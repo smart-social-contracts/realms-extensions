@@ -1,11 +1,16 @@
 {
   "name": "metrics",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Analytics and metrics dashboard for realm performance",
   "author": "Smart Social Contracts",
   "permissions": [],
-  "profiles": ["member", "admin"],
-  "categories": ["oversight"],
+  "profiles": [
+    "member",
+    "admin"
+  ],
+  "categories": [
+    "oversight"
+  ],
   "icon": "analytics",
   "doc_url": null,
   "url_path": null,
