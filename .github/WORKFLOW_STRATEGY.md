@@ -51,13 +51,22 @@ on:
 
 ### 2. Release Workflows
 
-**Naming:** `{extension-name}-release.yml`
+**Unified Release:** `extensions-release.yml`
 
 **Triggers:**
 - Manual workflow dispatch (`workflow_dispatch`)
-- No path filters needed (manual trigger only)
+- Releases all extensions at once
+- Creates individual tags and releases per extension
 
-**Example:** `vault-release.yml`
+**Features:**
+- Automatic extension discovery
+- Synchronized version bumping
+- Batch packaging and releasing
+- Comprehensive release summary
+
+See [Extensions Release Guide](../EXTENSIONS_RELEASE_GUIDE.md) for detailed usage.
+
+**Legacy:** Individual extension release workflows like `vault-release.yml` can coexist for hotfixes.
 
 ## Adding Workflows for New Extensions
 

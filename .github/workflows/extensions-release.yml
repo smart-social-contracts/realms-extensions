@@ -1,0 +1,207 @@
+name: Extensions Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Type of release (patch, minor, major)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      create_github_release:
+        description: 'Create GitHub Releases'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install semver pipx
+        python -m pipx ensurepath
+        # jq is pre-installed on ubuntu-latest runners
+        
+    - name: Discover extensions
+      id: discover
+      run: |
+        # Find all directories with manifest.json
+        EXTENSIONS=$(find . -maxdepth 2 -name "manifest.json" -type f | sed 's|./||' | sed 's|/manifest.json||' | sort)
+        echo "Found extensions:"
+        echo "$EXTENSIONS"
+        
+        # Convert to JSON array for matrix
+        EXTENSIONS_JSON=$(echo "$EXTENSIONS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+        echo "extensions=$EXTENSIONS_JSON" >> $GITHUB_OUTPUT
+        
+    - name: Bump versions
+      id: bump_versions
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        echo "# Version Bumps" > version_summary.txt
+        echo "" >> version_summary.txt
+        
+        EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+        
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          if [ -f "$extension/manifest.json" ]; then
+            echo "Processing $extension..."
+            
+            # Extract current version from manifest.json
+            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            
+            # Calculate new version
+            NEW_VERSION=$(python -c "import semver; v=semver.VersionInfo.parse('${CURRENT_VERSION}'); print(v.bump_${{ github.event.inputs.release_type }}())")
+            
+            # Update manifest.json with new version
+            jq --arg version "${NEW_VERSION}" '.version = $version' "$extension/manifest.json" > "$extension/manifest.json.tmp"
+            mv "$extension/manifest.json.tmp" "$extension/manifest.json"
+            
+            echo "- **$extension**: v${CURRENT_VERSION} → v${NEW_VERSION}" >> version_summary.txt
+            echo "${extension}_current=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+            echo "${extension}_new=${NEW_VERSION}" >> $GITHUB_OUTPUT
+            
+            # Stage the changes
+            git add "$extension/manifest.json"
+          fi
+        done
+        
+        # Output the summary
+        cat version_summary.txt
+        
+    - name: Clone realms framework
+      run: |
+        git clone https://github.com/smart-social-contracts/realms.git .realms
+        
+    - name: Install realms CLI
+      run: |
+        cd .realms
+        pipx install -e cli/
+        
+    - name: Package extensions
+      run: |
+        mkdir -p releases
+        
+        EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+        
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          echo "Packaging $extension..."
+          cd .realms
+          realms extension package --extension-id "$extension" --source-dir "../$extension"
+          mv "${extension}.zip" "../releases/${extension}.zip"
+          cd ..
+        done
+        
+        echo "Packaged extensions:"
+        ls -lh releases/
+        
+    - name: Commit and push version bumps
+      run: |
+        COMMIT_MSG="release: Bump all extensions to ${{ github.event.inputs.release_type }} version
+        
+        $(cat version_summary.txt)"
+        
+        git commit -m "$COMMIT_MSG"
+        
+        # Create tags for each extension
+        EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+        
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          if [ -f "$extension/manifest.json" ]; then
+            NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            git tag -a "${extension}-v${NEW_VERSION}" -m "${extension} Release v${NEW_VERSION}"
+          fi
+        done
+        
+        git push origin
+        git push origin --tags
+        
+    - name: Create GitHub Releases
+      if: ${{ github.event.inputs.create_github_release == 'true' }}
+      run: |
+        EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+        
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          if [ -f "$extension/manifest.json" ]; then
+            NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
+            DESCRIPTION=$(jq -r '.description // "Extension for Realms"' "$extension/manifest.json")
+            
+            # Create release body
+            cat > release_body.md << EOF
+        # ${EXTENSION_NAME} v${NEW_VERSION}
+        
+        ${DESCRIPTION}
+        
+        ## Installation
+        
+        \`\`\`bash
+        realms extension install ${extension} --from https://github.com/${{ github.repository }}/releases/download/${extension}-v${NEW_VERSION}/${extension}.zip
+        \`\`\`
+        
+        ## Changes
+        
+        This is a ${{ github.event.inputs.release_type }} release of the ${extension} extension.
+        
+        ## Commit
+        
+        ${{ github.sha }}
+        EOF
+            
+            # Create the release
+            gh release create "${extension}-v${NEW_VERSION}" \
+              "releases/${extension}.zip" \
+              --title "${EXTENSION_NAME} v${NEW_VERSION}" \
+              --notes-file release_body.md \
+              --repo ${{ github.repository }}
+              
+            echo "✅ Created release for ${extension} v${NEW_VERSION}"
+          fi
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Generate release summary
+      run: |
+        echo "## 🎉 Extensions Released" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+        
+        echo "| Extension | Version | Download |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+        
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          if [ -f "$extension/manifest.json" ]; then
+            NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
+            echo "| ${EXTENSION_NAME} | v${NEW_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${extension}-v${NEW_VERSION}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Release Type: \`${{ github.event.inputs.release_type }}\`" >> $GITHUB_STEP_SUMMARY
