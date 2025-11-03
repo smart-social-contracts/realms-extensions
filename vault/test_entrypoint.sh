@@ -51,11 +51,11 @@ pip install -e cli/ --force
 
 rm -rf extensions
 
+# Install the vault extension BEFORE creating the realm
+"${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" extension-root
+
 echo '[INFO] Creating test realm with ${CITIZENS_COUNT} citizens...'
 realms create #--random #--citizens "${CITIZENS_COUNT}"
-
-# Install the vault extension
-"${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" ..
 
 
 # Stop previous dfx instances and clean up
