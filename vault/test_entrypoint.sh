@@ -9,12 +9,20 @@ CITIZENS_COUNT=5
 REALM_FOLDER="generated_realm"
 EXTENSION_DIR="extension-root"
 
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Download test artifacts
+"${SCRIPT_DIR}/tests/download_test_artifacts.sh"
+
 # Run from home directory where realms framework lives (if in Docker)
 if [ -f /.dockerenv ]; then
     cd /app
     # In Docker, create a temp directory with proper structure
     mkdir -p /tmp/extensions/vault
     cp -r extension-root/* /tmp/extensions/vault/
+    # Don't copy the .realms directory if it exists (causes conflicts)
+    rm -rf /tmp/extensions/vault/.realms
     EXTENSION_SOURCE_DIR="/tmp/extensions"
     TEST_FILE="extension-root/tests/test_vault.py"
 else
@@ -41,17 +49,14 @@ rm -rf "${REALM_FOLDER}"
 echo '[INFO] Installing realms cli...'
 pip install -e cli/ --force
 
-# DO NOT USE THIS APPROACH
-# echo '[INFO] Packaging vault extension...'
-# realms extension package --extension-id "${EXTENSION_ID}" --source-dir .. --package-path ${EXTENSION_ID}.zip #"${EXTENSION_DIR}" --
-# echo '[INFO] Installing vault extension...'
-# realms extension install --extension-id "${EXTENSION_ID}" --package-path ${EXTENSION_ID}.zip #"/app/${EXTENSION_ID}.zip"
-
-echo '[INFO] Installing vault extension from source...'
-realms extension install-from-source --source-dir "${EXTENSION_SOURCE_DIR}"
+rm -rf extensions
 
 echo '[INFO] Creating test realm with ${CITIZENS_COUNT} citizens...'
-realms create --random #--citizens "${CITIZENS_COUNT}"
+realms create #--random #--citizens "${CITIZENS_COUNT}"
+
+# Install the vault extension
+"${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" ..
+
 
 # Stop previous dfx instances and clean up
 echo '[INFO] Stopping previous dfx instances...'
