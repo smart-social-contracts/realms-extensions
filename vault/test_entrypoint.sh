@@ -55,7 +55,7 @@ rm -rf extensions
 "${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" extension-root
 
 echo '[INFO] Creating test realm with ${CITIZENS_COUNT} citizens...'
-realms create #--random #--citizens "${CITIZENS_COUNT}"
+realms create --folder "${REALM_FOLDER}" #--random #--citizens "${CITIZENS_COUNT}"
 
 
 # Stop previous dfx instances and clean up
