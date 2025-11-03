@@ -6,7 +6,7 @@ set -x
 # Configuration
 EXTENSION_ID="vault"
 CITIZENS_COUNT=5
-REALM_FOLDER="generated_realm"
+REALM_FOLDER=".realm"
 EXTENSION_DIR="extension-root"
 
 # Get the directory where this script is located
@@ -55,7 +55,7 @@ rm -rf extensions
 "${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" extension-root
 
 echo '[INFO] Creating test realm with ${CITIZENS_COUNT} citizens...'
-realms create --folder "${REALM_FOLDER}" #--random #--citizens "${CITIZENS_COUNT}"
+realms create #--random #--citizens "${CITIZENS_COUNT}"
 
 
 # Stop previous dfx instances and clean up
