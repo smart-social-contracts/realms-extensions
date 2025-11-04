@@ -1,12 +1,40 @@
 import json
 import traceback
 from datetime import datetime, timedelta
+from typing import Any, Dict
 
+from ggg import Service, TaxRecord, User
 from kybra import Async
 from kybra_simple_logging import get_logger
 
 # Initialize logger
 logger = get_logger("citizen_dashboard")
+
+
+def _service_to_dict(service: Service) -> Dict[str, Any]:
+    """Convert Service entity to dictionary format"""
+    return {
+        "id": service.service_id,
+        "name": service.name,
+        "description": service.description,
+        "provider": service.provider,
+        "status": service.status,
+        "due_date": service.due_date,
+        "link": service.link,
+    }
+
+
+def _tax_record_to_dict(tax_record: TaxRecord) -> Dict[str, Any]:
+    """Convert TaxRecord entity to dictionary format"""
+    return {
+        "id": tax_record.tax_id,
+        "tax_type": tax_record.tax_type,
+        "description": tax_record.description,
+        "period": tax_record.period,
+        "amount": tax_record.amount,
+        "due_date": tax_record.due_date,
+        "status": tax_record.status,
+    }
 
 
 def get_dashboard_summary(args: str) -> Async[str]:
@@ -16,16 +44,30 @@ def get_dashboard_summary(args: str) -> Async[str]:
         params = json.loads(args)
         user_id = params.get("user_id", "anonymous")
 
-        # In a real implementation, we would fetch this data from a database or service
-        # For demonstration, we'll return mock data
+        # Get data from database
+        all_services = Service.instances()
+        all_tax_records = TaxRecord.instances()
+        
+        # Filter by user if provided
+        if user_id and user_id != "anonymous":
+            user_services = [s for s in all_services if s.user and s.user.id == user_id]
+            user_tax_records = [t for t in all_tax_records if t.user and t.user.id == user_id]
+        else:
+            user_services = list(all_services)
+            user_tax_records = list(all_tax_records)
+        
+        # Calculate summary
+        services_approaching = len([s for s in user_services if s.status == "Approaching"])
+        tax_overdue = len([t for t in user_tax_records if t.status == "Overdue"])
+        
         summary_data = {
-            "user_name": "John Citizen",
-            "services_count": 5,
-            "services_approaching": 2,
-            "tax_records": 4,
-            "tax_overdue": 1,
-            "personal_data_items": 8,
-            "personal_data_updated": 2,
+            "user_name": user_id,
+            "services_count": len(user_services),
+            "services_approaching": services_approaching,
+            "tax_records": len(user_tax_records),
+            "tax_overdue": tax_overdue,
+            "personal_data_items": 0,
+            "personal_data_updated": 0,
         }
 
         response = {"success": True, "data": summary_data}
@@ -54,65 +96,27 @@ def get_public_services(args: str) -> Async[str]:
         params = json.loads(args)
         user_id = params.get("user_id", "anonymous")
 
-        # Mock data - in a real implementation, we would fetch this from a database
-        today = datetime.now()
-        services = [
-            {
-                "id": "srv-001",
-                "name": "Citizen ID Renewal",
-                "description": "Renew your citizen identification card",
-                "provider": "Department of Citizen Affairs",
-                "status": "Active",
-                "due_date": (today + timedelta(days=30)).isoformat(),
-                "link": "/service/id-renewal",
-            },
-            {
-                "id": "srv-002",
-                "name": "Property Tax Filing",
-                "description": "Annual property tax declaration",
-                "provider": "Tax Department",
-                "status": "Pending",
-                "due_date": (today + timedelta(days=5)).isoformat(),
-                "link": "/service/property-tax",
-            },
-            {
-                "id": "srv-003",
-                "name": "Vehicle Registration",
-                "description": "Renew your vehicle registration",
-                "provider": "Transport Authority",
-                "status": "Expired",
-                "due_date": (today - timedelta(days=15)).isoformat(),
-                "link": "/service/vehicle-reg",
-            },
-            {
-                "id": "srv-004",
-                "name": "Health Insurance Verification",
-                "description": "Verify your health insurance status",
-                "provider": "Health Department",
-                "status": "Active",
-                "due_date": (today + timedelta(days=90)).isoformat(),
-                "link": "/service/health-insurance",
-            },
-            {
-                "id": "srv-005",
-                "name": "Business License Renewal",
-                "description": "Renew your business operating license",
-                "provider": "Business Registry",
-                "status": "Pending",
-                "due_date": (today + timedelta(days=7)).isoformat(),
-                "link": "/service/business-license",
-            },
-        ]
+        # Get services from database
+        all_services = Service.instances()
+        
+        # Filter by user if user_id provided
+        if user_id and user_id != "anonymous":
+            services = [s for s in all_services if s.user and s.user.id == user_id]
+        else:
+            services = list(all_services)
+        
+        # Convert to dict format
+        services_list = [_service_to_dict(s) for s in services]
 
         response = {
             "success": True,
-            "data": {"services": services, "total_count": len(services)},
+            "data": {"services": services_list, "total_count": len(services_list)},
         }
 
         logger.info(f"get_public_services successful for user: {user_id}")
         return json.dumps(response)
     except Exception as e:
-        logger.error(f"Error in get_public_services: {str(e)}")
+        logger.error(f"Error in get_public_services: {str(e)}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -127,62 +131,31 @@ def get_tax_information(args: str) -> str:
         str: JSON string with tax information data
     """
     try:
-        args = "{}"
         logger.info(f"get_tax_information called with args: {args}")
-        params = json.loads(args)
+        params = json.loads(args) if args else {}
         user_id = params.get("user_id", "anonymous")
 
-        # Mock data - in a real implementation, we would fetch this from a tax database
-        today = datetime.now()
-
-        tax_records = [
-            {
-                "id": "tax-001",
-                "tax_type": "Income Tax",
-                "description": "Annual personal income tax",
-                "period": "2024",
-                "amount": 2450.75,
-                "due_date": (today + timedelta(days=45)).isoformat(),
-                "status": "Pending",
-            },
-            {
-                "id": "tax-002",
-                "tax_type": "Property Tax",
-                "description": "Residential property tax",
-                "period": "2024 Q1",
-                "amount": 650.00,
-                "due_date": (today - timedelta(days=15)).isoformat(),
-                "status": "Overdue",
-            },
-            {
-                "id": "tax-003",
-                "tax_type": "Vehicle Tax",
-                "description": "Annual vehicle ownership tax",
-                "period": "2024",
-                "amount": 320.50,
-                "due_date": (today - timedelta(days=60)).isoformat(),
-                "status": "Paid",
-            },
-            {
-                "id": "tax-004",
-                "tax_type": "Business Tax",
-                "description": "Quarterly business operations tax",
-                "period": "2024 Q2",
-                "amount": 1200.00,
-                "due_date": (today + timedelta(days=10)).isoformat(),
-                "status": "Pending",
-            },
-        ]
+        # Get tax records from database
+        all_tax_records = TaxRecord.instances()
+        
+        # Filter by user if user_id provided
+        if user_id and user_id != "anonymous":
+            tax_records = [t for t in all_tax_records if t.user and t.user.id == user_id]
+        else:
+            tax_records = list(all_tax_records)
+        
+        # Convert to dict format
+        tax_records_list = [_tax_record_to_dict(t) for t in tax_records]
 
         # Calculate summary
         total_paid = sum(
-            record["amount"] for record in tax_records if record["status"] == "Paid"
+            record["amount"] for record in tax_records_list if record["status"] == "Paid"
         )
         total_pending = sum(
-            record["amount"] for record in tax_records if record["status"] == "Pending"
+            record["amount"] for record in tax_records_list if record["status"] == "Pending"
         )
         total_overdue = sum(
-            record["amount"] for record in tax_records if record["status"] == "Overdue"
+            record["amount"] for record in tax_records_list if record["status"] == "Overdue"
         )
 
         summary = {
@@ -194,7 +167,7 @@ def get_tax_information(args: str) -> str:
 
         response = {
             "success": True,
-            "data": {"tax_records": tax_records, "summary": summary},
+            "data": {"tax_records": tax_records_list, "summary": summary},
         }
 
         logger.info(f"get_tax_information successful for user: {user_id}")
@@ -222,18 +195,25 @@ def get_personal_data(args: str) -> str:
         params = json.loads(args)
         user_id = params.get("user_id", "anonymous")
 
-        # Mock data - in a real implementation, we would fetch this from a secure database
-        today = datetime.now()
+        # Get user from database
+        user = None
+        for u in User.instances():
+            if u.id == user_id:
+                user = u
+                break
+        
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
 
         personal_data = {
-            "name": "John Citizen",
-            "id_number": "CTZ-12345678",
-            "date_of_birth": "1980-05-15",
-            "citizenship_status": "Full Citizenship",
-            "registration_date": "2010-03-22",
-            "address": "123 Main Street, Cityville, State 12345",
-            "email": "john.citizen@email.com",
-            "phone": "+1 (555) 123-4567",
+            "name": user.name or "",
+            "id_number": user.id or "",
+            "date_of_birth": "",
+            "citizenship_status": "Full Citizenship" if user.profiles and "member" in user.profiles else "Pending",
+            "registration_date": str(user.timestamp_created) if hasattr(user, 'timestamp_created') else "",
+            "address": "",
+            "email": user.email or "",
+            "phone": "",
         }
 
         response = {"success": True, "data": {"personal_data": personal_data}}

@@ -7,13 +7,40 @@ import traceback
 from datetime import datetime
 from typing import Any, Dict
 
+from ggg import Dispute, User
 from kybra import Async
 from kybra_simple_logging import get_logger
 
 logger = get_logger("extensions.justice_litigation")
 
-# Global litigation storage - will be populated by demo_loader
-LITIGATION_STORAGE = [
+
+def _dispute_to_dict(dispute: Dispute) -> Dict[str, Any]:
+    """Convert Dispute entity to dictionary format"""
+    # Parse actions_taken JSON string to list
+    actions_taken = json.loads(dispute.actions_taken) if dispute.actions_taken else []
+    
+    # Handle timestamp - it could be string or datetime object
+    timestamp = dispute.timestamp_created
+    if hasattr(timestamp, 'strftime'):
+        timestamp_str = timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    else:
+        timestamp_str = str(timestamp) if timestamp else ""
+    
+    return {
+        "id": dispute.dispute_id,
+        "requester_principal": dispute.requester.id if dispute.requester else "unknown",
+        "defendant_principal": dispute.defendant.id if dispute.defendant else "unknown",
+        "case_title": dispute.case_title,
+        "description": dispute.description,
+        "status": dispute.status,
+        "requested_at": timestamp_str,
+        "verdict": dispute.verdict if dispute.verdict else None,
+        "actions_taken": actions_taken,
+    }
+
+
+# Removed hardcoded litigation storage - now using database
+_REMOVED_LITIGATION_STORAGE = [
     {
         "id": "lit_100",
         "requester_principal": "by6od-j4aaa-aaaah-qcaiq-cai",
@@ -310,12 +337,20 @@ def get_litigations(args: str) -> str:
                 {"success": False, "error": "user_principal parameter is required"}
             )
 
-        if user_profile == "admin":
-            filtered_litigations = LITIGATION_STORAGE
-        else:
-            # For demo purposes, show all cases to any authenticated user
-            # In production, this would filter by user_principal
-            filtered_litigations = LITIGATION_STORAGE
+        # Get all disputes from database
+        all_disputes = Dispute.instances()
+        
+        # Convert to dict format
+        filtered_litigations = [_dispute_to_dict(d) for d in all_disputes]
+        
+        # For non-admin users, could filter by user_principal here
+        # For now, showing all disputes to all users for demo purposes
+        if user_profile != "admin":
+            # Filter to show only disputes where user is involved
+            filtered_litigations = [
+                d for d in filtered_litigations
+                if d["requester_principal"] == user_principal or d["defendant_principal"] == user_principal
+            ]
 
         return json.dumps(
             {
@@ -356,19 +391,33 @@ def create_litigation(args: str) -> str:
                 }
             )
 
-        new_litigation = {
-            "id": f"lit_{len(LITIGATION_STORAGE) + 1:03d}",
-            "requester_principal": requester_principal,
-            "defendant_principal": defendant_principal,
-            "case_title": case_title,
-            "description": description,
-            "status": "pending",
-            "requested_at": datetime.utcnow().isoformat() + "Z",
-            "verdict": None,
-            "actions_taken": [],
-        }
-
-        LITIGATION_STORAGE.append(new_litigation)
+        # Find requester and defendant users
+        requester_user = None
+        defendant_user = None
+        for u in User.instances():
+            if u.id == requester_principal:
+                requester_user = u
+            if u.id == defendant_principal:
+                defendant_user = u
+        
+        # Generate dispute ID
+        existing_disputes = Dispute.instances()
+        dispute_id = f"lit_{len(existing_disputes) + 1:03d}"
+        
+        # Create Dispute entity
+        new_dispute = Dispute(
+            dispute_id=dispute_id,
+            requester=requester_user,
+            defendant=defendant_user,
+            case_title=case_title,
+            description=description,
+            status="pending",
+            verdict="",
+            actions_taken="[]",  # Empty JSON array
+            metadata="{}"
+        )
+        
+        new_litigation = _dispute_to_dict(new_dispute)
 
         return json.dumps(
             {
@@ -407,30 +456,35 @@ def execute_verdict(args: str) -> str:
                 }
             )
 
-        litigation = None
-        for lit in LITIGATION_STORAGE:
-            if lit["id"] == litigation_id:
-                litigation = lit
+        # Find dispute in database
+        dispute = None
+        for d in Dispute.instances():
+            if d.dispute_id == litigation_id:
+                dispute = d
                 break
 
-        if not litigation:
+        if not dispute:
             return json.dumps(
                 {"success": False, "error": f"Litigation {litigation_id} not found"}
             )
 
-        if litigation["status"] == "resolved":
+        if dispute.status == "resolved":
             return json.dumps(
                 {"success": False, "error": "Litigation is already resolved"}
             )
 
-        litigation["verdict"] = verdict_code
-        litigation["status"] = "resolved"
-        litigation["actions_taken"] = ["verdict_executed", "case_closed"]
+        # Update dispute
+        dispute.verdict = verdict_code
+        dispute.status = "resolved"
+        dispute.actions_taken = json.dumps(["verdict_executed", "case_closed"])
+        dispute.save()
 
         executed_actions = []
         if verdict_code and "transfer(" in verdict_code:
             executed_actions.append("Token transfer simulated")
             logger.info(f"Simulated execution of codex: {verdict_code}")
+
+        litigation = _dispute_to_dict(dispute)
 
         return json.dumps(
             {
@@ -449,39 +503,25 @@ def execute_verdict(args: str) -> str:
 
 
 def load_demo_litigations(args: str) -> str:
-    """Load demo litigation data - called by demo_loader extension"""
-    logger.info(f"justice_litigation.load_demo_litigations called with args: {args}")
+    """
+    DEPRECATED: Load demo litigation data - no longer needed
+    
+    Litigation data is now automatically loaded from extensions/justice_litigation/data/*.json
+    during realm deployment via the automatic extension data loading feature.
+    """
+    logger.info(f"justice_litigation.load_demo_litigations called (DEPRECATED)")
+    
+    # Get current count from database
+    disputes_count = len(Dispute.instances())
 
-    try:
-        if args:
-            params = json.loads(args) if isinstance(args, str) else args
-        else:
-            params = {}
-
-        demo_cases = params.get("cases", [])
-
-        if not demo_cases:
-            return json.dumps({"success": False, "error": "No demo cases provided"})
-
-        # Clear existing storage and load demo cases
-        LITIGATION_STORAGE.clear()
-        LITIGATION_STORAGE.extend(demo_cases)
-
-        logger.info(f"Loaded {len(demo_cases)} demo litigation cases")
-
-        return json.dumps(
-            {
-                "success": True,
-                "message": f"Successfully loaded {len(demo_cases)} demo litigation cases",
-                "data": {
-                    "total_loaded": len(demo_cases),
-                    "storage_size": len(LITIGATION_STORAGE),
-                },
-            }
-        )
-
-    except Exception as e:
-        logger.error(
-            f"Error in load_demo_litigations: {str(e)}\n{traceback.format_exc()}"
-        )
-        return json.dumps({"success": False, "error": str(e)})
+    return json.dumps(
+        {
+            "success": True,
+            "message": f"Litigation data is now loaded from database. Current count: {disputes_count}",
+            "data": {
+                "total_loaded": disputes_count,
+                "storage_size": disputes_count,
+                "note": "This function is deprecated. Use automatic data loading instead.",
+            },
+        }
+    )
