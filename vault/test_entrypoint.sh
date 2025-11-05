@@ -7,7 +7,6 @@ set -x
 EXTENSION_ID="vault"
 CITIZENS_COUNT=5
 REALM_FOLDER=".realm"
-EXTENSION_DIR="extension-root"
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -52,11 +51,10 @@ pip install -e cli/ --force
 rm -rf extensions
 
 # Install the vault extension BEFORE creating the realm
-"${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" extension-root
+bash "${SCRIPT_DIR}/install_extension.sh" "${EXTENSION_ID}" "${EXTENSION_SOURCE_DIR}/${EXTENSION_ID}"
 
 echo '[INFO] Creating test realm with ${CITIZENS_COUNT} citizens...'
 realms create #--random #--citizens "${CITIZENS_COUNT}"
-
 
 # Stop previous dfx instances and clean up
 echo '[INFO] Stopping previous dfx instances...'

@@ -40,6 +40,11 @@ def merge_dfx_json(test_dfx_path: str, realm_dfx_path: str) -> bool:
     with open(realm_dfx_file) as f:
         realm_dfx = json.load(f)
 
+    # Compute the path prefix based on where test_dfx is located
+    # The test_dfx_path should be like "../tests/dfx.json" or "/app/extension-root/tests/dfx.json"
+    test_dir = test_dfx_file.parent
+    path_prefix = str(test_dir) + "/"
+
     # Track if we made any changes
     changes_made = False
 
@@ -51,12 +56,12 @@ def merge_dfx_json(test_dfx_path: str, realm_dfx_path: str) -> bool:
 
             if "wasm" in adjusted_config:
                 adjusted_config["wasm"] = (
-                    "extension-root/tests/" + adjusted_config["wasm"]
+                    path_prefix + adjusted_config["wasm"]
                 )
 
             if "candid" in adjusted_config:
                 adjusted_config["candid"] = (
-                    "extension-root/tests/" + adjusted_config["candid"]
+                    path_prefix + adjusted_config["candid"]
                 )
 
             realm_dfx["canisters"][canister_name] = adjusted_config
