@@ -9,13 +9,12 @@ import json
 import traceback
 from typing import Any, Dict
 
+from ggg import Balance, Transfer
 from kybra import Async, Principal, ic
 from kybra_simple_logging import get_logger
 
 from .vault_lib.constants import CANISTER_PRINCIPALS, MAX_ITERATION_COUNT, MAX_RESULTS
 from .vault_lib.entities import Canisters, app_data
-
-from ggg import Transfer, Balance
 
 logger = get_logger("extensions.vault")
 

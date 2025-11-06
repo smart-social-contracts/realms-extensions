@@ -55,14 +55,10 @@ def merge_dfx_json(test_dfx_path: str, realm_dfx_path: str) -> bool:
             adjusted_config = canister_config.copy()
 
             if "wasm" in adjusted_config:
-                adjusted_config["wasm"] = (
-                    path_prefix + adjusted_config["wasm"]
-                )
+                adjusted_config["wasm"] = path_prefix + adjusted_config["wasm"]
 
             if "candid" in adjusted_config:
-                adjusted_config["candid"] = (
-                    path_prefix + adjusted_config["candid"]
-                )
+                adjusted_config["candid"] = path_prefix + adjusted_config["candid"]
 
             realm_dfx["canisters"][canister_name] = adjusted_config
             print(f"✅ Added {canister_name} to unified dfx.json")
