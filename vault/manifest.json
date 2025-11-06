@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "0.1.2",
+  "version": "0.1.1",
   "description": "Secure digital asset and token management extension for Realms. Provides treasury functionality with ckBTC support, transaction history tracking, and balance management.",
   "author": "Smart Social Contracts",
   "repository": "https://github.com/smart-social-contracts/realms-extension-vault",
@@ -30,8 +30,8 @@
   "url_path": null,
   "show_in_sidebar": true,
   "python_dependencies": [
-    "kybra>=0.10.0",
-    "kybra-simple-db>=1.0.0",
-    "kybra-simple-logging>=1.0.0"
+    "kybra==0.7.*",
+    "kybra-simple-db>=0.3.2",
+    "kybra-simple-logging==0.2.*"
   ]
 }

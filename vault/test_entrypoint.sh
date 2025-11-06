@@ -41,9 +41,6 @@ else
     TEST_FILE="../tests/test_vault.py"
 fi
 
-echo '[INFO] Cleaning up previous realms installation...'
-rm -rf "${REALM_FOLDER}"
-
 # Install realms cli
 echo '[INFO] Installing realms cli...'
 pip install -e cli/ --force

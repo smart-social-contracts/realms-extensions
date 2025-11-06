@@ -9,15 +9,156 @@ import json
 import traceback
 from typing import Any, Dict
 
-from kybra import Async, ic
+from kybra import Async, Principal, ic
 from kybra_simple_logging import get_logger
+
+from .vault_lib.constants import CANISTER_PRINCIPALS, MAX_ITERATION_COUNT, MAX_RESULTS
+from .vault_lib.entities import Canisters, app_data
+
+from ggg import Transfer, Balance
 
 logger = get_logger("extensions.vault")
 
 
+def register_entities():
+    """Register vault entity types with the Database."""
+    from kybra_simple_db import Database
+
+    from .vault_lib import entities as vault_entities
+
+    logger.info("Registering vault entity types...")
+    vault_entity_types = [
+        vault_entities.ApplicationData,
+        vault_entities.TestModeData,
+        vault_entities.Canisters,
+        vault_entities.Category,
+        # vault_entities.VaultTransaction,
+        # vault_entities.Balance,
+    ]
+
+    for entity_type in vault_entity_types:
+        try:
+            logger.info(f"Registering vault entity type {entity_type.__name__}")
+            Database.get_instance().register_entity_type(entity_type)
+        except Exception as e:
+            logger.error(
+                f"Error registering vault entity type {entity_type.__name__}: {str(e)}\n{traceback.format_exc()}"
+            )
+
+    logger.info("✅ Vault entity types registered")
+
+
+def initialize(args: str):
+    logger.info("Initializing vault...")
+
+    if not Canisters["ckBTC ledger"]:
+        logger.info(
+            f"Creating canister record 'ckBTC ledger' with principal: {CANISTER_PRINCIPALS['ckBTC']['ledger']}"
+        )
+        Canisters(_id="ckBTC ledger", principal=CANISTER_PRINCIPALS["ckBTC"]["ledger"])
+    else:
+        logger.info(
+            f"Canister record 'ckBTC ledger' already exists with principal: {Canisters['ckBTC ledger'].principal}"
+        )
+
+    if not Canisters["ckBTC indexer"]:
+        logger.info(
+            f"Creating canister record 'ckBTC indexer' with principal: {CANISTER_PRINCIPALS['ckBTC']['indexer']}"
+        )
+        Canisters(
+            _id="ckBTC indexer", principal=CANISTER_PRINCIPALS["ckBTC"]["indexer"]
+        )
+    else:
+        logger.info(
+            f"Canister record 'ckBTC indexer' already exists with principal: {Canisters['ckBTC indexer'].principal}"
+        )
+
+    # TODO: remove, not needed anymore
+    # if not app_data().admin_principal:
+    #     new_admin_principal = (
+    #         admin_principal.to_str() if admin_principal else ic.caller().to_str()
+    #     )
+    #     logger.info(f"Setting admin principal to {new_admin_principal}")
+    #     app_data().admin_principal = new_admin_principal
+
+    if not app_data().max_results:
+        logger.info(f"Setting max results to {MAX_RESULTS}")
+        app_data().max_results = MAX_RESULTS
+
+    if not app_data().max_iteration_count:
+        logger.info(f"Setting max iteration_count to {MAX_ITERATION_COUNT}")
+        app_data().max_iteration_count = MAX_ITERATION_COUNT
+
+    canister_id = ic.id().to_str()
+    # if not Balance[canister_id]:
+    #     logger.info("Creating vault balance record")
+    #     Balance(_id=canister_id, amount=0)
+
+    logger.info(
+        f"Canisters: {[canister.serialize() for canister in Canisters.instances()]}"
+    )
+    logger.info(f"Max results: {app_data().max_results}")
+    logger.info(f"Max iteration_count: {app_data().max_iteration_count}")
+
+    logger.info("Vault initialized.")
+
+
+def set_canister(args: str) -> str:
+    """
+    Set or update the principal ID for a specific canister in the Canisters entity.
+
+    Args:
+        args: JSON string with {"canister_name": "xxx", "principal_id": "yyy"}
+              canister_name examples: "ckBTC ledger", "ckBTC indexer"
+
+    Returns:
+        JSON string with success status
+    """
+    logger.info(f"vault.set_canister called with args: {args}")
+
+    try:
+        # Parse args
+        params = json.loads(args) if isinstance(args, str) else args
+        canister_name = params.get("canister_name")
+        principal_id = params.get("principal_id")
+
+        if not canister_name or not principal_id:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "canister_name and principal_id are required",
+                }
+            )
+
+        logger.info(f"Setting canister '{canister_name}' to principal: {principal_id}")
+
+        # Check if the canister already exists
+        existing_canister = Canisters[canister_name]
+        if existing_canister:
+            # Update the existing canister record
+            existing_canister.principal = principal_id
+            logger.info(
+                f"Updated existing canister '{canister_name}' with new principal."
+            )
+        else:
+            # Create a new canister record
+            Canisters(_id=canister_name, principal=principal_id)
+            logger.info(f"Created new canister '{canister_name}' with principal.")
+
+        return json.dumps(
+            {
+                "success": True,
+                "data": {"canister_name": canister_name, "principal_id": principal_id},
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error setting canister: {str(e)}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def convert_principals_to_strings(obj):
     """Recursively convert Principal objects to strings for JSON serialization"""
-    from kybra import Principal
 
     if isinstance(obj, Principal):
         return obj.to_str()
@@ -78,15 +219,10 @@ def get_status(args: str) -> str:
     Returns:
         JSON string with vault stats
     """
-    logger.info(f"vault.get_status called")
+    logger.info("vault.get_status called")
 
     try:
-        from .vault_lib.entities import (
-            ApplicationData,
-            Balance,
-            Canisters,
-            app_data,
-        )
+        from .vault_lib.entities import ApplicationData, Balance, Canisters, app_data
 
         # Gather stats
         app = app_data()
@@ -185,14 +321,8 @@ def transfer(args: str) -> Async[str]:
     logger.info(f"vault.transfer called with args: {args}")
 
     try:
-        from kybra import Principal
-
-        from .vault_lib.candid_types import (
-            Account,
-            ICRCLedger,
-            TransferArg,
-        )
-        from .vault_lib.entities import Balance, Canisters, VaultTransaction, app_data
+        from .vault_lib.candid_types import Account, ICRCLedger, TransferArg
+        from .vault_lib.entities import Canisters, app_data
 
         # Parse args
         params = json.loads(args) if isinstance(args, str) else args
@@ -232,20 +362,19 @@ def transfer(args: str) -> Async[str]:
 
         # Handle result
         if hasattr(result, "Ok") and result.Ok is not None:
-            tx_id = result.Ok
+            tx_id = str(result.Ok)
 
             # Create transaction record
-            VaultTransaction(
-                _id=tx_id,
+            Transfer(
+                id=tx_id,
                 principal_from=ic.id().to_str(),
                 principal_to=to_principal,
                 amount=amount,
-                timestamp=ic.time(),
-                kind="transfer",
+                timestamp=str(ic.time()),
             )
 
             # Update balances
-            balance = Balance[to_principal] or Balance(_id=to_principal, amount=0)
+            balance = Balance[to_principal] or Balance(id=to_principal, amount=0)
             balance.amount -= amount
 
             logger.info(
@@ -277,10 +406,11 @@ def refresh(args: str) -> Async[str]:
     Returns:
         JSON string with sync summary
     """
-    logger.info(f"vault.refresh called")
+    logger.info("vault.refresh called")
 
     try:
-        from .vault_lib.entities import Balance, Canisters, VaultTransaction, app_data
+        # from .vault_lib.entities import Balance, Canisters, VaultTransaction, app_data
+        from .vault_lib.entities import Canisters, app_data
         from .vault_lib.ic_util_calls import get_account_transactions
 
         app = app_data()
@@ -298,17 +428,19 @@ def refresh(args: str) -> Async[str]:
             owner_principal=vault_principal,
             max_results=app.max_results or 20,
             subaccount=None,
-            start_tx_id=0,
+            start_tx_id=None,  # None = start from most recent
         )
+
+        logger.info(f"Successfully retrieved response: {response}")
 
         # Process transactions
         new_tx_count = 0
-        for account_tx in response.transactions:
+        for account_tx in response["transactions"]:
             tx_id = account_tx["id"]
             tx = account_tx["transaction"]
 
             # Skip if already exists
-            if VaultTransaction[tx_id]:
+            if Transfer[tx_id]:
                 continue
 
             # Process based on type
@@ -319,26 +451,25 @@ def refresh(args: str) -> Async[str]:
                 amount = transfer_data["amount"]
 
                 # Create transaction record
-                VaultTransaction(
-                    _id=tx_id,
+                Transfer(
+                    id=tx_id,
                     principal_from=principal_from,
                     principal_to=principal_to,
                     amount=amount,
                     timestamp=tx["timestamp"],
-                    kind="transfer",
                 )
 
                 # Update balances
                 if principal_to == vault_principal:
                     # Deposit: user sent to vault
                     balance = Balance[principal_from] or Balance(
-                        _id=principal_from, amount=0
+                        id=principal_from, amount=0
                     )
                     balance.amount += amount
                 elif principal_from == vault_principal:
                     # Withdrawal: vault sent to user
                     balance = Balance[principal_to] or Balance(
-                        _id=principal_to, amount=0
+                        id=principal_to, amount=0
                     )
                     balance.amount -= amount
 
@@ -352,7 +483,7 @@ def refresh(args: str) -> Async[str]:
                     "TransactionSummary": {
                         "new_txs_count": new_tx_count,
                         "sync_status": "Synced",
-                        "scan_end_tx_id": response.oldest_tx_id or 0,
+                        "scan_end_tx_id": response["oldest_tx_id"] or 0,
                     }
                 },
             }
