@@ -361,7 +361,12 @@ def transfer(args: str) -> Async[str]:
 
         # Handle result
         if hasattr(result, "Ok") and result.Ok is not None:
-            tx_id = str(result.Ok)
+            # Extract transaction ID (handle nested Ok structures)
+            tx_result = result.Ok
+            if isinstance(tx_result, dict) and "Ok" in tx_result:
+                tx_id = str(tx_result["Ok"])
+            else:
+                tx_id = str(tx_result)
 
             # Create transaction record
             Transfer(
@@ -433,8 +438,14 @@ def refresh(args: str) -> Async[str]:
         logger.info(f"Successfully retrieved response: {response}")
 
         # Process transactions
+        # Sort by ID ascending to avoid collision with internal entity IDs.
+        # Note: tx["id"] is a sequential integer (transaction index) per ICRC-1 standard,
+        # not an arbitrary string, so we sort numerically to maintain chronological order.
+        sorted_transactions = sorted(
+            response["transactions"], key=lambda tx: tx["id"]
+        )
         new_tx_count = 0
-        for account_tx in response["transactions"]:
+        for account_tx in sorted_transactions:
             tx_id = str(account_tx["id"])  # Convert to string for Transfer entity
             tx = account_tx["transaction"]
 

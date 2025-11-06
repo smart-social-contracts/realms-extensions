@@ -7,13 +7,19 @@ This script:
 2. Deploys ckBTC ledger with initial balance
 3. Deploys ckBTC indexer
 4. Sends test tokens to realm_backend
-5. Verifies the setup
+5. Sends N additional transactions with incrementing amounts
+6. Verifies the setup
 """
 
 import json
+import os
 import subprocess
 import sys
+import time
 from typing import Optional
+
+# Configuration - can be overridden via environment variable
+NUM_ADDITIONAL_TRANSACTIONS = int(os.getenv("NUM_ADDITIONAL_TRANSACTIONS", "5"))
 
 
 def validate_json_response(data: dict, expected_keys: list[str], context: str) -> bool:
@@ -54,7 +60,7 @@ def get_canister_id(canister_name: str) -> str:
 
 def create_canisters():
     """Create all canisters defined in dfx.json."""
-    print("\n[1/8] Creating canisters...")
+    print("\n[1/9] Creating canisters...")
     run_command(
         ["dfx", "canister", "create", "--all", "--no-wallet"], capture_output=False
     )
@@ -62,7 +68,7 @@ def create_canisters():
 
 def deploy_ledger(principal: str) -> str:
     """Deploy the ckBTC ledger canister with initial balance."""
-    print("\n[2/8] Deploying ckbtc_ledger...")
+    print("\n[2/9] Deploying ckbtc_ledger...")
 
     # Build the init argument
     init_arg = (
@@ -91,7 +97,7 @@ def deploy_ledger(principal: str) -> str:
         capture_output=False,
     )
 
-    print("\n[3/8] Getting ledger canister ID...")
+    print("\n[3/9] Getting ledger canister ID...")
     ledger_id = get_canister_id("ckbtc_ledger")
     print(f"Ledger canister ID: {ledger_id}")
     return ledger_id
@@ -99,7 +105,7 @@ def deploy_ledger(principal: str) -> str:
 
 def deploy_indexer(ledger_id: str) -> str:
     """Deploy the ckBTC indexer canister."""
-    print("\n[4/8] Deploying ckbtc_indexer with ledger reference...")
+    print("\n[4/9] Deploying ckbtc_indexer with ledger reference...")
 
     init_arg = (
         f"(opt variant {{ Init = record {{ "
@@ -124,7 +130,10 @@ def deploy_indexer(ledger_id: str) -> str:
 
 def send_tokens(ledger_id: str, to_principal: str, amount: int) -> int:
     """Send tokens from current identity to a principal."""
-    print(f"\n[6/8] Sending {amount:,} ckBTC tokens to realm_backend...")
+    if amount == 100_000:
+        print(f"\n[6/9] Sending initial {amount:,} ckBTC tokens to realm_backend...")
+    else:
+        print(f"     Sending {amount} satoshi(s)...", end=" ")
 
     transfer_arg = (
         f"(record {{"
@@ -164,10 +173,13 @@ def send_tokens(ledger_id: str, to_principal: str, amount: int) -> int:
             if tx_id <= 0:
                 print(f"⚠️  Warning: Unexpected transaction ID: {tx_id}")
 
-            print(f"✅ Transfer successful")
-            print(f"   Transaction ID: {tx_id}")
-            print(f"   Amount: {amount:,} ckBTC")
-            print(f"   Sanity check: TX ID > 0 ✓")
+            if amount == 100_000:
+                print(f"✅ Transfer successful")
+                print(f"   Transaction ID: {tx_id}")
+                print(f"   Amount: {amount:,} satoshis")
+                print(f"   Sanity check: TX ID > 0 ✓")
+            else:
+                print(f"✓ (TX ID: {tx_id})")
             return tx_id
         else:
             error = response_data.get("Err", "Unknown error")
@@ -223,7 +235,7 @@ def verify_balance(ledger_id: str, principal: str) -> int:
 
 def check_indexer_transactions(indexer_id: str, principal: str) -> dict:
     """Query indexer for account transactions and return as JSON."""
-    print("\n[8/8] Checking indexer transactions...")
+    print("\n[9/9] Checking indexer transactions...")
 
     query_arg = (
         f"(record {{"
@@ -232,7 +244,7 @@ def check_indexer_transactions(indexer_id: str, principal: str) -> dict:
         f"    subaccount = null;"
         f"  }};"
         f"  start = null;"
-        f"  max_results = 10 : nat;"
+        f"  max_results = 20 : nat;"
         f"}})"
     )
 
@@ -334,6 +346,7 @@ def main():
     # Step 0: Get current principal
     principal = get_principal()
     print(f"Using principal: {principal}")
+    print(f"Will send {NUM_ADDITIONAL_TRANSACTIONS} additional transactions after initial transfer\n")
 
     # Step 1: Create canisters
     create_canisters()
@@ -345,7 +358,7 @@ def main():
     indexer_id = deploy_indexer(ledger_id)
 
     # Step 5: Get realm_backend canister ID
-    print("\n[5/8] Getting realm_backend canister ID...")
+    print("\n[5/9] Getting realm_backend canister ID...")
     try:
         realm_backend_id = get_canister_id("realm_backend")
         print(f"Realm backend canister ID: {realm_backend_id}")
@@ -354,15 +367,32 @@ def main():
         print("    Skipping token transfer step")
         return
 
-    # Step 6: Send tokens
+    # Step 6: Send initial tokens
     tx_id = send_tokens(ledger_id, realm_backend_id, 100_000)
+    
+    # Step 7: Send N additional transactions with incrementing amounts
+    print(f"\n[7/9] Sending {NUM_ADDITIONAL_TRANSACTIONS} additional transactions with amounts 1, 2, 3, ... {NUM_ADDITIONAL_TRANSACTIONS} satoshis...")
+    total_sent = 100_000  # Track total amount sent
+    additional_tx_ids = []
+    
+    for i in range(1, NUM_ADDITIONAL_TRANSACTIONS + 1):
+        print(f"  Transaction {i}: Sending {i} satoshi(s) to realm_backend...")
+        additional_tx_id = send_tokens(ledger_id, realm_backend_id, i)
+        additional_tx_ids.append(additional_tx_id)
+        total_sent += i
+        
+        # Small delay to ensure transactions are processed and indexed
+        time.sleep(0.5)
+    
+    print(f"✅ Sent {NUM_ADDITIONAL_TRANSACTIONS} additional transactions")
+    print(f"   Total amount sent to realm_backend: {total_sent:,} satoshis")
 
-    # Step 7: Verify
-    print("\n[7/8] Verifying ledger balance...")
+    # Step 8: Verify
+    print("\n[8/9] Verifying ledger balance...")
     balance = verify_balance(ledger_id, realm_backend_id)
     print(f"✅ Balance verified: {balance:,} ckBTC")
 
-    # Step 8: Check indexer
+    # Step 9: Check indexer
     tx_data = check_indexer_transactions(indexer_id, realm_backend_id)
 
     # Final sanity check: compare ledger balance with indexer balance
@@ -373,11 +403,12 @@ def main():
     print("🎉 Test Setup Complete!")
     print("=" * 60)
     print(f"📊 Summary:")
-    print(f"  • Tokens sent: 100,000 ckBTC")
-    print(f"  • Transaction ID: {tx_id}")
-    print(f"  • Ledger balance: {balance:,} ckBTC")
-    print(f"  • Indexer balance: {indexer_balance:,} ckBTC")
-    print(f"  • Total transactions: {len(tx_data.get('transactions', []))}")
+    print(f"  • Initial transfer: 100,000 satoshis (TX ID: {tx_id})")
+    print(f"  • Additional transactions: {NUM_ADDITIONAL_TRANSACTIONS} (amounts: 1, 2, 3, ..., {NUM_ADDITIONAL_TRANSACTIONS})")
+    print(f"  • Total sent to realm_backend: {total_sent:,} satoshis")
+    print(f"  • Ledger balance: {balance:,} satoshis")
+    print(f"  • Indexer balance: {indexer_balance:,} satoshis")
+    print(f"  • Total transactions indexed: {len(tx_data.get('transactions', []))}")
     print(f"  • All data available in JSON format")
 
     print(f"\n✅ Final Validation:")
@@ -391,6 +422,9 @@ def main():
     else:
         print(f"  ⚠️  Latest transaction not yet indexed")
 
+    print("=" * 60)
+    print(f"\n💡 Tip: Set NUM_ADDITIONAL_TRANSACTIONS environment variable to change the number of test transactions")
+    print(f"   Example: NUM_ADDITIONAL_TRANSACTIONS=10 python3 {__file__}")
     print("=" * 60)
 
 
