@@ -436,7 +436,7 @@ def refresh(args: str) -> Async[str]:
         # Process transactions
         new_tx_count = 0
         for account_tx in response["transactions"]:
-            tx_id = account_tx["id"]
+            tx_id = str(account_tx["id"])  # Convert to string for Transfer entity
             tx = account_tx["transaction"]
 
             # Skip if already exists
@@ -456,7 +456,7 @@ def refresh(args: str) -> Async[str]:
                     principal_from=principal_from,
                     principal_to=principal_to,
                     amount=amount,
-                    timestamp=tx["timestamp"],
+                    timestamp=str(tx["timestamp"]),  # Convert to string
                 )
 
                 # Update balances
