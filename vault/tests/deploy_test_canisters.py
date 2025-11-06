@@ -19,7 +19,7 @@ import time
 from typing import Optional
 
 # Configuration - can be overridden via environment variable
-NUM_ADDITIONAL_TRANSACTIONS = int(os.getenv("NUM_ADDITIONAL_TRANSACTIONS", "5"))
+NUM_ADDITIONAL_TRANSACTIONS = int(os.getenv("NUM_ADDITIONAL_TRANSACTIONS", "100"))
 
 
 def validate_json_response(data: dict, expected_keys: list[str], context: str) -> bool:

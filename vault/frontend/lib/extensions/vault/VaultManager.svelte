@@ -17,6 +17,12 @@ let currentPrincipal: string = '';
 let canisterPrincipal: string = '';
 let balancePagination: any = null;
 let transferPagination: any = null;
+let currentPage = 0;
+const pageSize = 10;
+let vaultPrincipal: string = '';
+let lastRefreshTime: Date | null = null;
+let copiedPrincipal: string = '';
+let copiedTimestamp: string = '';
 
 async function loadBalance() {
 loading = true;
@@ -52,19 +58,33 @@ loading = false;
 }
 }
 
-async function loadTransactions() {
+async function loadTransactions(page: number = currentPage) {
 loading = true;
 error = '';
 try {
-// Get canister principal (the vault backend canister ID)
-if (!canisterPrincipal) {
-// The canister ID is available from the backend module
-// For now, we'll show all transfers since they're all vault-related
-canisterPrincipal = 'vault'; // Placeholder - will be updated when we call backend
+// Get vault principal (realm_backend canister ID)
+if (!vaultPrincipal) {
+try {
+if (typeof backend.get_canister_id === 'function') {
+const principalResult = await backend.get_canister_id();
+vaultPrincipal = principalResult || '';
+} else {
+// Backend not yet deployed with get_canister_id method
+vaultPrincipal = 'N/A (TODO)';
+}
+} catch (e) {
+console.warn('Could not fetch vault principal:', e);
+vaultPrincipal = 'N/A (TODO)';
+}
 }
 
-// Fetch all Transfer objects using get_objects_paginated
-const response = await backend.get_objects_paginated('Transfer', 0n, 100n, 'asc');
+// Fetch Transfer objects with pagination
+const response = await backend.get_objects_paginated(
+'Transfer',
+BigInt(page),
+BigInt(pageSize),
+'desc' // Most recent first
+);
 
 if (response.success && response.data?.objectsListPaginated) {
 const objectsData = response.data.objectsListPaginated;
@@ -96,9 +116,11 @@ args: '{}'
 });
 
 if (result.success) {
+// Update last refresh time
+lastRefreshTime = new Date();
 // Reload data after successful refresh
 await loadBalance();
-await loadTransactions();
+await loadTransactions(0); // Reset to first page
 } else {
 error = result.response || 'Refresh failed';
 }
@@ -145,13 +167,73 @@ loading = false;
 }
 }
 
+// Helper function to format time ago
+function timeAgo(date: Date): string {
+const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+if (seconds < 60) return `${seconds}s ago`;
+const minutes = Math.floor(seconds / 60);
+if (minutes < 60) return `${minutes}m ago`;
+const hours = Math.floor(minutes / 60);
+if (hours < 24) return `${hours}h ago`;
+const days = Math.floor(hours / 24);
+return `${days}d ago`;
+}
+
+// Helper function to copy text to clipboard
+async function copyToClipboard(text: string) {
+try {
+await navigator.clipboard.writeText(text);
+copiedPrincipal = text;
+setTimeout(() => copiedPrincipal = '', 2000);
+} catch (e) {
+console.error('Failed to copy:', e);
+}
+}
+
+// Helper function to copy timestamp
+async function copyTimestamp(timestamp: string) {
+try {
+await navigator.clipboard.writeText(timestamp);
+copiedTimestamp = timestamp;
+setTimeout(() => copiedTimestamp = '', 2000);
+} catch (e) {
+console.error('Failed to copy:', e);
+}
+}
+
+// Convert nanosecond timestamp to Date
+function parseTimestamp(timestamp: string): Date {
+const nanos = BigInt(timestamp);
+const millis = Number(nanos / BigInt(1000000));
+return new Date(millis);
+}
+
+// Pagination helpers
+function goToPage(page: number) {
+currentPage = page;
+loadTransactions(page);
+}
+
+function nextPage() {
+if (transferPagination && currentPage < Number(transferPagination.total_pages) - 1) {
+goToPage(currentPage + 1);
+}
+}
+
+function previousPage() {
+if (currentPage > 0) {
+goToPage(currentPage - 1);
+}
+}
+
 onMount(async () => {
 await loadBalance();
-await loadTransactions();
+await loadTransactions(0);
 });
 </script>
 
 <div class="p-6 space-y-6 mb-64">
+<div class="space-y-4">
 <div class="flex justify-between items-center">
 <h1 class="text-3xl font-bold">{$_('extensions.vault.title')}</h1>
 <button
@@ -161,6 +243,34 @@ class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opaci
 >
 {loading ? 'Refreshing...' : 'Refresh'}
 </button>
+</div>
+
+<!-- Vault Info Card -->
+<div class="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
+<div class="flex items-center justify-between">
+<div>
+<span class="text-sm font-medium text-gray-600">Vault Principal:</span>
+<button
+on:click={() => copyToClipboard(vaultPrincipal)}
+class="ml-2 font-mono text-xs text-blue-600 hover:text-blue-800 underline"
+title="Click to copy"
+>
+{vaultPrincipal || 'Loading...'}
+</button>
+{#if copiedPrincipal === vaultPrincipal}
+<span class="ml-2 text-xs text-green-600">✓ Copied!</span>
+{/if}
+</div>
+</div>
+{#if lastRefreshTime}
+<div>
+<span class="text-sm font-medium text-gray-600">Last Refresh:</span>
+<span class="ml-2 text-sm text-gray-700">
+{lastRefreshTime.toLocaleString()} ({timeAgo(lastRefreshTime)})
+</span>
+</div>
+{/if}
+</div>
 </div>
 
 {#if error}
@@ -230,6 +340,7 @@ Showing {allBalances.length} balance(s) (Page {Number(balancePagination.page_num
 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">From</th>
 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">To</th>
 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">When</th>
 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
 </tr>
 </thead>
@@ -239,32 +350,99 @@ Showing {allBalances.length} balance(s) (Page {Number(balancePagination.page_num
 <td class="px-6 py-4 text-sm">{tx._id || tx.id}</td>
 <td class="px-6 py-4 text-sm font-mono text-xs">
 {#if tx.principal_from}
+<button
+on:click={() => copyToClipboard(tx.principal_from)}
+class="text-blue-600 hover:text-blue-800 hover:underline text-left"
+title="Click to copy full principal"
+>
 {tx.principal_from.substring(0, 20)}...
+</button>
+{#if copiedPrincipal === tx.principal_from}
+<span class="ml-1 text-xs text-green-600">✓</span>
+{/if}
 {:else}
 <span class="text-gray-400">N/A</span>
 {/if}
 </td>
 <td class="px-6 py-4 text-sm font-mono text-xs">
 {#if tx.principal_to}
+<button
+on:click={() => copyToClipboard(tx.principal_to)}
+class="text-blue-600 hover:text-blue-800 hover:underline text-left"
+title="Click to copy full principal"
+>
 {tx.principal_to.substring(0, 20)}...
+</button>
+{#if copiedPrincipal === tx.principal_to}
+<span class="ml-1 text-xs text-green-600">✓</span>
+{/if}
 {:else}
 <span class="text-gray-400">N/A</span>
 {/if}
 </td>
 <td class="px-6 py-4 text-sm">{(tx.amount || 0).toLocaleString()}</td>
+<td class="px-6 py-4 text-sm">
+{#if tx.timestamp}
+{@const txDate = parseTimestamp(tx.timestamp)}
+<button
+on:click={() => copyTimestamp(txDate.toLocaleString())}
+class="text-gray-700 hover:text-blue-600 hover:underline text-left"
+title="Click to copy: {txDate.toLocaleString()}"
+>
+{timeAgo(txDate)}
+</button>
+{#if copiedTimestamp === txDate.toLocaleString()}
+<span class="ml-1 text-xs text-green-600">✓</span>
+{/if}
+{:else}
+<span class="text-gray-400">N/A</span>
+{/if}
+</td>
 <td class="px-6 py-4 text-sm"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded">transfer</span></td>
 </tr>
 {:else}
 <tr>
-<td colspan="5" class="px-6 py-4 text-center text-gray-500">No transactions found</td>
+<td colspan="6" class="px-6 py-4 text-center text-gray-500">No transactions found</td>
 </tr>
 {/each}
 </tbody>
 </table>
 </div>
 {#if transferPagination}
-<div class="p-4 border-t text-xs text-gray-500">
-Showing all {transactions.length} vault transfer(s) (Total: {transferPagination.total_items_count} transfers in system)
+<div class="p-4 border-t space-y-3">
+<div class="text-sm text-gray-600">
+Showing {transactions.length} of {transferPagination.total_items_count} transfers
+(Page {currentPage + 1} of {transferPagination.total_pages})
+</div>
+<!-- Pagination Controls -->
+<div class="flex items-center justify-center space-x-2">
+<button
+on:click={previousPage}
+disabled={currentPage === 0}
+class="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+← Previous
+</button>
+{#each Array(Number(transferPagination.total_pages)) as _, i}
+{#if i < 10 || i === currentPage || Math.abs(i - currentPage) < 2 || i >= Number(transferPagination.total_pages) - 2}
+<button
+on:click={() => goToPage(i)}
+class="px-3 py-1 border rounded {currentPage === i ? 'bg-blue-600 text-white' : 'hover:bg-gray-50'}"
+>
+{i + 1}
+</button>
+{:else if i === 10 || (i === currentPage - 2 && currentPage > 10) || (i === currentPage + 2 && currentPage < Number(transferPagination.total_pages) - 3)}
+<span class="px-2">...</span>
+{/if}
+{/each}
+<button
+on:click={nextPage}
+disabled={currentPage >= Number(transferPagination.total_pages) - 1}
+class="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Next →
+</button>
+</div>
 </div>
 {/if}
 </div>
