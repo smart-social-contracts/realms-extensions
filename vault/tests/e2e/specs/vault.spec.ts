@@ -49,6 +49,9 @@ test.describe('Vault Extension E2E Tests', () => {
     // Switch to Transactions tab
     await page.getByRole('button', { name: 'Transactions' }).click();
     
+    // Wait for transactions to load
+    await page.waitForTimeout(1000);
+    
     // Check table headers
     await expect(page.getByText('ID', { exact: true })).toBeVisible();
     await expect(page.getByText('FROM')).toBeVisible();
@@ -57,13 +60,13 @@ test.describe('Vault Extension E2E Tests', () => {
     await expect(page.getByText('WHEN')).toBeVisible();
     await expect(page.getByText('TYPE')).toBeVisible();
     
-    // Check if pagination controls exist (they may not if there are no transactions yet)
+    // Wait for pagination to appear
     const paginationText = page.getByText(/Page \d+ of \d+/);
-    if (await paginationText.isVisible()) {
-      // Check Previous and Next buttons
-      await expect(page.getByRole('button', { name: /Previous/ })).toBeVisible();
-      await expect(page.getByRole('button', { name: /Next/ })).toBeVisible();
-    }
+    await expect(paginationText).toBeVisible({ timeout: 5000 });
+    
+    // Check Previous and Next buttons
+    await expect(page.getByRole('button', { name: /Previous/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Next/ })).toBeVisible();
   });
 
   test('should copy principal to clipboard when clicked', async ({ page, context }) => {
@@ -78,14 +81,14 @@ test.describe('Vault Extension E2E Tests', () => {
     // Wait for transactions to load
     await page.waitForTimeout(1000);
     
-    // Find first principal link (if any transactions exist)
-    const principalButton = page.locator('button.text-blue-600').first();
+    // Find first principal button in the FROM column (td:nth-child(2))
+    const principalButton = page.locator('tbody tr:first-child td:nth-child(2) button').first();
     
     if (await principalButton.isVisible()) {
       await principalButton.click();
       
-      // Check for "Copied!" message
-      await expect(page.getByText('✓')).toBeVisible({ timeout: 2000 });
+      // Check for "Copied!" checkmark next to the clicked principal (more specific)
+      await expect(page.locator('tbody tr:first-child td:nth-child(2) .text-green-600')).toBeVisible({ timeout: 2000 });
     }
   });
 
@@ -101,14 +104,14 @@ test.describe('Vault Extension E2E Tests', () => {
     // Wait for transactions to load
     await page.waitForTimeout(1000);
     
-    // Find first timestamp button (if any transactions exist)
-    const timestampButton = page.locator('td button[title*="Click to copy"]').first();
+    // Find first timestamp button in the WHEN column (td:nth-child(5))
+    const timestampButton = page.locator('tbody tr:first-child td:nth-child(5) button').first();
     
     if (await timestampButton.isVisible()) {
       await timestampButton.click();
       
-      // Check for "Copied!" checkmark
-      await expect(page.getByText('✓')).toBeVisible({ timeout: 2000 });
+      // Check for "Copied!" checkmark next to the clicked timestamp (more specific)
+      await expect(page.locator('tbody tr:first-child td:nth-child(5) .text-green-600')).toBeVisible({ timeout: 2000 });
     }
   });
 
@@ -167,7 +170,7 @@ test.describe('Vault Extension E2E Tests', () => {
     test.setTimeout(TIMEOUT);
     
     // Switch to Transfer tab
-    await page.getByRole('button', { name: 'Transfer' }).click();
+    await page.getByRole('button', { name: 'Transfer', exact: true }).first().click();
     
     // Check form elements
     await expect(page.getByText('Recipient Principal')).toBeVisible();
@@ -177,8 +180,8 @@ test.describe('Vault Extension E2E Tests', () => {
     await expect(page.getByPlaceholder(/xxxxx-xxxxx/)).toBeVisible();
     await expect(page.getByPlaceholder('100000000')).toBeVisible();
     
-    // Check transfer button
-    const transferButton = page.getByRole('button', { name: 'Transfer' });
+    // Check transfer submit button (inside the form, not the tab)
+    const transferButton = page.locator('form button[type="submit"], form button:has-text("Transfer")').first();
     await expect(transferButton).toBeVisible();
     
     // Button should be disabled when form is empty
