@@ -346,7 +346,9 @@ def main():
     # Step 0: Get current principal
     principal = get_principal()
     print(f"Using principal: {principal}")
-    print(f"Will send {NUM_ADDITIONAL_TRANSACTIONS} additional transactions after initial transfer\n")
+    print(
+        f"Will send {NUM_ADDITIONAL_TRANSACTIONS} additional transactions after initial transfer\n"
+    )
 
     # Step 1: Create canisters
     create_canisters()
@@ -369,21 +371,23 @@ def main():
 
     # Step 6: Send initial tokens
     tx_id = send_tokens(ledger_id, realm_backend_id, 100_000)
-    
+
     # Step 7: Send N additional transactions with incrementing amounts
-    print(f"\n[7/9] Sending {NUM_ADDITIONAL_TRANSACTIONS} additional transactions with amounts 1, 2, 3, ... {NUM_ADDITIONAL_TRANSACTIONS} satoshis...")
+    print(
+        f"\n[7/9] Sending {NUM_ADDITIONAL_TRANSACTIONS} additional transactions with amounts 1, 2, 3, ... {NUM_ADDITIONAL_TRANSACTIONS} satoshis..."
+    )
     total_sent = 100_000  # Track total amount sent
     additional_tx_ids = []
-    
+
     for i in range(1, NUM_ADDITIONAL_TRANSACTIONS + 1):
         print(f"  Transaction {i}: Sending {i} satoshi(s) to realm_backend...")
         additional_tx_id = send_tokens(ledger_id, realm_backend_id, i)
         additional_tx_ids.append(additional_tx_id)
         total_sent += i
-        
+
         # Small delay to ensure transactions are processed and indexed
         time.sleep(0.5)
-    
+
     print(f"✅ Sent {NUM_ADDITIONAL_TRANSACTIONS} additional transactions")
     print(f"   Total amount sent to realm_backend: {total_sent:,} satoshis")
 
@@ -404,7 +408,9 @@ def main():
     print("=" * 60)
     print(f"📊 Summary:")
     print(f"  • Initial transfer: 100,000 satoshis (TX ID: {tx_id})")
-    print(f"  • Additional transactions: {NUM_ADDITIONAL_TRANSACTIONS} (amounts: 1, 2, 3, ..., {NUM_ADDITIONAL_TRANSACTIONS})")
+    print(
+        f"  • Additional transactions: {NUM_ADDITIONAL_TRANSACTIONS} (amounts: 1, 2, 3, ..., {NUM_ADDITIONAL_TRANSACTIONS})"
+    )
     print(f"  • Total sent to realm_backend: {total_sent:,} satoshis")
     print(f"  • Ledger balance: {balance:,} satoshis")
     print(f"  • Indexer balance: {indexer_balance:,} satoshis")
@@ -423,7 +429,9 @@ def main():
         print(f"  ⚠️  Latest transaction not yet indexed")
 
     print("=" * 60)
-    print(f"\n💡 Tip: Set NUM_ADDITIONAL_TRANSACTIONS environment variable to change the number of test transactions")
+    print(
+        f"\n💡 Tip: Set NUM_ADDITIONAL_TRANSACTIONS environment variable to change the number of test transactions"
+    )
     print(f"   Example: NUM_ADDITIONAL_TRANSACTIONS=10 python3 {__file__}")
     print("=" * 60)
 

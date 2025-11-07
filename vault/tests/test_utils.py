@@ -9,7 +9,6 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # Terminal colors
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -35,11 +34,11 @@ def print_warning(message: str):
 def run_command(command: str, capture_output: bool = True) -> Optional[str]:
     """
     Run a shell command and return its output.
-    
+
     Args:
         command: Shell command to execute
         capture_output: Whether to capture output
-        
+
     Returns:
         Command output as string, or None if command failed
     """
@@ -57,17 +56,17 @@ def run_command(command: str, capture_output: bool = True) -> Optional[str]:
 def run_command_json(command: str) -> Optional[Dict[str, Any]]:
     """
     Run a command and parse JSON response.
-    
+
     Args:
         command: Shell command to execute
-        
+
     Returns:
         Parsed JSON dict, or None if command failed or response invalid
     """
     result = run_command(command)
     if not result:
         return None
-    
+
     try:
         return json.loads(result)
     except json.JSONDecodeError as e:
@@ -99,28 +98,28 @@ def call_realm_extension(
 ) -> Optional[Dict[str, Any]]:
     """
     Call a method on a realm extension.
-    
+
     Args:
         extension_name: Name of the extension (e.g., "vault")
         method_name: Method to call (e.g., "refresh")
         args: JSON string of arguments
-        
+
     Returns:
         Parsed JSON response, or None if call failed
     """
     # Escape the JSON args for shell
     escaped_args = args.replace('"', '\\"')
-    
+
     command = (
-        f'dfx canister call realm_backend call_extension '
+        f"dfx canister call realm_backend call_extension "
         f'\'("{extension_name}", "{method_name}", "{escaped_args}")\' '
-        f'--output json'
+        f"--output json"
     )
-    
+
     result = run_command_json(command)
     if not result:
         return None
-    
+
     # The response is nested: result["data"]["extension_response"]
     # which itself contains JSON that needs parsing
     if "data" in result and "extension_response" in result["data"]:
@@ -130,7 +129,7 @@ def call_realm_extension(
         except json.JSONDecodeError:
             print_error(f"Failed to parse extension response: {extension_response_str}")
             return None
-    
+
     return result
 
 
@@ -139,22 +138,22 @@ def query_ggg_entities(
 ) -> Optional[Dict[str, Any]]:
     """
     Query ggg entities using the realm backend API.
-    
+
     Args:
         entity_type: Entity type name (e.g., "Transfer", "Balance")
         page_num: Page number (0-indexed)
         page_size: Number of items per page
         order: Sort order ("asc" or "desc")
-        
+
     Returns:
         Dict with items list and pagination info, or None if failed
     """
     command = (
-        f'dfx canister call realm_backend list_objects_paginated '
+        f"dfx canister call realm_backend list_objects_paginated "
         f'\'("{entity_type}", {page_num}, {page_size}, "{order}")\' '
-        f'--output json'
+        f"--output json"
     )
-    
+
     return run_command_json(command)
 
 
@@ -166,18 +165,18 @@ def send_icrc_tokens(
 ) -> Optional[int]:
     """
     Send ICRC tokens from current identity to a principal.
-    
+
     Args:
         ledger_id: Ledger canister ID
         to_principal: Destination principal
         amount: Amount to send
         identity: Optional dfx identity to use
-        
+
     Returns:
         Transaction ID if successful, None otherwise
     """
     identity_arg = f"--identity {identity}" if identity else ""
-    
+
     transfer_arg = (
         f"(record {{"
         f"  to = record {{"
@@ -191,16 +190,16 @@ def send_icrc_tokens(
         f"  created_at_time = null;"
         f"}})"
     )
-    
+
     command = (
         f"dfx {identity_arg} canister call --output json "
         f"{ledger_id} icrc1_transfer '{transfer_arg}'"
     )
-    
+
     result = run_command_json(command)
     if not result:
         return None
-    
+
     if "Ok" in result:
         tx_id = int(result["Ok"])
         return tx_id
@@ -213,11 +212,11 @@ def send_icrc_tokens(
 def check_icrc_balance(ledger_id: str, principal: str) -> Optional[int]:
     """
     Check ICRC token balance for a principal.
-    
+
     Args:
         ledger_id: Ledger canister ID
         principal: Principal to check balance for
-        
+
     Returns:
         Balance amount, or None if check failed
     """
@@ -227,16 +226,16 @@ def check_icrc_balance(ledger_id: str, principal: str) -> Optional[int]:
         f"  subaccount = null;"
         f"}})"
     )
-    
+
     command = (
         f"dfx canister call --output json "
         f"{ledger_id} icrc1_balance_of '{balance_arg}'"
     )
-    
+
     result = run_command(command)
     if not result:
         return None
-    
+
     try:
         # Response is just a number in JSON format
         balance_str = result.strip().strip('"')
@@ -250,32 +249,32 @@ def check_icrc_balance(ledger_id: str, principal: str) -> Optional[int]:
 def create_test_identities(identity_names: List[str]) -> Dict[str, str]:
     """
     Create test dfx identities.
-    
+
     Args:
         identity_names: List of identity names to create
-        
+
     Returns:
         Dictionary mapping identity names to their principal IDs
     """
     identities = {}
     current_identity = run_command("dfx identity whoami")
-    
+
     try:
         for name in identity_names:
             # Create identity if needed
             existing = run_command("dfx identity list")
             if existing and name not in existing.split():
                 run_command(f"dfx identity new --disable-encryption {name}")
-            
+
             # Get principal ID
             run_command(f"dfx identity use {name}")
             principal = get_current_principal()
-            
+
             if principal:
                 identities[name] = principal
                 print(f"{name}: {principal}")
     finally:
         if current_identity:
             run_command(f"dfx identity use {current_identity}")
-    
+
     return identities

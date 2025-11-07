@@ -441,9 +441,7 @@ def refresh(args: str) -> Async[str]:
         # Sort by ID ascending to avoid collision with internal entity IDs.
         # Note: tx["id"] is a sequential integer (transaction index) per ICRC-1 standard,
         # not an arbitrary string, so we sort numerically to maintain chronological order.
-        sorted_transactions = sorted(
-            response["transactions"], key=lambda tx: tx["id"]
-        )
+        sorted_transactions = sorted(response["transactions"], key=lambda tx: tx["id"])
         new_tx_count = 0
         for account_tx in sorted_transactions:
             tx_id = str(account_tx["id"])  # Convert to string for Transfer entity
