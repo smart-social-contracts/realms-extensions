@@ -363,7 +363,7 @@ def transfer(args: str) -> Async[str]:
         if hasattr(result, "Ok") and result.Ok is not None:
             transfer_result = result.Ok
             logger.info(f"Transfer call successful: {transfer_result}")
-            
+
             # Check if the transfer itself succeeded
             if isinstance(transfer_result, dict) and "Ok" in transfer_result:
                 tx_id = str(transfer_result["Ok"])
@@ -408,7 +408,9 @@ def transfer(args: str) -> Async[str]:
                 )
                 balance = Balance[to_principal] or Balance(id=to_principal, amount=0)
                 balance.amount -= amount
-                logger.info(f"Successfully transferred {amount} to {to_principal}, tx_id: {tx_id}")
+                logger.info(
+                    f"Successfully transferred {amount} to {to_principal}, tx_id: {tx_id}"
+                )
                 return json.dumps(
                     {
                         "success": True,
