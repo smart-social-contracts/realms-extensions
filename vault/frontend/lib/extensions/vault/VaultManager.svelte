@@ -86,14 +86,24 @@ BigInt(pageSize),
 'desc' // Most recent first
 );
 
+console.log('Transfer response:', response);
+console.log('Response success:', response.success);
+console.log('Response data:', response.data);
+console.log('Response data keys:', response.data ? Object.keys(response.data) : 'no data');
+
 if (response.success && response.data?.objectsListPaginated) {
 const objectsData = response.data.objectsListPaginated;
 transferPagination = objectsData.pagination;
 
+console.log('Objects data:', objectsData);
+console.log('Objects array length:', objectsData.objects?.length);
+
 // Parse each JSON string in the objects array
 // Show ALL transfers since the vault tracks all transactions to/from the canister
 transactions = objectsData.objects.map((objStr: string) => JSON.parse(objStr));
+console.log('Parsed transactions:', transactions);
 } else {
+console.warn('No objectsListPaginated in response');
 transactions = [];
 }
 } catch (e: any) {
