@@ -53,7 +53,7 @@ dfx2.log
 # Realms
 .dfx/
 .kybra/
-# .realms/
+.realms/
 canister_ids.json
 .env
 node_modules/
