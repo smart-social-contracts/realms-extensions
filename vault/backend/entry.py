@@ -19,6 +19,41 @@ from .vault_lib.entities import Canisters, app_data
 logger = get_logger("extensions.vault")
 
 
+def format_transfer_error(error_dict: Dict) -> str:
+    """
+    Format ICRC transfer error into a user-friendly message.
+    
+    Args:
+        error_dict: Error dictionary from ICRC transfer result
+        
+    Returns:
+        Formatted error message string
+    """
+    if "InsufficientFunds" in error_dict:
+        balance = error_dict["InsufficientFunds"].get("balance", 0)
+        return f"Insufficient funds: vault balance is {balance} satoshis. A minimum of 10 satoshis is required for transaction fees."
+    elif "BadFee" in error_dict:
+        expected_fee = error_dict["BadFee"].get("expected_fee", "unknown")
+        return f"Incorrect fee provided. Expected fee: {expected_fee} satoshis"
+    elif "BadBurn" in error_dict:
+        min_burn = error_dict["BadBurn"].get("min_burn_amount", "unknown")
+        return f"Burn amount too low. Minimum burn amount: {min_burn} satoshis"
+    elif "TooOld" in error_dict:
+        return "Transaction is too old to be processed"
+    elif "CreatedInFuture" in error_dict:
+        return "Transaction timestamp is in the future"
+    elif "Duplicate" in error_dict:
+        dup_of = error_dict["Duplicate"].get("duplicate_of", "unknown")
+        return f"Duplicate transaction (original tx: {dup_of})"
+    elif "TemporarilyUnavailable" in error_dict:
+        return "Ledger temporarily unavailable. Please try again."
+    elif "GenericError" in error_dict:
+        msg = error_dict["GenericError"].get("message", "Unknown error")
+        return f"Transfer error: {msg}"
+    else:
+        return f"Transfer failed: {str(error_dict)}"
+
+
 def register_entities():
     """Register vault entity types with the Database."""
     from kybra_simple_db import Database
@@ -394,7 +429,8 @@ def transfer(args: str) -> Async[str]:
                 # Transfer failed with ICRC error
                 error = transfer_result["Err"]
                 logger.error(f"Transfer failed: {error}")
-                return json.dumps({"success": False, "error": str(error)})
+                user_friendly_error = format_transfer_error(error)
+                return json.dumps({"success": False, "error": user_friendly_error})
             else:
                 # Unexpected format - treat as tx_id for backwards compatibility
                 tx_id = str(transfer_result)

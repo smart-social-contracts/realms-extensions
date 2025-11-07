@@ -125,14 +125,25 @@ function_name: 'refresh',
 args: '{}'
 });
 
-if (result.success) {
+// Parse the inner JSON response from the extension
+let innerResponse;
+try {
+innerResponse = JSON.parse(result.response);
+} catch {
+// If parsing fails, use the raw response
+error = result.response || 'Refresh failed';
+return;
+}
+
+// Check the inner success field from the extension
+if (innerResponse.success) {
 // Update last refresh time
 lastRefreshTime = new Date();
 // Reload data after successful refresh
 await loadBalance();
 await loadTransactions(0); // Reset to first page
 } else {
-error = result.response || 'Refresh failed';
+error = innerResponse.error || 'Refresh failed';
 }
 } catch (e: any) {
 console.error('Failed to refresh vault:', e);
@@ -161,13 +172,24 @@ amount: transferAmount
 })
 });
 
-if (result.success) {
+// Parse the inner JSON response from the extension
+let innerResponse;
+try {
+innerResponse = JSON.parse(result.response);
+} catch {
+// If parsing fails, use the raw response
+error = result.response || 'Transfer failed';
+return;
+}
+
+// Check the inner success field from the extension
+if (innerResponse.success) {
 transferTo = '';
 transferAmount = 0;
 await loadBalance();
 await loadTransactions();
 } else {
-error = result.response || 'Transfer failed';
+error = innerResponse.error || 'Transfer failed';
 }
 } catch (e: any) {
 console.error('Failed to perform transfer:', e);

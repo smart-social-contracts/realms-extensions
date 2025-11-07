@@ -239,4 +239,73 @@ test.describe('Vault Extension E2E Tests', () => {
       await expect(timeAgoElements.first()).toBeVisible();
     }
   });
+
+  test('should display user-friendly error message for insufficient funds', async ({ page }) => {
+    test.setTimeout(TIMEOUT);
+    
+    // Switch to Transfer tab
+    await page.getByRole('button', { name: 'Transfer', exact: true }).first().click();
+    
+    // Fill in transfer form with a valid principal and amount
+    // Note: This will fail if the vault doesn't have enough balance
+    const recipientInput = page.getByPlaceholder(/xxxxx-xxxxx/);
+    const amountInput = page.getByPlaceholder('100000000');
+    
+    // Use a test principal (this could be any valid principal)
+    await recipientInput.fill('64fpo-jgpms-fpewi-hrskb-f3n6u-3z5fy-bv25f-zxjzg-q5m55-xmfpq-hqe');
+    
+    // Try to transfer an amount that would require more than available balance
+    // (including the 10 satoshi fee)
+    await amountInput.fill('999999999');
+    
+    // Submit the transfer
+    const transferButton = page.locator('form button[type="submit"], form button:has-text("Transfer")').first();
+    await transferButton.click();
+    
+    // Wait for the error message to appear
+    // The error should contain user-friendly text about insufficient funds
+    const errorMessage = page.locator('.bg-red-50, [class*="error"]').filter({ hasText: /Insufficient funds/ });
+    
+    // Check that the error is visible and contains helpful information
+    await expect(errorMessage).toBeVisible({ timeout: 10000 });
+    
+    // Verify the error message contains:
+    // 1. The phrase "Insufficient funds"
+    // 2. Information about the current balance
+    // 3. Information about the transaction fee requirement
+    await expect(page.getByText(/Insufficient funds.*satoshis/)).toBeVisible();
+    
+    // The error should mention the 10 satoshi transaction fee requirement
+    await expect(page.getByText(/minimum.*10 satoshis.*fee/i)).toBeVisible();
+  });
+
+  test('should validate transfer form inputs', async ({ page }) => {
+    test.setTimeout(TIMEOUT);
+    
+    // Switch to Transfer tab
+    await page.getByRole('button', { name: 'Transfer', exact: true }).first().click();
+    
+    const recipientInput = page.getByPlaceholder(/xxxxx-xxxxx/);
+    const amountInput = page.getByPlaceholder('100000000');
+    const transferButton = page.locator('form button[type="submit"], form button:has-text("Transfer")').first();
+    
+    // Button should be disabled with empty inputs
+    await expect(transferButton).toBeDisabled();
+    
+    // Fill only recipient
+    await recipientInput.fill('64fpo-jgpms-fpewi-hrskb-f3n6u-3z5fy-bv25f-zxjzg-q5m55-xmfpq-hqe');
+    await expect(transferButton).toBeDisabled();
+    
+    // Clear recipient and fill only amount
+    await recipientInput.clear();
+    await amountInput.fill('100');
+    await expect(transferButton).toBeDisabled();
+    
+    // Fill both fields with valid values
+    await recipientInput.fill('64fpo-jgpms-fpewi-hrskb-f3n6u-3z5fy-bv25f-zxjzg-q5m55-xmfpq-hqe');
+    await amountInput.fill('100');
+    
+    // Button should be enabled when both fields are filled
+    await expect(transferButton).toBeEnabled();
+  });
 });
