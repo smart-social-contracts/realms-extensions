@@ -1,6 +1,7 @@
 {
   "extensions": {
     "erd_explorer": {
+      "sidebar": "ERD Explorer",
       "title": "ERD Explorer",
       "description": "Interactive Entity Relationship Diagram explorer for visualizing and navigating Realms data structure",
       "entity_diagram": "Entity Relationship Diagram",
