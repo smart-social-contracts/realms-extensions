@@ -22,10 +22,10 @@ logger = get_logger("extensions.vault")
 def format_transfer_error(error_dict: Dict) -> str:
     """
     Format ICRC transfer error into a user-friendly message.
-    
+
     Args:
         error_dict: Error dictionary from ICRC transfer result
-        
+
     Returns:
         Formatted error message string
     """
