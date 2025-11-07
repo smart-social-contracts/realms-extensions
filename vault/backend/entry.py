@@ -361,38 +361,64 @@ def transfer(args: str) -> Async[str]:
 
         # Handle result
         if hasattr(result, "Ok") and result.Ok is not None:
-            # Extract transaction ID (handle nested Ok structures)
-            tx_result = result.Ok
-            if isinstance(tx_result, dict) and "Ok" in tx_result:
-                tx_id = str(tx_result["Ok"])
+            transfer_result = result.Ok
+            logger.info(f"Transfer call successful: {transfer_result}")
+            
+            # Check if the transfer itself succeeded
+            if isinstance(transfer_result, dict) and "Ok" in transfer_result:
+                tx_id = str(transfer_result["Ok"])
+
+                # Create transaction record
+                Transfer(
+                    id=tx_id,
+                    principal_from=ic.id().to_str(),
+                    principal_to=to_principal,
+                    amount=amount,
+                    timestamp=str(ic.time()),
+                )
+
+                # Update balances
+                balance = Balance[to_principal] or Balance(id=to_principal, amount=0)
+                balance.amount -= amount
+
+                logger.info(
+                    f"Successfully transferred {amount} to {to_principal}, tx_id: {tx_id}"
+                )
+                return json.dumps(
+                    {
+                        "success": True,
+                        "data": {"TransactionId": {"transaction_id": int(tx_id)}},
+                    }
+                )
+            elif isinstance(transfer_result, dict) and "Err" in transfer_result:
+                # Transfer failed with ICRC error
+                error = transfer_result["Err"]
+                logger.error(f"Transfer failed: {error}")
+                return json.dumps({"success": False, "error": str(error)})
             else:
-                tx_id = str(tx_result)
-
-            # Create transaction record
-            Transfer(
-                id=tx_id,
-                principal_from=ic.id().to_str(),
-                principal_to=to_principal,
-                amount=amount,
-                timestamp=str(ic.time()),
-            )
-
-            # Update balances
-            balance = Balance[to_principal] or Balance(id=to_principal, amount=0)
-            balance.amount -= amount
-
-            logger.info(
-                f"Successfully transferred {amount} to {to_principal}, tx_id: {tx_id}"
-            )
-            return json.dumps(
-                {
-                    "success": True,
-                    "data": {"TransactionId": {"transaction_id": int(tx_id)}},
-                }
-            )
+                # Unexpected format - treat as tx_id for backwards compatibility
+                tx_id = str(transfer_result)
+                logger.warning(f"Unexpected transfer result format: {transfer_result}")
+                Transfer(
+                    id=tx_id,
+                    principal_from=ic.id().to_str(),
+                    principal_to=to_principal,
+                    amount=amount,
+                    timestamp=str(ic.time()),
+                )
+                balance = Balance[to_principal] or Balance(id=to_principal, amount=0)
+                balance.amount -= amount
+                logger.info(f"Successfully transferred {amount} to {to_principal}, tx_id: {tx_id}")
+                return json.dumps(
+                    {
+                        "success": True,
+                        "data": {"TransactionId": {"transaction_id": int(tx_id)}},
+                    }
+                )
         else:
+            # Inter-canister call failed
             error = result.Err if hasattr(result, "Err") else "Unknown error"
-            logger.error(f"Transfer failed: {error}")
+            logger.error(f"Transfer call failed: {error}")
             return json.dumps({"success": False, "error": str(error)})
 
     except Exception as e:
