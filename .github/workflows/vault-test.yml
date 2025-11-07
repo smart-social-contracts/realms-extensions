@@ -1,4 +1,4 @@
-name: Vault Test
+name: Vault Test Suite
 
 on:
   push:
@@ -11,9 +11,11 @@ on:
     paths:
       - 'vault/**'
       - '.github/workflows/vault-test.yml'
+  workflow_dispatch:
 
 jobs:
-  test:
+  lint-and-unit-tests:
+    name: Linting & Unit Tests
     runs-on: ubuntu-latest
     
     steps:
@@ -48,7 +50,7 @@ jobs:
         flake8 backend
         flake8 tests --extend-ignore=F401,W291,F841
         
-    - name: Run tests
+    - name: Run unit tests
       run: |
         cd vault
         bash run_tests.sh
@@ -57,7 +59,91 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: vault-test-logs
+        name: vault-unit-test-logs
         path: vault/test-logs/
+        retention-days: 7
+        if-no-files-found: warn
+
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: lint-and-unit-tests
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install DFX
+      run: |
+        wget https://github.com/dfinity/sdk/releases/download/0.15.2/dfx-0.15.2-x86_64-linux.tar.gz
+        tar -xzf dfx-0.15.2-x86_64-linux.tar.gz
+        sudo mv dfx /usr/local/bin/
+        dfx --version
+    
+    - name: Install Realms CLI
+      run: |
+        cd ../..
+        pip install -e .
+        realms --version
+      working-directory: vault
+    
+    - name: Create and deploy realm
+      run: |
+        cd ../..
+        realms create --random
+        realms deploy
+      working-directory: vault
+    
+    - name: Deploy vault test canisters
+      run: |
+        cd tests
+        python3 deploy_test_canisters.py
+      working-directory: vault
+      env:
+        NUM_ADDITIONAL_TRANSACTIONS: 100
+    
+    - name: Run vault refresh
+      run: |
+        cd ../..
+        realms run --file vault/tests/test_vault.py --wait
+      working-directory: vault
+    
+    - name: Install Playwright dependencies
+      run: |
+        cd tests/e2e
+        npm install
+        npx playwright install chromium --with-deps
+      working-directory: vault
+    
+    - name: Run Playwright E2E tests
+      run: |
+        cd tests/e2e
+        ./run-e2e-tests.sh --reporter=line
+      working-directory: vault
+    
+    - name: Upload E2E test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vault-e2e-test-results
+        path: |
+          vault/tests/e2e/test-results/
+          vault/tests/e2e/playwright-report/
+        retention-days: 7
+    
+    - name: Upload canister logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vault-canister-logs
+        path: |
+          dfx.log
+          dfx2.log
+          realms_cli.log
         retention-days: 7
         if-no-files-found: warn
