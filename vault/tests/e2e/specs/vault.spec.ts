@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const TIMEOUT = 300000; // 5 minutes for vault operations
+const TIMEOUT = 30000; // 30 seconds for vault operations
 
 test.describe('Vault Extension E2E Tests', () => {
   

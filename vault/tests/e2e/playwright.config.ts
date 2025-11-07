@@ -8,7 +8,7 @@ export default defineConfig({
   testDir: './specs',
   
   /* Maximum time one test can run for */
-  timeout: 120 * 1000,
+  timeout: 30 * 1000,
   
   /* Run tests in files in parallel */
   fullyParallel: false,
