@@ -1,6 +1,6 @@
 {
   "name": "metrics",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Analytics and metrics dashboard for realm performance",
   "author": "Smart Social Contracts",
   "permissions": [],
