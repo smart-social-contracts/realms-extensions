@@ -85,19 +85,24 @@ jobs:
         sudo mv dfx /usr/local/bin/
         dfx --version
     
+    - name: Checkout Realms parent repository
+      uses: actions/checkout@v4
+      with:
+        repository: smart-social-contracts/realms
+        path: realms-parent
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
     - name: Install Realms CLI
       run: |
-        cd ../..
+        cd realms-parent/cli
         pip install -e .
         realms --version
-      working-directory: vault
     
     - name: Create and deploy realm
       run: |
-        cd ../..
+        cd realms-parent
         realms create --random
         realms deploy
-      working-directory: vault
     
     - name: Deploy vault test canisters
       run: |
@@ -109,9 +114,8 @@ jobs:
     
     - name: Run vault refresh
       run: |
-        cd ../..
-        realms run --file vault/tests/test_vault.py --wait
-      working-directory: vault
+        cd realms-parent
+        realms run --file ../vault/tests/test_vault.py --wait
     
     - name: Install Playwright dependencies
       run: |
@@ -142,8 +146,8 @@ jobs:
       with:
         name: vault-canister-logs
         path: |
-          dfx.log
-          dfx2.log
-          realms_cli.log
+          realms-parent/dfx.log
+          realms-parent/dfx2.log
+          realms-parent/realms_cli.log
         retention-days: 7
         if-no-files-found: warn
