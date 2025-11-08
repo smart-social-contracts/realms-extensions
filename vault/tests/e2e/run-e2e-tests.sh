@@ -18,15 +18,14 @@ export PLAYWRIGHT_BASE_URL="http://${CANISTER_ID}.localhost:8000/"
 echo "✅ Set PLAYWRIGHT_BASE_URL to: $PLAYWRIGHT_BASE_URL"
 echo ""
 
-# NO NEED, Playwright is already installed in the Docker image
-# # Ensure dependencies are installed
-# if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
-#   echo "📦 Installing Playwright dependencies..."
-#   cd "$SCRIPT_DIR"
-#   npm install
-#   npx playwright install chromium
-#   echo ""
-# fi
+# Ensure dependencies are installed
+if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
+  echo "📦 Installing Playwright dependencies..."
+  cd "$SCRIPT_DIR"
+  npm install
+  npx playwright install chromium
+  echo ""
+fi
 
 echo "🎭 Running Vault extension E2E tests..."
 echo ""
