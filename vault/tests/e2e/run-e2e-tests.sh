@@ -28,16 +28,26 @@ fi
 
 # Ensure Playwright browsers are installed (pinned to same version as realm_frontend: 1.52.0)
 # This handles cases where npm install updates Playwright or Docker image browsers are missing
-PLAYWRIGHT_CACHE="${HOME}/.cache/ms-playwright"
-if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
-  echo "📥 Installing Playwright browsers..."
-  cd "$SCRIPT_DIR"
-  npx playwright install chromium --with-deps
-  echo ""
+echo "📥 Checking Playwright browsers..."
+cd "$SCRIPT_DIR"
+
+# In Docker environments, always ensure browsers are installed
+if [ -f /.dockerenv ]; then
+  echo "🐳 Docker environment detected - ensuring browsers are installed..."
+  npx playwright install chromium --with-deps || npx playwright install chromium
+  echo "✅ Playwright browsers ready"
 else
-  echo "✅ Playwright browsers already installed"
-  echo ""
+  # For local development, check if browsers exist
+  PLAYWRIGHT_CACHE="${HOME}/.cache/ms-playwright"
+  if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
+    echo "📥 Installing Playwright browsers..."
+    npx playwright install chromium --with-deps
+    echo "✅ Playwright browsers installed"
+  else
+    echo "✅ Playwright browsers already installed"
+  fi
 fi
+echo ""
 
 # Warm up the vault page before running tests
 echo "🔥 Warming up vault page..."
