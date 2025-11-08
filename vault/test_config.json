@@ -13,7 +13,17 @@
     "enabled": true,
     "dfx_json": "tests/dfx.json",
     "deploy_script": "tests/deploy_test_canisters.py",
-    "init_script": "tests/init_vault_canisters.py"
+    "init_script": "tests/init_vault_canisters.py",
+    "canister_id_replacements": [
+      {
+        "canister_name": "ckbtc_ledger",
+        "placeholder": "PLACEHOLDER_LEDGER_ID"
+      },
+      {
+        "canister_name": "ckbtc_indexer",
+        "placeholder": "PLACEHOLDER_INDEXER_ID"
+      }
+    ]
   },
   
   "backend_tests": {

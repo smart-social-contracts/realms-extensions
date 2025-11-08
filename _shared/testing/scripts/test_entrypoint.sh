@@ -194,6 +194,37 @@ if [ "$TEST_CANISTERS_ENABLED" = "true" ] && [ -n "$TEST_CANISTERS_DEPLOY" ]; th
     fi
 fi
 
+# Capture deployed canister IDs for dynamic replacement
+if [ "$TEST_CANISTERS_ENABLED" = "true" ]; then
+    echo '[INFO] Capturing deployed test canister IDs for placeholder replacement...'
+    
+    # Build sed replacement arguments from config
+    SED_REPLACEMENTS=""
+    
+    # Check if config has canister_id_replacements defined
+    if jq -e '.test_canisters.canister_id_replacements' "$CONFIG_FILE" > /dev/null 2>&1; then
+        # Get count of replacements
+        REPLACEMENT_COUNT=$(jq '.test_canisters.canister_id_replacements | length' "$CONFIG_FILE")
+        echo "[INFO] Found $REPLACEMENT_COUNT canister ID replacement(s) to configure"
+        
+        # Iterate through each replacement mapping using index
+        for i in $(seq 0 $((REPLACEMENT_COUNT - 1))); do
+            CANISTER_NAME=$(jq -r ".test_canisters.canister_id_replacements[$i].canister_name" "$CONFIG_FILE")
+            PLACEHOLDER=$(jq -r ".test_canisters.canister_id_replacements[$i].placeholder" "$CONFIG_FILE")
+            
+            # Get the actual canister ID
+            CANISTER_ID=$(dfx canister id "$CANISTER_NAME" 2>/dev/null || echo "")
+            
+            if [ -n "$CANISTER_ID" ]; then
+                echo "[INFO] $CANISTER_NAME: $CANISTER_ID (will replace $PLACEHOLDER)"
+                SED_REPLACEMENTS="$SED_REPLACEMENTS -e s/$PLACEHOLDER/$CANISTER_ID/"
+            else
+                echo "[WARNING] Canister '$CANISTER_NAME' not found, $PLACEHOLDER will not be replaced"
+            fi
+        done
+    fi
+fi
+
 # Run initialization script if provided
 if [ -n "$TEST_CANISTERS_INIT" ]; then
     echo '[INFO] Running test initialization script...'
@@ -205,7 +236,25 @@ if [ -n "$TEST_CANISTERS_INIT" ]; then
     fi
     
     if [ -f "$INIT_SCRIPT" ]; then
-        realms run --file "$INIT_SCRIPT"
+        # Check if we have any sed replacements to perform
+        if [ -n "$SED_REPLACEMENTS" ]; then
+            echo '[INFO] Performing dynamic canister ID injection in init script...'
+            
+            # Create temporary file with injected IDs
+            INIT_SCRIPT_TEMP="/tmp/init_script_configured_$$.py"
+            
+            # Perform sed replacements
+            eval "sed $SED_REPLACEMENTS '$INIT_SCRIPT' > '$INIT_SCRIPT_TEMP'"
+            
+            echo '[INFO] Running init script with injected canister IDs...'
+            realms run --file "$INIT_SCRIPT_TEMP"
+            
+            # Clean up temp file
+            rm -f "$INIT_SCRIPT_TEMP"
+        else
+            echo '[INFO] Running init script as-is (no replacements configured)...'
+            realms run --file "$INIT_SCRIPT"
+        fi
     else
         echo "[WARNING] Initialization script not found: $INIT_SCRIPT"
     fi
@@ -225,7 +274,24 @@ if [ "$BACKEND_TESTS_ENABLED" = "true" ] && [ "$TEST_TYPE" != "e2e_only" ]; then
         
         if [ -f "$PRE_SETUP" ]; then
             echo '[INFO] Running pre-setup script...'
-            realms run --file "$PRE_SETUP"
+            
+            # Check if we have any sed replacements to perform
+            if [ -n "$SED_REPLACEMENTS" ]; then
+                echo '[INFO] Performing dynamic canister ID injection in pre-setup script...'
+                
+                # Create temporary file with injected IDs
+                PRE_SETUP_TEMP="/tmp/pre_setup_configured_$$.py"
+                
+                # Perform sed replacements
+                eval "sed $SED_REPLACEMENTS '$PRE_SETUP' > '$PRE_SETUP_TEMP'"
+                
+                realms run --file "$PRE_SETUP_TEMP"
+                
+                # Clean up temp file
+                rm -f "$PRE_SETUP_TEMP"
+            else
+                realms run --file "$PRE_SETUP"
+            fi
         fi
     fi
     

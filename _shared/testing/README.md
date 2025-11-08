@@ -198,6 +198,54 @@ if __name__ == "__main__":
 }
 ```
 
+### Dynamic Canister ID Injection
+
+If your init scripts need the actual deployed canister IDs (not hardcoded), use placeholder replacement:
+
+1. **Use placeholders** in your init script (`tests/init_my_extension.py`):
+```python
+from kybra import ic
+from extension_packages.my_extension.entities import Canisters
+
+# Placeholders will be replaced by test framework
+LEDGER_ID = "PLACEHOLDER_LEDGER_ID"
+INDEXER_ID = "PLACEHOLDER_INDEXER_ID"
+
+ic.print(f"Configuring ledger: {LEDGER_ID}")
+ledger = Canisters["my_ledger"]
+ledger.principal = LEDGER_ID
+```
+
+2. **Configure replacements** in `test_config.json`:
+```json
+{
+  "test_canisters": {
+    "enabled": true,
+    "dfx_json": "tests/dfx.json",
+    "deploy_script": "tests/deploy_test_canisters.py",
+    "init_script": "tests/init_my_extension.py",
+    "canister_id_replacements": [
+      {
+        "canister_name": "my_test_ledger",
+        "placeholder": "PLACEHOLDER_LEDGER_ID"
+      },
+      {
+        "canister_name": "my_test_indexer",
+        "placeholder": "PLACEHOLDER_INDEXER_ID"
+      }
+    ]
+  }
+}
+```
+
+The framework will:
+1. Deploy your test canisters
+2. Capture their canister IDs using `dfx canister id <name>`
+3. Replace all placeholders in your init script with actual IDs
+4. Run the modified script
+
+This keeps your test scripts generic and reusable across different deployments.
+
 ## E2E Tests
 
 ### Setup
