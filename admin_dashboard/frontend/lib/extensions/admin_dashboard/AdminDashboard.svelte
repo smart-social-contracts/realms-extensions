@@ -3,65 +3,104 @@
   import { backend } from '$lib/canisters';
   import GenericEntityTable from '$lib/components/ggg/GenericEntityTable.svelte';
   
-  let activeTab = 'users';
-  let data = {
-    users: [],
-    organizations: [],
-    mandates: [],
-    instruments: [],
-    transfers: []
-  };
+  let selectedType = 'users';
+  let items = [];
   let loading = false;
+  let expandedItem = null;
   
-  // Map display names to API class names
-  const classNames = {
-    users: 'User',
-    organizations: 'Organization',
-    mandates: 'Mandate',
-    instruments: 'Instrument',
-    transfers: 'Transfer'
-  };
+  // Pagination state
+  let currentPage = 0;
+  let pageSize = 10;
+  let totalItems = 0;
+  let totalPages = 0;
   
-  async function fetchData(entityType) {
-    console.log(`📥 Fetching ${entityType}...`);
+  // Entity types configuration
+  const entityTypes = [
+    { value: 'users', label: '👤 Users', className: 'User' },
+    { value: 'organizations', label: '🏢 Organizations', className: 'Organization' },
+    { value: 'mandates', label: '📜 Mandates', className: 'Mandate' },
+    { value: 'instruments', label: '💰 Instruments', className: 'Instrument' },
+    { value: 'transfers', label: '🔄 Transfers', className: 'Transfer' },
+    { value: 'proposals', label: '🗳️ Proposals', className: 'Proposal' },
+    { value: 'votes', label: '✅ Votes', className: 'Vote' }
+  ];
+  
+  async function loadData() {
+    loading = true;
+    expandedItem = null;
+    const entityConfig = entityTypes.find(t => t.value === selectedType);
+    
+    console.log(`📥 Loading ${entityConfig.label} - Page ${currentPage + 1}...`);
+    
     try {
-      const className = classNames[entityType];
-      const result = await backend.get_objects_paginated(className, 0, 20, 'desc');
+      const result = await backend.get_objects_paginated(
+        entityConfig.className,
+        currentPage,
+        pageSize,
+        'desc'
+      );
       
       if (result.success && result.data) {
         const objects = result.data.objectsListPaginated?.objects || [];
-        data[entityType] = objects.map(obj => {
+        items = objects.map(obj => {
           try {
             return typeof obj === 'string' ? JSON.parse(obj) : obj;
           } catch (e) {
             return obj;
           }
         });
-        console.log(`✅ Loaded ${data[entityType].length} ${entityType}`);
-        data = { ...data }; // Trigger reactivity
+        
+        const pagination = result.data.objectsListPaginated?.pagination;
+        if (pagination) {
+          totalItems = pagination.total_items || 0;
+          totalPages = pagination.total_pages || 0;
+        }
+        
+        console.log(`✅ Loaded ${items.length} items (Page ${currentPage + 1}/${totalPages})`);
       }
     } catch (error) {
-      console.error(`❌ Error fetching ${entityType}:`, error);
+      console.error(`❌ Error loading data:`, error);
+      items = [];
+    } finally {
+      loading = false;
     }
   }
   
-  onMount(async () => {
-    console.log('🚀 Simple AdminDashboard mounted');
-    loading = true;
-    await Promise.all([
-      fetchData('users'),
-      fetchData('organizations'),
-      fetchData('mandates'),
-      fetchData('instruments'),
-      fetchData('transfers')
-    ]);
-    loading = false;
-  });
-  
-  function switchTab(tab) {
-    console.log(`🔄 Switching to tab: ${tab}`);
-    activeTab = tab;
+  function toggleExpand(index) {
+    expandedItem = expandedItem === index ? null : index;
   }
+  
+  function copyJSON(item) {
+    const json = JSON.stringify(item, null, 2);
+    navigator.clipboard.writeText(json);
+    alert('✅ JSON copied to clipboard!');
+  }
+  
+  function goToPage(page) {
+    currentPage = page;
+    loadData();
+  }
+  
+  function nextPage() {
+    if (currentPage < totalPages - 1) goToPage(currentPage + 1);
+  }
+  
+  function prevPage() {
+    if (currentPage > 0) goToPage(currentPage - 1);
+  }
+  
+  function firstPage() {
+    goToPage(0);
+  }
+  
+  function lastPage() {
+    goToPage(totalPages - 1);
+  }
+  
+  onMount(() => {
+    console.log('🚀 Simple AdminDashboard mounted');
+    loadData();
+  });
 </script>
 
 <div class="w-full px-4 max-w-none">
@@ -72,100 +111,156 @@
     </div>
   </div>
   
-  <!-- Tabs -->
-  <div class="mb-6 border-b border-gray-200">
-    <div class="flex flex-wrap">
-      <button 
-        class="px-4 py-2 mr-1 {activeTab === 'users' ? 'border-b-2 border-blue-500 font-medium text-blue-600' : 'text-gray-600 hover:text-gray-900'}"
-        on:click={() => switchTab('users')}
+  <!-- Controls -->
+  <div class="mb-6 bg-white shadow-sm rounded-lg p-4">
+    <div class="flex items-center gap-4">
+      <label class="font-medium text-gray-700">Entity Type:</label>
+      <select 
+        bind:value={selectedType}
+        class="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
-        👤 Users
-      </button>
+        {#each entityTypes as type}
+          <option value={type.value}>{type.label}</option>
+        {/each}
+      </select>
+      
       <button 
-        class="px-4 py-2 mr-1 {activeTab === 'organizations' ? 'border-b-2 border-blue-500 font-medium text-blue-600' : 'text-gray-600 hover:text-gray-900'}"
-        on:click={() => switchTab('organizations')}
+        on:click={loadData}
+        disabled={loading}
+        class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
       >
-        🏢 Organizations
+        {loading ? '⏳ Loading...' : '📥 Load Data'}
       </button>
-      <button 
-        class="px-4 py-2 mr-1 {activeTab === 'mandates' ? 'border-b-2 border-blue-500 font-medium text-blue-600' : 'text-gray-600 hover:text-gray-900'}"
-        on:click={() => switchTab('mandates')}
-      >
-        📜 Mandates
-      </button>
-      <button 
-        class="px-4 py-2 mr-1 {activeTab === 'instruments' ? 'border-b-2 border-blue-500 font-medium text-blue-600' : 'text-gray-600 hover:text-gray-900'}"
-        on:click={() => switchTab('instruments')}
-      >
-        💰 Instruments
-      </button>
-      <button 
-        class="px-4 py-2 mr-1 {activeTab === 'transfers' ? 'border-b-2 border-blue-500 font-medium text-blue-600' : 'text-gray-600 hover:text-gray-900'}"
-        on:click={() => switchTab('transfers')}
-      >
-        🔄 Transfers
-      </button>
+      
+      <div class="ml-auto text-gray-600">
+        {#if totalItems > 0}
+          Showing {items.length} of {totalItems} items
+        {/if}
+      </div>
     </div>
   </div>
   
-  <!-- Content -->
+  <!-- Items List -->
   <div class="bg-white shadow-sm rounded-lg">
     {#if loading}
       <div class="text-center py-10 p-6">
         <div class="inline-block animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
         <p class="mt-2 text-gray-600">Loading data...</p>
       </div>
+    {:else if items.length === 0}
+      <div class="text-center py-10 p-6">
+        <span class="text-6xl block mb-4">📭</span>
+        <p class="text-gray-600">No items found. Click "Load Data" to fetch entities.</p>
+      </div>
     {:else}
-      <!-- Users Tab -->
-      <div class:hidden={activeTab !== 'users'}>
-        <GenericEntityTable 
-          entityType="users"
-          items={data.users}
-          loading={false}
-        />
+      <div class="divide-y divide-gray-200">
+        {#each items as item, index}
+          <div class="p-4 hover:bg-gray-50 transition">
+            <div class="flex items-center justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-3">
+                  <button 
+                    on:click={() => toggleExpand(index)}
+                    class="text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    {expandedItem === index ? '▼' : '▶'} 
+                    {item._type || 'Entity'} #{item._id || index + 1}
+                  </button>
+                  {#if item.name}
+                    <span class="text-gray-700">- {item.name}</span>
+                  {/if}
+                  {#if item.id}
+                    <span class="text-xs text-gray-500">({item.id})</span>
+                  {/if}
+                </div>
+              </div>
+              
+              <button 
+                on:click={() => copyJSON(item)}
+                class="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium"
+              >
+                📋 Copy JSON
+              </button>
+            </div>
+            
+            {#if expandedItem === index}
+              <div class="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  {#each Object.entries(item) as [key, value]}
+                    <div>
+                      <span class="font-semibold text-gray-700">{key}:</span>
+                      <span class="text-gray-600 ml-2">
+                        {typeof value === 'object' ? JSON.stringify(value) : value}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
       
-      <!-- Organizations Tab -->
-      <div class:hidden={activeTab !== 'organizations'}>
-        <GenericEntityTable 
-          entityType="organizations"
-          items={data.organizations}
-          loading={false}
-        />
-      </div>
-      
-      <!-- Mandates Tab -->
-      <div class:hidden={activeTab !== 'mandates'}>
-        <GenericEntityTable 
-          entityType="mandates"
-          items={data.mandates}
-          loading={false}
-        />
-      </div>
-      
-      <!-- Instruments Tab -->
-      <div class:hidden={activeTab !== 'instruments'}>
-        <GenericEntityTable 
-          entityType="instruments"
-          items={data.instruments}
-          loading={false}
-        />
-      </div>
-      
-      <!-- Transfers Tab -->
-      <div class:hidden={activeTab !== 'transfers'}>
-        <GenericEntityTable 
-          entityType="transfers"
-          items={data.transfers}
-          loading={false}
-        />
-      </div>
+      <!-- Pagination Controls -->
+      {#if totalPages > 1}
+        <div class="border-t border-gray-200 p-4 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <button 
+              on:click={firstPage}
+              disabled={currentPage === 0}
+              class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ⏮ First
+            </button>
+            <button 
+              on:click={prevPage}
+              disabled={currentPage === 0}
+              class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ◀ Prev
+            </button>
+          </div>
+          
+          <div class="flex items-center gap-1">
+            {#each Array(Math.min(5, totalPages)) as _, i}
+              {#if totalPages <= 5}
+                <button 
+                  on:click={() => goToPage(i)}
+                  class="px-3 py-1 border rounded {currentPage === i ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-50'}"
+                >
+                  {i + 1}
+                </button>
+              {:else if i < 2 || i >= totalPages - 2 || Math.abs(currentPage - i) <= 1}
+                <button 
+                  on:click={() => goToPage(i)}
+                  class="px-3 py-1 border rounded {currentPage === i ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-50'}"
+                >
+                  {i + 1}
+                </button>
+              {:else if i === 2}
+                <span class="px-2">...</span>
+              {/if}
+            {/each}
+          </div>
+          
+          <div class="flex items-center gap-2">
+            <button 
+              on:click={nextPage}
+              disabled={currentPage >= totalPages - 1}
+              class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next ▶
+            </button>
+            <button 
+              on:click={lastPage}
+              disabled={currentPage >= totalPages - 1}
+              class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Last ⏭
+            </button>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
-
-<style>
-  .hidden {
-    display: none;
-  }
-</style>
