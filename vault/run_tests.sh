@@ -25,8 +25,8 @@ log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Docker image to use for realm deployment
-REALM_DOCKER_IMAGE="ghcr.io/smart-social-contracts/realms:latest"
+# Docker image to use for realm deployment (ui-test-latest has Playwright pre-installed)
+REALM_DOCKER_IMAGE="ghcr.io/smart-social-contracts/realms:ui-test-latest"
 
 # Configuration
 EXTENSION_NAME="vault"

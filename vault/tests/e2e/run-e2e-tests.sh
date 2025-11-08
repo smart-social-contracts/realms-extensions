@@ -20,10 +20,17 @@ echo ""
 
 # Ensure dependencies are installed
 if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
-  echo "📦 Installing Playwright dependencies..."
+  echo "📦 Installing npm dependencies..."
   cd "$SCRIPT_DIR"
   npm install
-  npx playwright install chromium
+  
+  # Only install browsers if not running in Docker (where they're pre-installed)
+  if [ ! -f "/.dockerenv" ]; then
+    echo "📥 Installing Playwright browsers (not in Docker)..."
+    npx playwright install chromium
+  else
+    echo "✅ Skipping browser install (already in Docker image)"
+  fi
   echo ""
 fi
 
