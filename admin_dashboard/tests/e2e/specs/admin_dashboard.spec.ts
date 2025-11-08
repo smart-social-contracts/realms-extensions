@@ -63,13 +63,13 @@ test.describe('Admin Dashboard E2E Tests', () => {
     // Get entity type selector
     const entitySelect = page.locator('#entity-type-select');
     
-    // Change entity type to Organization
-    await entitySelect.selectOption('Organization');
-    await expect(entitySelect).toHaveValue('Organization');
+    // Change entity type to organizations
+    await entitySelect.selectOption('organizations');
+    await expect(entitySelect).toHaveValue('organizations');
     
-    // Change to Mandate
-    await entitySelect.selectOption('Mandate');
-    await expect(entitySelect).toHaveValue('Mandate');
+    // Change to mandates
+    await entitySelect.selectOption('mandates');
+    await expect(entitySelect).toHaveValue('mandates');
   });
 
   test('should display pagination controls when data is loaded', async ({ page }) => {
@@ -102,7 +102,7 @@ test.describe('Admin Dashboard E2E Tests', () => {
   test('should display empty state when no data exists', async ({ page }) => {
     // Select an entity type that might not have data
     const entitySelect = page.locator('#entity-type-select');
-    await entitySelect.selectOption('License');
+    await entitySelect.selectOption('licenses');
     
     // Load data
     const loadButton = page.getByRole('button', { name: /Load Data/i });
