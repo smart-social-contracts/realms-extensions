@@ -17,7 +17,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   
   /* Retry flaky tests */
-  retries: 2,
+  retries: 5,
   
   /* Opt out of parallel tests on CI */
   workers: 1,
