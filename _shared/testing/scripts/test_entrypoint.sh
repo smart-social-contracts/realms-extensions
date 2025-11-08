@@ -23,8 +23,9 @@ fi
 if [ -f /.dockerenv ]; then
     CONFIG_FILE="/app/extension-root/test_config.json"
 else
-    # Local development - config should be in current directory
-    CONFIG_FILE="test_config.json"
+    # Local development - find test_config.json in current directory
+    # Convert to absolute path to survive directory changes
+    CONFIG_FILE="$(pwd)/test_config.json"
 fi
 
 if [ ! -f "$CONFIG_FILE" ]; then
