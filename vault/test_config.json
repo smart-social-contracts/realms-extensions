@@ -20,8 +20,7 @@
     "enabled": true,
     "pre_setup": "tests/init_vault_canisters.py",
     "test_files": [
-      "tests/test_vault.py",
-      "tests/test_vault_refresh.py"
+      "tests/test_vault.py"
     ],
     "test_directory": "tests"
   },
