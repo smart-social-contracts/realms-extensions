@@ -133,7 +133,15 @@ jobs:
         for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
           if [ -f "$extension/manifest.json" ]; then
             NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            git tag -a "${extension}-v${NEW_VERSION}" -m "${extension} Release v${NEW_VERSION}"
+            TAG_NAME="${extension}-v${NEW_VERSION}"
+            
+            # Only create tag if it doesn't exist
+            if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+              git tag -a "$TAG_NAME" -m "${extension} Release v${NEW_VERSION}"
+              echo "✅ Created tag $TAG_NAME"
+            else
+              echo "⚠️  Tag $TAG_NAME already exists, skipping"
+            fi
           fi
         done
         
