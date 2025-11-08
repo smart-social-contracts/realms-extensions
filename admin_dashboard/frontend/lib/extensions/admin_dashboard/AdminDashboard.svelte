@@ -89,8 +89,9 @@
         
         const pagination = result.data.objectsListPaginated?.pagination;
         if (pagination) {
-          totalItems = pagination.total_items || 0;
-          totalPages = pagination.total_pages || 0;
+          // Convert BigInt to Number for JavaScript operations
+          totalItems = Number(pagination.total_items || 0);
+          totalPages = Number(pagination.total_pages || 0);
         }
         
         console.log(`✅ Loaded ${items.length} items (Page ${currentPage + 1}/${totalPages})`);
@@ -151,8 +152,9 @@
   <!-- Controls -->
   <div class="mb-6 bg-white shadow-sm rounded-lg p-4">
     <div class="flex items-center gap-4">
-      <label class="font-medium text-gray-700">Entity Type:</label>
+      <label for="entity-type-select" class="font-medium text-gray-700">Entity Type:</label>
       <select 
+        id="entity-type-select"
         bind:value={selectedType}
         class="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
       >

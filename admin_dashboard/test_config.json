@@ -4,9 +4,7 @@
   "test_type": "full",
   
   "realm_config": {
-    "citizens": 10,
-    "organizations": 3,
-    "random": false
+    "random": true
   },
   
   "test_canisters": {

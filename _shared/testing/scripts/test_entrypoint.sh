@@ -37,8 +37,6 @@ fi
 EXTENSION_ID=$(jq -r '.extension_id' "$CONFIG_FILE")
 TEST_TYPE=$(jq -r '.test_type // "full"' "$CONFIG_FILE")
 
-REALM_CITIZENS=$(jq -r '.realm_config.citizens // 5' "$CONFIG_FILE")
-REALM_ORGS=$(jq -r '.realm_config.organizations // 2' "$CONFIG_FILE")
 REALM_RANDOM=$(jq -r '.realm_config.random // false' "$CONFIG_FILE")
 
 TEST_CANISTERS_ENABLED=$(jq -r '.test_canisters.enabled // false' "$CONFIG_FILE")
