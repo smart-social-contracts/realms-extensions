@@ -7,8 +7,25 @@
 set -e
 set -x
 
+# Install jq if not available (only in Docker)
+if ! command -v jq &> /dev/null; then
+    if [ -f /.dockerenv ]; then
+        echo "[INFO] Installing jq..."
+        apt-get update -qq && apt-get install -y -qq jq > /dev/null 2>&1
+    else
+        echo "[ERROR] jq is required but not installed"
+        echo "Install it with: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (macOS)"
+        exit 1
+    fi
+fi
+
 # Configuration file
-CONFIG_FILE="/app/extension-root/test_config.json"
+if [ -f /.dockerenv ]; then
+    CONFIG_FILE="/app/extension-root/test_config.json"
+else
+    # Local development - config should be in current directory
+    CONFIG_FILE="test_config.json"
+fi
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[ERROR] test_config.json not found at $CONFIG_FILE"
@@ -95,7 +112,14 @@ if [ -f "$INSTALL_SCRIPT" ]; then
     bash "$INSTALL_SCRIPT" "$EXTENSION_ID" "$EXTENSION_SOURCE_DIR/$EXTENSION_ID"
 else
     echo '[INFO] Installing extension using CLI...'
-    realms extension install --extension-id "$EXTENSION_ID" --source-dir "$EXTENSION_SOURCE_DIR/$EXTENSION_ID"
+    # Package the extension first
+    echo "[INFO] Packaging extension..."
+    realms extension package --extension-id "$EXTENSION_ID" --source-dir "$EXTENSION_SOURCE_DIR/$EXTENSION_ID"
+    
+    # Install the packaged extension
+    echo "[INFO] Installing packaged extension..."
+    PACKAGE_PATH="$EXTENSION_SOURCE_DIR/${EXTENSION_ID}.zip"
+    realms extension install --extension-id "$EXTENSION_ID" --package-path "$PACKAGE_PATH"
 fi
 
 # Create realm

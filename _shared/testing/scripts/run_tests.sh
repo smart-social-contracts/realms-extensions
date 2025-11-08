@@ -107,6 +107,13 @@ docker run -d \
 log_info "Copying extension files to container..."
 docker cp "$EXTENSION_ROOT_DIR/." "$CONTAINER_NAME:/app/extension-root"
 
+# Copy shared testing framework to container
+SHARED_DIR="$EXTENSION_ROOT_DIR/../_shared"
+if [ -d "$SHARED_DIR" ]; then
+    log_info "Copying shared testing framework..."
+    docker cp "$SHARED_DIR" "$CONTAINER_NAME:/app/extension-root/_shared"
+fi
+
 # Copy test config to container
 docker cp "$CONFIG_FILE" "$CONTAINER_NAME:/app/extension-root/test_config.json"
 
