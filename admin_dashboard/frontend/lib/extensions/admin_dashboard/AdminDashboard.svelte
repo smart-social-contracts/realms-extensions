@@ -172,7 +172,7 @@
       </button>
       
       <div class="ml-auto text-gray-600">
-        {#if totalItems > 0}
+        {#if totalItems >= 0}
           Showing {items.length} of {totalItems} items
         {/if}
       </div>
