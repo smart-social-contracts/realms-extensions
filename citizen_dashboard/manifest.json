@@ -1,6 +1,6 @@
 {
   "name": "citizen_dashboard",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Personal dashboard for citizens to manage their government services and documents",
   "author": "Smart Social Contracts",
   "permissions": [],

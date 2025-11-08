@@ -1,6 +1,6 @@
 {
   "name": "passport_verification",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Rarimo ZK Passport verification extension for secure identity verification",
   "author": "Realms Team",
   "permissions": [],

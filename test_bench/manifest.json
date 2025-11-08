@@ -1,6 +1,6 @@
 {
   "name": "test_bench",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Development testing and debugging tools",
   "author": "Smart Social Contracts Team",
   "permissions": [

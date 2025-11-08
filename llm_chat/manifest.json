@@ -1,6 +1,6 @@
 {
   "name": "llm_chat",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "AI-powered assistant for governance and legal questions",
   "author": "Smart Social Contracts Team",
   "permissions": [],

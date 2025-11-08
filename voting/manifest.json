@@ -1,6 +1,6 @@
 {
   "name": "voting",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Governance voting system for submitting and voting on proposals to execute Python code",
   "author": "Smart Social Contracts",
   "permissions": [],
