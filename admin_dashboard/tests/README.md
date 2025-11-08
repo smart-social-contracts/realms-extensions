@@ -9,6 +9,8 @@ tests/
 ├── README.md                          # This file
 ├── test_admin_dashboard.py           # Backend integration tests
 ├── test_registration_codes.py        # Registration code tests
+├── test_csv_import.py                # CSV import functionality tests
+├── test_edge_cases.py                # Edge cases and error handling tests
 └── e2e/                              # E2E browser tests
     ├── package.json
     ├── playwright.config.ts
@@ -65,23 +67,54 @@ cd tests/e2e
 
 **test_admin_dashboard.py:**
 - ✓ Extension availability check
-- ✓ Data import functionality
+- ✓ JSON data import functionality
 - ✓ Entity query capabilities
 - ✓ Sample data validation
+- ✓ Import result verification
 
 **test_registration_codes.py:**
 - ✓ Registration code generation
 - ✓ Code validation
-- ✓ Code listing
+- ✓ Code listing with filters
 - ✓ Invalid code handling
+- ✓ Code expiry management
+
+**test_csv_import.py:**
+- ✓ CSV user import
+- ✓ CSV instrument import
+- ✓ Malformed CSV handling
+- ✓ Empty CSV validation
+- ✓ CSV with headers only
+- ✓ CSV with special characters
+
+**test_edge_cases.py:**
+- ✓ Missing required fields handling
+- ✓ Large dataset import (100+ records)
+- ✓ Duplicate ID detection
+- ✓ Invalid entity type rejection
+- ✓ Registration code edge cases
+- ✓ Missing parameter validation
+- ✓ Non-existent code validation
+- ✓ Empty data array handling
+- ✓ Malformed JSON rejection
+- ✓ Very long field values
 
 ### E2E Tests
 
 **admin_dashboard.spec.ts:**
-- ✓ Admin dashboard page loads
-- ✓ Entity management sections visible
-- ✓ Navigation elements present
-- ✓ System statistics displayed
+- ✓ Admin dashboard page loads with heading
+- ✓ Search bar functionality
+- ✓ All navigation tabs visible
+- ✓ Tab navigation between sections
+- ✓ Overview metrics display
+- ✓ Treasury Portfolio section
+- ✓ Bulk import configuration UI
+- ✓ Entity type selection
+- ✓ Registration URLs section
+- ✓ Entity table navigation
+- ✓ Error message handling
+- ✓ Tab state management
+- ✓ Responsive design testing
 
 ## Test Configuration
 
@@ -92,6 +125,7 @@ Key settings:
 - **Realm Config**: 10 citizens, 3 organizations
 - **Docker Port**: 8002 (to avoid conflicts)
 - **Admin Path**: `/admin` (custom URL path)
+- **Linting**: Black, isort, flake8, mypy (all enabled)
 
 ## Adding New Tests
 
@@ -137,6 +171,8 @@ Add to `test_config.json`:
     "test_files": [
       "tests/test_admin_dashboard.py",
       "tests/test_registration_codes.py",
+      "tests/test_csv_import.py",
+      "tests/test_edge_cases.py",
       "tests/my_new_test.py"  // Add here
     ]
   }
@@ -189,3 +225,40 @@ See `.github/workflows/admin_dashboard-test.yml`
 - **Framework Docs**: `../_shared/testing/README.md`
 - **Migration Guide**: `../_shared/testing/MIGRATION_GUIDE.md`
 - **Test Config Schema**: `../_shared/testing/config/test_config.schema.json`
+
+## Recent Test Improvements
+
+### Enhanced E2E Tests
+- **13 comprehensive UI tests** covering all major dashboard features
+- Tab navigation testing across all entity types
+- Search bar interaction tests
+- Bulk import UI validation
+- Responsive design verification (mobile/desktop)
+- Error handling and state management tests
+
+### New CSV Import Tests
+- **6 CSV-specific test cases** covering:
+  - User and instrument imports
+  - Malformed CSV handling
+  - Empty data validation
+  - Special character support
+  
+### Edge Case Coverage
+- **10 edge case scenarios** including:
+  - Large dataset imports (100+ records)
+  - Duplicate ID detection
+  - Invalid entity type handling
+  - Very long field values
+  - Missing required parameters
+
+### Code Quality
+- **Mypy type checking enabled** for improved type safety
+- All linters active (black, isort, flake8, mypy)
+- Comprehensive error handling in all tests
+
+### Test Statistics
+- **Backend Tests**: 4 files, 30+ test cases
+- **E2E Tests**: 13 comprehensive UI tests
+- **Coverage**: All 4 extension API methods tested
+- **Edge Cases**: 10+ boundary condition tests
+- **Data Formats**: JSON and CSV import tested

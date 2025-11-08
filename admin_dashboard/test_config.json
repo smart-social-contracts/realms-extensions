@@ -17,7 +17,9 @@
     "enabled": true,
     "test_files": [
       "tests/test_admin_dashboard.py",
-      "tests/test_registration_codes.py"
+      "tests/test_registration_codes.py",
+      "tests/test_csv_import.py",
+      "tests/test_edge_cases.py"
     ],
     "test_directory": "tests"
   },
@@ -33,7 +35,7 @@
     "black": true,
     "isort": true,
     "flake8": true,
-    "mypy": false
+    "mypy": true
   },
   
   "docker": {

@@ -5,7 +5,7 @@
   
   import GenericEntityTable from '$lib/components/ggg/GenericEntityTable.svelte';
   import CodexViewer from '$lib/components/ggg/CodexViewer.svelte';
-  import MetricsComponent from '$lib/extensions/metrics/Metrics.svelte';
+  // import MetricsComponent from '$lib/extensions/metrics/Metrics.svelte'; // Commented out for standalone testing
   import RegistrationUrlManager from './RegistrationUrlManager.svelte';
   
   let activeTab = 'overview';
@@ -421,7 +421,8 @@
             🏦 <span class="ml-2">{$_('extensions.admin_dashboard.treasury_portfolio') || 'Treasury Portfolio'}</span>
           </h3>
           
-          <MetricsComponent />
+          <!-- <MetricsComponent /> -->
+          <p class="text-gray-600 italic">Treasury metrics component available when metrics extension is installed</p>
         </div>
         
         <!-- Metrics Cards -->
