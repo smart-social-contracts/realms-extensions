@@ -34,6 +34,13 @@ if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
   echo ""
 fi
 
+# Warm up the vault page before running tests
+echo "🔥 Warming up vault page..."
+curl -s "${PLAYWRIGHT_BASE_URL}extensions/vault" > /dev/null || echo "⚠️  Warmup request failed (may still work)"
+sleep 3
+echo "✅ Warmup complete"
+echo ""
+
 echo "🎭 Running Vault extension E2E tests..."
 echo ""
 

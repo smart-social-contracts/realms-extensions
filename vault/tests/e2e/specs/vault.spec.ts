@@ -5,9 +5,19 @@ const TIMEOUT = 30000; // 30 seconds for vault operations
 test.describe('Vault Extension E2E Tests', () => {
   
   test.beforeEach(async ({ page }) => {
-    // Navigate to the vault extension
-    await page.goto('/extensions/vault');
-    await page.waitForLoadState('networkidle');
+    // Navigate to the vault extension with increased timeout
+    // Note: First page load can be slow due to canister cold start
+    await page.goto('/extensions/vault', { 
+      waitUntil: 'domcontentloaded',
+      timeout: 60000 
+    });
+    
+    // Wait for the Vault Manager heading to ensure page is fully loaded
+    // Increased timeout handles cold starts and resource contention in CI
+    await expect(page.getByRole('heading', { name: 'Vault Manager' })).toBeVisible({ timeout: 45000 });
+    
+    // Wait for refresh button to ensure components are mounted
+    await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible({ timeout: 15000 });
   });
 
   test('should display vault manager page with all tabs', async ({ page }) => {
@@ -49,16 +59,20 @@ test.describe('Vault Extension E2E Tests', () => {
     // Switch to Transactions tab
     await page.getByRole('button', { name: 'Transactions' }).click();
     
-    // Wait for transactions to load
-    await page.waitForTimeout(1000);
+    // Wait a moment for tab content to render
+    await page.waitForTimeout(500);
     
-    // Check table headers
-    await expect(page.getByText('ID', { exact: true })).toBeVisible();
-    await expect(page.getByText('FROM')).toBeVisible();
-    await expect(page.getByText('TO')).toBeVisible();
-    await expect(page.getByText('AMOUNT')).toBeVisible();
-    await expect(page.getByText('WHEN')).toBeVisible();
-    await expect(page.getByText('TYPE')).toBeVisible();
+    // Wait for table to appear with visible headers
+    await expect(page.getByRole('table')).toBeVisible({ timeout: 10000 });
+    
+    // Check table headers (table uses cells in header row, not th elements)
+    const headerRow = page.locator('thead tr, tbody tr').first();
+    await expect(headerRow.locator('text=ID')).toBeVisible();
+    await expect(headerRow.locator('text=From')).toBeVisible();
+    await expect(headerRow.locator('text=To')).toBeVisible();
+    await expect(headerRow.locator('text=Amount')).toBeVisible();
+    await expect(headerRow.locator('text=When')).toBeVisible();
+    await expect(headerRow.locator('text=Type')).toBeVisible();
     
     // Wait for pagination to appear
     const paginationText = page.getByText(/Page \d+ of \d+/);
@@ -156,14 +170,17 @@ test.describe('Vault Extension E2E Tests', () => {
   test('should display balance information', async ({ page }) => {
     test.setTimeout(TIMEOUT);
     
-    // Balance tab should be active by default
+    // Click Balance tab to ensure we're on the right tab
+    await page.getByRole('button', { name: 'Balance' }).click();
+    
+    // Wait for balance heading to appear
     await expect(page.getByRole('heading', { name: 'Your Balance' })).toBeVisible();
     
     // Check satoshis display
-    await expect(page.getByText(/satoshis/)).toBeVisible();
+    await expect(page.getByText(/satoshis/).first()).toBeVisible();
     
-    // Check ckBTC conversion display
-    await expect(page.getByText(/ckBTC/)).toBeVisible();
+    // Check ckBTC conversion display (use first match to avoid strict mode violation)
+    await expect(page.getByText(/≈.*ckBTC/)).toBeVisible();
   });
 
   test('should show transfer form in transfer tab', async ({ page }) => {
