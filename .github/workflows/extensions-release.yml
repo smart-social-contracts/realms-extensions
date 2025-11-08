@@ -82,21 +82,23 @@ jobs:
         CHANGED_COUNT=0
         UNCHANGED_COUNT=0
         
+        # Store old and new versions for later comparison
+        echo "# Extension version changes" > version_changes.txt
+        
         for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
           if [ -f "$extension/manifest.json" ]; then
             # Check if extension directory has changes since last release
+            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            
             if git diff --quiet "$COMPARE_REF" HEAD -- "$extension/" 2>/dev/null; then
               # No changes - keep current version
-              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
               echo "⏭️  $extension: No changes, keeping v${CURRENT_VERSION}"
-              echo "${extension}_current=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
-              echo "${extension}_new=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+              echo "${extension}|${CURRENT_VERSION}|${CURRENT_VERSION}|unchanged" >> version_changes.txt
               UNCHANGED_COUNT=$((UNCHANGED_COUNT + 1))
             else
               # Has changes - bump version
               echo "📝 $extension: Changes detected, bumping version..."
               
-              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
               NEW_VERSION=$(python -c "import semver; v=semver.VersionInfo.parse('${CURRENT_VERSION}'); print(v.bump_${{ github.event.inputs.release_type }}())")
               
               # Update manifest.json with new version
@@ -104,8 +106,7 @@ jobs:
               mv "$extension/manifest.json.tmp" "$extension/manifest.json"
               
               echo "- **$extension**: v${CURRENT_VERSION} → v${NEW_VERSION}" >> version_summary.txt
-              echo "${extension}_current=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
-              echo "${extension}_new=${NEW_VERSION}" >> $GITHUB_OUTPUT
+              echo "${extension}|${CURRENT_VERSION}|${NEW_VERSION}|changed" >> version_changes.txt
               
               # Stage the changes
               git add "$extension/manifest.json"
@@ -222,26 +223,25 @@ jobs:
         EOF
         
         # Add changed extensions first
-        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
-          if [ -f "$extension/manifest.json" ]; then
-            OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
-            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            
-            # Only show if version changed (compare with current file version)
-            if [ "$OLD_VERSION" != "$CURRENT_VERSION" ]; then
-              NAME=$(jq -r '.name' "$extension/manifest.json")
-              DESCRIPTION=$(jq -r '.description // "Extension for Realms"' "$extension/manifest.json")
+        while IFS='|' read -r ext old_ver new_ver status; do
+          # Skip comment lines
+          if [[ "$ext" == \#* ]]; then continue; fi
+          
+          if [ "$status" = "changed" ]; then
+            if [ -f "$ext/manifest.json" ]; then
+              NAME=$(jq -r '.name' "$ext/manifest.json")
+              DESCRIPTION=$(jq -r '.description // "Extension for Realms"' "$ext/manifest.json")
               
               cat >> release_body.md << EXTEOF
-        ### ${NAME} (${extension})
+        ### ${NAME} (${ext})
         
-        **Version:** v${OLD_VERSION} → v${CURRENT_VERSION}
+        **Version:** v${old_ver} → v${new_ver}
         
         ${DESCRIPTION}
         
         **Installation:**
         \`\`\`bash
-        realms extension install ${extension} --from https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip
+        realms extension install ${ext} --from https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ext}.zip
         \`\`\`
         
         ---
@@ -249,7 +249,7 @@ jobs:
         EXTEOF
             fi
           fi
-        done
+        done < version_changes.txt
         
         # Add unchanged extensions section
         cat >> release_body.md << 'EOF'
@@ -260,21 +260,20 @@ jobs:
         
         EOF
         
-        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
-          if [ -f "$extension/manifest.json" ]; then
-            OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
-            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            
-            # Only show if version didn't change
-            if [ "$OLD_VERSION" = "$CURRENT_VERSION" ]; then
-              NAME=$(jq -r '.name' "$extension/manifest.json")
+        while IFS='|' read -r ext old_ver new_ver status; do
+          # Skip comment lines
+          if [[ "$ext" == \#* ]]; then continue; fi
+          
+          if [ "$status" = "unchanged" ]; then
+            if [ -f "$ext/manifest.json" ]; then
+              NAME=$(jq -r '.name' "$ext/manifest.json")
               
               cat >> release_body.md << EXTEOF
-        - **${NAME}** (${extension}) - v${CURRENT_VERSION} - [Download](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip)
+        - **${NAME}** (${ext}) - v${new_ver} - [Download](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ext}.zip)
         EXTEOF
             fi
           fi
-        done
+        done < version_changes.txt
         
         # Add footer
         cat >> release_body.md << 'EOF'
@@ -337,17 +336,17 @@ jobs:
         echo "| Extension | Old Version | New Version | Download |" >> $GITHUB_STEP_SUMMARY
         echo "|-----------|-------------|-------------|----------|" >> $GITHUB_STEP_SUMMARY
         
-        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
-          if [ -f "$extension/manifest.json" ]; then
-            OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
-            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            
-            if [ "$OLD_VERSION" != "$CURRENT_VERSION" ]; then
-              EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
-              echo "| ${EXTENSION_NAME} | v${OLD_VERSION} | v${CURRENT_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+        while IFS='|' read -r ext old_ver new_ver status; do
+          # Skip comment lines
+          if [[ "$ext" == \#* ]]; then continue; fi
+          
+          if [ "$status" = "changed" ]; then
+            if [ -f "$ext/manifest.json" ]; then
+              EXTENSION_NAME=$(jq -r '.name' "$ext/manifest.json")
+              echo "| ${EXTENSION_NAME} | v${old_ver} | v${new_ver} | [${ext}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ext}.zip) |" >> $GITHUB_STEP_SUMMARY
             fi
           fi
-        done
+        done < version_changes.txt
         
         # Unchanged extensions
         if [ "$UNCHANGED_COUNT" -gt 0 ]; then
@@ -357,17 +356,17 @@ jobs:
           echo "| Extension | Version | Download |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
           
-          for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
-            if [ -f "$extension/manifest.json" ]; then
-              OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
-              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
-              
-              if [ "$OLD_VERSION" = "$CURRENT_VERSION" ]; then
-                EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
-                echo "| ${EXTENSION_NAME} | v${CURRENT_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+          while IFS='|' read -r ext old_ver new_ver status; do
+            # Skip comment lines
+            if [[ "$ext" == \#* ]]; then continue; fi
+            
+            if [ "$status" = "unchanged" ]; then
+              if [ -f "$ext/manifest.json" ]; then
+                EXTENSION_NAME=$(jq -r '.name' "$ext/manifest.json")
+                echo "| ${EXTENSION_NAME} | v${new_ver} | [${ext}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ext}.zip) |" >> $GITHUB_STEP_SUMMARY
               fi
             fi
-          done
+          done < version_changes.txt
         fi
         
         echo "" >> $GITHUB_STEP_SUMMARY
