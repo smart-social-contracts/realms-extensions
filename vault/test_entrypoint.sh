@@ -115,4 +115,7 @@ realms run --file "${INIT_SCRIPT_TEMP}"
 echo '[INFO] Running vault extension tests...'
 realms run --file "${TEST_FILE}" --wait
 
+echo '[INFO] Running E2E tests...'
+bash "${SCRIPT_DIR}/tests/e2e/run-e2e-tests.sh"
+
 echo '[SUCCESS] All tests completed successfully!'
