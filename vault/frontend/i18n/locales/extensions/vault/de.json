@@ -44,5 +44,11 @@
   },
   "loading": "Laden...",
   "loading_vault": "Tresor-Daten werden geladen...",
-  "error_prefix": "Fehler:"
+  "error_prefix": "Fehler:",
+  "ledger_canisters": {
+    "title": "Unterstützte Ledger-Canister",
+    "ckbtc_ledger": "ckBTC-Ledger",
+    "ckbtc_indexer": "ckBTC-Indexer",
+    "copy_tooltip": "Klicken zum Kopieren"
+  }
 }

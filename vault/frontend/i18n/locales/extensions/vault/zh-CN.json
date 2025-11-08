@@ -47,5 +47,11 @@
   },
   "loading": "加载中...",
   "loading_vault": "正在加载保险库数据...",
-  "error_prefix": "错误："
+  "error_prefix": "错误：",
+  "ledger_canisters": {
+    "title": "支持的账本容器",
+    "ckbtc_ledger": "ckBTC账本",
+    "ckbtc_indexer": "ckBTC索引器",
+    "copy_tooltip": "点击复制"
+  }
 }

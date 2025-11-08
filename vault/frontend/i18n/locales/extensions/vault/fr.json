@@ -44,5 +44,11 @@
   },
   "loading": "Chargement...",
   "loading_vault": "Chargement des données du coffre...",
-  "error_prefix": "Erreur :"
+  "error_prefix": "Erreur :",
+  "ledger_canisters": {
+    "title": "Canisters de Registre Pris en Charge",
+    "ckbtc_ledger": "Registre ckBTC",
+    "ckbtc_indexer": "Indexeur ckBTC",
+    "copy_tooltip": "Cliquer pour copier"
+  }
 }

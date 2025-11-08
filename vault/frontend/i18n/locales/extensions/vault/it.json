@@ -44,5 +44,11 @@
   },
   "loading": "Caricamento...",
   "loading_vault": "Caricamento dati vault...",
-  "error_prefix": "Errore:"
+  "error_prefix": "Errore:",
+  "ledger_canisters": {
+    "title": "Canister Ledger Supportati",
+    "ckbtc_ledger": "Ledger ckBTC",
+    "ckbtc_indexer": "Indicizzatore ckBTC",
+    "copy_tooltip": "Clicca per copiare"
+  }
 }

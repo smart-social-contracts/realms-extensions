@@ -44,5 +44,11 @@
   },
   "loading": "Cargando...",
   "loading_vault": "Cargando datos de la bóveda...",
-  "error_prefix": "Error:"
+  "error_prefix": "Error:",
+  "ledger_canisters": {
+    "title": "Canisters de Libro Mayor Soportados",
+    "ckbtc_ledger": "Libro Mayor ckBTC",
+    "ckbtc_indexer": "Indexador ckBTC",
+    "copy_tooltip": "Clic para copiar"
+  }
 }

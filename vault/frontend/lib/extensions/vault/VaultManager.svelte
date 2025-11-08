@@ -24,6 +24,12 @@ let lastRefreshTime: Date | null = null;
 let copiedPrincipal: string = '';
 let copiedTimestamp: string = '';
 
+// Ledger canister principals from backend constants
+const LEDGER_CANISTERS = {
+	ckBTC_ledger: 'mxzaz-hqaaa-aaaar-qaada-cai',
+	ckBTC_indexer: 'n5wcd-faaaa-aaaar-qaaea-cai'
+};
+
 async function loadBalance() {
 loading = true;
 error = '';
@@ -302,6 +308,39 @@ title="Click to copy"
 </span>
 </div>
 {/if}
+</div>
+</div>
+
+<!-- Ledger Canisters Info Card -->
+<div class="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+<h3 class="text-sm font-semibold text-gray-700">{$_('extensions.vault.ledger_canisters.title')}</h3>
+<div class="space-y-2">
+<div class="flex items-center justify-between">
+<span class="text-sm font-medium text-gray-600">{$_('extensions.vault.ledger_canisters.ckbtc_ledger')}:</span>
+<button
+on:click={() => copyToClipboard(LEDGER_CANISTERS.ckBTC_ledger)}
+class="ml-2 font-mono text-xs text-blue-600 hover:text-blue-800 underline"
+title={$_('extensions.vault.ledger_canisters.copy_tooltip')}
+>
+{LEDGER_CANISTERS.ckBTC_ledger}
+</button>
+{#if copiedPrincipal === LEDGER_CANISTERS.ckBTC_ledger}
+<span class="ml-2 text-xs text-green-600">✓ Copied!</span>
+{/if}
+</div>
+<div class="flex items-center justify-between">
+<span class="text-sm font-medium text-gray-600">{$_('extensions.vault.ledger_canisters.ckbtc_indexer')}:</span>
+<button
+on:click={() => copyToClipboard(LEDGER_CANISTERS.ckBTC_indexer)}
+class="ml-2 font-mono text-xs text-blue-600 hover:text-blue-800 underline"
+title={$_('extensions.vault.ledger_canisters.copy_tooltip')}
+>
+{LEDGER_CANISTERS.ckBTC_indexer}
+</button>
+{#if copiedPrincipal === LEDGER_CANISTERS.ckBTC_indexer}
+<span class="ml-2 text-xs text-green-600">✓ Copied!</span>
+{/if}
+</div>
 </div>
 </div>
 
