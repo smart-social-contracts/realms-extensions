@@ -42,7 +42,7 @@ if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
   echo ""
 fi
 
-# Ensure Playwright browsers are installed (correct version for this Playwright installation)
+# Ensure Playwright browsers are installed
 echo "📥 Ensuring Playwright browsers are installed..."
 cd "$SCRIPT_DIR"
 
@@ -50,13 +50,16 @@ cd "$SCRIPT_DIR"
 if [ -f /.dockerenv ]; then
   echo "🐳 Docker environment detected - installing browsers..."
   npx playwright install chromium --with-deps || npx playwright install chromium
-  echo "✅ Playwright browsers ready"
 else
-  # For local development, always run install (it skips if correct version exists)
-  # This handles version mismatches automatically
-  echo "📥 Installing/verifying Playwright browsers for version $(npx playwright --version)..."
-  npx playwright install chromium --no-shell 2>&1 | grep -v "is already installed" || true
-  echo "✅ Playwright browsers ready"
+  # For local development, check if browsers exist
+  PLAYWRIGHT_CACHE="${HOME}/.cache/ms-playwright"
+  if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
+    echo "📥 Installing Playwright browsers..."
+    npx playwright install chromium
+    echo "✅ Playwright browsers installed"
+  else
+    echo "✅ Playwright browsers already installed"
+  fi
 fi
 echo ""
 
