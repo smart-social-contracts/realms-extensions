@@ -64,34 +64,72 @@ jobs:
         
         echo "# Version Bumps" > version_summary.txt
         echo "" >> version_summary.txt
+        echo "## Changed Extensions" >> version_summary.txt
+        echo "" >> version_summary.txt
+        
+        # Get the last release tag to compare against
+        LAST_RELEASE=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        
+        if [ -z "$LAST_RELEASE" ]; then
+          echo "No previous release found, bumping all extensions"
+          COMPARE_REF="HEAD~1"  # Compare against previous commit if no tags
+        else
+          echo "Comparing against last release: $LAST_RELEASE"
+          COMPARE_REF="$LAST_RELEASE"
+        fi
         
         EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+        CHANGED_COUNT=0
+        UNCHANGED_COUNT=0
         
         for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
           if [ -f "$extension/manifest.json" ]; then
-            echo "Processing $extension..."
-            
-            # Extract current version from manifest.json
-            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            
-            # Calculate new version
-            NEW_VERSION=$(python -c "import semver; v=semver.VersionInfo.parse('${CURRENT_VERSION}'); print(v.bump_${{ github.event.inputs.release_type }}())")
-            
-            # Update manifest.json with new version
-            jq --arg version "${NEW_VERSION}" '.version = $version' "$extension/manifest.json" > "$extension/manifest.json.tmp"
-            mv "$extension/manifest.json.tmp" "$extension/manifest.json"
-            
-            echo "- **$extension**: v${CURRENT_VERSION} → v${NEW_VERSION}" >> version_summary.txt
-            echo "${extension}_current=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
-            echo "${extension}_new=${NEW_VERSION}" >> $GITHUB_OUTPUT
-            
-            # Stage the changes
-            git add "$extension/manifest.json"
+            # Check if extension directory has changes since last release
+            if git diff --quiet "$COMPARE_REF" HEAD -- "$extension/" 2>/dev/null; then
+              # No changes - keep current version
+              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+              echo "⏭️  $extension: No changes, keeping v${CURRENT_VERSION}"
+              echo "${extension}_current=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+              echo "${extension}_new=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+              UNCHANGED_COUNT=$((UNCHANGED_COUNT + 1))
+            else
+              # Has changes - bump version
+              echo "📝 $extension: Changes detected, bumping version..."
+              
+              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+              NEW_VERSION=$(python -c "import semver; v=semver.VersionInfo.parse('${CURRENT_VERSION}'); print(v.bump_${{ github.event.inputs.release_type }}())")
+              
+              # Update manifest.json with new version
+              jq --arg version "${NEW_VERSION}" '.version = $version' "$extension/manifest.json" > "$extension/manifest.json.tmp"
+              mv "$extension/manifest.json.tmp" "$extension/manifest.json"
+              
+              echo "- **$extension**: v${CURRENT_VERSION} → v${NEW_VERSION}" >> version_summary.txt
+              echo "${extension}_current=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+              echo "${extension}_new=${NEW_VERSION}" >> $GITHUB_OUTPUT
+              
+              # Stage the changes
+              git add "$extension/manifest.json"
+              CHANGED_COUNT=$((CHANGED_COUNT + 1))
+            fi
           fi
         done
         
+        # Add unchanged extensions section
+        if [ $UNCHANGED_COUNT -gt 0 ]; then
+          echo "" >> version_summary.txt
+          echo "## Unchanged Extensions (${UNCHANGED_COUNT})" >> version_summary.txt
+          echo "" >> version_summary.txt
+          echo "These extensions have no changes and retain their current versions." >> version_summary.txt
+        fi
+        
         # Output the summary
+        echo "" >> version_summary.txt
+        echo "**Summary:** ${CHANGED_COUNT} extensions updated, ${UNCHANGED_COUNT} unchanged" >> version_summary.txt
         cat version_summary.txt
+        
+        # Store counts for later steps
+        echo "changed_count=${CHANGED_COUNT}" >> $GITHUB_OUTPUT
+        echo "unchanged_count=${UNCHANGED_COUNT}" >> $GITHUB_OUTPUT
         
     - name: Clone realms framework
       run: |
@@ -120,33 +158,46 @@ jobs:
         ls -lh releases/
         
     - name: Commit and push version bumps
+      id: commit
       run: |
-        COMMIT_MSG="release: Bump all extensions to ${{ github.event.inputs.release_type }} version
+        CHANGED_COUNT="${{ steps.bump_versions.outputs.changed_count }}"
+        UNCHANGED_COUNT="${{ steps.bump_versions.outputs.unchanged_count }}"
         
-        $(cat version_summary.txt)"
-        
-        git commit -m "$COMMIT_MSG"
-        
-        # Create tags for each extension
-        EXTENSIONS='${{ steps.discover.outputs.extensions }}'
-        
-        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
-          if [ -f "$extension/manifest.json" ]; then
-            NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            TAG_NAME="${extension}-v${NEW_VERSION}"
-            
-            # Only create tag if it doesn't exist
-            if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-              git tag -a "$TAG_NAME" -m "${extension} Release v${NEW_VERSION}"
-              echo "✅ Created tag $TAG_NAME"
-            else
-              echo "⚠️  Tag $TAG_NAME already exists, skipping"
+        # Check if there are any changes to commit
+        if [ "$CHANGED_COUNT" -eq 0 ]; then
+          echo "⚠️  No extensions were changed. Skipping commit."
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "✅ $CHANGED_COUNT extension(s) changed. Creating commit..."
+          
+          COMMIT_MSG="release: Bump $CHANGED_COUNT extension(s) to ${{ github.event.inputs.release_type }} version
+          
+          $(cat version_summary.txt)"
+          
+          git commit -m "$COMMIT_MSG"
+          
+          # Create tags for changed extensions only
+          EXTENSIONS='${{ steps.discover.outputs.extensions }}'
+          
+          for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+            if [ -f "$extension/manifest.json" ]; then
+              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+              TAG_NAME="${extension}-v${CURRENT_VERSION}"
+              
+              # Only create tag if it doesn't exist
+              if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+                git tag -a "$TAG_NAME" -m "${extension} Release v${CURRENT_VERSION}"
+                echo "✅ Created tag $TAG_NAME"
+              else
+                echo "⚠️  Tag $TAG_NAME already exists, skipping"
+              fi
             fi
-          fi
-        done
-        
-        git push origin
-        git push origin --tags
+          done
+          
+          git push origin
+          git push origin --tags
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
         
     - name: Create GitHub Releases
       if: ${{ github.event.inputs.create_github_release == 'true' }}
@@ -158,24 +209,33 @@ jobs:
         RELEASE_TAG="v${RELEASE_DATE}-${{ github.event.inputs.release_type }}"
         
         # Create release body with all extensions
-        cat > release_body.md << 'EOF'
+        CHANGED_COUNT="${{ steps.bump_versions.outputs.changed_count }}"
+        UNCHANGED_COUNT="${{ steps.bump_versions.outputs.unchanged_count }}"
+        
+        cat > release_body.md << EOF
         # Realms Extensions Release
         
-        This is a ${{ github.event.inputs.release_type }} release of all Realms extensions.
+        This is a ${{ github.event.inputs.release_type }} release with **${CHANGED_COUNT} updated** and **${UNCHANGED_COUNT} unchanged** extensions.
         
-        ## 📦 Included Extensions
+        ## ✨ Updated Extensions
         
         EOF
         
-        # Add extension details to release body
+        # Add changed extensions first
         for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
           if [ -f "$extension/manifest.json" ]; then
-            VERSION=$(jq -r '.version' "$extension/manifest.json")
-            NAME=$(jq -r '.name' "$extension/manifest.json")
-            DESCRIPTION=$(jq -r '.description // "Extension for Realms"' "$extension/manifest.json")
+            OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
+            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
             
-            cat >> release_body.md << EOF
-        ### ${NAME} (${extension}) - v${VERSION}
+            # Only show if version changed (compare with current file version)
+            if [ "$OLD_VERSION" != "$CURRENT_VERSION" ]; then
+              NAME=$(jq -r '.name' "$extension/manifest.json")
+              DESCRIPTION=$(jq -r '.description // "Extension for Realms"' "$extension/manifest.json")
+              
+              cat >> release_body.md << EXTEOF
+        ### ${NAME} (${extension})
+        
+        **Version:** v${OLD_VERSION} → v${CURRENT_VERSION}
         
         ${DESCRIPTION}
         
@@ -186,7 +246,33 @@ jobs:
         
         ---
         
+        EXTEOF
+            fi
+          fi
+        done
+        
+        # Add unchanged extensions section
+        cat >> release_body.md << 'EOF'
+        
+        ## 📦 Unchanged Extensions
+        
+        These extensions have no changes since the last release and retain their current versions:
+        
         EOF
+        
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          if [ -f "$extension/manifest.json" ]; then
+            OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
+            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            
+            # Only show if version didn't change
+            if [ "$OLD_VERSION" = "$CURRENT_VERSION" ]; then
+              NAME=$(jq -r '.name' "$extension/manifest.json")
+              
+              cat >> release_body.md << EXTEOF
+        - **${NAME}** (${extension}) - v${CURRENT_VERSION} - [Download](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip)
+        EXTEOF
+            fi
           fi
         done
         
@@ -233,24 +319,56 @@ jobs:
       run: |
         RELEASE_DATE=$(date +%Y-%m-%d)
         RELEASE_TAG="v${RELEASE_DATE}-${{ github.event.inputs.release_type }}"
+        CHANGED_COUNT="${{ steps.bump_versions.outputs.changed_count }}"
+        UNCHANGED_COUNT="${{ steps.bump_versions.outputs.unchanged_count }}"
         
         echo "## 🎉 Extensions Released" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Release Tag:** [\`${RELEASE_TAG}\`](https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG})" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Summary:** ${CHANGED_COUNT} extensions updated, ${UNCHANGED_COUNT} unchanged" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         
         EXTENSIONS='${{ steps.discover.outputs.extensions }}'
         
-        echo "| Extension | Version | Download |" >> $GITHUB_STEP_SUMMARY
-        echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+        # Updated extensions
+        echo "### ✨ Updated Extensions" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Extension | Old Version | New Version | Download |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|-------------|-------------|----------|" >> $GITHUB_STEP_SUMMARY
         
         for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
           if [ -f "$extension/manifest.json" ]; then
-            NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
-            echo "| ${EXTENSION_NAME} | v${NEW_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+            OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
+            CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+            
+            if [ "$OLD_VERSION" != "$CURRENT_VERSION" ]; then
+              EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
+              echo "| ${EXTENSION_NAME} | v${OLD_VERSION} | v${CURRENT_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
         done
+        
+        # Unchanged extensions
+        if [ "$UNCHANGED_COUNT" -gt 0 ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Unchanged Extensions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Extension | Version | Download |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          
+          for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+            if [ -f "$extension/manifest.json" ]; then
+              OLD_VERSION="${{ steps.bump_versions.outputs[format('{0}_current', extension)] }}"
+              CURRENT_VERSION=$(jq -r '.version' "$extension/manifest.json")
+              
+              if [ "$OLD_VERSION" = "$CURRENT_VERSION" ]; then
+                EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
+                echo "| ${EXTENSION_NAME} | v${CURRENT_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done
+        fi
         
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Release Type: \`${{ github.event.inputs.release_type }}\`" >> $GITHUB_STEP_SUMMARY
