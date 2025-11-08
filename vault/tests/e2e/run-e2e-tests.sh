@@ -23,14 +23,19 @@ if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
   echo "📦 Installing npm dependencies..."
   cd "$SCRIPT_DIR"
   npm install
-  
-  # Only install browsers if not running in Docker (where they're pre-installed)
-  if [ ! -f "/.dockerenv" ]; then
-    echo "📥 Installing Playwright browsers (not in Docker)..."
-    npx playwright install chromium
-  else
-    echo "✅ Skipping browser install (already in Docker image)"
-  fi
+  echo ""
+fi
+
+# Ensure Playwright browsers are installed (pinned to same version as realm_frontend: 1.52.0)
+# This handles cases where npm install updates Playwright or Docker image browsers are missing
+PLAYWRIGHT_CACHE="${HOME}/.cache/ms-playwright"
+if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
+  echo "📥 Installing Playwright browsers..."
+  cd "$SCRIPT_DIR"
+  npx playwright install chromium --with-deps
+  echo ""
+else
+  echo "✅ Playwright browsers already installed"
   echo ""
 fi
 
