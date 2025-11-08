@@ -20,6 +20,9 @@ export default defineConfig({
   /* Retry flaky tests on CI */
   retries: process.env.CI ? 2 : 0,
   
+  /* Stop after first test failure (fail fast) */
+  maxFailures: 1,
+  
   /* Opt out of parallel tests on CI to reduce resource contention */
   workers: process.env.CI ? 1 : undefined,
   

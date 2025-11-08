@@ -19,6 +19,9 @@ export default defineConfig({
   /* Retry flaky tests */
   retries: 5,
   
+  /* Stop after first test failure (fail fast) */
+  maxFailures: 1,
+  
   /* Opt out of parallel tests on CI */
   workers: 1,
   

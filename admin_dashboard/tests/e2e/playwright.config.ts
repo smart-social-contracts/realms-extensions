@@ -18,10 +18,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   
   /* Retry flaky tests on CI */
-  retries: process.env.CI ? 2 : 0,
+  retries: 5,
+  
+  /* Stop after first test failure (fail fast) */
+  maxFailures: 1,
   
   /* Opt out of parallel tests on CI */
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   
   /* Reporter to use */
   reporter: [
