@@ -205,9 +205,22 @@ jobs:
       run: |
         EXTENSIONS='${{ steps.discover.outputs.extensions }}'
         
-        # Generate release tag with timestamp
-        RELEASE_DATE=$(date +%Y-%m-%d)
-        RELEASE_TAG="v${RELEASE_DATE}-${{ github.event.inputs.release_type }}"
+        # Get last unified release version (tags matching v*.*.*)
+        LAST_RELEASE_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)
+        
+        if [ -z "$LAST_RELEASE_TAG" ]; then
+          # No previous semver release, start at v1.0.0
+          echo "No previous release found, starting at v1.0.0"
+          RELEASE_TAG="v1.0.0"
+        else
+          # Parse and bump version
+          echo "Last release: $LAST_RELEASE_TAG"
+          CURRENT_VERSION=${LAST_RELEASE_TAG#v}  # Remove 'v' prefix
+          NEW_VERSION=$(python -c "import semver; v=semver.VersionInfo.parse('${CURRENT_VERSION}'); print(v.bump_${{ github.event.inputs.release_type }}())")
+          RELEASE_TAG="v${NEW_VERSION}"
+        fi
+        
+        echo "Creating release: $RELEASE_TAG"
         
         # Create release body with all extensions
         CHANGED_COUNT="${{ steps.bump_versions.outputs.changed_count }}"
@@ -306,7 +319,7 @@ jobs:
         # Create single release with all extensions
         gh release create "${RELEASE_TAG}" \
           $ZIP_FILES \
-          --title "Extensions Release ${RELEASE_DATE} (${{ github.event.inputs.release_type }})" \
+          --title "Extensions Release ${RELEASE_TAG}" \
           --notes-file release_body.md \
           --repo ${{ github.repository }}
           
@@ -316,8 +329,17 @@ jobs:
         
     - name: Generate release summary
       run: |
-        RELEASE_DATE=$(date +%Y-%m-%d)
-        RELEASE_TAG="v${RELEASE_DATE}-${{ github.event.inputs.release_type }}"
+        # Get the release tag (same logic as Create GitHub Releases step)
+        LAST_RELEASE_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)
+        
+        if [ -z "$LAST_RELEASE_TAG" ]; then
+          RELEASE_TAG="v1.0.0"
+        else
+          CURRENT_VERSION=${LAST_RELEASE_TAG#v}
+          NEW_VERSION=$(python -c "import semver; v=semver.VersionInfo.parse('${CURRENT_VERSION}'); print(v.bump_${{ github.event.inputs.release_type }}())")
+          RELEASE_TAG="v${NEW_VERSION}"
+        fi
+        
         CHANGED_COUNT="${{ steps.bump_versions.outputs.changed_count }}"
         UNCHANGED_COUNT="${{ steps.bump_versions.outputs.unchanged_count }}"
         
