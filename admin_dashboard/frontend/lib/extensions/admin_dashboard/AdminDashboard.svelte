@@ -14,15 +14,52 @@
   let totalItems = 0;
   let totalPages = 0;
   
-  // Entity types configuration
+  // Entity types configuration - all GGG entities
   const entityTypes = [
+    // Core Entities
     { value: 'users', label: '👤 Users', className: 'User' },
+    { value: 'citizens', label: '🙋 Citizens', className: 'Citizen' },
+    { value: 'humans', label: '🧑 Humans', className: 'Human' },
+    { value: 'identities', label: '🆔 Identities', className: 'Identity' },
+    { value: 'user_profiles', label: '📋 User Profiles', className: 'UserProfile' },
+    
+    // Organizations & Realms
     { value: 'organizations', label: '🏢 Organizations', className: 'Organization' },
+    { value: 'realms', label: '🏛️ Realms', className: 'Realm' },
+    
+    // Governance
     { value: 'mandates', label: '📜 Mandates', className: 'Mandate' },
+    { value: 'proposals', label: '🗳️ Proposals', className: 'Proposal' },
+    { value: 'votes', label: '✅ Votes', className: 'Vote' },
+    { value: 'codexes', label: '📚 Codexes', className: 'Codex' },
+    
+    // Financial
     { value: 'instruments', label: '💰 Instruments', className: 'Instrument' },
     { value: 'transfers', label: '🔄 Transfers', className: 'Transfer' },
-    { value: 'proposals', label: '🗳️ Proposals', className: 'Proposal' },
-    { value: 'votes', label: '✅ Votes', className: 'Vote' }
+    { value: 'balances', label: '💵 Balances', className: 'Balance' },
+    { value: 'treasuries', label: '🏦 Treasuries', className: 'Treasury' },
+    { value: 'tax_records', label: '📊 Tax Records', className: 'TaxRecord' },
+    
+    // Assets & Resources
+    { value: 'lands', label: '🏞️ Lands', className: 'Land' },
+    { value: 'licenses', label: '📃 Licenses', className: 'License' },
+    
+    // Contracts & Agreements
+    { value: 'contracts', label: '📝 Contracts', className: 'Contract' },
+    { value: 'trades', label: '🤝 Trades', className: 'Trade' },
+    { value: 'services', label: '⚙️ Services', className: 'Service' },
+    
+    // Tasks & Operations
+    { value: 'tasks', label: '📋 Tasks', className: 'Task' },
+    { value: 'task_schedules', label: '⏰ Task Schedules', className: 'TaskSchedule' },
+    { value: 'task_executions', label: '▶️ Task Executions', className: 'TaskExecution' },
+    
+    // Disputes & Notifications
+    { value: 'disputes', label: '⚖️ Disputes', className: 'Dispute' },
+    { value: 'notifications', label: '🔔 Notifications', className: 'Notification' },
+    
+    // Permissions
+    { value: 'permissions', label: '🔐 Permissions', className: 'Permission' }
   ];
   
   async function loadData() {
