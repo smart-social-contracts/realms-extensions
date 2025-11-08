@@ -115,11 +115,11 @@ else
     echo '[INFO] Installing extension using CLI...'
     # Package the extension first
     echo "[INFO] Packaging extension..."
-    realms extension package --extension-id "$EXTENSION_ID" --source-dir "$EXTENSION_SOURCE_DIR/$EXTENSION_ID"
+    PACKAGE_PATH="$EXTENSION_SOURCE_DIR/${EXTENSION_ID}.zip"
+    realms extension package --extension-id "$EXTENSION_ID" --source-dir "$EXTENSION_SOURCE_DIR/$EXTENSION_ID" --package-path "$PACKAGE_PATH"
     
     # Install the packaged extension
     echo "[INFO] Installing packaged extension..."
-    PACKAGE_PATH="$EXTENSION_SOURCE_DIR/${EXTENSION_ID}.zip"
     realms extension install --extension-id "$EXTENSION_ID" --package-path "$PACKAGE_PATH"
 fi
 
