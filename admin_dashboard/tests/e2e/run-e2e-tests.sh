@@ -56,7 +56,7 @@ else
   PLAYWRIGHT_CACHE="${HOME}/.cache/ms-playwright"
   if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
     echo "📥 Installing Playwright browsers..."
-    npx playwright install chromium --with-deps
+    npx playwright install chromium
     echo "✅ Playwright browsers installed"
   else
     echo "✅ Playwright browsers already installed"

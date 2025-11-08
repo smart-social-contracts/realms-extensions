@@ -37,14 +37,24 @@ fi
 # Ensure Playwright browsers are installed (pinned to version in package.json)
 # This handles cases where npm install updates Playwright or Docker image browsers are missing
 PLAYWRIGHT_CACHE="${HOME}/.cache/ms-playwright"
-if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
-  echo -e "${BLUE}📥 Installing Playwright browsers...${NC}"
+
+# In Docker environments, always ensure browsers are installed
+if [ -f /.dockerenv ]; then
+  echo "🐳 Docker environment detected - ensuring browsers are installed..."
   cd "$SCRIPT_DIR"
-  npx playwright install chromium --with-deps
+  npx playwright install chromium --with-deps || npx playwright install chromium
   echo ""
 else
-  echo -e "${GREEN}✅ Playwright browsers already installed${NC}"
-  echo ""
+  # For local development, check if browsers exist
+  if ! ls "${PLAYWRIGHT_CACHE}"/chromium* > /dev/null 2>&1; then
+    echo -e "${BLUE}📥 Installing Playwright browsers...${NC}"
+    cd "$SCRIPT_DIR"
+    npx playwright install chromium
+    echo ""
+  else
+    echo -e "${GREEN}✅ Playwright browsers already installed${NC}"
+    echo ""
+  fi
 fi
 
 # Warm up the extension page before running tests (if URL is available)
