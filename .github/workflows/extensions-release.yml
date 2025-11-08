@@ -153,49 +153,90 @@ jobs:
       run: |
         EXTENSIONS='${{ steps.discover.outputs.extensions }}'
         
+        # Generate release tag with timestamp
+        RELEASE_DATE=$(date +%Y-%m-%d)
+        RELEASE_TAG="v${RELEASE_DATE}-${{ github.event.inputs.release_type }}"
+        
+        # Create release body with all extensions
+        cat > release_body.md << 'EOF'
+        # Realms Extensions Release
+        
+        This is a ${{ github.event.inputs.release_type }} release of all Realms extensions.
+        
+        ## 📦 Included Extensions
+        
+        EOF
+        
+        # Add extension details to release body
         for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
           if [ -f "$extension/manifest.json" ]; then
-            NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
-            EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
+            VERSION=$(jq -r '.version' "$extension/manifest.json")
+            NAME=$(jq -r '.name' "$extension/manifest.json")
             DESCRIPTION=$(jq -r '.description // "Extension for Realms"' "$extension/manifest.json")
             
-            # Create release body
-            cat > release_body.md << EOF
-        # ${EXTENSION_NAME} v${NEW_VERSION}
+            cat >> release_body.md << EOF
+        ### ${NAME} (${extension}) - v${VERSION}
         
         ${DESCRIPTION}
         
-        ## Installation
-        
+        **Installation:**
         \`\`\`bash
-        realms extension install ${extension} --from https://github.com/${{ github.repository }}/releases/download/${extension}-v${NEW_VERSION}/${extension}.zip
+        realms extension install ${extension} --from https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip
         \`\`\`
         
-        ## Changes
+        ---
         
-        This is a ${{ github.event.inputs.release_type }} release of the ${extension} extension.
-        
-        ## Commit
-        
-        ${{ github.sha }}
         EOF
-            
-            # Create the release
-            gh release create "${extension}-v${NEW_VERSION}" \
-              "releases/${extension}.zip" \
-              --title "${EXTENSION_NAME} v${NEW_VERSION}" \
-              --notes-file release_body.md \
-              --repo ${{ github.repository }}
-              
-            echo "✅ Created release for ${extension} v${NEW_VERSION}"
           fi
         done
+        
+        # Add footer
+        cat >> release_body.md << 'EOF'
+        
+        ## 🚀 Quick Install All Extensions
+        
+        To install all extensions at once, download the zip files and use:
+        
+        \`\`\`bash
+        for ext in *.zip; do
+          realms extension install "${ext%.zip}" --from "$ext"
+        done
+        \`\`\`
+        
+        ## 📝 Changes
+        
+        This release includes ${{ github.event.inputs.release_type }} version bumps for all extensions.
+        
+        **Commit:** ${{ github.sha }}
+        EOF
+        
+        # Collect all zip files for the release
+        ZIP_FILES=""
+        for extension in $(echo "$EXTENSIONS" | jq -r '.[]'); do
+          if [ -f "releases/${extension}.zip" ]; then
+            ZIP_FILES="$ZIP_FILES releases/${extension}.zip"
+          fi
+        done
+        
+        # Create single release with all extensions
+        gh release create "${RELEASE_TAG}" \
+          $ZIP_FILES \
+          --title "Extensions Release ${RELEASE_DATE} (${{ github.event.inputs.release_type }})" \
+          --notes-file release_body.md \
+          --repo ${{ github.repository }}
+          
+        echo "✅ Created unified release ${RELEASE_TAG} with all extensions"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Generate release summary
       run: |
+        RELEASE_DATE=$(date +%Y-%m-%d)
+        RELEASE_TAG="v${RELEASE_DATE}-${{ github.event.inputs.release_type }}"
+        
         echo "## 🎉 Extensions Released" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Release Tag:** [\`${RELEASE_TAG}\`](https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG})" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         EXTENSIONS='${{ steps.discover.outputs.extensions }}'
@@ -207,7 +248,7 @@ jobs:
           if [ -f "$extension/manifest.json" ]; then
             NEW_VERSION=$(jq -r '.version' "$extension/manifest.json")
             EXTENSION_NAME=$(jq -r '.name' "$extension/manifest.json")
-            echo "| ${EXTENSION_NAME} | v${NEW_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${extension}-v${NEW_VERSION}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
+            echo "| ${EXTENSION_NAME} | v${NEW_VERSION} | [${extension}.zip](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${extension}.zip) |" >> $GITHUB_STEP_SUMMARY
           fi
         done
         
