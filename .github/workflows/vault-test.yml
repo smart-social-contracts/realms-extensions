@@ -42,18 +42,12 @@ jobs:
     - name: Run linters
       run: |
         cd vault
-        echo "Running black..."
-        black backend tests --check
-        echo "Running isort..."
-        isort backend tests --check-only
-        echo "Running flake8..."
-        flake8 backend
-        flake8 tests --extend-ignore=F401,W291,F841
+        bash ../_shared/testing/scripts/run_linters.sh --config .flake8
         
     - name: Run unit tests
       run: |
         cd vault
-        bash run_tests.sh
+        bash ../_shared/testing/scripts/run_tests.sh
         
     - name: Upload test logs
       if: always()

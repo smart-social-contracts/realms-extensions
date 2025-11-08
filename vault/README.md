@@ -152,8 +152,18 @@ realms-extension-vault/
 
 ### Running Tests
 
+See [TESTING.md](./TESTING.md) for complete testing guide.
+
+Quick start:
 ```bash
-pytest tests/ -v
+# Run all tests (local development)
+../_shared/testing/scripts/test_entrypoint.sh
+
+# Run linters
+../_shared/testing/scripts/run_linters.sh --config .flake8
+
+# Run E2E tests
+cd tests/e2e && ./run-e2e-tests.sh
 ```
 
 ### Packaging for Distribution
