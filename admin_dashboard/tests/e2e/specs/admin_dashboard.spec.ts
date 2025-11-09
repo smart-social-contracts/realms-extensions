@@ -91,14 +91,17 @@ test.describe('Admin Dashboard E2E Tests', () => {
     await loadButton.click();
     await expect(loadButton).toContainText(/Load Data/i, { timeout: 10000 });
     
-    // Find the first "View Details" button
-    const viewDetailsButton = page.getByRole('button', { name: /View Details/i }).first();
+    // Wait for items to appear
+    await expect(page.getByText(/Showing \d+ of \d+ items/i)).toBeVisible({ timeout: 5000 });
+    
+    // Find the first expandable item button (▶ arrow button)
+    const expandButton = page.getByRole('button').filter({ hasText: /▶/ }).first();
     
     // Click to expand
-    await viewDetailsButton.click();
+    await expandButton.click();
     
-    // Check if details are now visible (button text changes to "Hide Details")
-    await expect(page.getByRole('button', { name: /Hide Details/i }).first()).toBeVisible();
+    // Check if details are now visible (arrow changes to ▼)
+    await expect(page.getByRole('button').filter({ hasText: /▼/ }).first()).toBeVisible();
   });
 
   test('should display empty state when no data exists', async ({ page }) => {
