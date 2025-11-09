@@ -137,7 +137,7 @@
   
   onMount(() => {
     console.log('🚀 Simple AdminDashboard mounted');
-    loadData();
+    // Don't auto-load data - let user explicitly click Load Data button
   });
 </script>
 

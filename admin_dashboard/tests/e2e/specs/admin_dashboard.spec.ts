@@ -9,11 +9,11 @@ test.describe('Admin Dashboard E2E Tests', () => {
   
   test.beforeEach(async ({ page }) => {
     // Navigate to admin dashboard
-    await page.goto('/admin');
+    await page.goto('/admin', { waitUntil: 'networkidle', timeout: 60000 });
     
     // Wait for page to load (admin dashboard should be visible)
     await expect(page.getByRole('heading', { level: 1 }))
-      .toBeVisible({ timeout: 45000 });
+      .toBeVisible({ timeout: 10000 });
   });
 
   test('should display admin dashboard page with main heading', async ({ page }) => {
