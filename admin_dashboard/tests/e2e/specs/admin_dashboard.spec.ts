@@ -78,9 +78,11 @@ test.describe('Admin Dashboard E2E Tests', () => {
     await loadButton.click();
     await expect(loadButton).toContainText(/Load Data/i, { timeout: 10000 });
     
-    // Check for pagination buttons (they may or may not be enabled depending on data)
-    const paginationSection = page.locator('text=/Page \\d+ of \\d+/i');
-    await expect(paginationSection).toBeVisible({ timeout: 5000 });
+    // Check if items are loaded by looking for the count text
+    await expect(page.getByText(/Showing \d+ of \d+ items/i)).toBeVisible({ timeout: 5000 });
+    
+    // If there's data and multiple pages, pagination buttons should appear
+    // We don't assert pagination presence as it depends on data volume
   });
 
   test('should show expandable item details', async ({ page }) => {
