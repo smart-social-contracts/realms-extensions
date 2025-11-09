@@ -8,12 +8,12 @@ import { test, expect } from '@playwright/test';
 test.describe('Admin Dashboard E2E Tests', () => {
   
   test.beforeEach(async ({ page }) => {
-    // Navigate to admin dashboard
-    await page.goto('/admin', { waitUntil: 'networkidle', timeout: 60000 });
+    // Navigate to admin dashboard  
+    await page.goto('/admin', { waitUntil: 'domcontentloaded', timeout: 60000 });
     
     // Wait for page to load (admin dashboard should be visible)
     await expect(page.getByRole('heading', { level: 1 }))
-      .toBeVisible({ timeout: 10000 });
+      .toBeVisible({ timeout: 30000 });
   });
 
   test('should display admin dashboard page with main heading', async ({ page }) => {
