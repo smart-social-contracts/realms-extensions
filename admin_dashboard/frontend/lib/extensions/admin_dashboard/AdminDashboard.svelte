@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { backend } from '$lib/canisters';
   import GenericEntityTable from '$lib/components/ggg/GenericEntityTable.svelte';
+  import { ClipboardListOutline } from 'flowbite-svelte-icons';
   
   let selectedType = 'users';
   let items = [];
@@ -216,9 +217,10 @@
               
               <button 
                 on:click={() => copyJSON(item)}
-                class="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-sm font-medium"
+                class="p-1.5 hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded transition-colors"
+                title="Copy JSON"
               >
-                📋 Copy JSON
+                <ClipboardListOutline class="w-4 h-4" />
               </button>
             </div>
             
