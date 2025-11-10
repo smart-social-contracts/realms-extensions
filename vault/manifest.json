@@ -31,7 +31,7 @@
   "show_in_sidebar": true,
   "python_dependencies": [
     "kybra==0.7.*",
-    "kybra-simple-db>=0.3.2",
+    "kybra-simple-db>=0.4.0",
     "kybra-simple-logging==0.2.*"
   ]
 }
