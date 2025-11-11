@@ -99,6 +99,18 @@ if [ -f "$DOWNLOAD_SCRIPT" ]; then
     bash "$DOWNLOAD_SCRIPT"
 fi
 
+# Install core extensions first (required by realm frontend)
+echo '[INFO] Installing core extensions from realms repository...'
+CORE_EXTENSIONS=("admin_dashboard")
+for CORE_EXT in "${CORE_EXTENSIONS[@]}"; do
+    if [ -d "extensions/$CORE_EXT" ]; then
+        echo "[INFO] Installing core extension: $CORE_EXT"
+        realms extension install-from-source --source-dir "extensions/$CORE_EXT" || echo "[WARNING] Failed to install $CORE_EXT, continuing..."
+    else
+        echo "[WARNING] Core extension $CORE_EXT not found in extensions directory"
+    fi
+done
+
 # Install the extension BEFORE creating the realm
 if [ -f /.dockerenv ]; then
     INSTALL_SCRIPT="/app/extension-root/install_extension.sh"
