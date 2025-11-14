@@ -1,4 +1,5 @@
 import json
+import secrets
 from urllib.parse import quote
 
 from kybra import Async, CallResult, ic, match, query, update
@@ -7,20 +8,70 @@ from kybra.canisters.management import (
     management_canister,
 )
 from kybra_simple_logging import get_logger
+from kybra_simple_db import String
+from core.extensions import create_extension_entity_class
 
 logger = get_logger("passport_verification")
 
+# Create ExtensionEntity for passport_verification
+ExtensionEntity = create_extension_entity_class("passport_verification")
+
+# Define configuration entity for storing application settings
+class AppConfig(ExtensionEntity):
+    """Store application configuration in stable memory.
+    
+    Stored with namespace: ext_passport_verification::AppConfig
+    """
+    __alias__ = "key"
+    key = String()
+    value = String()
+
 RARIMO_API_BASE = "https://api.app.rarime.com"
+
+
+def initialize(args: str):
+    """Initialize extension - generate application ID if not exists.
+    
+    Called once during canister initialization.
+    """
+    logger.info("Initializing passport_verification extension...")
+    
+    # Check if application ID already exists
+    config = AppConfig["application_id"]
+    
+    if not config:
+        # First time initialization - generate timestamp-based decimal ID
+        # IC time is in nanoseconds, convert to seconds
+        timestamp_ns = ic.time()
+        timestamp_s = timestamp_ns // 1_000_000_000
+        
+        # Format: YYYYMMDDhhmmss as decimal string
+        from datetime import datetime, timezone
+        dt = datetime.fromtimestamp(timestamp_s, tz=timezone.utc)
+        app_id = dt.strftime("%Y%m%d%H%M%S")
+        
+        # Store in ExtensionEntity
+        AppConfig(key="application_id", value=app_id)
+        logger.info(f"🆕 Generated new application ID (timestamp): {app_id}")
+    else:
+        logger.info(f"📋 Application ID already exists: {config.value}")
+    
+    logger.info("Passport verification extension initialized.")
+
 
 def get_session_id(args: str) -> str:
     return ic.caller().to_str()
 
 
 def get_event_id(args: str) -> str:
-    principal_bytes = ic.id().to_str().encode("utf-8")
-    number = int.from_bytes(principal_bytes, byteorder="big")
-    logger.info(f"Event ID: {number}, derived from principal: {ic.id()}")
-    return str(number)
+    """Get the application ID (event_id for Rarimo) from storage.
+    
+    The ID is generated once during initialization and persists in stable storage.
+    """
+    config = AppConfig["application_id"]
+    if not config or not config.value:
+        raise ValueError("Application ID not found")
+    return config.value
 
 
 @update
@@ -118,6 +169,51 @@ def check_verification_status(args: str) -> Async[str]:
             "Err": lambda err: json.dumps({"success": False, "error": str(err)}),
         },
     )
+
+
+@query
+def get_current_application_id() -> str:
+    """Get the current application ID without generating a new one (query method)."""
+    config = AppConfig["application_id"]
+    if config:
+        return json.dumps({
+            "application_id": config.value,
+            "status": "initialized",
+            "created_at": str(config.created_at) if hasattr(config, 'created_at') else None
+        })
+    return json.dumps({
+        "application_id": None,
+        "status": "not_initialized"
+    })
+
+
+@update
+def set_application_id(new_app_id: str) -> str:
+    """Manually set a specific application ID (admin/debug function)."""
+    try:
+        # Check if config already exists
+        config = AppConfig["application_id"]
+        
+        if config:
+            # Update existing config
+            old_value = config.value
+            config.value = new_app_id
+            logger.info(f"🔧 Application ID updated from {old_value} to {new_app_id}")
+        else:
+            # Create new config
+            config = AppConfig(key="application_id", value=new_app_id)
+            logger.info(f"🔧 Application ID manually set to: {new_app_id}")
+        
+        return json.dumps({
+            "success": True,
+            "application_id": new_app_id
+        })
+    except Exception as e:
+        logger.error(f"❌ Error setting application ID: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        })
 
 
 def create_passport_identity(args: str) -> str:
