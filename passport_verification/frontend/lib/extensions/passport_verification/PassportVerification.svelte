@@ -11,6 +11,8 @@
   let qrCodeData = '';
   let errorMessage = '';
   let verificationResult: any = null;
+  let sessionId = '';
+  let eventId = '';
 
   
   async function generateVerificationLink() {
@@ -19,6 +21,19 @@
       errorMessage = '';
       
       console.log('Generating passport verification for user:', userId);
+      
+      // Get event_id from backend
+      const eventIdResponse = await backend.extension_sync_call({
+        extension_name: "passport_verification",
+        function_name: "get_current_application_id",
+        args: ""
+      });
+      
+      if (eventIdResponse.success) {
+        const eventIdData = JSON.parse(eventIdResponse.response);
+        eventId = eventIdData.application_id || '';
+      }
+      
       const response = await backend.extension_async_call({
         extension_name: "passport_verification",
         function_name: "get_verification_link",
@@ -33,6 +48,7 @@
           const verificationUrl = result.data.attributes.rarime_app_url || result.data.attributes.get_proof_params;
           verificationLink = verificationUrl;
           qrCodeData = generateQRCodeData(verificationUrl);
+          sessionId = result.data.id || userId;
           verificationStatus = 'pending';
         } else {
           verificationStatus = 'error';
@@ -114,6 +130,8 @@
     qrCodeData = '';
     errorMessage = '';
     verificationResult = null;
+    sessionId = '';
+    eventId = '';
   }
 </script>
 
@@ -145,8 +163,24 @@
       </P>
       
       {#if qrCodeData}
-        <div class="mb-6">
+        <div class="mb-4">
           <img src={qrCodeData} alt="Passport Verification QR Code" class="mx-auto border rounded-lg shadow-sm" />
+        </div>
+      {/if}
+      
+      {#if sessionId || eventId}
+        <div class="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <P class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Verification Details:</P>
+          {#if sessionId}
+            <P class="text-xs text-gray-600 dark:text-gray-400 mb-1 font-mono break-all">
+              <strong>Session ID:</strong> {sessionId}
+            </P>
+          {/if}
+          {#if eventId}
+            <P class="text-xs text-gray-600 dark:text-gray-400 font-mono break-all">
+              <strong>Event ID:</strong> {eventId}
+            </P>
+          {/if}
         </div>
       {/if}
       

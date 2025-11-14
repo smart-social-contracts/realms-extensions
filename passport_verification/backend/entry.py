@@ -172,7 +172,7 @@ def check_verification_status(args: str) -> Async[str]:
 
 
 @query
-def get_current_application_id() -> str:
+def get_current_application_id(args: str) -> str:
     """Get the current application ID without generating a new one (query method)."""
     config = AppConfig["application_id"]
     if config:
