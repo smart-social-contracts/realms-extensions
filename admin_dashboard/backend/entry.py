@@ -27,6 +27,7 @@ def extension_sync_call(method_name: str, args: dict):
     # Method mapping with argument requirements
     methods = {
         "import_data": (import_data, True),
+        "export_data": (export_data, True),
         "generate_registration_url": (generate_registration_url, True),
         "validate_registration_code": (validate_registration_code, True),
         "get_registration_codes": (get_registration_codes, True),
@@ -44,6 +45,98 @@ def extension_sync_call(method_name: str, args: dict):
             return function()
     except Exception as e:
         return {"success": False, "error": f"Error calling {method_name}: {str(e)}"}
+
+
+def export_data(args):
+    """
+    Export all data from the realm (entities and codexes)
+    """
+    try:
+        # Parse args if it's a JSON string
+        if isinstance(args, str):
+            args = json.loads(args)
+
+        entity_types = args.get("entity_types", None)
+        include_codexes = args.get("include_codexes", True)
+
+        logger.debug(f"Exporting data - entity_types: {entity_types}, include_codexes: {include_codexes}")
+
+        # Get all entity classes from ggg module
+        import ggg
+        from kybra_simple_db import Entity
+        
+        all_entities = []
+        codexes = []
+        
+        # List of known entity types in the system
+        entity_classes = [
+            'User', 'Human', 'Citizen', 'Organization', 'Realm', 'Treasury',
+            'Instrument', 'Transfer', 'Balance', 'Mandate', 'Contract', 'Trade',
+            'Dispute', 'License', 'Task', 'Codex', 'TaskSchedule', 'TaskExecution',
+            'Land', 'Registry', 'Service', 'Proposal', 'Vote', 'TaxRecord',
+            'Notification', 'Identity', 'UserProfile', 'Permission'
+        ]
+        
+        # Filter entity classes if specific types requested
+        if entity_types:
+            entity_classes = [ec for ec in entity_classes if ec in entity_types]
+        
+        # Export each entity type
+        for entity_class_name in entity_classes:
+            try:
+                # Get the entity class from ggg module
+                if hasattr(ggg, entity_class_name):
+                    entity_class = getattr(ggg, entity_class_name)
+                    
+                    # Get all instances of this entity type
+                    instances = list(entity_class.instances())
+                    
+                    logger.debug(f"Found {len(instances)} instances of {entity_class_name}")
+                    
+                    for instance in instances:
+                        try:
+                            # Serialize the entity
+                            serialized = instance.serialize()
+                            
+                            # Separate codexes from regular entities
+                            if entity_class_name == 'Codex' and include_codexes:
+                                codexes.append({
+                                    'name': serialized.get('name', ''),
+                                    'code': serialized.get('code', ''),
+                                    '_id': serialized.get('_id', ''),
+                                })
+                            else:
+                                all_entities.append(serialized)
+                        except Exception as e:
+                            logger.error(f"Error serializing {entity_class_name} instance: {str(e)}")
+                            continue
+                            
+            except Exception as e:
+                logger.error(f"Error processing entity class {entity_class_name}: {str(e)}")
+                continue
+        
+        # Prepare response data
+        response_data = {
+            "entities": all_entities,
+            "codexes": codexes,
+            "total_entities": len(all_entities),
+            "total_codexes": len(codexes),
+        }
+        
+        # Serialize to JSON string for transport
+        data_json = json.dumps(response_data)
+        
+        logger.debug(f"Export complete - {len(all_entities)} entities, {len(codexes)} codexes")
+        
+        return {
+            "success": True,
+            "message": f"Successfully exported {len(all_entities)} entities and {len(codexes)} codexes",
+            "data": data_json,
+        }
+
+    except Exception as e:
+        logger.error(f"Error exporting data: {e}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e)}
 
 
 def import_data(args):
