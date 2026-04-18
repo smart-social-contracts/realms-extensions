@@ -1,0 +1,68 @@
+{
+  "name": "Package Manager",
+  "description": "Install, update and uninstall extensions and codex packages from connected file registries",
+  "sidebar": "Package Manager",
+  "title": "Package Manager",
+  "subtitle": "Install, update and uninstall extensions and codex packages from connected file registries",
+  "tabs": {
+    "installed": "Installed",
+    "browse": "Browse",
+    "upload": "Upload"
+  },
+  "kind": {
+    "extension": "Extension",
+    "codex": "Codex"
+  },
+  "labels": {
+    "id": "ID",
+    "name": "Name",
+    "version": "Version",
+    "installed_version": "Installed",
+    "latest_version": "Latest",
+    "kind_label": "Type",
+    "source": "Source",
+    "registry": "Registry",
+    "actions": "Actions",
+    "status": "Status"
+  },
+  "status": {
+    "installed": "Installed",
+    "outdated": "Update available",
+    "not_installed": "Not installed",
+    "unknown": "Unknown"
+  },
+  "actions": {
+    "install": "Install",
+    "update": "Update",
+    "uninstall": "Uninstall",
+    "reload": "Reload",
+    "refresh": "Refresh",
+    "upload": "Upload"
+  },
+  "messages": {
+    "no_installed": "No packages installed yet. Browse a registry or upload files to install your first package.",
+    "no_browse": "No registries linked to this realm. Connect a file registry from the Settings page first.",
+    "no_browse_results": "This registry has no published packages.",
+    "loading": "Loading…",
+    "installing": "Installing {id}…",
+    "uninstalling": "Uninstalling {id}…",
+    "reloading": "Reloading {id}…",
+    "install_success": "Installed {id} (v{version})",
+    "update_success": "Updated {id} → v{version}",
+    "uninstall_success": "Uninstalled {id}",
+    "reload_success": "Reloaded {id}",
+    "init_warning": "Init warning: {warning}",
+    "registry_load_failed": "Failed to load packages from registry {id}: {error}",
+    "confirm_uninstall": "Uninstall {id}? Any data the package wrote to the canister will remain, but the package itself will be removed.",
+    "confirm_update": "Update {id} from v{from} to v{to}?",
+    "no_updates_available": "All installed packages are up to date.",
+    "upload_dropzone": "Drop a folder of extension or codex files here, or click to choose files",
+    "upload_select_kind": "What are you installing?",
+    "upload_extension_id": "Extension ID",
+    "upload_codex_id": "Codex ID",
+    "upload_files_count": "{count} files selected",
+    "upload_size_warning": "Total payload {size} exceeds the ~1.8 MB ingress safe limit. The install call will likely be rejected; consider publishing through a file registry instead.",
+    "upload_run_init": "Run init.py after install (codex only)",
+    "upload_clear": "Clear selection"
+  }
+}

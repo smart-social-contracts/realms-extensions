@@ -1,0 +1,68 @@
+{
+  "name": "Gestor de Paquetes",
+  "description": "Instalar, actualizar y desinstalar extensiones y paquetes de codex desde los registros conectados",
+  "sidebar": "Gestor de Paquetes",
+  "title": "Gestor de Paquetes",
+  "subtitle": "Instalar, actualizar y desinstalar extensiones y paquetes de codex desde los registros conectados",
+  "tabs": {
+    "installed": "Instaladas",
+    "browse": "Explorar",
+    "upload": "Subir"
+  },
+  "kind": {
+    "extension": "Extensión",
+    "codex": "Codex"
+  },
+  "labels": {
+    "id": "ID",
+    "name": "Nombre",
+    "version": "Versión",
+    "installed_version": "Instalada",
+    "latest_version": "Última",
+    "kind_label": "Tipo",
+    "source": "Origen",
+    "registry": "Registro",
+    "actions": "Acciones",
+    "status": "Estado"
+  },
+  "status": {
+    "installed": "Instalado",
+    "outdated": "Actualización disponible",
+    "not_installed": "No instalado",
+    "unknown": "Desconocido"
+  },
+  "actions": {
+    "install": "Instalar",
+    "update": "Actualizar",
+    "uninstall": "Desinstalar",
+    "reload": "Recargar",
+    "refresh": "Refrescar",
+    "upload": "Subir"
+  },
+  "messages": {
+    "no_installed": "Aún no hay paquetes instalados. Explora un registro o sube archivos para instalar tu primer paquete.",
+    "no_browse": "No hay registros conectados a este realm. Vincula primero un registro de archivos desde la página de Configuración.",
+    "no_browse_results": "Este registro no tiene paquetes publicados.",
+    "loading": "Cargando…",
+    "installing": "Instalando {id}…",
+    "uninstalling": "Desinstalando {id}…",
+    "reloading": "Recargando {id}…",
+    "install_success": "Instalado {id} (v{version})",
+    "update_success": "Actualizado {id} → v{version}",
+    "uninstall_success": "Desinstalado {id}",
+    "reload_success": "Recargado {id}",
+    "init_warning": "Aviso del init: {warning}",
+    "registry_load_failed": "Error cargando paquetes del registro {id}: {error}",
+    "confirm_uninstall": "¿Desinstalar {id}? Los datos que el paquete haya escrito en el canister permanecerán, pero el paquete será eliminado.",
+    "confirm_update": "¿Actualizar {id} de v{from} a v{to}?",
+    "no_updates_available": "Todos los paquetes instalados están al día.",
+    "upload_dropzone": "Arrastra aquí una carpeta con archivos de extensión o codex, o haz clic para elegir archivos",
+    "upload_select_kind": "¿Qué vas a instalar?",
+    "upload_extension_id": "ID de la extensión",
+    "upload_codex_id": "ID del codex",
+    "upload_files_count": "{count} archivos seleccionados",
+    "upload_size_warning": "El payload total {size} supera el límite seguro de ingreso (~1.8 MB). Probablemente la llamada de instalación sea rechazada; considera publicar a través de un registro de archivos.",
+    "upload_run_init": "Ejecutar init.py después de instalar (solo codex)",
+    "upload_clear": "Limpiar selección"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "name": "包管理器",
+  "description": "从已连接的文件注册中心安装、更新和卸载扩展和 Codex 包",
+  "sidebar": "包管理器",
+  "title": "包管理器",
+  "subtitle": "从已连接的文件注册中心安装、更新和卸载扩展和 Codex 包",
+  "tabs": {
+    "installed": "已安装",
+    "browse": "浏览",
+    "upload": "上传"
+  },
+  "kind": {
+    "extension": "扩展",
+    "codex": "Codex"
+  },
+  "labels": {
+    "id": "ID",
+    "name": "名称",
+    "version": "版本",
+    "installed_version": "已安装",
+    "latest_version": "最新",
+    "kind_label": "类型",
+    "source": "来源",
+    "registry": "注册中心",
+    "actions": "操作",
+    "status": "状态"
+  },
+  "status": {
+    "installed": "已安装",
+    "outdated": "有可用更新",
+    "not_installed": "未安装",
+    "unknown": "未知"
+  },
+  "actions": {
+    "install": "安装",
+    "update": "更新",
+    "uninstall": "卸载",
+    "reload": "重新加载",
+    "refresh": "刷新",
+    "upload": "上传"
+  },
+  "messages": {
+    "no_installed": "尚未安装任何包。请浏览注册中心或上传文件以安装第一个包。",
+    "no_browse": "此 realm 未连接任何注册中心。请先在设置页面连接一个文件注册中心。",
+    "no_browse_results": "此注册中心没有已发布的包。",
+    "loading": "加载中…",
+    "installing": "正在安装 {id}…",
+    "uninstalling": "正在卸载 {id}…",
+    "reloading": "正在重新加载 {id}…",
+    "install_success": "已安装 {id}（v{version}）",
+    "update_success": "已更新 {id} → v{version}",
+    "uninstall_success": "已卸载 {id}",
+    "reload_success": "已重新加载 {id}",
+    "init_warning": "init 警告：{warning}",
+    "registry_load_failed": "从注册中心 {id} 加载包失败：{error}",
+    "confirm_uninstall": "确定要卸载 {id} 吗？包写入容器的数据将保留，但包本身将被移除。",
+    "confirm_update": "确定要将 {id} 从 v{from} 更新到 v{to} 吗？",
+    "no_updates_available": "所有已安装的包都是最新的。",
+    "upload_dropzone": "将扩展或 Codex 文件夹拖到这里，或点击选择文件",
+    "upload_select_kind": "您要安装什么？",
+    "upload_extension_id": "扩展 ID",
+    "upload_codex_id": "Codex ID",
+    "upload_files_count": "已选择 {count} 个文件",
+    "upload_size_warning": "总有效负载 {size} 超过约 1.8 MB 的安全入口限制。安装调用可能会被拒绝；请考虑通过文件注册中心发布。",
+    "upload_run_init": "安装后运行 init.py（仅限 codex）",
+    "upload_clear": "清除选择"
+  }
+}
