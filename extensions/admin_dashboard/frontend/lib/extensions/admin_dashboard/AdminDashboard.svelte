@@ -443,8 +443,111 @@
     }
   }
   
+  // -----------------------------------------------------------------
+  // Packages widget — links to the package_manager extension
+  //
+  // Surfaces a one-line summary of installed runtime extensions /
+  // codex packages on top of admin_dashboard, plus how many of them
+  // have a newer version available in any linked file_registry.
+  // The actual install/update/uninstall UI lives in the dedicated
+  // `package_manager` extension; this widget just deep-links to it.
+  // -----------------------------------------------------------------
+  let pkgInstalledCount = null;
+  let pkgUpdateCount = 0;
+  let pkgWidgetLoading = true;
+  let pkgWidgetError = '';
+
+  function _parseSemverParts(v) {
+    return (v || '').split('-', 1)[0].split('.').map(n => parseInt(n, 10) || 0);
+  }
+
+  function _versionGreater(a, b) {
+    const pa = _parseSemverParts(a);
+    const pb = _parseSemverParts(b);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const x = pa[i] ?? 0;
+      const y = pb[i] ?? 0;
+      if (x !== y) return x > y;
+    }
+    return false;
+  }
+
+  async function _registryBaseUrl(canisterId) {
+    if (typeof window === 'undefined') return null;
+    const host = window.location.host;
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    if (isLocal) {
+      const port = host.split(':')[1] ?? '4943';
+      return `http://${canisterId}.localhost:${port}`;
+    }
+    return `https://${canisterId}.icp0.io`;
+  }
+
+  async function loadPackagesWidget() {
+    pkgWidgetLoading = true;
+    pkgWidgetError = '';
+    try {
+      const [extRaw, codexRaw, statusResp] = await Promise.all([
+        backend.list_runtime_extensions().catch(() => '{}'),
+        backend.list_codex_packages().catch(() => '{}'),
+        backend.status().catch(() => null),
+      ]);
+
+      const extParsed = JSON.parse(extRaw || '{}');
+      const codexParsed = JSON.parse(codexRaw || '{}');
+      const installedExt = extParsed?.success ? (extParsed.runtime_extensions ?? []) : [];
+      const installedCodex = codexParsed?.success ? (codexParsed.codex_packages ?? []) : [];
+      const extManifests = extParsed?.success ? (extParsed.all_manifests ?? {}) : {};
+      const codexManifests = codexParsed?.success ? (codexParsed.manifests ?? {}) : {};
+      pkgInstalledCount = installedExt.length + installedCodex.length;
+
+      // Compare against linked registries to count available updates.
+      const registries = (statusResp?.success && statusResp.data?.status?.registries) || [];
+      let updates = 0;
+      for (const reg of registries) {
+        try {
+          const base = await _registryBaseUrl(reg.canister_id);
+          if (!base) continue;
+          const [extResp, codexResp] = await Promise.all([
+            fetch(`${base}/api/extensions`, { headers: { Accept: 'application/json' } }),
+            fetch(`${base}/api/codices`, { headers: { Accept: 'application/json' } }),
+          ]);
+          if (extResp.ok) {
+            const exts = await extResp.json();
+            for (const e of exts) {
+              if (!installedExt.includes(e.ext_id)) continue;
+              const installedVersion = extManifests?.[e.ext_id]?.version;
+              if (installedVersion && e.latest && _versionGreater(e.latest, installedVersion)) {
+                updates++;
+              }
+            }
+          }
+          if (codexResp.ok) {
+            const codices = await codexResp.json();
+            for (const c of codices) {
+              if (!installedCodex.includes(c.codex_id)) continue;
+              const installedVersion = codexManifests?.[c.codex_id]?.version;
+              if (installedVersion && c.latest && _versionGreater(c.latest, installedVersion)) {
+                updates++;
+              }
+            }
+          }
+        } catch (_e) {
+          // A single unreachable registry must not break the widget.
+        }
+      }
+      pkgUpdateCount = updates;
+    } catch (e) {
+      pkgWidgetError = e?.message ?? String(e);
+    } finally {
+      pkgWidgetLoading = false;
+    }
+  }
+
   onMount(() => {
     loadEntityTypes();
+    loadPackagesWidget();
   });
 </script>
 
@@ -497,7 +600,35 @@
       <p class="text-gray-600 mt-1">Manage realm entities</p>
     </div>
   </div>
-  
+
+  <!-- Packages widget — links to the package_manager extension -->
+  <a
+    href="/extensions/package_manager"
+    data-sveltekit-reload
+    class="block mb-4 bg-white shadow-sm rounded-lg p-4 border border-gray-200 hover:border-blue-400 hover:shadow transition-all"
+  >
+    <div class="flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+          📦
+        </div>
+        <div>
+          <div class="text-sm font-medium text-gray-700">Packages</div>
+          {#if pkgWidgetLoading}
+            <div class="text-xs text-gray-400">Loading…</div>
+          {:else if pkgWidgetError}
+            <div class="text-xs text-red-500">{pkgWidgetError}</div>
+          {:else}
+            <div class="text-xs text-gray-500">
+              {pkgInstalledCount ?? 0} installed{#if pkgUpdateCount > 0} · <span class="text-yellow-600 font-medium">{pkgUpdateCount} update{pkgUpdateCount === 1 ? '' : 's'} available</span>{/if}
+            </div>
+          {/if}
+        </div>
+      </div>
+      <span class="text-blue-600 text-sm font-medium">Manage →</span>
+    </div>
+  </a>
+
   <!-- Entity type selector -->
   <div class="mb-4 bg-white shadow-sm rounded-lg p-4">
     <div class="flex items-center gap-4 flex-wrap">
