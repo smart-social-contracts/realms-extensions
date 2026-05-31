@@ -32,6 +32,7 @@
   "show_in_sidebar": true,
   "python_dependencies": [
     "ic-basilisk>=0.10.6",
+    "ic-basilisk-toolkit>=0.2.0",
     "ic-python-db>=0.7.1",
     "ic-python-logging>=0.3.1"
   ],

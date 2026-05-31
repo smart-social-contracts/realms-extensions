@@ -1,7 +1,7 @@
 """
 Vault Extension — Admin treasury dashboard for Realms.
 
-Thin wrapper around ``basilisk.os.Wallet`` providing:
+Thin wrapper around ``ic_basilisk_toolkit.wallet.Wallet`` providing:
 - Per-token vault balance viewing & live refresh from ledger
 - Transaction history (synced from ICRC indexers)
 - Ad-hoc admin transfers
@@ -17,7 +17,7 @@ from ic_python_logging import get_logger
 
 logger = get_logger("extensions.vault")
 
-# Lazy singleton — created on first use to avoid module-level basilisk.os imports
+# Lazy singleton — created on first use to avoid module-level toolkit imports
 # that can interfere with ic_python_db entity registration order.
 _wallet = None
 
@@ -26,7 +26,7 @@ def _get_wallet():
     """Return (or create) the singleton Wallet instance."""
     global _wallet
     if _wallet is None:
-        from basilisk.os.wallet import Wallet
+        from ic_basilisk_toolkit.wallet import Wallet
         _wallet = Wallet()
     return _wallet
 
@@ -39,7 +39,7 @@ def initialize(args: str):
     """Called once after the extension is loaded.  Registers tokens from
     the ``Token`` entity table into the Wallet (tokens are seeded by
     the post-deploy script)."""
-    from basilisk.os.entities import Token
+    from ic_basilisk_toolkit.entities import Token
     logger.info("Vault: initializing...")
     wallet = _get_wallet()
     for token in Token.instances():
@@ -246,7 +246,7 @@ def lookup_balance(args: str):
         subaccount_hex: Raw hex subaccount (overrides principal/invoice_id)
     """
     try:
-        from basilisk.os.wallet import Wallet as W
+        from ic_basilisk_toolkit.wallet import Wallet as W
         params = json.loads(args) if args and args.strip() else {}
         principal = params.get("principal")
         invoice_id = params.get("invoice_id")
@@ -332,7 +332,7 @@ def get_status(args: str) -> str:
     """Return vault status: registered tokens, cached balances, transfer counts."""
     try:
         from basilisk import ic
-        from basilisk.os.entities import Token
+        from ic_basilisk_toolkit.entities import Token
         wallet = _get_wallet()
         tokens_info = []
         for t in wallet.list_tokens():
