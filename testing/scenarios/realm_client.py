@@ -19,6 +19,10 @@ import uuid
 REALM = os.environ.get("REALM_CANISTER_ID", "ku6cv-2iaaa-aaaab-agrpa-cai")
 NETWORK = os.environ.get("DFX_NETWORK", "test")
 
+# Deployed test token (kybra-simple-token, test mode). In test mode ANY caller
+# may `mint`, so scenarios self-fund throwaway identities without any secret.
+TOKEN = os.environ.get("TOKEN_CANISTER_ID", "nusyl-jiaaa-aaaae-qj6mq-cai")
+
 # Self-registration invite-code checksums (sha256 of the role name). With
 # test_mode_user_self_registration enabled these grant the role without a real
 # invite code (see realm_backend.join_realm).
@@ -64,6 +68,72 @@ def call_extension(extension, function, args_obj=None, timeout=120):
         except json.JSONDecodeError:
             pass
     return resp
+
+
+def call_canister(canister, method, candid_arg="()", query=False, timeout=120):
+    """Call an arbitrary canister method with a raw Candid argument string."""
+    cmd = [
+        "dfx", "canister", "--network", NETWORK, "call", canister,
+        method, candid_arg, "--output", "json",
+    ]
+    if query:
+        cmd.append("--query")
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_env())
+    if proc.returncode != 0:
+        raise RuntimeError(f"dfx call {canister}.{method} failed: {proc.stderr.strip()}")
+    return json.loads(proc.stdout)
+
+
+def to_nat(value):
+    """Parse a Candid nat from dfx JSON output (e.g. "1_000_500_000" -> int)."""
+    return int(str(value).replace("_", "").strip().strip('"'))
+
+
+# --- test token faucet ------------------------------------------------------
+
+
+class TestToken:
+    """Thin wrapper over the deployed test token (kybra-simple-token).
+
+    `mint` is open to any caller while the token is in test mode, so scenarios
+    can fund their own throwaway identities for free — no faucet secret needed.
+    """
+
+    def __init__(self, canister=None):
+        self.canister = canister or TOKEN
+
+    @staticmethod
+    def _account(principal):
+        return f'record {{ owner = principal "{principal}"; subaccount = null }}'
+
+    def mint(self, principal, amount):
+        arg = f"(record {{ to = {self._account(principal)}; amount = {amount} : nat }})"
+        return call_canister(self.canister, "mint", arg)
+
+    def transfer(self, to_principal, amount, fee=None):
+        fee_s = "null" if fee is None else f"opt ({fee} : nat)"
+        arg = (
+            f"(record {{ to = {self._account(to_principal)}; amount = {amount} : nat; "
+            f"fee = {fee_s}; memo = null; from_subaccount = null; created_at_time = null }})"
+        )
+        return call_canister(self.canister, "icrc1_transfer", arg)
+
+    def balance_of(self, principal):
+        arg = f"({self._account(principal)})"
+        return to_nat(call_canister(self.canister, "icrc1_balance_of", arg, query=True))
+
+    def fee(self):
+        return to_nat(call_canister(self.canister, "icrc1_fee", "()", query=True))
+
+    def transactions(self, principal, max_results=20):
+        arg = (
+            f"(record {{ account = {self._account(principal)}; "
+            f"start = null; max_results = {max_results} : nat }})"
+        )
+        out = call_canister(
+            self.canister, "get_account_transactions", arg, query=True
+        )
+        return out.get("Ok", {}).get("transactions", []) if isinstance(out, dict) else []
 
 
 # --- dfx identity management ------------------------------------------------

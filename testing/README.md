@@ -29,6 +29,15 @@ there; override via environment variables.
 |----------|---------|-------------|
 | `REALM_CANISTER_ID` | `ku6cv-2iaaa-aaaab-agrpa-cai` | Realm backend canister id |
 | `DFX_NETWORK` | `ic` | dfx network (the realm lives on `icp0.io`) |
+| `TOKEN_CANISTER_ID` | `nusyl-jiaaa-aaaae-qj6mq-cai` | Test token used for value flows |
+
+### Value flows (tokens) — no real assets, no secret
+
+Scenarios that move value use a deployed **test token** (`kybra-simple-token`)
+running in test mode. In test mode any caller may `mint`, so a scenario funds its
+own throwaway identities for free via `TestToken.mint(...)` — no real ckBTC/ckUSD,
+no faucet key, no GitHub secret. Transfers, fees, and the indexer history the vault
+relies on are exercised against this token exactly as a real ICRC-1 ledger would be.
 
 ## Quick start
 
@@ -51,6 +60,9 @@ aggregates results and exits non-zero if any scenario fails.
 - **governance_execution** — an admin submits a proposal carrying inline code,
   approves it, and the test asserts the approved proposal produced a real,
   verifiable side effect (a marker codex) in the realm.
+- **token_treasury** — a throwaway identity self-mints test tokens, transfers to
+  a second identity, and the test asserts balances reconcile (amount + fee) and
+  both the mint and transfer appear in the token indexer history.
 
 ## Adding a scenario
 
