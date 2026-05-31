@@ -7,10 +7,15 @@ This module re-exports them for backward compatibility.
 """
 
 # Re-export every ICRC type from basilisk so existing imports keep working.
-from basilisk.canisters.icrc import (  # noqa: F401
+from basilisk.canisters.icrc import (
     Account,
+    AccountTransaction,
     Approve,
-    BurnTx as Burn,
+    BadBurn,
+    BadFee,
+)
+from basilisk.canisters.icrc import BurnTx as Burn  # noqa: F401
+from basilisk.canisters.icrc import (
     Duplicate,
     GenericError,
     GetAccountTransactionsRequest,
@@ -19,14 +24,13 @@ from basilisk.canisters.icrc import (  # noqa: F401
     ICRCIndexer,
     ICRCLedger,
     InsufficientFunds,
-    MintTx as Mint,
+)
+from basilisk.canisters.icrc import MintTx as Mint
+from basilisk.canisters.icrc import (
     Spender,
+    Transaction,
     TransferArg,
     TransferError,
     TransferResult,
-    TransferTx as Transfer,
-    Transaction,
-    AccountTransaction,
-    BadFee,
-    BadBurn,
 )
+from basilisk.canisters.icrc import TransferTx as Transfer

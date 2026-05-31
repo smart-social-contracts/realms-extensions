@@ -5,8 +5,8 @@ import json
 import traceback
 from pprint import pformat
 
-from ggg import Treasury
 from basilisk import ic
+from ggg import Treasury
 
 
 def async_task():

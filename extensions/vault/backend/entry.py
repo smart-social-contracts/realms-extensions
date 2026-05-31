@@ -27,6 +27,7 @@ def _get_wallet():
     global _wallet
     if _wallet is None:
         from ic_basilisk_toolkit.wallet import Wallet
+
         _wallet = Wallet()
     return _wallet
 
@@ -35,11 +36,13 @@ def _get_wallet():
 # Lifecycle
 # ------------------------------------------------------------------
 
+
 def initialize(args: str):
     """Called once after the extension is loaded.  Registers tokens from
     the ``Token`` entity table into the Wallet (tokens are seeded by
     the post-deploy script)."""
     from ic_basilisk_toolkit.entities import Token
+
     logger.info("Vault: initializing...")
     wallet = _get_wallet()
     for token in Token.instances():
@@ -50,7 +53,9 @@ def initialize(args: str):
             decimals=getattr(token, "decimals", 8) or 8,
             fee=getattr(token, "fee", 10) or 10,
         )
-    logger.info(f"Vault: tokens registered: {[t['name'] for t in wallet.list_tokens()]}")
+    logger.info(
+        f"Vault: tokens registered: {[t['name'] for t in wallet.list_tokens()]}"
+    )
 
 
 def register_entities():
@@ -63,10 +68,12 @@ def register_entities():
 # Balance (sync — reads cached WalletBalance)
 # ------------------------------------------------------------------
 
+
 def get_vault_balance(args: str) -> str:
     """Return the vault's cached balance for a token (no inter-canister call)."""
     try:
         from basilisk import ic
+
         params = json.loads(args) if args and args.strip() else {}
         token = params.get("token", "")
         vault_principal = ic.id().to_str()
@@ -74,7 +81,15 @@ def get_vault_balance(args: str) -> str:
 
         if token:
             amount = wallet.cached_balance(token)
-            return _ok({"Balance": {"principal_id": vault_principal, "token": token, "amount": amount}})
+            return _ok(
+                {
+                    "Balance": {
+                        "principal_id": vault_principal,
+                        "token": token,
+                        "amount": amount,
+                    }
+                }
+            )
 
         # No token specified → return all token balances
         balances = {}
@@ -89,10 +104,12 @@ def get_vault_balance(args: str) -> str:
 # Balance (async — queries ledger)
 # ------------------------------------------------------------------
 
+
 def refresh_vault_balance(args: str):
     """Query the ledger for the vault's balance and update local cache."""
     try:
         from basilisk import ic
+
         params = json.loads(args) if args and args.strip() else {}
         token = params.get("token")
         vault_principal = ic.id().to_str()
@@ -100,7 +117,15 @@ def refresh_vault_balance(args: str):
 
         if token:
             amount = yield wallet.balance_of(token)
-            return _ok({"Balance": {"principal_id": vault_principal, "token": token, "amount": amount}})
+            return _ok(
+                {
+                    "Balance": {
+                        "principal_id": vault_principal,
+                        "token": token,
+                        "amount": amount,
+                    }
+                }
+            )
 
         # No token specified → refresh all tokens
         balances = {}
@@ -114,6 +139,7 @@ def refresh_vault_balance(args: str):
 # ------------------------------------------------------------------
 # Transaction history (async — syncs from indexer)
 # ------------------------------------------------------------------
+
 
 def refresh(args: str):
     """Sync recent transactions from indexer canister(s) into local DB."""
@@ -129,14 +155,20 @@ def refresh(args: str):
             results[token] = yield wallet.refresh(token, subaccount=subaccount)
         else:
             for t in wallet.list_tokens():
-                results[t["name"]] = yield wallet.refresh(t["name"], subaccount=subaccount)
+                results[t["name"]] = yield wallet.refresh(
+                    t["name"], subaccount=subaccount
+                )
 
         total_new = sum(r.get("new_txs", 0) for r in results.values())
-        return _ok({"TransactionSummary": {
-            "new_txs_count": total_new,
-            "per_token": results,
-            "sync_status": "Synced",
-        }})
+        return _ok(
+            {
+                "TransactionSummary": {
+                    "new_txs_count": total_new,
+                    "per_token": results,
+                    "sync_status": "Synced",
+                }
+            }
+        )
     except Exception as e:
         return _err(e)
 
@@ -167,6 +199,7 @@ def get_transactions(args: str) -> str:
 # Subaccount management (sync — local DB)
 # ------------------------------------------------------------------
 
+
 def register_subaccount(args: str) -> str:
     """Register a subaccount for balance and transaction tracking."""
     try:
@@ -176,16 +209,22 @@ def register_subaccount(args: str) -> str:
         label = params.get("label", "")
 
         if not token or not subaccount_hex:
-            return json.dumps({"success": False, "error": "token and subaccount_hex are required"})
+            return json.dumps(
+                {"success": False, "error": "token and subaccount_hex are required"}
+            )
 
         wallet = _get_wallet()
         sub = wallet.register_subaccount(token, subaccount_hex, label=label)
-        return _ok({"Subaccount": {
-            "token": token,
-            "subaccount_hex": sub.subaccount_hex,
-            "label": sub.label,
-            "balance": sub.balance,
-        }})
+        return _ok(
+            {
+                "Subaccount": {
+                    "token": token,
+                    "subaccount_hex": sub.subaccount_hex,
+                    "label": sub.label,
+                    "balance": sub.balance,
+                }
+            }
+        )
     except Exception as e:
         return _err(e)
 
@@ -198,7 +237,9 @@ def unregister_subaccount(args: str) -> str:
         subaccount_hex = params.get("subaccount_hex", "")
 
         if not token or not subaccount_hex:
-            return json.dumps({"success": False, "error": "token and subaccount_hex are required"})
+            return json.dumps(
+                {"success": False, "error": "token and subaccount_hex are required"}
+            )
 
         wallet = _get_wallet()
         removed = wallet.unregister_subaccount(token, subaccount_hex)
@@ -233,6 +274,7 @@ def list_subaccounts(args: str) -> str:
 # Subaccount lookup (async — queries ledger on the fly)
 # ------------------------------------------------------------------
 
+
 def lookup_balance(args: str):
     """Look up balances for a user's or invoice's subaccount across all tokens.
 
@@ -247,6 +289,7 @@ def lookup_balance(args: str):
     """
     try:
         from ic_basilisk_toolkit.wallet import Wallet as W
+
         params = json.loads(args) if args and args.strip() else {}
         principal = params.get("principal")
         invoice_id = params.get("invoice_id")
@@ -264,7 +307,12 @@ def lookup_balance(args: str):
             subaccount_hex = sub_bytes.hex()
             label = f"inv_{invoice_id}"
         else:
-            return json.dumps({"success": False, "error": "principal, invoice_id, or subaccount_hex required"})
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "principal, invoice_id, or subaccount_hex required",
+                }
+            )
 
         wallet = _get_wallet()
         balances = {}
@@ -272,11 +320,15 @@ def lookup_balance(args: str):
             bal = yield wallet.balance_of(t["name"], subaccount=sub_bytes)
             balances[t["name"]] = bal
 
-        return _ok({"LookupBalance": {
-            "subaccount_hex": subaccount_hex,
-            "label": label,
-            "balances": balances,
-        }})
+        return _ok(
+            {
+                "LookupBalance": {
+                    "subaccount_hex": subaccount_hex,
+                    "label": label,
+                    "balances": balances,
+                }
+            }
+        )
     except Exception as e:
         return _err(e)
 
@@ -284,6 +336,7 @@ def lookup_balance(args: str):
 # ------------------------------------------------------------------
 # Transfer (async — admin only)
 # ------------------------------------------------------------------
+
 
 def transfer(args: str):
     """Perform an ICRC-1 transfer from the vault (admin only)."""
@@ -296,7 +349,9 @@ def transfer(args: str):
         from_sub = params.get("from_subaccount")
 
         if not to_principal or amount is None:
-            return json.dumps({"success": False, "error": "to_principal and amount are required"})
+            return json.dumps(
+                {"success": False, "error": "to_principal and amount are required"}
+            )
 
         wallet = _get_wallet()
         if not token:
@@ -317,9 +372,13 @@ def transfer(args: str):
         if "ok" in result:
             return _ok({"TransactionId": {"transaction_id": int(result["ok"])}})
         elif "err" in result:
-            return json.dumps({"success": False, "error": _format_transfer_error(result["err"])})
+            return json.dumps(
+                {"success": False, "error": _format_transfer_error(result["err"])}
+            )
         else:
-            return json.dumps({"success": False, "error": f"Unexpected result: {result}"})
+            return json.dumps(
+                {"success": False, "error": f"Unexpected result: {result}"}
+            )
     except Exception as e:
         return _err(e)
 
@@ -328,11 +387,13 @@ def transfer(args: str):
 # Status
 # ------------------------------------------------------------------
 
+
 def get_status(args: str) -> str:
     """Return vault status: registered tokens, cached balances, transfer counts."""
     try:
         from basilisk import ic
         from ic_basilisk_toolkit.entities import Token
+
         wallet = _get_wallet()
         tokens_info = []
         for t in wallet.list_tokens():
@@ -341,20 +402,26 @@ def get_status(args: str) -> str:
             subs = wallet.list_subaccounts(t["name"])
             sub_balance = sum(s.get("balance", 0) for s in subs)
             default_balance = wallet.cached_balance(t["name"])
-            tokens_info.append({
-                "name": t["name"],
-                "ledger": t["ledger"],
-                "indexer": t["indexer"],
-                "cached_balance": default_balance,
-                "aggregate_balance": default_balance + sub_balance,
-                "transfer_count": tx_count,
-                "subaccounts": subs,
-            })
+            tokens_info.append(
+                {
+                    "name": t["name"],
+                    "ledger": t["ledger"],
+                    "indexer": t["indexer"],
+                    "cached_balance": default_balance,
+                    "aggregate_balance": default_balance + sub_balance,
+                    "transfer_count": tx_count,
+                    "subaccounts": subs,
+                }
+            )
 
-        return _ok({"Stats": {
-            "vault_principal": ic.id().to_str(),
-            "tokens": tokens_info,
-        }})
+        return _ok(
+            {
+                "Stats": {
+                    "vault_principal": ic.id().to_str(),
+                    "tokens": tokens_info,
+                }
+            }
+        )
     except Exception as e:
         return _err(e)
 
@@ -363,6 +430,7 @@ def get_balance(args: str) -> str:
     """Get cached balance for a specific principal (reads WalletBalance)."""
     try:
         from basilisk import ic
+
         params = json.loads(args) if args and args.strip() else {}
         principal_id = params.get("principal_id") or ic.id().to_str()
         token = params.get("token")
@@ -370,11 +438,21 @@ def get_balance(args: str) -> str:
 
         if token:
             amount = wallet.cached_balance(token, principal=principal_id)
-            return _ok({"Balance": {"principal_id": principal_id, "token": token, "amount": amount}})
+            return _ok(
+                {
+                    "Balance": {
+                        "principal_id": principal_id,
+                        "token": token,
+                        "amount": amount,
+                    }
+                }
+            )
 
         balances = {}
         for t in wallet.list_tokens():
-            balances[t["name"]] = wallet.cached_balance(t["name"], principal=principal_id)
+            balances[t["name"]] = wallet.cached_balance(
+                t["name"], principal=principal_id
+            )
         return _ok({"Balance": {"principal_id": principal_id, "balances": balances}})
     except Exception as e:
         return _err(e)
@@ -383,6 +461,7 @@ def get_balance(args: str) -> str:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _ok(data: dict) -> str:
     return json.dumps({"success": True, "data": data})
@@ -410,7 +489,9 @@ def _format_transfer_error(error_dict: dict) -> str:
         if key in error_dict:
             detail = error_dict[key]
             if isinstance(detail, dict):
-                msg = detail.get("message", detail.get("balance", detail.get("expected_fee", "")))
+                msg = detail.get(
+                    "message", detail.get("balance", detail.get("expected_fee", ""))
+                )
                 return f"{label}: {msg}" if msg else label
             return label
     return f"Transfer failed: {error_dict}"
