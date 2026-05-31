@@ -1,0 +1,59 @@
+name: Scenario Tests (IC)
+
+# Runs cross-extension scenario tests against the Dominion test realm on the IC.
+# Scenarios are self-provisioning: they create their own throwaway identities and
+# state over `dfx`, so no controller secret, wallet, or local replica is needed.
+# The realm must already be deployed with TEST_MODE_* flags enabled.
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      realm_canister_id:
+        description: 'Realm backend canister id'
+        required: false
+        type: string
+      scenarios:
+        description: 'Space-separated scenario names (leave empty for all)'
+        required: false
+        type: string
+
+# Serialize runs: all scenarios hit one shared realm, so queue rather than
+# overlap. cancel-in-progress: false makes new runs wait for the active one.
+concurrency:
+  group: realm-scenario-tests
+  cancel-in-progress: false
+
+jobs:
+  scenario-tests:
+    name: Scenario Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      REALM_CANISTER_ID: ${{ github.event.inputs.realm_canister_id || 'ku6cv-2iaaa-aaaab-agrpa-cai' }}
+      DFX_NETWORK: ic
+
+    steps:
+    - name: Checkout extensions repo
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dfx
+      run: |
+        DFXVM_INIT_YES=true sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
+        echo "$HOME/.local/share/dfx/bin" >> "$GITHUB_PATH"
+
+    - name: Show dfx version
+      run: dfx --version
+
+    - name: Run scenario tests
+      run: |
+        bash testing/scenarios/run_scenarios.sh ${{ github.event.inputs.scenarios }}
