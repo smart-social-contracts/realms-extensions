@@ -15,7 +15,9 @@ testing/
 │   ├── realm_client.py                  ← shared dfx client + identity + assertions
 │   ├── run_scenarios.sh                 ← discovers & runs all *_scenario.py
 │   ├── citizen_onboarding_scenario.py
-│   └── governance_execution_scenario.py
+│   ├── governance_execution_scenario.py
+│   ├── token_treasury_scenario.py
+│   └── vault_treasury_scenario.py
 └── README.md
 ```
 
@@ -63,6 +65,12 @@ aggregates results and exits non-zero if any scenario fails.
 - **token_treasury** — a throwaway identity self-mints test tokens, transfers to
   a second identity, and the test asserts balances reconcile (amount + fee) and
   both the mint and transfer appear in the token indexer history.
+- **vault_treasury** — deposits test tokens into the realm's vault (the realm
+  treasury), refreshes the vault's on-ledger balance, then withdraws to a throwaway
+  recipient via `vault.transfer` (a real inter-canister ICRC-1 transfer). Asserts
+  deposit/withdraw deltas reconcile (amount + fee) and the withdrawal is recorded in
+  the vault's transaction history. Self-registers the test token in the vault if
+  missing, so no manual setup is required.
 
 ## Adding a scenario
 

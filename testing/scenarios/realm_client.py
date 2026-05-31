@@ -55,12 +55,7 @@ def call_backend(method, *text_args, timeout=120):
     return json.loads(proc.stdout)
 
 
-def call_extension(extension, function, args_obj=None, timeout=120):
-    """Call extension_sync_call and unwrap the nested JSON `response` string."""
-    raw = call_backend(
-        "extension_sync_call", extension, function, json.dumps(args_obj or {}),
-        timeout=timeout,
-    )
+def _unwrap_extension(raw):
     resp = raw.get("response", raw)
     if isinstance(resp, str):
         try:
@@ -68,6 +63,25 @@ def call_extension(extension, function, args_obj=None, timeout=120):
         except json.JSONDecodeError:
             pass
     return resp
+
+
+def call_extension(extension, function, args_obj=None, timeout=120):
+    """Call extension_sync_call and unwrap the nested JSON `response` string."""
+    raw = call_backend(
+        "extension_sync_call", extension, function, json.dumps(args_obj or {}),
+        timeout=timeout,
+    )
+    return _unwrap_extension(raw)
+
+
+def call_extension_async(extension, function, args_obj=None, timeout=180):
+    """Call extension_async_call — required for extension methods that are async
+    generators (e.g. anything doing inter-canister ledger/indexer calls)."""
+    raw = call_backend(
+        "extension_async_call", extension, function, json.dumps(args_obj or {}),
+        timeout=timeout,
+    )
+    return _unwrap_extension(raw)
 
 
 def call_canister(canister, method, candid_arg="()", query=False, timeout=120):
@@ -134,6 +148,35 @@ class TestToken:
             self.canister, "get_account_transactions", arg, query=True
         )
         return out.get("Ok", {}).get("transactions", []) if isinstance(out, dict) else []
+
+
+def ensure_test_token_in_vault(name="SMPL", canister=None, decimals=8, fee=10_000):
+    """Register the test token in the realm's Wallet so the vault tracks it.
+
+    Idempotent (register_token is an upsert). Uses install_codex with run_init
+    to execute the registration in-canister. Returns True if the token is listed
+    by the vault afterwards.
+    """
+    ledger = canister or TOKEN
+    init_code = (
+        "from ic_basilisk_toolkit.wallet import Wallet\n"
+        "Wallet().register_token("
+        f"name='{name}', ledger='{ledger}', indexer='{ledger}', "
+        f"decimals={decimals}, fee={fee})\n"
+        f"ic.print('registered {name} test token')\n"
+    )
+    files = {
+        "init.py": init_code,
+        "manifest.json": json.dumps({"name": "test_token_setup", "version": "0.0.1"}),
+    }
+    call_backend(
+        "install_codex",
+        json.dumps({"codex_id": "test_token_setup", "files": files, "run_init": True}),
+        timeout=180,
+    )
+    status = call_extension("vault", "get_status")
+    tokens = status.get("data", {}).get("Stats", {}).get("tokens", [])
+    return any(t.get("name") == name for t in tokens)
 
 
 # --- dfx identity management ------------------------------------------------
