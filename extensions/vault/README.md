@@ -179,16 +179,12 @@ realms-extension-vault/
 
 ### Running Tests
 
-See [TESTING.md](./TESTING.md) for complete testing guide.
+> **Note:** Vault's backend test suite (`tests/test_*.py`) still targets the
+> retired Docker harness and is pending migration to the deployed-realm scenario
+> approach documented in [`testing/README.md`](../../testing/README.md). E2E tests
+> are unaffected.
 
-Quick start:
 ```bash
-# Run all tests (local development)
-../_shared/testing/scripts/test_entrypoint.sh
-
-# Run linters
-../_shared/testing/scripts/run_linters.sh --config .flake8
-
 # Run E2E tests
 cd tests/e2e && ./run-e2e-tests.sh
 ```
