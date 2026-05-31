@@ -1,123 +1,103 @@
-# Extension Integration Testing
+# Extension Testing
 
-Runs backend and frontend E2E tests for all extensions against a staging realm on the Internet Computer.
+Tests run against a **deployed** realm on the Internet Computer — no Docker and no
+local replica. There are two layers:
 
-## Architecture
-
-The extensions repo is **independent** from the realms repo. Tests download a specific version of the realms framework (specified in `.realms-version`) and deploy to the **Dominion** staging realm.
+1. **Scenario tests** (`testing/scenarios/`) — cross-extension user journeys driven
+   over `dfx`. Each scenario is self-provisioning: it creates its own throwaway
+   identity and state, so runs never collide and nothing needs pre-seeding.
+2. **E2E tests** (`extensions/<name>/tests/e2e/`) — Playwright specs that drive the
+   deployed frontend. Run by the `integration-test.yml` workflow.
 
 ```
-.realms-version          ← Pinned realms version (tag, SHA, or "latest")
 testing/
-├── setup_staging_realm.sh   ← Downloads realms, deploys to Dominion
-├── run_all_tests.sh         ← Runs backend + E2E tests for all extensions
+├── scenarios/
+│   ├── realm_client.py                  ← shared dfx client + identity + assertions
+│   ├── run_scenarios.sh                 ← discovers & runs all *_scenario.py
+│   ├── citizen_onboarding_scenario.py
+│   └── governance_execution_scenario.py
 └── README.md
 ```
 
-### Staging Realms
+## Target realm
 
-| # | Name | Use | Frontend URL |
-|---|------|-----|-------------|
-| 1 | **Dominion** | Extension testing | `https://gzya5-jyaaa-aaaac-qai5a-cai.icp0.io` |
-| 2 | Agora | Realms repo development | `https://3gpbx-xaaaa-aaaac-qcylq-cai.icp0.io` |
-| 3 | Syntropia | Reserved | — |
+Scenarios run against the **Dominion test** realm, deployed with `TEST_MODE_*`
+flags enabled (self-registration, skip-authentication, etc.). The defaults point
+there; override via environment variables.
 
-## Quick Start
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REALM_CANISTER_ID` | `ku6cv-2iaaa-aaaab-agrpa-cai` | Realm backend canister id |
+| `DFX_NETWORK` | `ic` | dfx network (the realm lives on `icp0.io`) |
 
-### 1. Set realms version
-
-Edit `.realms-version` in the repo root:
-
-```
-# Use a specific release
-v0.9.2
-
-# Or use the latest commit on main
-latest
-
-# Or a specific commit SHA
-abc1234def
-```
-
-### 2. Deploy to staging
+## Quick start
 
 ```bash
-bash testing/setup_staging_realm.sh
+# Run every scenario
+bash testing/scenarios/run_scenarios.sh
+
+# Run a subset by name
+bash testing/scenarios/run_scenarios.sh citizen_onboarding governance_execution
 ```
 
-This will:
-- Clone/update the realms framework at the specified version
-- Install the `realms` CLI
-- Copy extensions into the realms tree
-- Deploy frontend + backend to Dominion (`-R 1`)
+A scenario exits with the number of failed assertions (0 == pass). The runner
+aggregates results and exits non-zero if any scenario fails.
 
-### 3. Run tests
+## Scenarios
 
-```bash
-# All tests (backend + E2E)
-bash testing/run_all_tests.sh
+- **citizen_onboarding** — a new member joins the realm, verifies a passport,
+  receives the welcome notification, submits a proposal, opens voting, casts a
+  vote, and the realm rejects a spoofed voter identity.
+- **governance_execution** — an admin submits a proposal carrying inline code,
+  approves it, and the test asserts the approved proposal produced a real,
+  verifiable side effect (a marker codex) in the realm.
 
-# Backend only
-bash testing/run_all_tests.sh --backend-only
+## Adding a scenario
 
-# E2E only
-bash testing/run_all_tests.sh --e2e-only
+Create `testing/scenarios/<name>_scenario.py`. It is picked up automatically by
+both `run_scenarios.sh` and CI. Use the shared helpers:
 
-# Single extension
-bash testing/run_all_tests.sh --extension passport_verification
+```python
+import sys
+from realm_client import Scenario, TestIdentity, call_backend, call_extension
+
+def run(sc: Scenario):
+    with TestIdentity(f"{sc.run_id}_alice") as actor:
+        res = call_backend("join_realm")
+        sc.check("success" in res, "join_realm succeeded")
+
+def main():
+    sc = Scenario("my journey")
+    sc.banner()
+    try:
+        run(sc)
+    except Exception as exc:
+        sc.check(False, f"scenario raised an exception: {exc}")
+    return sc.finish()
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
-### 4. Run E2E tests manually
+## E2E tests
+
+Create `extensions/<name>/tests/e2e/` with `playwright.config.ts`, `package.json`,
+and specs. The `integration-test.yml` workflow discovers extensions via the
+`tests/e2e/.staging-e2e` marker and runs them against the Dominion frontend.
 
 ```bash
 export PLAYWRIGHT_BASE_URL=https://gzya5-jyaaa-aaaac-qai5a-cai.icp0.io
-cd extensions/passport_verification/tests/e2e
+cd extensions/<name>/tests/e2e
 npm install
 npx playwright install chromium
 npx playwright test
-npx playwright test --headed  # Watch in browser
 ```
 
 ## CI/CD
 
-The `integration-test.yml` workflow needs an `IC_IDENTITY_PEM` secret in the GitHub repo settings containing the PEM key for the dfx identity that has controller access to the Dominion canisters.
-
-The workflow runs automatically on push/PR to main:
-
-1. **Setup job**: Clones realms at pinned version, deploys to Dominion
-2. **Backend tests**: Runs `test_*.py` for each extension via `dfx canister call`
-3. **E2E tests**: Runs Playwright specs against Dominion frontend URL
-
-### Manual trigger
-
-The workflow supports `workflow_dispatch` with optional overrides:
-- `realms_version`: Override `.realms-version` (e.g., test against a specific commit)
-- `extension`: Test a single extension instead of all
-
-## Adding Tests to an Extension
-
-### Backend tests
-
-Create `extensions/<name>/tests/test_<name>.py`:
-- Use `_shared/testing/utils/test_utils.py` helpers
-- Tests run via `dfx canister call` against the deployed realm
-- Define `async_task()` as the entry point
-
-### E2E tests
-
-Create `extensions/<name>/tests/e2e/`:
-- `playwright.config.ts` — Playwright configuration
-- `package.json` — Node dependencies
-- `specs/<name>.spec.ts` — Test specs
-- `run-e2e-tests.sh` — Runner script (delegates to shared runner)
-
-The `PLAYWRIGHT_BASE_URL` environment variable points to the Dominion frontend.
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REALMS_VERSION` | from `.realms-version` | Override realms framework version |
-| `PLAYWRIGHT_BASE_URL` | Dominion URL | Frontend URL for E2E tests |
-| `DFX_NETWORK` | `staging` | dfx network for backend tests |
-| `REALM_NUMBER` | `1` | Realm number (1=Dominion) |
+- **`scenario-tests.yml`** — installs `dfx`, runs `run_scenarios.sh` against the IC
+  on every push/PR. Runs are serialized via a concurrency group because they share
+  one live realm. No controller secret or wallet is needed (scenarios self-provision
+  throwaway identities and call public `TEST_MODE`-enabled methods).
+- **`integration-test.yml`** — runs Playwright E2E tests against the deployed
+  Dominion frontend.
