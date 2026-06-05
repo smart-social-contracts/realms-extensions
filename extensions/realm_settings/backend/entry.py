@@ -76,7 +76,17 @@ def get_realm_stage(args=None):
                     "infrastructure_ready": lifecycle.get("infrastructure_ready", False),
                     "providers_ready": lifecycle.get("providers_ready", False),
                     "history": lifecycle.get("history", []),
+                    # Codex-driven fields consumed by the input-driven public dashboard.
+                    "population_target": lifecycle.get("population_target"),
+                    "go_live_target": lifecycle.get("go_live_target"),
+                    "deposit_label": lifecycle.get("deposit_label"),
                 },
+                # Presentation config written by the codex (see codices/*/init.py).
+                # The public dashboard renders blocks based on this, with a
+                # graceful fallback to the default layout when absent.
+                "dashboard": manifest.get("dashboard", {}),
+                "onboarding": manifest.get("onboarding", {}),
+                "departments": manifest.get("departments", []),
             },
         }
     except Exception as e:

@@ -7,6 +7,9 @@
 	let realmData: any = $state(null);
 	let lifecycleData: any = $state({});
 	let lifecycleStageIndex = $state(0);
+	let dashboardConfig: any = $state({});
+	let departments: string[] = $state([]);
+	let now = $state(Date.now());
 	let zones: any[] = $state([]);
 	let latestUsers: any[] = $state([]);
 	let loading = $state(true);
@@ -87,6 +90,8 @@
 			if (res?.success && res?.data) {
 				lifecycleData = res.data.lifecycle || {};
 				lifecycleStageIndex = res.data.stage_index ?? Math.max(0, STAGES.indexOf(res.data.stage || 'alpha'));
+				dashboardConfig = res.data.dashboard || {};
+				departments = res.data.departments || [];
 				return;
 			}
 		} catch (e) {
@@ -250,6 +255,19 @@
 	let registrationOpen = $derived(Boolean(statusData?.open_registration ?? realmData?.open_registration));
 	let quarterCount = $derived(statusData?.quarters?.length || 0);
 
+	let dashboardSections: string[] = $derived(dashboardConfig?.public?.sections || []);
+	let goLiveRemaining = $derived.by(() => {
+		const target = lifecycleData.go_live_target ? new Date(lifecycleData.go_live_target).getTime() : NaN;
+		const diff = target - now;
+		if (!Number.isFinite(target) || diff <= 0) return null;
+		return {
+			days: Math.floor(diff / 86400000),
+			hours: Math.floor((diff % 86400000) / 3600000),
+			minutes: Math.floor((diff % 3600000) / 60000),
+			seconds: Math.floor((diff % 60000) / 1000),
+		};
+	});
+
 	let kpiVisible = $state(false);
 	let animatedValues: number[] = $state([]);
 
@@ -297,6 +315,11 @@
 		await initMap();
 		setTimeout(() => { showOverlay = true; }, 2000);
 		setTimeout(() => { animateCountUp(); }, 2800);
+	});
+
+	$effect(() => {
+		const id = setInterval(() => { now = Date.now(); }, 1000);
+		return () => clearInterval(id);
 	});
 </script>
 
@@ -672,6 +695,72 @@
 					</svg>
 				</a>
 			</div>
+
+			<!-- Codex-driven dashboard blocks -->
+			{#if dashboardSections.length > 0}
+				{@const registered = Number(lifecycleData.registered_users ?? statusData?.users_count ?? 0)}
+				<div class="max-w-5xl mx-auto px-4 pb-6">
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						{#if dashboardSections.includes('migration_progress')}
+							{@const target = Number(lifecycleData.population_target || lifecycleData.critical_mass || 0)}
+							{@const pct = target > 0 ? Math.min(100, Math.round((registered / target) * 100)) : 0}
+							<div class="bg-white rounded-lg border border-gray-200 shadow p-6">
+								<div class="text-sm font-medium text-gray-500 mb-2">{dashboardConfig.public?.migration_progress?.label || 'Population migrated'}</div>
+								<div class="text-3xl font-bold text-gray-900">{pct}%</div>
+								<div class="realm-progress-bar">
+									<div class="realm-progress-fill" style="width: {pct}%; background: #10b981;"></div>
+								</div>
+								<div class="text-sm text-gray-500 mt-2">{registered.toLocaleString()} of {target.toLocaleString()} migrated</div>
+							</div>
+						{/if}
+
+						{#if dashboardSections.includes('departments') && departments.length > 0}
+							<div class="bg-white rounded-lg border border-gray-200 shadow p-6">
+								<div class="text-sm font-medium text-gray-500 mb-2">Departments</div>
+								<div class="text-3xl font-bold text-gray-900 mb-3">{departments.length}</div>
+								<div class="flex flex-wrap gap-2">
+									{#each departments as dept (dept)}
+										<span class="inline-block px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-xs">{dept}</span>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						{#if dashboardSections.includes('countdown')}
+							<div class="bg-white rounded-lg border border-gray-200 shadow p-6">
+								<div class="text-sm font-medium text-gray-500 mb-2">{dashboardConfig.public?.countdown?.label || 'Time to go-live'}</div>
+								{#if goLiveRemaining}
+									<div class="text-3xl font-bold text-gray-900" style="font-variant-numeric: tabular-nums;">
+										{goLiveRemaining.days}d {goLiveRemaining.hours}h {goLiveRemaining.minutes}m {goLiveRemaining.seconds}s
+									</div>
+								{:else}
+									<div class="text-3xl font-bold text-green-600">Live</div>
+								{/if}
+							</div>
+						{/if}
+
+						{#if dashboardSections.includes('citizen_counter')}
+							<div class="bg-white rounded-lg border border-gray-200 shadow p-6">
+								<div class="text-sm font-medium text-gray-500 mb-2">{dashboardConfig.public?.citizen_counter?.label || 'Citizens onboarded'}</div>
+								<div class="text-3xl font-bold text-gray-900">{Number(statusData?.users_count ?? lifecycleData.registered_users ?? 0).toLocaleString()}</div>
+							</div>
+						{/if}
+
+						{#if dashboardSections.includes('threshold')}
+							{@const mass = Number(lifecycleData.critical_mass || 0)}
+							{@const pct = mass > 0 ? Math.min(100, Math.round((registered / mass) * 100)) : 0}
+							<div class="bg-white rounded-lg border border-gray-200 shadow p-6">
+								<div class="text-sm font-medium text-gray-500 mb-2">{dashboardConfig.public?.threshold?.label || 'Critical mass'}</div>
+								<div class="text-3xl font-bold text-gray-900">{pct}%</div>
+								<div class="realm-progress-bar">
+									<div class="realm-progress-fill" style="width: {pct}%; background: #2563eb;"></div>
+								</div>
+								<div class="text-sm text-gray-500 mt-2">{registered.toLocaleString()} / {mass.toLocaleString()}</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/if}
 
 			<!-- Realm lifecycle status -->
 			{#if statusData}
