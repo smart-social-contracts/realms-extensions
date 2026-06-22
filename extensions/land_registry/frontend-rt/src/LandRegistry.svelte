@@ -84,6 +84,59 @@
 	};
 	const ZONE_COLOR = '#f59e0b';
 	const INFLUENCE_RINGS = 2;
+	const DEFAULT_H3_RESOLUTION = 6;
+	const HEX_ZOOM_THRESHOLD = 10;
+
+	function parseMetadata(raw: unknown): Record<string, unknown> | null {
+		if (!raw) return null;
+		try {
+			return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+		} catch {
+			return null;
+		}
+	}
+
+	function resolveH3Index(land: any, h3Api: any): string | null {
+		const candidates: (string | null | undefined)[] = [
+			land.h3_index,
+			land.zones?.[0]?.h3_index,
+		];
+		const meta = parseMetadata(land.metadata);
+		if (meta?.parent_zone) candidates.push(String(meta.parent_zone));
+
+		for (const idx of candidates) {
+			if (!idx || String(idx).includes('manual')) continue;
+			try {
+				if (h3Api.isValidCell && !h3Api.isValidCell(idx)) continue;
+				h3Api.cellToLatLng(idx);
+				return idx;
+			} catch {}
+		}
+
+		const lat = land.latitude ?? land.zones?.[0]?.latitude;
+		const lng = land.longitude ?? land.zones?.[0]?.longitude;
+		if (lat == null || lng == null) return null;
+
+		const resolution = Math.round(Number(land.zones?.[0]?.resolution ?? DEFAULT_H3_RESOLUTION));
+		try {
+			return h3Api.latLngToCell(Number(lat), Number(lng), resolution);
+		} catch {
+			return null;
+		}
+	}
+
+	function getLandLatLng(land: any, h3Api: any, h3Index: string | null): [number, number] | null {
+		if (land.latitude != null && land.longitude != null) {
+			return [Number(land.latitude), Number(land.longitude)];
+		}
+		if (h3Index && h3Api) {
+			try {
+				const c = h3Api.cellToLatLng(h3Index);
+				return [c[0], c[1]];
+			} catch {}
+		}
+		return null;
+	}
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
 		return await ctx.callSync(fn, args);
@@ -156,7 +209,7 @@
 	function updateLayerVisibility() {
 		if (!mapInstance || !circleLayer || !landLayer) return;
 		const zoom = mapInstance.getZoom();
-		if (zoom < 10) {
+		if (zoom < HEX_ZOOM_THRESHOLD) {
 			circleLayer.addTo(mapInstance);
 			mapInstance.removeLayer(landLayer);
 		} else {
@@ -171,13 +224,8 @@
 
 		const parentZones = new Map<string, { landCount: number; landTypes: Record<string, number> }>();
 		for (const land of lands) {
-			let parentZone: string | null = null;
-			if (land.metadata) {
-				try {
-					const meta = typeof land.metadata === 'string' ? JSON.parse(land.metadata) : land.metadata;
-					parentZone = meta.parent_zone;
-				} catch {}
-			}
+			const meta = parseMetadata(land.metadata);
+			const parentZone = meta?.parent_zone ? String(meta.parent_zone) : null;
 			if (!parentZone) continue;
 			if (!parentZones.has(parentZone)) parentZones.set(parentZone, { landCount: 0, landTypes: {} });
 			const zd = parentZones.get(parentZone)!;
@@ -237,20 +285,10 @@
 		for (const land of lands) {
 			const color = LAND_COLORS[land.land_type] || LAND_COLORS.unassigned;
 			const isOwned = land.owner_user_id || land.owner_organization_id;
-			let lat: number | null = null;
-			let lng: number | null = null;
-			let h3Index = land.h3_index;
-
-			if (land.latitude && land.longitude) { lat = land.latitude; lng = land.longitude; }
-			else if (h3 && h3Index && !h3Index.includes('manual')) {
-				try { const c = h3.cellToLatLng(h3Index); lat = c[0]; lng = c[1]; } catch { h3Index = null; }
-			}
-			if (lat == null && h3) {
-				let parentZone: string | null = null;
-				if (land.metadata) { try { const m = typeof land.metadata === 'string' ? JSON.parse(land.metadata) : land.metadata; parentZone = m.parent_zone; } catch {} }
-				if (parentZone) { try { const c = h3.cellToLatLng(parentZone); lat = c[0]; lng = c[1]; h3Index = parentZone; } catch {} }
-			}
-			if (lat == null || lng == null) continue;
+			const h3Index = h3 ? resolveH3Index(land, h3) : null;
+			const coords = h3 ? getLandLatLng(land, h3, h3Index) : null;
+			if (!coords) continue;
+			const [lat, lng] = coords;
 			allLatLngs.push([lat, lng]);
 
 			const priceInfo = land.for_sale && land.price_realm_tokens ? `<br><span style="color:#16a34a;font-weight:600">${land.price_realm_tokens} REALM</span>` : '';
@@ -260,7 +298,7 @@
 			L.circleMarker([lat, lng], { radius: 18, fillColor: color, color: isOwned ? '#1f2937' : '#22c55e', weight: 3, opacity: 1, fillOpacity: 0.85 })
 				.bindPopup(popup).addTo(circleLayer);
 
-			if (h3 && h3Index && !h3Index.includes('manual')) {
+			if (h3 && h3Index) {
 				try {
 					const boundary = h3.cellToBoundary(h3Index);
 					const latLngs = boundary.map((c: number[]) => [c[0], c[1]]);
