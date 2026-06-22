@@ -25,7 +25,28 @@ Litigation **titles and descriptions** are **private by default**. They are encr
 
 The canister only ever sees an opaque ciphertext blob (`enc:v=2:…`). It never receives plaintext, the data-encryption key (DEK), or any vetKey material.
 
-![Public metadata vs encrypted case content](docs/data-split.png)
+```mermaid
+flowchart TB
+  subgraph public ["Public on-chain metadata"]
+    direction TB
+    P1["Case ID / case number"]
+    P2["Status, requester, defendant, dates"]
+    P3["Court assignment, verdict actions"]
+  end
+
+  subgraph private ["Encrypted with vetKeys"]
+    direction TB
+    E1["Title"]
+    E2["Description"]
+  end
+
+  CANISTER[("Realm canister")]
+  public --> CANISTER
+  private -->|"opaque enc:v=2:..."| CANISTER
+
+  NOTE["Plaintext, DEK, and vetKey material never reach the canister"]
+  CANISTER --- NOTE
+```
 
 ### Who can read private content
 
@@ -62,7 +83,21 @@ Alice files a private litigation against Carol titled *"Contract breach over unp
 
 Dave still sees metadata such as case ID `DEMO-2026-0001`, status, requester, defendant, and date — but not the encrypted narrative.
 
-![Who can see the case list vs encrypted title and description](docs/access-control.png)
+```mermaid
+flowchart TB
+  Alice["Alice · submitter<br/>List: Yes · Content: Yes"]
+  Bob["Bob · Justice department<br/>List: Yes · Content: Yes"]
+  Carol["Carol · defendant<br/>List: No · Content: No"]
+  Dave["Dave · realm admin<br/>List: Yes · Content: No"]
+
+  classDef allowed fill:#ecfdf5,stroke:#059669,color:#065f46;
+  classDef partial fill:#fffbeb,stroke:#d97706,color:#92400e;
+  classDef denied fill:#fef2f2,stroke:#dc2626,color:#991b1b;
+
+  class Alice,Bob allowed;
+  class Dave partial;
+  class Carol denied;
+```
 
 ### Sharing scope
 
@@ -98,7 +133,25 @@ litigation:Justice:aaaaa-aa:7f3c2b1a-4d5e-6f70-8192-abcdef012345
 4. **Grant access** — Wrapped DEKs are stored as key envelopes via `ctx.crypto.grantScope()`.
 5. **Read** — Authorized users decrypt in the browser with `ctx.crypto.decryptScope()`. Everyone else sees the case in the list but the UI shows **"Encrypted — no access"** for the title/description.
 
-![End-to-end vetKeys encryption flow for private litigations](docs/encryption-flow.png)
+```mermaid
+sequenceDiagram
+  autonumber
+  actor User as User browser
+  participant C as Realm canister
+
+  User->>C: create_litigation()
+  C-->>User: case id, scope, recipients
+  Note over User: encryptForRecipients()<br/>wrap DEK for each recipient
+  User->>C: set_litigation_content(ciphertext)
+  User->>C: grantScope(wrapped DEKs)
+  User->>C: get_litigations()
+  C-->>User: metadata + scope + ciphertext
+  alt authorized recipient
+    Note over User: decryptScope() → title + description
+  else everyone else
+    Note over User: decryptScope() → null<br/>UI: Encrypted — no access
+  end
+```
 
 ### Example: filing a private litigation (client flow)
 
