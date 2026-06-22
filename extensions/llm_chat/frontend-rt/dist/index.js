@@ -1207,7 +1207,7 @@ function ha(e, t = !1, n = !0) {
   const r = Xt(e);
   return t || (r.equals = ti), r;
 }
-function g(e, t, n = !1) {
+function h(e, t, n = !1) {
   R !== null && // since we are untracking the function inside `$inspect.with` we need to add this check
   // to ensure we error if state is set inside an inspect effect
   (!Je || (R.f & bs) !== 0) && ri() && (R.f & (ve | We | un | bs)) !== 0 && (lt === null || !lt.has(e)) && zo();
@@ -1244,7 +1244,7 @@ function ga() {
   ms.clear();
 }
 function Yn(e) {
-  g(e, e.v + 1);
+  h(e, e.v + 1);
 }
 function ki(e, t, n) {
   var r = e.reactions;
@@ -1298,7 +1298,7 @@ function Ge(e) {
         return p === void 0 ? c(() => {
           var _ = /* @__PURE__ */ P(u.value);
           return n.set(l, _), _;
-        }) : g(p, u.value, !0), !0;
+        }) : h(p, u.value, !0), !0;
       },
       deleteProperty(f, l) {
         var u = n.get(l);
@@ -1308,7 +1308,7 @@ function Ge(e) {
             n.set(l, p), Yn(s);
           }
         } else
-          g(u, oe), Yn(s);
+          h(u, oe), Yn(s);
         return !0;
       },
       get(f, l, u) {
@@ -1362,14 +1362,14 @@ function Ge(e) {
           for (var b = u; b < /** @type {Source<number>} */
           _.v; b += 1) {
             var m = n.get(b + "");
-            m !== void 0 ? g(m, oe) : b in f && (m = c(() => /* @__PURE__ */ P(oe)), n.set(b + "", m));
+            m !== void 0 ? h(m, oe) : b in f && (m = c(() => /* @__PURE__ */ P(oe)), n.set(b + "", m));
           }
         if (_ === void 0)
-          (!v || Vn(f, l)?.writable) && (_ = c(() => /* @__PURE__ */ P(void 0)), g(_, Ge(u)), n.set(l, _));
+          (!v || Vn(f, l)?.writable) && (_ = c(() => /* @__PURE__ */ P(void 0)), h(_, Ge(u)), n.set(l, _));
         else {
           v = _.v !== oe;
           var y = c(() => Ge(u));
-          g(_, y);
+          h(_, y);
         }
         var k = Reflect.getOwnPropertyDescriptor(f, l);
         if (k?.set && k.set.call(p, u), !v) {
@@ -1378,7 +1378,7 @@ function Ge(e) {
               /** @type {Source<number>} */
               n.get("length")
             ), ee = Number(l);
-            Number.isInteger(ee) && ee >= O.v && g(O, ee + 1);
+            Number.isInteger(ee) && ee >= O.v && h(O, ee + 1);
           }
           Yn(s);
         }
@@ -2819,9 +2819,9 @@ function Ol(e, t) {
   function r() {
     const d = t.ctx.config?.network;
     if (d && d !== "ic") return d;
-    const h = globalThis.__CANISTER_IDS;
-    if (h?.network && h.network !== "ic") return h.network;
-    const w = t.ctx.config?.fileRegistryCanisterId || h?.file_registry || "";
+    const g = globalThis.__CANISTER_IDS;
+    if (g?.network && g.network !== "ic") return g.network;
+    const w = t.ctx.config?.fileRegistryCanisterId || g?.file_registry || "";
     return w && n[w] ? n[w] : window.location.hostname.includes("icp0.io") ? "test" : "staging";
   }
   let s = /* @__PURE__ */ P(Ge([])), i = /* @__PURE__ */ P(""), c = /* @__PURE__ */ P(!1), f = /* @__PURE__ */ P(""), l = /* @__PURE__ */ P(!1), u = /* @__PURE__ */ P(Ge(typeof sessionStorage < "u" && sessionStorage.getItem("llm-chat-backend-awake") === "1")), p = /* @__PURE__ */ P(""), _ = /* @__PURE__ */ P(void 0), v = /* @__PURE__ */ P(Ge([])), b = /* @__PURE__ */ P(!1), m = /* @__PURE__ */ P(void 0), y = /* @__PURE__ */ P(Ge([])), k = /* @__PURE__ */ P(null), O = /* @__PURE__ */ P(!1), ee = /* @__PURE__ */ P(null), W = /* @__PURE__ */ P("calc(100dvh - 102px)"), le = /* @__PURE__ */ P(null), te = /* @__PURE__ */ P(!1), ce = /* @__PURE__ */ P(null), pe = /* @__PURE__ */ P(0), Qe, ut, V = /* @__PURE__ */ P(null), Le = /* @__PURE__ */ P(Ge([])), Xe = /* @__PURE__ */ P(!1), es = /* @__PURE__ */ P(!1);
@@ -2829,26 +2829,26 @@ function Ol(e, t) {
   let Hi = `${Tn}api/ask`, Ui = `${Tn}suggestions`, qi = `${Tn}api/personas/assistants`, An = `${Tn}api/conversations`;
   function Vi(d) {
     if (!d) return null;
-    const h = d.match(/^realms:\/\/codex_viewer\/codex\/([^?]+)/);
-    if (!h) return null;
+    const g = d.match(/^realms:\/\/codex_viewer\/codex\/([^?]+)/);
+    if (!g) return null;
     try {
-      return decodeURIComponent(h[1]);
+      return decodeURIComponent(g[1]);
     } catch {
-      return h[1];
+      return g[1];
     }
   }
   function kr(d) {
     if (!d) return null;
-    const h = d.match(/^realms:\/\/voting\/proposal\/([^?#]+)/);
-    if (!h) return null;
+    const g = d.match(/^realms:\/\/voting\/proposal\/([^?#]+)/);
+    if (!g) return null;
     try {
-      return decodeURIComponent(h[1]);
+      return decodeURIComponent(g[1]);
     } catch {
-      return h[1];
+      return g[1];
     }
   }
   function Bi(d) {
-    !d || d.id === o(pe) || (g(pe, d.id, !0), g(i, d.message, !0), g(te, !0), d.autoSend ? setTimeout(() => void tn(), 150) : Un().then(Os));
+    !d || d.id === o(pe) || (h(pe, d.id, !0), h(i, d.message, !0), h(te, !0), d.autoSend ? setTimeout(() => void tn(), 150) : Un().then(Os));
   }
   function Yi() {
     if (kr(o(ce)?.uri)) {
@@ -2863,57 +2863,57 @@ function Ol(e, t) {
   }
   function Gi() {
     Qe = t.ctx.host?.pendingPrompt?.subscribe?.(Bi), ut = t.ctx.host?.focus?.subscribe?.((d) => {
-      g(ce, d, !0);
+      h(ce, d, !0);
     });
   }
-  function mr(d, h) {
-    if (h === 503 && d instanceof Error && d.message) {
+  function mr(d, g) {
+    if (g === 503 && d instanceof Error && d.message) {
       const w = d.message.toLowerCase();
       return w.includes("pod") || w.includes("llm backend") || w.includes("ollama") || w.includes("waking up") || w.includes("still starting") ? "The AI assistant is still waking up. Please try again in a few minutes." : d.message;
     }
-    return h === 502 || h === 530 ? "The AI backend is temporarily offline. Please try again in a few minutes." : h === 504 || h === 524 ? "The request timed out before the server could respond. Please try again." : h && h >= 500 ? "Server error. Please try again later." : d instanceof DOMException && d.name === "TimeoutError" || d instanceof Error && d.name === "AbortError" ? "The request timed out before the server could respond. Please try again." : d instanceof TypeError || d instanceof Error && d.message.includes("fetch") ? "Could not reach the AI service. Check your network or try again shortly." : d instanceof Error && d.message.includes("HTTP error") ? mr(d, Number(d.message.match(/Status:\s*(\d+)/)?.[1])) : "Failed to get a response. Please try again.";
+    return g === 502 || g === 530 ? "The AI backend is temporarily offline. Please try again in a few minutes." : g === 504 || g === 524 ? "The request timed out before the server could respond. Please try again." : g && g >= 500 ? "Server error. Please try again later." : d instanceof DOMException && d.name === "TimeoutError" || d instanceof Error && d.name === "AbortError" ? "The request timed out before the server could respond. Please try again." : d instanceof TypeError || d instanceof Error && d.message.includes("fetch") ? "Could not reach the AI service. Check your network or try again shortly." : d instanceof Error && d.message.includes("HTTP error") ? mr(d, Number(d.message.match(/Status:\s*(\d+)/)?.[1])) : "Failed to get a response. Please try again.";
   }
   function Wi(d) {
-    const h = d.toLowerCase();
-    return h.includes("llm backend") || h.includes("cannot reach ollama") || h.includes("ollama at");
+    const g = d.toLowerCase();
+    return g.includes("llm backend") || g.includes("cannot reach ollama") || g.includes("ollama at");
   }
   function Cn() {
-    g(u, !0);
+    h(u, !0);
     try {
       sessionStorage.setItem("llm-chat-backend-awake", "1");
     } catch {
     }
   }
   function wr() {
-    g(u, !1);
+    h(u, !1);
     try {
       sessionStorage.removeItem("llm-chat-backend-awake");
     } catch {
     }
   }
   function Ki(d) {
-    const h = d.toLowerCase();
-    return h.includes("waking up") || h.includes("still starting");
+    const g = d.toLowerCase();
+    return g.includes("waking up") || g.includes("still starting");
   }
   function Ps() {
-    g(f, ""), g(l, !1);
+    h(f, ""), h(l, !1);
   }
-  function ts(d, h) {
-    (d.trim() || h.trim()) && g(l, !0);
-    const w = { text: d, isUser: !1, ...h.trim() ? { thinking: h } : {} }, x = o(s)[o(s).length - 1];
-    !x || x.isUser ? g(s, [...o(s), w], !0) : g(s, o(s).map((M, Ze) => Ze === o(s).length - 1 ? { ...M, ...w } : M), !0), Un().then(Rs);
+  function ts(d, g) {
+    d.trim() && (h(l, !0), h(f, ""));
+    const w = { text: d, isUser: !1, ...g.trim() ? { thinking: g } : {} }, x = o(s)[o(s).length - 1];
+    !x || x.isUser ? h(s, [...o(s), w], !0) : h(s, o(s).map((M, Ze) => Ze === o(s).length - 1 ? { ...M, ...w } : M), !0), Un().then(Rs);
   }
-  function Ji(d, h) {
+  function Ji(d, g) {
     const w = typeof d.type == "string" ? d.type : d.text ? "text" : "", x = typeof d.text == "string" ? d.text : "";
     if (w === "status" && x) {
-      Cn(), g(f, x, !0);
+      Cn(), h(f, x, !0);
       return;
     }
     if (w === "thinking" && x) {
-      Cn(), h.thinking += x, ts(h.text, h.thinking);
+      Cn(), g.thinking += x, ts(g.text, g.thinking);
       return;
     }
-    x && (Cn(), h.text += x, ts(h.text, h.thinking));
+    x && (Cn(), g.text += x, ts(g.text, g.thinking));
   }
   let Mn = "", Et = "", xr, yr, St = /* @__PURE__ */ P(!1);
   const Is = !!t.ctx.sidebarPanel, Er = "llm_chat_prefs";
@@ -2943,38 +2943,38 @@ function Ol(e, t) {
   async function Sr() {
     try {
       const d = await fetch(`${Tn}api/personas/assistants`, { method: "HEAD", signal: AbortSignal.timeout(5e3) });
-      g(In, d.ok ? "online" : "offline", !0);
+      h(In, d.ok ? "online" : "offline", !0);
     } catch {
-      g(In, "offline");
+      h(In, "offline");
     }
   }
   async function Xi() {
     if (!(!Et || !o(St))) {
-      g(ns, !0);
+      h(ns, !0);
       try {
-        await Ds(), await Promise.all(o(Le).map((d) => fetch(`${An}/${d.conversation_id}`, { method: "DELETE" }))), g(Le, [], !0), g(s, [], !0), g(V, null), g(Ls, !0), setTimeout(
+        await Ds(), await Promise.all(o(Le).map((d) => fetch(`${An}/${d.conversation_id}`, { method: "DELETE" }))), h(Le, [], !0), h(s, [], !0), h(V, null), h(Ls, !0), setTimeout(
           () => {
-            g(Ls, !1);
+            h(Ls, !1);
           },
           2e3
         );
       } catch {
       } finally {
-        g(ns, !1);
+        h(ns, !1);
       }
     }
   }
   Xa(async () => {
-    const d = globalThis.__CANISTER_IDS?.realm_backend || "", h = t.ctx.config?.canisterId || "";
-    Mn = d || h, xr = t.ctx.principal?.subscribe?.((x) => {
+    const d = globalThis.__CANISTER_IDS?.realm_backend || "", g = t.ctx.config?.canisterId || "";
+    Mn = d || g, xr = t.ctx.principal?.subscribe?.((x) => {
       Et = x || "";
     }), yr = t.ctx.isAuthenticated?.subscribe?.((x) => {
-      g(St, x, !0);
+      h(St, x, !0);
     });
     const w = window.visualViewport;
     if (w) {
       const x = () => {
-        g(W, `${w.height - w.offsetTop}px`);
+        h(W, `${w.height - w.offsetTop}px`);
       };
       x(), w.addEventListener("resize", x), w.addEventListener("scroll", x), window.__chatVpCleanup = () => {
         w.removeEventListener("resize", x), w.removeEventListener("scroll", x);
@@ -2982,28 +2982,28 @@ function Ol(e, t) {
     }
     if (Zi(), Gi(), await eo(), o(en) && o(y).length > 0) {
       const x = o(y).find((M) => M.id === o(en));
-      x && g(k, x, !0);
+      x && h(k, x, !0);
     }
     !o(te) && o(Dt) && await ss(), Is || (Sr(), o(St) && await Ds());
   });
   function Zi() {
     try {
-      const d = new URLSearchParams(window.location.search), h = d.get("explain");
-      if (!h) return;
-      const [w, x] = h.split(":");
+      const d = new URLSearchParams(window.location.search), g = d.get("explain");
+      if (!g) return;
+      const [w, x] = g.split(":");
       if (w === "codex" && x)
-        g(te, !0), t.ctx.backend.extension_sync_call("codex_viewer", "get_codex_details", JSON.stringify({ codex_id: x })).then((M) => {
+        h(te, !0), t.ctx.backend.extension_sync_call("codex_viewer", "get_codex_details", JSON.stringify({ codex_id: x })).then((M) => {
           if (M.success) {
             const dt = (typeof M.response == "string" ? JSON.parse(M.response) : M.response).codex?.name || `codex_${x}`, he = `/extensions/codex_viewer/${x}`;
-            g(le, x, !0), g(i, `Please explain this codex: [${dt}](${he})`), setTimeout(() => tn(), 300);
+            h(le, x, !0), h(i, `Please explain this codex: [${dt}](${he})`), setTimeout(() => tn(), 300);
           }
         }).catch((M) => {
-          console.error("Failed to fetch codex for explanation:", M), g(te, !1);
+          console.error("Failed to fetch codex for explanation:", M), h(te, !1);
         });
       else if (w === "financial_statements") {
-        g(te, !0);
+        h(te, !0);
         const M = d.get("context") || "";
-        g(i, `Please explain the following financial statements of this realm in plain language. Highlight key insights, any concerns, and the overall financial health:
+        h(i, `Please explain the following financial statements of this realm in plain language. Highlight key insights, any concerns, and the overall financial health:
 
 ${M}`), setTimeout(() => tn(), 300);
       }
@@ -3019,47 +3019,47 @@ ${M}`), setTimeout(() => tn(), 300);
   }
   async function eo() {
     if (!o(O)) {
-      g(O, !0);
+      h(O, !0);
       try {
         const d = await fetch(qi, {
           method: "GET",
           headers: { "Content-Type": "application/json" }
         });
         if (!d.ok) throw new Error(`HTTP ${d.status}`);
-        const h = await d.json();
-        h.assistants && Array.isArray(h.assistants) && (g(y, h.assistants, !0), o(y).length > 0 && !o(k) && g(k, o(y)[0], !0));
+        const g = await d.json();
+        g.assistants && Array.isArray(g.assistants) && (h(y, g.assistants, !0), o(y).length > 0 && !o(k) && h(k, o(y)[0], !0));
       } catch (d) {
         console.error("Error fetching assistants:", d);
       } finally {
-        g(O, !1);
+        h(O, !1);
       }
     }
   }
   async function ss() {
     if (!o(b)) {
-      g(b, !0);
+      h(b, !0);
       try {
         const d = new URLSearchParams({
           user_principal: Et || "",
           realm_principal: Mn || "",
           persona: o(k)?.id || "ashoka"
-        }), h = await fetch(`${Ui}?${d.toString()}`, {
+        }), g = await fetch(`${Ui}?${d.toString()}`, {
           method: "GET",
           headers: { "Content-Type": "application/json" }
         });
-        if (!h.ok) throw new Error(`HTTP ${h.status}`);
-        const w = await h.json();
-        w.suggestions && Array.isArray(w.suggestions) && g(v, w.suggestions, !0);
+        if (!g.ok) throw new Error(`HTTP ${g.status}`);
+        const w = await g.json();
+        w.suggestions && Array.isArray(w.suggestions) && h(v, w.suggestions, !0);
       } catch (d) {
         console.error("Error fetching suggestions:", d);
       } finally {
-        g(b, !1);
+        h(b, !1);
       }
     }
   }
   async function tn() {
     if (!o(i).trim()) return;
-    g(p, ""), g(
+    h(p, ""), h(
       s,
       [
         ...o(s),
@@ -3068,21 +3068,21 @@ ${M}`), setTimeout(() => tn(), 300);
       !0
     );
     const d = o(i);
-    g(i, ""), g(c, !0), Ps(), g(f, o(u) ? "Thinking…" : "", !0);
+    h(i, ""), h(c, !0), Ps(), h(f, o(u) ? "Thinking…" : "", !0);
     try {
       await ro();
-      const h = r(), w = {
+      const g = r(), w = {
         question: d,
         realm_principal: Mn,
         user_principal: Et,
         stream: !0,
         verbosity: 1,
         persona: o(k)?.id || "ashoka",
-        network: h,
+        network: g,
         ...o(V) ? { conversation_id: o(V) } : {}
       };
       if (o(le))
-        w.explain_codex_id = o(le), g(le, null);
+        w.explain_codex_id = o(le), h(le, null);
       else {
         const ne = Vi(o(ce)?.uri);
         ne && (w.explain_codex_id = ne);
@@ -3139,68 +3139,68 @@ ${M}`), setTimeout(() => tn(), 300);
         Ze.releaseLock();
       }
       const et = he.text, rs = he.thinking;
-      et.trim() ? Wi(et) ? (g(p, "The AI backend is temporarily offline. Please try again in a few minutes."), wr()) : et.trim() && Cn() : o(s).length > 0 && !o(s)[o(s).length - 1].isUser ? g(s, o(s).map((ne, qe) => qe === o(s).length - 1 ? { ...ne, text: "No response from LLM" } : ne), !0) : g(
+      et.trim() ? Wi(et) ? (h(p, "The AI backend is temporarily offline. Please try again in a few minutes."), wr()) : et.trim() && Cn() : o(s).length > 0 && !o(s)[o(s).length - 1].isUser ? h(s, o(s).map((ne, qe) => qe === o(s).length - 1 ? { ...ne, text: "No response from LLM" } : ne), !0) : h(
         s,
         [
           ...o(s),
           { text: "No response from LLM", isUser: !1 }
         ],
         !0
-      ), g(c, !1), Ps(), g(te, !1), await ss();
-    } catch (h) {
-      console.error("Error calling LLM:", h), g(p, mr(h, h?.httpStatus), !0), Ki(o(p)) && wr(), o(s).length > 0 && !o(s)[o(s).length - 1].isUser && g(s, o(s).slice(0, -1), !0);
+      ), h(c, !1), Ps(), h(te, !1), await ss();
+    } catch (g) {
+      console.error("Error calling LLM:", g), h(p, mr(g, g?.httpStatus), !0), Ki(o(p)) && wr(), o(s).length > 0 && !o(s)[o(s).length - 1].isUser && h(s, o(s).slice(0, -1), !0);
     } finally {
-      g(c, !1), Ps(), g(te, !1);
+      h(c, !1), Ps(), h(te, !1);
     }
   }
   function to() {
-    g(p, "");
+    h(p, "");
   }
   async function Ds() {
     if (!(!Et || !o(St))) {
-      g(es, !0);
+      h(es, !0);
       try {
         const d = new URLSearchParams({
           user_principal: Et,
           realm_principal: Mn
-        }), h = await fetch(`${An}?${d}`, { headers: { "Content-Type": "application/json" } });
-        if (!h.ok) return;
-        const w = await h.json();
-        g(Le, (w.conversations || []).sort((x, M) => new Date(M.updated_at).getTime() - new Date(x.updated_at).getTime()), !0);
+        }), g = await fetch(`${An}?${d}`, { headers: { "Content-Type": "application/json" } });
+        if (!g.ok) return;
+        const w = await g.json();
+        h(Le, (w.conversations || []).sort((x, M) => new Date(M.updated_at).getTime() - new Date(x.updated_at).getTime()), !0);
       } catch {
       } finally {
-        g(es, !1);
+        h(es, !1);
       }
     }
   }
   async function Tr(d) {
-    g(Xe, !1), g(s, [], !0), g(V, d.conversation_id, !0);
-    const h = o(y).find((w) => w.id === d.persona);
-    h && g(k, h, !0);
+    h(Xe, !1), h(s, [], !0), h(V, d.conversation_id, !0);
+    const g = o(y).find((w) => w.id === d.persona);
+    g && h(k, g, !0);
     try {
       const w = await fetch(`${An}/${d.conversation_id}/messages`, { headers: { "Content-Type": "application/json" } });
       if (!w.ok) return;
       const x = await w.json();
-      g(s, io(x.messages || []), !0), o(s).some((M) => !M.isUser) && Cn(), await Un(), Rs();
+      h(s, io(x.messages || []), !0), o(s).some((M) => !M.isUser) && Cn(), await Un(), Rs();
     } catch {
     }
   }
   async function no() {
-    g(Xe, !1), g(s, [], !0), g(V, null), g(p, ""), g(v, [], !0), await ss();
+    h(Xe, !1), h(s, [], !0), h(V, null), h(p, ""), h(v, [], !0), await ss();
   }
-  async function Ar(d, h) {
-    h.stopPropagation();
+  async function Ar(d, g) {
+    g.stopPropagation();
     try {
-      await fetch(`${An}/${d}`, { method: "DELETE" }), g(Le, o(Le).filter((w) => w.conversation_id !== d), !0), o(V) === d && (g(s, [], !0), g(V, null));
+      await fetch(`${An}/${d}`, { method: "DELETE" }), h(Le, o(Le).filter((w) => w.conversation_id !== d), !0), o(V) === d && (h(s, [], !0), h(V, null));
     } catch {
     }
   }
   async function so() {
-    g(Xe, !0), await Ds();
+    h(Xe, !0), await Ds();
   }
   function Cr(d) {
-    const h = new Date(d), x = (/* @__PURE__ */ new Date()).getTime() - h.getTime(), M = Math.floor(x / 864e5);
-    return M === 0 ? h.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : M === 1 ? "Yesterday" : M < 7 ? h.toLocaleDateString([], { weekday: "short" }) : h.toLocaleDateString([], { month: "short", day: "numeric" });
+    const g = new Date(d), x = (/* @__PURE__ */ new Date()).getTime() - g.getTime(), M = Math.floor(x / 864e5);
+    return M === 0 ? g.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : M === 1 ? "Yesterday" : M < 7 ? g.toLocaleDateString([], { weekday: "short" }) : g.toLocaleDateString([], { month: "short", day: "numeric" });
   }
   async function ro() {
     if (!(o(V) || !Et || !o(St)))
@@ -3215,17 +3215,17 @@ ${M}`), setTimeout(() => tn(), 300);
           })
         });
         if (d.ok) {
-          const h = await d.json();
-          g(V, h.conversation_id || null, !0);
+          const g = await d.json();
+          h(V, g.conversation_id || null, !0);
         }
       } catch {
       }
   }
-  function Mr(d, h) {
+  function Mr(d, g) {
     const w = () => {
-      g(ee, h, !0), setTimeout(
+      h(ee, g, !0), setTimeout(
         () => {
-          g(ee, null);
+          h(ee, null);
         },
         1500
       );
@@ -3241,22 +3241,22 @@ ${M}`), setTimeout(() => tn(), 300);
     navigator.clipboard ? navigator.clipboard.writeText(d).then(w).catch(x) : x();
   }
   function io(d) {
-    const h = [];
+    const g = [];
     for (const w of d) {
       if (!w || typeof w != "object") continue;
       const x = w;
       if (x.role && x.content != null) {
-        h.push({ text: String(x.content), isUser: x.role === "user" });
+        g.push({ text: String(x.content), isUser: x.role === "user" });
         continue;
       }
-      x.question != null && String(x.question).trim() && h.push({ text: String(x.question), isUser: !0 }), x.response != null && String(x.response).trim() && h.push({ text: String(x.response), isUser: !1 });
+      x.question != null && String(x.question).trim() && g.push({ text: String(x.question), isUser: !0 }), x.response != null && String(x.response).trim() && g.push({ text: String(x.response), isUser: !1 });
     }
-    return h;
+    return g;
   }
   function oo(d) {
     if (!d) return "";
-    let h = d.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return h = h.replace(/```([^`]*?)```/gs, '<pre class="bg-gray-100 dark:bg-gray-900 rounded-md p-3 my-2 overflow-x-auto text-xs font-mono"><code>$1</code></pre>').replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/`(.+?)`/g, '<code class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-xs font-mono">$1</code>').replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-800">$1</a>').replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-3 mb-1">$1</h3>').replace(/^## (.+)$/gm, '<h2 class="text-lg font-semibold mt-3 mb-1">$1</h2>').replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-3 mb-1">$1</h1>').replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>').replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 list-decimal">$2</li>').replace(/\n{2,}/g, "<br/><br/>").replace(/\n/g, "<br/>"), h;
+    let g = d.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return g = g.replace(/```([^`]*?)```/gs, '<pre class="bg-gray-100 dark:bg-gray-900 rounded-md p-3 my-2 overflow-x-auto text-xs font-mono"><code>$1</code></pre>').replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/`(.+?)`/g, '<code class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-xs font-mono">$1</code>').replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-800">$1</a>').replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold mt-3 mb-1">$1</h3>').replace(/^## (.+)$/gm, '<h2 class="text-lg font-semibold mt-3 mb-1">$1</h2>').replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold mt-3 mb-1">$1</h1>').replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>').replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 list-decimal">$2</li>').replace(/\n{2,}/g, "<br/><br/>").replace(/\n/g, "<br/>"), g;
   }
   function Os() {
     if (o(m)) {
@@ -3269,10 +3269,10 @@ ${M}`), setTimeout(() => tn(), 300);
     d.key === "Enter" && !d.shiftKey && (d.preventDefault(), tn()), setTimeout(Os, 0);
   }
   function lo(d) {
-    g(i, d, !0), tn();
+    h(i, d, !0), tn();
   }
   function co(d) {
-    g(k, d, !0), g(s, [], !0), ss();
+    h(k, d, !0), h(s, [], !0), ss();
   }
   ps(() => () => {
     xr?.(), yr?.(), Qe?.(), ut?.(), window.__chatVpCleanup?.();
@@ -3280,7 +3280,7 @@ ${M}`), setTimeout(() => tn(), 300);
   var Pr = rn(), fo = zt(Pr);
   {
     var uo = (d) => {
-      var h = al(), w = I(E(h), 2), x = I(E(w), 4);
+      var g = al(), w = I(E(g), 2), x = I(E(w), 4);
       {
         var M = ($) => {
           var ke = tl();
@@ -3288,7 +3288,7 @@ ${M}`), setTimeout(() => tn(), 300);
             var K = el(), B = E(K), X = E(B), re = I(B, 2), H = E(re);
             be(() => {
               ln(K, 1, `settings-assistant-btn ${o(en) === o(j).id || !o(en) && o(y)[0].id === o(j).id ? "selected" : ""}`, "svelte-beco3k"), me(X, o(j).emoji), me(H, o(j).name);
-            }), se("click", K, () => g(en, o(j).id, !0)), S(T, K);
+            }), se("click", K, () => h(en, o(j).id, !0)), S(T, K);
           }), S($, ke);
         }, Ze = ($) => {
           var ke = nl();
@@ -3363,14 +3363,14 @@ ${M}`), setTimeout(() => tn(), 300);
       var Fs = I(tt, 2);
       be(() => {
         ln(et, 1, `settings-switch ${o(Dt) ? "on" : ""}`, "svelte-beco3k"), as(et, "aria-checked", o(Dt)), ln(ne, 1, `settings-switch ${o(Pn) ? "on" : ""}`, "svelte-beco3k"), as(ne, "aria-checked", o(Pn)), ln(vt, 1, `settings-api-status ${o(In) ?? ""}`, "svelte-beco3k");
-      }), se("click", et, () => g(Dt, !o(Dt))), se("click", ne, () => g(Pn, !o(Pn))), se("click", Fs, Sr), S(d, h);
+      }), se("click", et, () => h(Dt, !o(Dt))), se("click", ne, () => h(Pn, !o(Pn))), se("click", Fs, Sr), S(d, g);
     }, vo = (d) => {
-      var h = Rl(), w = E(h);
+      var g = Rl(), w = E(g);
       {
         var x = (T) => {
           var j = ll(), K = E(j), B = I(K, 2);
           be(() => ln(B, 1, `toolbar-btn ${o(Xe) ? "active" : ""}`, "svelte-beco3k")), se("click", K, no), se("click", B, function(...X) {
-            (o(Xe) ? () => g(Xe, !1) : so)?.apply(this, X);
+            (o(Xe) ? () => h(Xe, !1) : so)?.apply(this, X);
           }), S(T, j);
         };
         q(w, (T) => {
@@ -3584,7 +3584,7 @@ ${M}`), setTimeout(() => tn(), 300);
           o(s).length === 0 && !o(te) ? T(is) : T(Nn, -1);
         });
       }
-      Br(ne, (T) => g(_, T), () => o(_));
+      Br(ne, (T) => h(_, T), () => o(_));
       var tt = I(ne, 2), vt = E(tt);
       {
         var zs = (T) => {
@@ -3611,7 +3611,7 @@ ${M}`), setTimeout(() => tn(), 300);
         });
       }
       var js = I(vt, 2), Ot = E(js);
-      Br(Ot, (T) => g(m, T), () => o(m));
+      Br(Ot, (T) => h(m, T), () => o(m));
       var Ln = I(Ot, 2), Fs = E(Ln);
       {
         var $ = (T) => {
@@ -3627,10 +3627,10 @@ ${M}`), setTimeout(() => tn(), 300);
       }
       be(
         (T) => {
-          qr(h, `height: ${o(W) ?? ""}`), qr(ne, o(Xe) ? "display:none" : ""), Ln.disabled = T;
+          qr(g, `height: ${o(W) ?? ""}`), qr(ne, o(Xe) ? "display:none" : ""), Ln.disabled = T;
         },
         [() => o(c) || !o(i).trim()]
-      ), se("keydown", Ot, ao), se("input", Ot, () => Os()), Qa(Ot, () => o(i), (T) => g(i, T)), se("click", Ln, () => tn()), S(d, h);
+      ), se("keydown", Ot, ao), se("input", Ot, () => Os()), Qa(Ot, () => o(i), (T) => h(i, T)), se("click", Ln, () => tn()), S(d, g);
     };
     q(fo, (d) => {
       Is ? d(vo, -1) : d(uo);

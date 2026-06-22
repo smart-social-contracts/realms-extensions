@@ -217,8 +217,11 @@
 	}
 
 	function upsertStreamingAssistant(text: string, thinking: string) {
-		if (text.trim() || thinking.trim()) {
+		// Only hide the loading indicator once visible answer text arrives.
+		// Thinking-only chunks should not count as streamed content.
+		if (text.trim()) {
 			streamHasContent = true;
+			loadingStatus = '';
 		}
 		const payload: ChatMessage = {
 			text,
