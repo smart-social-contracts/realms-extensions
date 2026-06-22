@@ -28,23 +28,34 @@ Every stage change is written to an **append-only audit log** (`RfpTransition`) 
 
 ### Who does what
 
+Each party is a separate actor — different shape, color, and role. No one box covers the whole process.
+
 ```mermaid
 flowchart TB
-    subgraph request["Request"]
-        R[Requester<br/>creates & publishes RFP]
-    end
-    subgraph compete["Competition"]
-        V1[Vendor A<br/>sealed bid]
-        V2[Vendor B<br/>sealed bid]
-        V3[Vendor C<br/>sealed bid]
-    end
-    subgraph decide["Decision"]
-        E[Evaluators<br/>score on rubric]
-        A[Approver<br/>award & execute]
-    end
+    R(["🧑‍💼<br/>Requester<br/>creates & publishes RFP"]):::requester
+
+    V1(["🏢<br/>Vendor A<br/>sealed bid"]):::vendor
+    V2(["🏢<br/>Vendor B<br/>sealed bid"]):::vendor
+    V3(["🏢<br/>Vendor C<br/>sealed bid"]):::vendor
+
+    EV(["👥<br/>Evaluators<br/>score on rubric"]):::evaluator
+    AP(["✅<br/>Approver<br/>award & execute"]):::approver
+
     R --> V1 & V2 & V3
-    V1 & V2 & V3 --> E --> A
+    V1 & V2 & V3 --> EV --> AP
+
+    classDef requester fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef vendor fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+    classDef evaluator fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#581c87
+    classDef approver fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
 ```
+
+| Figurine | Role | Why separate |
+|----------|------|----------------|
+| 🧑‍💼 **Requester** | Defines the need and opens bidding | Must not pick the winner alone |
+| 🏢 **Vendors** | Compete with sealed bids | Must not see each other's offers early |
+| 👥 **Evaluators** | Score against a fixed rubric | Must not also be the requester |
+| ✅ **Approver** | Awards and records execution | Final check before contract |
 
 No single person creates the need, reads all bids, scores them, and awards the contract to a friend — unless they hold every role (which admins can configure to prevent).
 
