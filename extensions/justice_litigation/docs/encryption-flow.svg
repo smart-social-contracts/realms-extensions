@@ -18,67 +18,57 @@
   <text x="460" y="34" text-anchor="middle" font-family="system-ui,Segoe UI,sans-serif" font-size="20" font-weight="700" fill="#111827">End-to-end encryption flow</text>
   <text x="460" y="56" text-anchor="middle" font-family="system-ui,Segoe UI,sans-serif" font-size="13" fill="#6b7280">Plaintext never leaves the browser unencrypted</text>
 
-  <!-- Browser -->
   <rect x="40" y="84" width="200" height="110" rx="12" fill="#eef2ff" stroke="#818cf8" stroke-width="2"/>
   <text class="boxTitle" x="140" y="112" text-anchor="middle">User browser</text>
   <text class="boxText" x="140" y="132" text-anchor="middle">Alice (submitter)</text>
   <text class="boxText" x="140" y="152" text-anchor="middle">ctx.crypto.*</text>
   <text class="boxText" x="140" y="172" text-anchor="middle">vetKeys IBE + AES-GCM</text>
 
-  <!-- Realm -->
   <rect x="660" y="84" width="220" height="110" rx="12" fill="#f3f4f6" stroke="#9ca3af" stroke-width="2"/>
   <text class="boxTitle" x="770" y="112" text-anchor="middle">Realm canister</text>
   <text class="boxText" x="770" y="132" text-anchor="middle">Case + LitigationContent</text>
   <text class="boxText" x="770" y="152" text-anchor="middle">KeyEnvelope records</text>
   <text class="boxText" x="770" y="172" text-anchor="middle">opaque ciphertext only</text>
 
-  <!-- Step 1 -->
   <rect x="40" y="230" width="250" height="88" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
   <text class="step" x="56" y="252">1. Open case</text>
   <text class="api" x="56" y="272">create_litigation()</text>
   <text class="boxText" x="56" y="292">Returns case id, scope,</text>
   <text class="boxText" x="56" y="308">recipients (no plaintext)</text>
 
-  <!-- Step 2 -->
   <rect x="310" y="230" width="250" height="88" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
   <text class="step" x="326" y="252">2. Encrypt locally</text>
   <text class="api" x="326" y="272">encryptForRecipients()</text>
   <text class="boxText" x="326" y="292">Fresh DEK wraps title +</text>
   <text class="boxText" x="326" y="308">description for each recipient</text>
 
-  <!-- Step 3 -->
   <rect x="580" y="230" width="140" height="88" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
   <text class="step" x="596" y="252">3. Store</text>
   <text class="api" x="596" y="272">set_litigation</text>
   <text class="api" x="596" y="288">_content()</text>
-  <text class="boxText" x="596" y="308">enc:v=2:&</text>
+  <text class="boxText" x="596" y="308">enc:v=2:...</text>
 
-  <!-- Step 4 -->
   <rect x="740" y="230" width="140" height="88" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
   <text class="step" x="756" y="252">4. Grant</text>
   <text class="api" x="756" y="272">grantScope()</text>
   <text class="boxText" x="756" y="292">Wrapped DEKs</text>
   <text class="boxText" x="756" y="308">per principal</text>
 
-  <!-- Arrows row 1 -->
   <line x1="240" y1="139" x2="660" y2="139" stroke="#6366f1" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="450" y="128" text-anchor="middle" class="boxText" fill="#4338ca">steps 14 on create</text>
+  <text x="450" y="128" text-anchor="middle" class="boxText" fill="#4338ca">steps 1-4 on create</text>
 
-  <!-- Step 5 read path -->
   <rect x="40" y="360" width="840" height="130" rx="12" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
   <text class="boxTitle" x="460" y="388" text-anchor="middle" fill="#065f46">5. Read (authorized users only)</text>
 
   <text class="boxText" x="80" y="416">get_litigations() returns metadata + content_scope + content_ciphertext</text>
   <text class="api" x="80" y="438">decryptScope(scope, ciphertext)</text>
-  <text class="boxText" x="80" y="458">Alice / Bob ’ plaintext title + description in browser</text>
-  <text class="boxText" x="80" y="478">Dave / others ’ null ’ UI shows Encrypted  no access</text>
+  <text class="boxText" x="80" y="458">Alice / Bob - plaintext title + description in browser</text>
+  <text class="boxText" x="80" y="478">Dave / others - null - UI shows Encrypted, no access</text>
 
-  <!-- Scope pill -->
   <rect x="520" y="404" width="330" height="56" rx="10" fill="#ffffff" stroke="#a7f3d0"/>
   <text class="boxText" x="536" y="424" fill="#047857">Sharing scope</text>
   <text class="api" x="536" y="446">litigation:Justice:aaaaa-aa:&lt;case_id&gt;</text>
 
-  <!-- Vertical connectors -->
   <line x1="165" y1="194" x2="165" y2="230" stroke="#6366f1" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="435" y1="318" x2="435" y2="360" stroke="#059669" stroke-width="2" marker-end="url(#arrow)"/>
 </svg>
