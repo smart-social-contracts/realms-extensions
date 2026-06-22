@@ -25,6 +25,8 @@ Litigation **titles and descriptions** are **private by default**. They are encr
 
 The canister only ever sees an opaque ciphertext blob (`enc:v=2:…`). It never receives plaintext, the data-encryption key (DEK), or any vetKey material.
 
+![Public metadata vs encrypted case content](docs/data-split.svg)
+
 ### Who can read private content
 
 Decryption keys are granted only to:
@@ -60,6 +62,8 @@ Alice files a private litigation against Carol titled *"Contract breach over unp
 
 Dave still sees metadata such as case ID `DEMO-2026-0001`, status, requester, defendant, and date — but not the encrypted narrative.
 
+![Who can see the case list vs encrypted title and description](docs/access-control.svg)
+
 ### Sharing scope
 
 Each private case gets a scope string:
@@ -93,6 +97,8 @@ litigation:Justice:aaaaa-aa:7f3c2b1a-4d5e-6f70-8192-abcdef012345
 3. **Store ciphertext** — `set_litigation_content` persists only the ciphertext in the extension's `LitigationContent` entity.
 4. **Grant access** — Wrapped DEKs are stored as key envelopes via `ctx.crypto.grantScope()`.
 5. **Read** — Authorized users decrypt in the browser with `ctx.crypto.decryptScope()`. Everyone else sees the case in the list but the UI shows **"Encrypted — no access"** for the title/description.
+
+![End-to-end vetKeys encryption flow for private litigations](docs/encryption-flow.svg)
 
 ### Example: filing a private litigation (client flow)
 
