@@ -31,6 +31,10 @@
 	let profiles: ProfileDef[] = $state([]);
 	let allOperations: OperationDef[] = $state([]);
 	let loading = $state(true);
+	let listLoadingMore = $state(false);
+	let listHasMore = $state(false);
+	let listNextFromId = $state(1);
+	const LIST_FETCH_SIZE = 10;
 	let error = $state('');
 	let accessDeniedOp = $state('');
 	let successMsg = $state('');
@@ -102,17 +106,44 @@
 		return typeof raw === 'string' ? JSON.parse(raw) : raw;
 	}
 
+	async function fetchUsersPage(fromId: number) {
+		const res = await callSync('list_users_with_profiles', {
+			from_id: fromId,
+			page_size: LIST_FETCH_SIZE,
+		});
+		if (res?.success) {
+			const batch = res.data?.users ?? [];
+			return {
+				users: Array.isArray(batch) ? batch : [],
+				hasMore: !!res.data?.has_more,
+				nextFromId: res.data?.next_from_id ?? null,
+			};
+		}
+		throw new Error(res?.error || 'Failed to load users');
+	}
+
+	function mergeUsers(existing: UserEntry[], batch: UserEntry[]) {
+		const seen = new Set(existing.map((u) => u.principal));
+		const merged = [...existing];
+		for (const user of batch) {
+			if (!seen.has(user.principal)) {
+				merged.push(user);
+				seen.add(user.principal);
+			}
+		}
+		return merged;
+	}
+
 	async function loadUsers() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
+		listNextFromId = 1;
 		try {
-			const res = await callSync('list_users_with_profiles');
-			if (res?.success) {
-				users = res.data?.users ?? [];
-			} else {
-				error = res?.error || 'Failed to load users';
-			}
+			const page = await fetchUsersPage(1);
+			users = page.users;
+			listHasMore = page.hasMore;
+			listNextFromId = page.nextFromId ?? 1;
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
@@ -124,6 +155,23 @@
 			}
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadMoreUsers() {
+		if (listLoadingMore || !listHasMore) return;
+		listLoadingMore = true;
+		error = '';
+		try {
+			const fromId = listNextFromId || 1;
+			const page = await fetchUsersPage(fromId);
+			users = mergeUsers(users, page.users);
+			listHasMore = page.hasMore;
+			listNextFromId = page.nextFromId ?? fromId;
+		} catch (e: any) {
+			error = e?.message ?? String(e);
+		} finally {
+			listLoadingMore = false;
 		}
 	}
 
@@ -1172,9 +1220,26 @@
 			{/if}
 
 			<!-- Footer -->
-			<div class="px-5 py-3 border-t border-gray-200 text-xs text-gray-400">
-				{filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''}
-				{#if searchQuery}&nbsp;(filtered){/if}
+			<div class="px-5 py-3 border-t border-gray-200 flex items-center justify-between gap-3">
+				<span class="text-xs text-gray-400">
+					{filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''}
+					{#if searchQuery}&nbsp;(filtered){/if}
+					{#if listHasMore && !searchQuery}&nbsp;· more available{/if}
+				</span>
+				{#if listHasMore && !searchQuery}
+					<button
+						onclick={loadMoreUsers}
+						disabled={listLoadingMore}
+						class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+					>
+						{#if listLoadingMore}
+							<div class="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+							Loading...
+						{:else}
+							Load more
+						{/if}
+					</button>
+				{/if}
 			</div>
 		</div>
 	{/if}

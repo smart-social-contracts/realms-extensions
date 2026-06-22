@@ -25,6 +25,9 @@ from ic_python_logging import get_logger
 
 logger = get_logger("extensions.role_manager")
 
+DEFAULT_PAGE_SIZE = 10
+MAX_PAGE_SIZE = 25
+
 # Crypto group whose members may decrypt member private data shared with admins.
 # Kept in sync with the "admin" profile so members can consent to share their
 # encrypted data with the current admin set (see issue #215).
@@ -154,27 +157,63 @@ def _get_user_effective_operations(user: User) -> list:
 # Extension API functions
 # ---------------------------------------------------------------------------
 
+def _user_summary(user: User, *, include_profiles: bool = False) -> Dict[str, Any]:
+    """Lightweight user row for list views."""
+    profiles: list = []
+    if include_profiles:
+        try:
+            profiles = [p.name for p in user.profiles]
+        except Exception:
+            pass
+    return {
+        "principal": user.id,
+        "nickname": user.nickname or "",
+        "profiles": profiles,
+        "status": "active",
+    }
+
+
 def list_users_with_profiles(args) -> str:
-    """List all users with their profile names and effective permissions."""
+    """List users with profile names, paginated via ``User.load_some``.
+
+    Large realms (demo data, justice cases, etc.) can exceed the IC
+    per-message instruction limit when loading every user at once.
+    """
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
         _require_operation(caller, Operations.PERMISSION_VIEW)
 
-        users = User.instances()
-        result = []
-        for user in users:
-            profiles = [p.name for p in user.profiles]
-            result.append({
-                "principal": user.id,
-                "nickname": user.nickname or "",
-                "profiles": profiles,
-                "status": "active",
-            })
+        from_id = max(1, int(args_dict.get("from_id", 1)))
+        page_size = min(
+            max(1, int(args_dict.get("page_size", DEFAULT_PAGE_SIZE))),
+            MAX_PAGE_SIZE,
+        )
+        include_profiles = bool(args_dict.get("include_profiles", False))
+
+        max_id = User.max_id()
+        batch = User.load_some(from_id=from_id, count=page_size)
+        result = [
+            _user_summary(user, include_profiles=include_profiles)
+            for user in batch
+            if user
+        ]
+
+        next_from_id = None
+        if batch:
+            last_id = int(getattr(batch[-1], "_id", 0) or 0)
+            if last_id and last_id < max_id:
+                next_from_id = last_id + 1
 
         return json.dumps({
             "success": True,
-            "data": {"users": result, "total": len(result)},
+            "data": {
+                "users": result,
+                "total": len(result),
+                "from_id": from_id,
+                "next_from_id": next_from_id,
+                "has_more": next_from_id is not None,
+            },
         })
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
