@@ -1,13 +1,13 @@
 {
   "name": "procurement",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Structured procurement — RFP lifecycle, vetKeys sealed bids, scoring, vendor reputation.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": ["member", "admin"],
   "categories": ["governance", "public_services"],
   "icon": "shopping-cart",
-  "doc_url": "https://github.com/smart-social-contracts/realms-extensions/issues/12",
+  "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/procurement",
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Procurement"
