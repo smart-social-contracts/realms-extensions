@@ -19,23 +19,32 @@
 	let circleLayer: any = null;
 	let zoneLayer: any = null;
 
+	async function loadScript(url: string, globalName: string): Promise<any> {
+		if ((window as any)[globalName]) return (window as any)[globalName];
+		const resp = await fetch(url);
+		if (!resp.ok) throw new Error(`Failed to load ${url}: HTTP ${resp.status}`);
+		const code = await resp.text();
+		(0, eval)(code);
+		return (window as any)[globalName];
+	}
+
 	async function loadLeaflet() {
 		if (L) return L;
-		L = await import('https://esm.sh/leaflet@1.9.4');
-		L = L.default ?? L;
 		if (!document.querySelector('link[data-leaflet-css]')) {
 			const link = document.createElement('link');
 			link.rel = 'stylesheet';
-			link.href = 'https://esm.sh/leaflet@1.9.4/dist/leaflet.css';
+			link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
 			link.setAttribute('data-leaflet-css', '');
 			document.head.appendChild(link);
+			await new Promise((r) => { link.onload = r; link.onerror = r; });
 		}
+		L = await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', 'L');
 		return L;
 	}
 
 	async function loadH3() {
 		if (h3) return h3;
-		h3 = await import('https://esm.sh/h3-js@4.2.1');
+		h3 = await loadScript('https://unpkg.com/h3-js@4.2.1/dist/h3-js.umd.js', 'h3');
 		return h3;
 	}
 
@@ -110,10 +119,11 @@
 	async function initMap() {
 		if (!mapContainer || mapInstance) return;
 
-		L = await loadLeaflet();
-		h3 = await loadH3();
+		try {
+			L = await loadLeaflet();
+			h3 = await loadH3();
 
-		mapInstance = L.map(mapContainer).setView([20, 0], 2);
+			mapInstance = L.map(mapContainer).setView([20, 0], 2);
 
 		const cartoLayer = L.tileLayer(
 			'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
@@ -138,6 +148,9 @@
 		mapInstance.on('zoomend', updateLayerVisibility);
 		updateLayerVisibility();
 		renderLands();
+		} catch (e: any) {
+			error = e?.message ?? String(e);
+		}
 	}
 
 	function updateLayerVisibility() {
