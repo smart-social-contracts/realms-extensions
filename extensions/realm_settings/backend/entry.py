@@ -23,6 +23,7 @@ def extension_sync_call(method_name: str, args: dict):
         "get_realm_stage": (get_realm_stage, False),
         "set_realm_stage": (set_realm_stage, True),
         "patch_manifest_data": (patch_manifest_data, True),
+        "set_quarter_policy": (set_quarter_policy, True),
     }
 
     if method_name not in methods:
@@ -160,6 +161,46 @@ def set_realm_stage(args: dict):
         }
     except Exception as e:
         logger.error(f"set_realm_stage error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def set_quarter_policy(args: dict):
+    """Enable/disable the realm's quarter auto-scaling. Admin only.
+
+    Args (JSON): {"auto_scale_enabled": bool}
+
+    Toggles ``Realm.auto_scale_enabled`` (issue #156). When disabled, new user
+    registrations no longer set the ``scale_in_flight`` guard, so the federation
+    stops requesting new quarters. Writing the realm field directly mirrors how
+    ``set_realm_stage`` updates ``Realm.status``; access is gated by the
+    extension's ``admin`` profile/permission.
+    """
+    from ggg import Realm
+
+    try:
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                return {"success": False, "error": "args is not valid JSON"}
+
+        realm = Realm.load("1")
+        if not realm:
+            return {"success": False, "error": "Realm not found"}
+
+        if "auto_scale_enabled" not in args:
+            return {"success": False, "error": "auto_scale_enabled is required"}
+
+        enabled = bool(args.get("auto_scale_enabled"))
+        realm.auto_scale_enabled = enabled
+        logger.info(f"Quarter auto-scaling set to {enabled}")
+
+        return {
+            "success": True,
+            "data": {"auto_scale_enabled": enabled},
+        }
+    except Exception as e:
+        logger.error(f"set_quarter_policy error: {e}")
         return {"success": False, "error": str(e)}
 
 

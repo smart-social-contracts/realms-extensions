@@ -14,6 +14,8 @@
 	let latestUsers: any[] = $state([]);
 	let loading = $state(true);
 	let mapContainer: HTMLDivElement | undefined = $state();
+	let scaleStatus: any = $state(null);
+	let myQuarterId = $state('');
 
 	const STAGES = ['alpha', 'beta', 'production', 'deprecation', 'terminated'] as const;
 	const STAGE_LABELS: Record<string, string> = {
@@ -70,8 +72,28 @@
 		latestUsers = parseEntities(latestResp);
 
 		await loadLifecycleData(backend);
+		await loadQuartersInfo(backend);
 
 		loading = false;
+	}
+
+	async function loadQuartersInfo(backend: any) {
+		// Expansion policy is a public query; member's home quarter requires auth.
+		try {
+			const raw = await backend.get_scale_status();
+			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			if (res?.success) scaleStatus = res;
+		} catch (e) {
+			console.warn('get_scale_status failed:', e);
+		}
+		try {
+			const resp = await backend.get_my_user_status();
+			if (resp?.success && resp?.data?.userGet) {
+				myQuarterId = resp.data.userGet.assigned_quarter || '';
+			}
+		} catch {
+			// Unauthenticated or not a member — no "your quarter" line.
+		}
 	}
 
 	function parseExtensionResponse(raw: any) {
@@ -253,7 +275,21 @@
 			: 0,
 	);
 	let registrationOpen = $derived(Boolean(statusData?.open_registration ?? realmData?.open_registration));
-	let quarterCount = $derived(statusData?.quarters?.length || 0);
+	let quartersList = $derived((statusData?.quarters || []) as any[]);
+	let quarterCount = $derived(quartersList.length);
+	let myQuarter = $derived(
+		myQuarterId ? quartersList.find((q: any) => q.canister_id === myQuarterId) : null,
+	);
+	let myQuarterLabel = $derived(
+		myQuarter
+			? `#${myQuarter.index ?? 0} ${myQuarter.name}`
+			: myQuarterId
+				? 'your quarter'
+				: quartersList.find((q: any) => q.is_capital)
+					? `#${quartersList.find((q: any) => q.is_capital).index ?? 0} ${quartersList.find((q: any) => q.is_capital).name}`
+					: '',
+	);
+	let showQuartersCard = $derived(quarterCount > 1 || Boolean(scaleStatus?.auto_scale_enabled));
 
 	let dashboardSections: string[] = $derived(dashboardConfig?.public?.sections || []);
 	let goLiveRemaining = $derived.by(() => {
@@ -922,6 +958,62 @@
 		{/if}
 
 		<div class="space-y-4 px-4 pb-8">
+			<!-- Quarters (read-only) -->
+			{#if showQuartersCard}
+				<div class="rounded-lg border border-gray-200 shadow-md bg-white p-6 max-w-5xl mx-auto">
+					<h3 class="text-lg font-semibold text-gray-900 mb-1">Quarters</h3>
+					<p class="text-sm text-gray-500 mb-4">
+						This realm scales horizontally: members are spread across autonomous quarters.
+					</p>
+
+					{#if myQuarterLabel}
+						<div class="mb-4 inline-flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>
+							<span class="text-sm text-blue-900">Your quarter: <strong>{myQuarterLabel}</strong></span>
+						</div>
+					{/if}
+
+					{#if scaleStatus}
+						<p class="text-sm text-gray-600 mb-4">
+							{#if scaleStatus.auto_scale_enabled}
+								A new quarter is created automatically once a quarter reaches
+								<strong>{Number(scaleStatus.threshold).toLocaleString()}</strong> members
+								(capacity {Number(scaleStatus.n).toLocaleString()} each).
+							{:else}
+								Automatic expansion is currently paused for this realm.
+							{/if}
+						</p>
+					{/if}
+
+					{#if quarterCount > 1}
+						<div class="overflow-x-auto rounded-lg border border-gray-200">
+							<table class="min-w-full text-sm">
+								<thead class="bg-gray-50 text-gray-500">
+									<tr>
+										<th class="text-left font-medium px-3 py-2">#</th>
+										<th class="text-left font-medium px-3 py-2">Name</th>
+										<th class="text-right font-medium px-3 py-2">Members</th>
+										<th class="text-left font-medium px-3 py-2">Status</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-gray-100">
+									{#each quartersList as q (q.canister_id)}
+										<tr class={q.canister_id === myQuarterId ? 'bg-blue-50/50' : ''}>
+											<td class="px-3 py-2 text-gray-700">{q.index ?? 0}</td>
+											<td class="px-3 py-2 font-medium text-gray-900">
+												{q.name}{#if q.is_capital}<span class="ml-1 text-[10px] uppercase tracking-wide text-blue-600">capital</span>{/if}
+											</td>
+											<td class="px-3 py-2 text-right text-gray-700">{Number(q.population ?? 0).toLocaleString()}</td>
+											<td class="px-3 py-2 text-gray-600">{q.status}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Zones Map -->
 			{#if zones.length > 0}
 				<div class="rounded-lg border border-gray-200 shadow-md bg-white p-6">

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ProposalModal from './ProposalModal.svelte';
+	import QuartersPanel from './QuartersPanel.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -406,6 +407,9 @@
 			{/if}
 		{/if}
 	</div>
+
+	<!-- Quarters & Auto-Scaling -->
+	<QuartersPanel {ctx} {addToast} />
 
 	<div class="bg-white shadow-sm rounded-lg p-6">
 		{#if settingsLoading}
