@@ -24,6 +24,7 @@ def extension_sync_call(method_name: str, args: dict):
         "set_realm_stage": (set_realm_stage, True),
         "patch_manifest_data": (patch_manifest_data, True),
         "set_quarter_policy": (set_quarter_policy, True),
+        "request_quarter_scale": (request_quarter_scale, True),
     }
 
     if method_name not in methods:
@@ -201,6 +202,47 @@ def set_quarter_policy(args: dict):
         }
     except Exception as e:
         logger.error(f"set_quarter_policy error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def request_quarter_scale(args: dict):
+    """Manually queue a quarter scale-out. Admin only.
+
+    Sets the idempotent ``scale_in_flight`` flag on the Realm so the existing
+    ``process_quarter_scaling`` flow (the "Provision queued quarter" action)
+    can perform the Casals provisioning. This is the explicit-admin counterpart
+    to the automatic trigger that runs on new user registration: on a realm that
+    was already populated before auto-scaling shipped, the automatic hook never
+    fired, so an admin can request a shard on demand here.
+    """
+    from ggg import Realm
+
+    try:
+        realm = Realm.load("1")
+        if not realm:
+            return {"success": False, "error": "Realm not found"}
+
+        if bool(getattr(realm, "scale_in_flight", False)):
+            return {
+                "success": True,
+                "data": {"scale_in_flight": True, "already_pending": True},
+            }
+
+        realm.scale_in_flight = True
+        try:
+            from _cdk import ic
+
+            realm.scale_requested_at = str(int(ic.time()))
+        except Exception:
+            pass
+        logger.info("Quarter scale manually requested by admin")
+
+        return {
+            "success": True,
+            "data": {"scale_in_flight": True, "already_pending": False},
+        }
+    except Exception as e:
+        logger.error(f"request_quarter_scale error: {e}")
         return {"success": False, "error": str(e)}
 
 

@@ -33,6 +33,7 @@
 	let policy: ScaleStatus | null = $state(null);
 	let toggling = $state(false);
 	let provisioning = $state(false);
+	let requesting = $state(false);
 
 	const maxPopulation = $derived(
 		policy && policy.populations.length ? Math.max(...policy.populations) : 0,
@@ -102,6 +103,28 @@
 			notify(e?.message || String(e), 'error');
 		} finally {
 			toggling = false;
+		}
+	}
+
+	async function requestScale() {
+		requesting = true;
+		try {
+			const raw = await ctx.backend.extension_sync_call(
+				'realm_settings',
+				'request_quarter_scale',
+				'{}',
+			);
+			const res = parseExtResponse(raw);
+			if (res?.success) {
+				notify('Scale requested — provision the queued quarter when ready');
+				await load();
+			} else {
+				notify(res?.error || 'Failed to request scale', 'error');
+			}
+		} catch (e: any) {
+			notify(e?.message || String(e), 'error');
+		} finally {
+			requesting = false;
 		}
 	}
 
@@ -204,17 +227,37 @@
 					<span class="ml-3 text-sm font-medium text-gray-700">Auto-scaling {policy.auto_scale_enabled ? 'enabled' : 'disabled'}</span>
 				</label>
 
-				<button
-					onclick={provisionNow}
-					disabled={provisioning || !policy.scale_in_flight}
-					title={policy.scale_in_flight ? 'Provision the queued quarter now' : 'No scale request pending'}
-					class="ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
-				>
-					{#if provisioning}
-						<div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+				<div class="ml-auto flex items-center gap-2">
+					{#if !policy.scale_in_flight}
+						<button
+							onclick={requestScale}
+							disabled={requesting}
+							title={policy.should_scale ? 'Queue a new quarter (threshold reached)' : 'Force a new quarter even though the threshold is not reached'}
+							class={cn(
+								'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed',
+								policy.should_scale
+									? 'bg-orange-600 text-white hover:bg-orange-700'
+									: 'bg-gray-100 text-gray-700 hover:bg-gray-200',
+							)}
+						>
+							{#if requesting}
+								<div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+							{/if}
+							Request scale now
+						</button>
 					{/if}
-					Provision queued quarter
-				</button>
+					<button
+						onclick={provisionNow}
+						disabled={provisioning || !policy.scale_in_flight}
+						title={policy.scale_in_flight ? 'Provision the queued quarter now' : 'No scale request pending'}
+						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
+					>
+						{#if provisioning}
+							<div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+						{/if}
+						Provision queued quarter
+					</button>
+				</div>
 			</div>
 		{/if}
 
