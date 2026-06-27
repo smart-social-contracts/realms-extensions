@@ -27,13 +27,34 @@
 		should_scale: boolean;
 	}
 
+	interface BootstrapStatus {
+		status: string;
+		cursor: number;
+		total: number;
+		done: string[];
+		failed: { id: string; error: string }[];
+		current: string | null;
+	}
+
 	let loading = $state(true);
 	let error = $state('');
 	let quarters: Quarter[] = $state([]);
 	let policy: ScaleStatus | null = $state(null);
+	let bootstrap: BootstrapStatus | null = $state(null);
 	let toggling = $state(false);
 	let provisioning = $state(false);
 	let requesting = $state(false);
+	let bootstrapTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const bootstrapPct = $derived(
+		bootstrap && bootstrap.total > 0
+			? Math.min(100, Math.round((bootstrap.cursor / bootstrap.total) * 100))
+			: 0,
+	);
+	// Active while the viewed quarter is still installing its codex/extensions.
+	const bootstrapActive = $derived(
+		!!bootstrap && (bootstrap.status === 'bootstrapping' || bootstrap.status === 'pending'),
+	);
 
 	const maxPopulation = $derived(
 		policy && policy.populations.length ? Math.max(...policy.populations) : 0,
@@ -58,6 +79,33 @@
 			: env;
 	}
 
+	async function loadBootstrap() {
+		// Self-bootstrap progress of the *currently viewed* realm/quarter. The
+		// capital reports "none"; a freshly provisioned quarter (selected via the
+		// top-bar switcher) reports its codex/extension install progress.
+		if (typeof ctx.backend.get_bootstrap_status !== 'function') {
+			bootstrap = null;
+			return;
+		}
+		try {
+			const raw = await ctx.backend.get_bootstrap_status();
+			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			bootstrap = res?.success && res.status && res.status !== 'none' ? (res as BootstrapStatus) : null;
+		} catch {
+			bootstrap = null;
+		}
+	}
+
+	function scheduleBootstrapPoll() {
+		if (bootstrapTimer) clearTimeout(bootstrapTimer);
+		bootstrapTimer = null;
+		if (!bootstrapActive) return;
+		bootstrapTimer = setTimeout(async () => {
+			await loadBootstrap();
+			scheduleBootstrapPoll();
+		}, 5000);
+	}
+
 	async function load() {
 		loading = true;
 		error = '';
@@ -65,6 +113,7 @@
 			const [statusRaw, scaleRaw] = await Promise.all([
 				ctx.backend.status(),
 				ctx.backend.get_scale_status(),
+				loadBootstrap(),
 			]);
 			if (statusRaw?.success && statusRaw?.data?.status) {
 				quarters = (statusRaw.data.status.quarters || []) as Quarter[];
@@ -75,6 +124,7 @@
 			} else {
 				error = scale?.error || 'Failed to load scale status';
 			}
+			scheduleBootstrapPoll();
 		} catch (e: any) {
 			error = e?.message || String(e);
 		} finally {
@@ -151,7 +201,12 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		load();
+		return () => {
+			if (bootstrapTimer) clearTimeout(bootstrapTimer);
+		};
+	});
 </script>
 
 <div class="bg-white shadow-sm rounded-lg p-6 mb-6">
@@ -258,6 +313,52 @@
 						Provision queued quarter
 					</button>
 				</div>
+			</div>
+		{/if}
+
+		<!-- Quarter self-bootstrap progress (for the currently viewed quarter) -->
+		{#if bootstrap}
+			<div class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4">
+				<div class="flex items-center justify-between mb-2">
+					<h3 class="text-sm font-semibold text-indigo-900">
+						Quarter bootstrap
+						<span class="ml-1 text-xs font-normal text-indigo-500">
+							{bootstrapActive ? 'installing…' : bootstrap.status}
+						</span>
+					</h3>
+					<span class="text-xs text-indigo-700">{bootstrap.cursor} / {bootstrap.total}</span>
+				</div>
+				<div class="h-2 rounded-full bg-indigo-100 overflow-hidden mb-2">
+					<div
+						class={cn(
+							'h-full rounded-full transition-all',
+							bootstrap.failed.length ? 'bg-amber-500' : bootstrapActive ? 'bg-indigo-500' : 'bg-green-500',
+						)}
+						style="width: {bootstrapPct}%"
+					></div>
+				</div>
+				<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-indigo-700">
+					{#if bootstrap.current}
+						<span>Installing: <span class="font-mono">{bootstrap.current}</span></span>
+					{/if}
+					<span>{bootstrap.done.length} installed</span>
+					{#if bootstrap.failed.length}
+						<span class="text-amber-700">{bootstrap.failed.length} failed</span>
+					{/if}
+					{#if bootstrapActive}
+						<span class="ml-auto inline-flex items-center gap-1 text-indigo-500">
+							<span class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+							auto-refreshing
+						</span>
+					{/if}
+				</div>
+				{#if bootstrap.failed.length}
+					<ul class="mt-2 space-y-0.5 text-xs text-amber-800">
+						{#each bootstrap.failed as f (f.id)}
+							<li><span class="font-mono">{f.id}</span>: {f.error}</li>
+						{/each}
+					</ul>
+				{/if}
 			</div>
 		{/if}
 
