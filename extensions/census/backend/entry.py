@@ -62,6 +62,16 @@ def get_user_count(args=None):
         return {"success": False, "error": str(e)}
 
 
+def _self_canister_id() -> str:
+    """Canister id this code lives on (the active quarter). Used by the frontend
+    to build a quarter-scoped invite link (issue #156)."""
+    try:
+        from kybra import ic as _ic
+        return _ic.id().to_str()
+    except Exception:
+        return ""
+
+
 def generate_registration_url(args: dict):
     """Generate a registration URL for inviting a new user."""
     try:
@@ -83,6 +93,8 @@ def generate_registration_url(args: dict):
             email=args.get("email", ""),
         )
 
+        canister_id = _self_canister_id()
+
         code_hash = args.get("code_hash")
         if code_hash:
             return {
@@ -91,6 +103,7 @@ def generate_registration_url(args: dict):
                     "code_hash": code_hash[:8],
                     "expires_at": datetime.fromtimestamp(reg_code.expires_at).isoformat(),
                     "profile": args.get("profile", "member"),
+                    "canister_id": canister_id,
                 },
             }
 
@@ -103,6 +116,7 @@ def generate_registration_url(args: dict):
                 "expires_at": datetime.fromtimestamp(reg_code.expires_at).isoformat(),
                 "user_id": reg_code.user_id,
                 "profile": args.get("profile", "member"),
+                "canister_id": canister_id,
             },
         }
     except Exception as e:

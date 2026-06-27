@@ -30,6 +30,7 @@
 	let expiresInHours = $state(24);
 	let generating = $state(false);
 	let generatedLink: string | null = $state(null);
+	let generatedQuarterId: string | null = $state(null);
 	let linkCopied = $state(false);
 	let qrSvg: string | null = $state(null);
 
@@ -63,6 +64,7 @@
 	async function generateInvitation() {
 		generating = true;
 		generatedLink = null;
+		generatedQuarterId = null;
 		qrSvg = null;
 		linkCopied = false;
 
@@ -70,7 +72,10 @@
 			const code = generateRandomCode(16);
 			const codeHash = await hashCode(code);
 
-			await ctx.callSync('generate_registration_url', {
+			// The code is created on whichever quarter this admin tab is pointed at
+			// (ctx.backend follows the active quarter). The backend returns its own
+			// canister id so we can make the invite link target that quarter only.
+			const res: any = await ctx.callSync('generate_registration_url', {
 				code_hash: codeHash,
 				profile,
 				max_uses: maxUses,
@@ -80,7 +85,10 @@
 				frontend_url: '',
 			});
 
-			const link = `${window.location.origin}/join?invite=${code}`;
+			const quarterId: string = res?.data?.canister_id ?? '';
+			generatedQuarterId = quarterId || null;
+			const quarterParam = quarterId ? `&quarter=${encodeURIComponent(quarterId)}` : '';
+			const link = `${window.location.origin}/join?invite=${code}${quarterParam}`;
 			generatedLink = link;
 			qrSvg = generateQrSvg(link);
 			addToast('Invitation code generated successfully');
@@ -281,6 +289,12 @@
 			<p class="mt-2 text-sm text-amber-700 font-medium">
 				⚠ Copy this link now — it cannot be retrieved later.
 			</p>
+			{#if generatedQuarterId}
+				<p class="mt-1 text-xs text-gray-600">
+					This invitation is valid only on quarter
+					<code class="font-mono">{generatedQuarterId}</code>. Switch the quarter selector in the top bar to issue codes for a different quarter.
+				</p>
+			{/if}
 
 			{#if qrSvg}
 				<div class="mt-4 pt-4 border-t border-blue-200">
