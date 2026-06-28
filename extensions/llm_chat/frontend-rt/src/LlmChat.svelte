@@ -56,7 +56,8 @@
 	let selectedAssistant: AssistantPersona | null = $state(null);
 	let isLoadingAssistants = $state(false);
 	let copiedIndex: number | null = $state(null);
-	let chatHeight = $state('calc(100dvh - 102px)');
+	let chatRootElement: HTMLDivElement | undefined = $state();
+	let chatHeight = $state('100%');
 
 	let pendingExplainCodexId: string | null = $state(null);
 	let isExplainMode = $state(false);
@@ -334,24 +335,27 @@
 			isAuthenticated = v;
 		});
 
-		// On mobile, the virtual keyboard shrinks the visual viewport.
-		// Use visualViewport to keep the component anchored inside the visible area.
-		const vv = window.visualViewport;
-		if (vv) {
-			const updateHeight = () => {
-				// vv.height is the visible area above the keyboard.
-				// vv.offsetTop accounts for any vertical scroll of the visual viewport.
-				chatHeight = `${vv.height - vv.offsetTop}px`;
-			};
-			updateHeight();
-			vv.addEventListener('resize', updateHeight);
-			vv.addEventListener('scroll', updateHeight);
-			// Clean up inside onMount's return is not possible directly;
-			// we store the cleanup in the $effect below.
-			(window as any).__chatVpCleanup = () => {
-				vv.removeEventListener('resize', updateHeight);
-				vv.removeEventListener('scroll', updateHeight);
-			};
+		// Full-page chat: size from visualViewport so the keyboard doesn't clip the input.
+		// Sidebar panel: fill the host panel via CSS (100%) — the panel handles viewport sizing.
+		if (!isSidebarPanel) {
+			const vv = window.visualViewport;
+			if (vv) {
+				const updateHeight = () => {
+					const top = chatRootElement?.getBoundingClientRect().top ?? vv.offsetTop;
+					const available = Math.max(Math.round(vv.height - top), 200);
+					chatHeight = `${available}px`;
+				};
+				await tick();
+				updateHeight();
+				vv.addEventListener('resize', updateHeight);
+				vv.addEventListener('scroll', updateHeight);
+				window.addEventListener('resize', updateHeight);
+				(window as any).__chatVpCleanup = () => {
+					vv.removeEventListener('resize', updateHeight);
+					vv.removeEventListener('scroll', updateHeight);
+					window.removeEventListener('resize', updateHeight);
+				};
+			}
 		}
 
 		handleExplainParam();
@@ -904,7 +908,12 @@
 
 {:else}
 <!-- ══════════════════════════════════════════════════════ CHAT PANEL ══ -->
-<div class="llm-chat-root" style="height: {chatHeight}">
+<div
+	class="llm-chat-root"
+	class:sidebar-panel={isSidebarPanel}
+	bind:this={chatRootElement}
+	style={isSidebarPanel ? undefined : `height: ${chatHeight}`}
+>
 	<!-- Top toolbar: new chat + history (authenticated users only) -->
 	{#if isAuthenticated}
 		<div class="chat-toolbar">
@@ -1117,8 +1126,7 @@
 	.llm-chat-root {
 		display: flex;
 		flex-direction: column;
-		/* height is set via inline style driven by visualViewport on mobile;
-		   the fallback keeps it correct on desktop */
+		/* Full-page: height via inline style + visualViewport. Sidebar: fill host panel. */
 		max-height: 100%;
 		min-height: 300px;
 		overflow: hidden;
@@ -1128,6 +1136,12 @@
 		/* Flush to the top of the sidebar panel — no stray gap */
 		margin-top: 0;
 		padding-top: 0;
+	}
+
+	.llm-chat-root.sidebar-panel {
+		height: 100%;
+		min-height: 0;
+		flex: 1;
 	}
 
 	/* Top toolbar */
@@ -1615,8 +1629,9 @@
 	.input-section {
 		flex-shrink: 0;
 		padding: 10px 14px;
+		padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
 		border-top: 1px solid #e5e7eb;
-		background: transparent;
+		background: #fff;
 	}
 
 	.suggestions {

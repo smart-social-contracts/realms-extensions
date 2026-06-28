@@ -19,6 +19,40 @@ logger = get_logger("extensions.task_monitor")
 DEFAULT_PAGE_SIZE = 10
 
 
+def _relation_child_count(entity, relation_name: str) -> int:
+    """Count related entities via reverse index without loading them."""
+    try:
+        db = entity.db()
+        ids = db.reverse_index_get(entity._type, str(entity._id), relation_name)
+        return len(ids)
+    except Exception:
+        return 0
+
+
+def _load_schedules_for_task(task) -> List[Dict[str, Any]]:
+    """Load schedule summaries without resolving the parent task relation."""
+    schedules = []
+    try:
+        db = task.db()
+        schedule_ids = db.reverse_index_get(task._type, str(task._id), "schedules")
+        for sid in schedule_ids:
+            schedule = TaskSchedule.load(sid, level=1)
+            if schedule:
+                schedules.append(
+                    {
+                        "_id": str(schedule._id),
+                        "name": schedule.name,
+                        "disabled": schedule.disabled,
+                        "run_at": schedule.run_at,
+                        "repeat_every": schedule.repeat_every,
+                        "last_run_at": schedule.last_run_at,
+                    }
+                )
+    except Exception:
+        pass
+    return schedules
+
+
 def _get_timestamp_ms(entity, field: str):
     """Extract a millisecond timestamp from an entity.
 
@@ -75,7 +109,7 @@ def extension_sync_call(method_name: str, args: dict):
 def get_all_tasks(args: str = "{}"):
     """
     Get a page of tasks with their schedules and status.
-    Uses load_some for pagination to stay within IC instruction limits.
+    Uses shallow loads and reverse-index counts to stay within IC instruction limits.
     Skips temporary _shell_* tasks.
     """
     try:
@@ -93,18 +127,17 @@ def get_all_tasks(args: str = "{}"):
         current_from = from_id
         attempts = 0
         while len(tasks) < page_size and current_from <= max_id and attempts < 10:
-            try:
-                batch = Task.load_some(from_id=current_from, count=page_size)
-            except Exception as batch_err:
-                logger.warning(f"get_all_tasks: batch load failed at from_id={current_from}: {batch_err}, loading individually")
-                batch = []
-                for eid in range(current_from, min(current_from + page_size, max_id + 1)):
-                    try:
-                        e = Task.load(str(eid))
-                        if e:
-                            batch.append(e)
-                    except Exception:
-                        logger.warning(f"get_all_tasks: skipping Task {eid} due to load error")
+            batch = []
+            batch_end = min(current_from + page_size - 1, max_id)
+            for eid in range(current_from, batch_end + 1):
+                try:
+                    entity = Task.load(str(eid), level=1)
+                    if entity:
+                        batch.append(entity)
+                except Exception as load_err:
+                    logger.warning(
+                        f"get_all_tasks: skipping Task {eid} due to load error: {load_err}"
+                    )
             if not batch:
                 break
             for task in batch:
@@ -112,12 +145,6 @@ def get_all_tasks(args: str = "{}"):
                     continue
 
                 task_id = str(task._id)
-                exec_count = 0
-                try:
-                    if hasattr(task, "executions"):
-                        exec_count = len(list(task.executions))
-                except Exception:
-                    pass
 
                 task_data = {
                     "_id": task_id,
@@ -127,25 +154,12 @@ def get_all_tasks(args: str = "{}"):
                     "step_to_execute": (
                         task.step_to_execute if hasattr(task, "step_to_execute") else 0
                     ),
-                    "total_steps": len(list(task.steps)) if hasattr(task, "steps") else 0,
-                    "executions_count": exec_count,
-                    "schedules": [],
+                    "total_steps": _relation_child_count(task, "steps"),
+                    "executions_count": _relation_child_count(task, "executions"),
+                    "schedules": _load_schedules_for_task(task),
                     "created_at": _get_timestamp_ms(task, "created"),
                     "updated_at": _get_timestamp_ms(task, "updated"),
                 }
-
-                if hasattr(task, "schedules"):
-                    for schedule in task.schedules:
-                        task_data["schedules"].append(
-                            {
-                                "_id": str(schedule._id),
-                                "name": schedule.name,
-                                "disabled": schedule.disabled,
-                                "run_at": schedule.run_at,
-                                "repeat_every": schedule.repeat_every,
-                                "last_run_at": schedule.last_run_at,
-                            }
-                        )
 
                 tasks.append(task_data)
                 if len(tasks) >= page_size:
@@ -191,13 +205,7 @@ def get_task_details(args):
             return json.dumps({"success": False, "error": f"Task {task_id} not found"})
         logger.info(f"get_task_details: task loaded: {task.name}")
 
-        # Total executions count (full relation, not paginated)
-        exec_count = 0
-        try:
-            if hasattr(task, "executions"):
-                exec_count = len(list(task.executions))
-        except Exception:
-            pass
+        exec_count = _relation_child_count(task, "executions")
 
         # Build detailed task data
         task_data = {
