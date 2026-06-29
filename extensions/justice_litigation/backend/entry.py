@@ -3,6 +3,16 @@ Justice Litigation extension entry point
 
 Redesigned to use the modular GGG Justice System entities:
 - JusticeSystem, Court, Judge, Case, Verdict, Penalty, Appeal, License
+
+Cross-quarter model
+-------------------
+Cross-quarter cases live on the plaintiff's quarter.
+defendant_quarter_id is the home canister of the defendant.
+
+When defendant_quarter_id is supplied and differs from the current canister's
+ID the case is tagged ``scope_tag = "cross_quarter"`` in its metadata.
+Penalty execution against a cross-quarter defendant requires a separate
+inter-canister call to that quarter; this is currently stubbed with a TODO.
 """
 
 import json
@@ -731,6 +741,21 @@ def issue_verdict(args: str) -> str:
                 "target_user": target_user,
             })
         
+        # Warn if this is a cross-quarter case — penalty execution will need an
+        # inter-canister call to the defendant's home quarter.
+        try:
+            case_meta = json.loads(case.metadata) if case.metadata else {}
+        except (ValueError, TypeError):
+            case_meta = {}
+        _dq_id = case_meta.get("defendant_quarter_id", "")
+        if _dq_id:
+            logger.warning(
+                f"issue_verdict: case {case.case_number} is cross-quarter "
+                f"(defendant_quarter_id={_dq_id}). "
+                # TODO: cross-quarter call to defendant_quarter_id
+                "Penalty execution against the remote quarter is not yet implemented."
+            )
+
         # Issue verdict using GGG function (judge already assigned via assign_judge)
         verdict = case_issue_verdict(
             case=case,
@@ -738,7 +763,7 @@ def issue_verdict(args: str) -> str:
             reasoning=reasoning,
             penalties=penalty_list
         )
-        
+
         return json.dumps({
             "success": True,
             "data": {
@@ -746,7 +771,7 @@ def issue_verdict(args: str) -> str:
                 "message": f"Verdict issued for case {case.case_number}"
             }
         })
-        
+
     except ValueError as e:
         logger.warning(f"Validation error in issue_verdict: {str(e)}")
         return json.dumps({"success": False, "error": str(e)})
@@ -808,10 +833,26 @@ def execute_penalty(args: str) -> str:
         penalty = Penalty[penalty_id]
         if not penalty:
             return json.dumps({"success": False, "error": f"Penalty {penalty_id} not found"})
-        
+
+        # Check whether the associated case is cross-quarter and warn accordingly.
+        try:
+            _case_for_penalty = penalty.verdict.case if (penalty.verdict and penalty.verdict.case) else None
+            if _case_for_penalty:
+                _pm = json.loads(_case_for_penalty.metadata) if _case_for_penalty.metadata else {}
+                _dq = _pm.get("defendant_quarter_id", "")
+                if _dq:
+                    logger.warning(
+                        f"execute_penalty: penalty {penalty_id} belongs to cross-quarter case "
+                        f"(defendant_quarter_id={_dq}). "
+                        # TODO: cross-quarter call to defendant_quarter_id
+                        "Cross-quarter penalty execution requires a separate inter-canister call."
+                    )
+        except Exception:
+            pass
+
         # Execute penalty using GGG function
         updated_penalty = penalty_execute(penalty)
-        
+
         return json.dumps({
             "success": True,
             "data": {
@@ -819,7 +860,7 @@ def execute_penalty(args: str) -> str:
                 "message": f"Penalty {penalty_id} executed successfully"
             }
         })
-        
+
     except ValueError as e:
         logger.warning(f"Validation error in execute_penalty: {str(e)}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1201,6 +1242,12 @@ def create_litigation(args: str) -> str:
         defendant_department_id = str(params.get("defendant_department_id") or "").strip()
         if not defendant_kind:
             defendant_kind = "department" if (defendant_department or defendant_department_id) else "user"
+
+        # Cross-quarter: optional canister ID of the defendant's home quarter.
+        defendant_quarter_id = str(params.get("defendant_quarter_id") or "").strip()
+        own_canister_id = _ic.id().to_str() if _ic else ""
+        is_cross_quarter = bool(defendant_quarter_id and defendant_quarter_id != own_canister_id)
+
         court_id = params.get("court_id")
 
         # If no court specified, use the first available court.
@@ -1237,16 +1284,22 @@ def create_litigation(args: str) -> str:
             dept_label = getattr(dept, "name", None) or defendant_department or defendant_department_id
             dept_ident = str(getattr(dept, "_id", "") or defendant_department_id or "")
             defendant = None
-            metadata = json.dumps(
-                {
-                    "defendant_kind": "department",
-                    "defendant_department": dept_label,
-                    "defendant_department_id": dept_ident,
-                }
-            )
+            meta_dict = {
+                "defendant_kind": "department",
+                "defendant_department": dept_label,
+                "defendant_department_id": dept_ident,
+            }
+            if is_cross_quarter:
+                meta_dict["defendant_quarter_id"] = defendant_quarter_id
+                meta_dict["scope_tag"] = "cross_quarter"
+            metadata = json.dumps(meta_dict)
         else:
             defendant = User[defendant_id] if defendant_id else None
-            metadata = json.dumps({"defendant_kind": "user", "defendant_principal": defendant_id}) if defendant_id else ""
+            meta_dict = {"defendant_kind": "user", "defendant_principal": defendant_id} if defendant_id else {}
+            if is_cross_quarter:
+                meta_dict["defendant_quarter_id"] = defendant_quarter_id
+                meta_dict["scope_tag"] = "cross_quarter"
+            metadata = json.dumps(meta_dict) if meta_dict else ""
 
         # Create the public Case with empty title/description; the real content
         # lives encrypted in this extension's own LitigationContent entity.
@@ -1271,18 +1324,25 @@ def create_litigation(args: str) -> str:
         if submitter not in recipients:
             recipients.append(submitter)
 
-        return json.dumps(
-            {
-                "success": True,
-                "data": {
-                    "id": str(new_case._id),
-                    "case_number": new_case.case_number or "",
-                    "scope": scope,
-                    "recipients": recipients,
-                    "message": f"Litigation {new_case.case_number} opened",
-                },
-            }
-        )
+        if is_cross_quarter:
+            logger.warning(
+                f"Cross-quarter litigation {new_case.case_number}: defendant is on "
+                f"quarter {defendant_quarter_id}. Penalty execution requires a "
+                f"separate inter-canister call to that quarter."
+            )
+
+        result_data = {
+            "id": str(new_case._id),
+            "case_number": new_case.case_number or "",
+            "scope": scope,
+            "recipients": recipients,
+            "message": f"Litigation {new_case.case_number} opened",
+        }
+        if is_cross_quarter:
+            result_data["defendant_quarter_id"] = defendant_quarter_id
+            result_data["scope_tag"] = "cross_quarter"
+
+        return json.dumps({"success": True, "data": result_data})
 
     except ValueError as e:
         logger.warning(f"Validation error in create_litigation: {e}")
