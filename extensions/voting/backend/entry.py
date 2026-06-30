@@ -972,14 +972,28 @@ def cast_vote(args: str) -> str:
 
         proposal_id = args_dict.get("proposal_id")
         vote_choice = args_dict.get("vote")
-        # Security: always use ic.caller() as the voter identity
-        voter_id = ic.caller().to_str()
 
         if not all([proposal_id, vote_choice]):
             return json.dumps({"success": False, "error": "proposal_id and vote are required"})
 
         if vote_choice not in ("yes", "no", "abstain"):
             return json.dumps({"success": False, "error": "vote must be 'yes', 'no', or 'abstain'"})
+
+        try:
+            from core.delegation import AccessDenied, resolve_acting_context
+            from ggg.system.user_profile import Operations
+
+            ctx = resolve_acting_context(args_dict, Operations.PROPOSAL_VOTE)
+            voter = ctx.subject_user
+            voter_id = voter.id
+            vote_meta = {}
+            if ctx.is_delegated:
+                vote_meta = {
+                    "delegated_by": ctx.actor,
+                    "delegation_id": ctx.delegation_id,
+                }
+        except AccessDenied as e:
+            return json.dumps({"success": False, "error": str(e)})
 
         proposal = _find_proposal(proposal_id)
         if not proposal:
@@ -991,7 +1005,6 @@ def cast_vote(args: str) -> str:
                 "error": f"Proposal is not open for voting. Status: {proposal.status}"
             })
 
-        voter = _find_user(voter_id)
         if not voter:
             return json.dumps({"success": False, "error": f"User {voter_id} not found"})
 
@@ -1014,8 +1027,15 @@ def cast_vote(args: str) -> str:
             elif old_choice == "abstain":
                 proposal.votes_abstain = (proposal.votes_abstain or 0.0) - 1.0
             existing_vote.vote_choice = vote_choice
+            if vote_meta:
+                existing_vote.metadata = json.dumps(vote_meta)
         else:
-            Vote(proposal=proposal, voter=voter, vote_choice=vote_choice, metadata="{}")
+            Vote(
+                proposal=proposal,
+                voter=voter,
+                vote_choice=vote_choice,
+                metadata=json.dumps(vote_meta) if vote_meta else "{}",
+            )
             proposal.total_voters = (proposal.total_voters or 0.0) + 1.0
 
         # Update counts for the new vote
