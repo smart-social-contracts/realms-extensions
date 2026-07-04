@@ -8,6 +8,9 @@
 	let totalCount = $state(0);
 	let userProfile = $state('member');
 	let loading = $state(true);
+	let loadingMore = $state(false);
+	let hasMore = $state(false);
+	let nextFromId = $state<number | null>(null);
 	let error = $state('');
 	let accessDeniedOp = $state('');
 
@@ -150,20 +153,33 @@
 		return { ...row, locked: true };
 	}
 
-	async function loadLitigations() {
-		loading = true;
+	async function loadLitigations(append = false) {
+		if (append) {
+			loadingMore = true;
+		} else {
+			loading = true;
+			nextFromId = null;
+			hasMore = false;
+		}
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const res = await callExt('get_litigations', {
+			const req: Record<string, unknown> = {
 				user_principal: principal,
 				user_profile: userProfile,
-			});
+			};
+			if (append && nextFromId != null) {
+				req.from_id = nextFromId;
+			}
+			const res = await callExt('get_litigations', req);
 			const data = res?.data ?? res;
 			const rows = data?.litigations ?? (Array.isArray(data) ? data : []);
-			litigations = await Promise.all(rows.map(decryptRow));
+			const decrypted = await Promise.all(rows.map(decryptRow));
+			litigations = append ? [...litigations, ...decrypted] : decrypted;
 			totalCount = data?.total_count ?? litigations.length;
 			if (data?.user_profile) userProfile = data.user_profile;
+			hasMore = !!data?.has_more;
+			nextFromId = data?.next_from_id ?? null;
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
@@ -175,6 +191,7 @@
 			}
 		} finally {
 			loading = false;
+			loadingMore = false;
 		}
 	}
 
@@ -366,7 +383,7 @@
 		</div>
 		<button
 			class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
-			onclick={loadLitigations}
+			onclick={() => loadLitigations()}
 			disabled={loading}
 		>
 			{#if loading}
@@ -622,6 +639,21 @@
 							</tbody>
 						</table>
 					</div>
+					{#if hasMore}
+						<div class="mt-4 flex justify-center">
+							<button
+								class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+								onclick={() => loadLitigations(true)}
+								disabled={loadingMore}
+							>
+								{#if loadingMore}
+									Loading…
+								{:else}
+									Load more cases
+								{/if}
+							</button>
+						</div>
+					{/if}
 				{/if}
 
 			<!-- CREATE TAB -->

@@ -1,6 +1,6 @@
 {
   "name": "justice_litigation",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Private-by-default litigations (end-to-end encrypted, shared only with the submitter and the justice department) plus courts, judges, verdicts, penalties, and appeals",
   "permissions": [],
   "entry_points": [

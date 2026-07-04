@@ -1108,6 +1108,107 @@ def get_statistics(args: str) -> str:
 # Legacy Support - Deprecated functions for backwards compatibility
 # ============================================================================
 
+DEFAULT_LITIGATIONS_PAGE_SIZE = 25
+
+
+def _parse_case_metadata(case: "Case") -> Dict[str, Any]:
+    try:
+        return json.loads(case.metadata) if case.metadata else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _defendant_fields(case: "Case", meta: Dict[str, Any]) -> Dict[str, str]:
+    if meta.get("defendant_kind") == "department":
+        return {
+            "defendant_kind": "department",
+            "defendant_principal": "",
+            "defendant_label": meta.get("defendant_department") or "Department",
+        }
+    defendant_principal = (
+        case.defendant._id
+        if case.defendant
+        else (meta.get("defendant_principal") or "unknown")
+    )
+    return {
+        "defendant_kind": "user",
+        "defendant_principal": defendant_principal,
+        "defendant_label": defendant_principal,
+    }
+
+
+def _verdict_decision(case: "Case") -> Optional[str]:
+    try:
+        verdict = getattr(case, "verdict", None)
+        if verdict is not None:
+            return getattr(verdict, "decision", None)
+        if hasattr(case, "verdicts"):
+            verdicts = list(case.verdicts)
+            if verdicts:
+                return getattr(verdicts[0], "decision", None)
+    except Exception:
+        pass
+    return None
+
+
+def _case_to_litigation_row(case: "Case") -> Dict[str, Any]:
+    content = _litigation_content(case._id)
+    is_private = content is not None
+    meta = _parse_case_metadata(case)
+    defendant = _defendant_fields(case, meta)
+    return {
+        "id": str(case._id),
+        "case_number": case.case_number or "",
+        "requester_principal": case.plaintiff._id if case.plaintiff else "unknown",
+        "defendant_principal": defendant["defendant_principal"],
+        "defendant_kind": defendant["defendant_kind"],
+        "defendant_label": defendant["defendant_label"],
+        "case_title": "" if is_private else (case.title or ""),
+        "description": "" if is_private else (case.description or ""),
+        "content_scope": (content.scope or "") if is_private else "",
+        "content_ciphertext": (content.ciphertext or "") if is_private else "",
+        "is_private": is_private,
+        "status": case.status or "filed",
+        "requested_at": case.filed_date or "",
+        "verdict": _verdict_decision(case),
+        "actions_taken": [],
+    }
+
+
+def _load_cases_for_caller(
+    caller: str, sees_all: bool, from_id: int, page_size: int
+) -> tuple:
+    """Return (cases, next_from_id, has_more) without scanning the full store.
+
+    Members load only their own cases via the User→Case relation. Justice
+    members and admins page through cases with load_some to stay under the IC
+    40B-instruction per-message limit on long-lived realms.
+    """
+    if sees_all:
+        max_id = Case.max_id()
+        if max_id == 0:
+            return [], None, False
+        batch = Case.load_some(from_id=from_id, count=page_size)
+        if not batch:
+            return [], None, False
+        last_id = int(batch[-1]._id)
+        next_from = last_id + 1
+        has_more = next_from <= max_id
+        return batch, (next_from if has_more else None), has_more
+
+    try:
+        user = User[caller]
+    except Exception:
+        user = None
+    if not user:
+        return [], None, False
+    try:
+        cases = list(user.cases_as_plaintiff) if user.cases_as_plaintiff else []
+    except Exception:
+        cases = []
+    return cases, None, False
+
+
 def get_litigations(args: str) -> str:
     """List the litigations the caller may access.
 
@@ -1121,68 +1222,30 @@ def get_litigations(args: str) -> str:
     logger.info("justice_litigation.get_litigations called")
 
     try:
-        caller = _caller_principal()
-        if not caller:
-            params = json.loads(args) if args else {}
-            caller = params.get("user_principal", "")
+        params = json.loads(args) if args else {}
+        caller = _caller_principal() or params.get("user_principal", "")
+        from_id = max(1, int(params.get("from_id", 1)))
+        page_size = max(1, min(int(params.get("page_size", DEFAULT_LITIGATIONS_PAGE_SIZE)), 100))
 
         # Compute the justice audience once (it is the same for every case).
         sees_all = _is_realm_admin(caller) or _is_justice_member(caller)
 
-        litigations = []
-        for case in Case.instances():
-            # Visible to the submitter, the justice department, or an admin.
-            if not (sees_all or _case_submitter(case) == caller):
-                continue
-            verdicts = list(case.verdicts) if hasattr(case, "verdicts") else []
-            content = _litigation_content(case._id)
-            is_private = content is not None
-
-            # Defendant may be a User (relation) or a department (metadata).
-            meta = {}
-            try:
-                meta = json.loads(case.metadata) if case.metadata else {}
-            except (ValueError, TypeError):
-                meta = {}
-            if meta.get("defendant_kind") == "department":
-                defendant_kind = "department"
-                defendant_principal = ""
-                defendant_label = meta.get("defendant_department") or "Department"
-            else:
-                defendant_kind = "user"
-                defendant_principal = case.defendant._id if case.defendant else (meta.get("defendant_principal") or "unknown")
-                defendant_label = defendant_principal
-
-            litigations.append(
-                {
-                    "id": str(case._id),
-                    "case_number": case.case_number or "",
-                    "requester_principal": case.plaintiff._id if case.plaintiff else "unknown",
-                    "defendant_principal": defendant_principal,
-                    "defendant_kind": defendant_kind,
-                    "defendant_label": defendant_label,
-                    # Private cases carry no plaintext; the client decrypts the
-                    # ciphertext below. Legacy plaintext cases still expose it.
-                    "case_title": "" if is_private else (case.title or ""),
-                    "description": "" if is_private else (case.description or ""),
-                    "content_scope": (content.scope or "") if is_private else "",
-                    "content_ciphertext": (content.ciphertext or "") if is_private else "",
-                    "is_private": is_private,
-                    "status": case.status or "filed",
-                    "requested_at": case.filed_date or "",
-                    "verdict": verdicts[0].decision if verdicts else None,
-                    "actions_taken": [],
-                }
-            )
+        cases, next_from_id, has_more = _load_cases_for_caller(
+            caller, sees_all, from_id, page_size
+        )
+        litigations = [_case_to_litigation_row(case) for case in cases]
+        total_count = Case.count() if sees_all else len(litigations)
 
         return json.dumps(
             {
                 "success": True,
                 "data": {
                     "litigations": litigations,
-                    "total_count": len(litigations),
+                    "total_count": total_count,
                     "user_profile": "admin" if sees_all else "member",
                     "can_view_all": sees_all,
+                    "next_from_id": next_from_id,
+                    "has_more": has_more,
                 },
             }
         )
