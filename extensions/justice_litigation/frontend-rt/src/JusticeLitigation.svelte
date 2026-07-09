@@ -1,6 +1,8 @@
 <script lang="ts">
 	let { ctx }: { ctx: any } = $props();
 
+	const EXTENSION_ID = 'justice_litigation';
+
 	type Tab = 'list' | 'create' | 'stats';
 
 	let tab = $state<Tab>('list');
@@ -263,12 +265,34 @@
 		}
 	}
 
+	function buildCaseFocusUri(caseId: string | number): string {
+		return `realms://${EXTENSION_ID}/case/${encodeURIComponent(String(caseId))}`;
+	}
+
+	function publishCaseFocus(litigation: any) {
+		if (!litigation?.id) return;
+		const label =
+			litigation.case_title ||
+			litigation.case_number ||
+			String(litigation.id);
+		ctx.host?.setFocus?.({
+			source: EXTENSION_ID,
+			uri: buildCaseFocusUri(litigation.id),
+			label,
+		});
+	}
+
+	function clearCaseFocus() {
+		ctx.host?.setFocus?.(null);
+	}
+
 	function openVerdict(litigation: any) {
 		verdictCase = litigation;
 		verdictCode = `transfer("${litigation.defendant_principal || ''}", "${litigation.requester_principal || ''}", 1000, "Compensation for ${litigation.case_title || ''}")`;
 		verdictError = '';
 		verdictSuccess = false;
 		showVerdict = true;
+		publishCaseFocus(litigation);
 	}
 
 	function closeVerdict() {
@@ -277,6 +301,7 @@
 		verdictCode = '';
 		verdictError = '';
 		verdictSuccess = false;
+		clearCaseFocus();
 	}
 
 	async function executeVerdict() {
@@ -561,7 +586,8 @@
 							<tbody>
 								{#each litigations as lit (lit.id)}
 									<tr
-										class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+										class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+										onclick={() => publishCaseFocus(lit)}
 									>
 									<td class="px-4 py-3 font-mono text-xs text-indigo-600 dark:text-indigo-400">
 										{lit.case_number || lit.id}
