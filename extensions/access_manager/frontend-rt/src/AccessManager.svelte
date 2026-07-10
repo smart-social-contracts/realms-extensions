@@ -1,7 +1,7 @@
 <script lang="ts">
 	let { ctx }: { ctx: any } = $props();
 
-	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
+	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
 	interface Toast { id: number; type: 'success' | 'error'; text: string; }
 
@@ -16,6 +16,9 @@
 	let newDeptName = $state('');
 	let newDeptDesc = $state('');
 	let newDeptHead = $state('');
+	let newDeptFund = $state('');
+	let newThresholdM = $state('1');
+	let newThresholdN = $state('1');
 	let expandedDept: string | null = $state(null);
 	let addMemberPrincipal = $state('');
 	let deptPermissions: Record<string, string[]> = $state({});
@@ -25,6 +28,12 @@
 	let deptPendingRevokes: Set<string> = $state(new Set());
 	let deptPermApplying = $state(false);
 	let allOperations: any[] = $state([]);
+	let policyDraft: Record<string, { m: string; n: string; quorum: string; veto: string; fund: string }> = $state({});
+	let authorities: any[] = $state([]);
+	let authTarget = $state('');
+	let authPerms = $state('org.appoint,org.expel,org.set_policy');
+	let authRemoteCanister = $state('');
+	let authRemoteOrg = $state('');
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const id = ++toastCounter;
@@ -42,8 +51,20 @@
 		try {
 			const res = await callExt('list_departments');
 			departments = res?.data?.departments ?? [];
+			for (const d of departments) {
+				policyDraft[d.name] = {
+					m: String(d.policy?.threshold_m ?? 1),
+					n: String(d.policy?.threshold_n ?? 1),
+					quorum: String(d.policy?.quorum_percent ?? 0),
+					veto: (d.policy?.veto_principals ?? []).join(', '),
+					fund: d.fund?.code ?? '',
+				};
+			}
+			policyDraft = { ...policyDraft };
+			const authRes = await callExt('list_authorities');
+			authorities = authRes?.data?.authorities ?? [];
 		} catch (e: any) {
-			addToast(e?.message || 'Failed to load departments', 'error');
+			addToast(e?.message || 'Failed to load organizations', 'error');
 		} finally {
 			deptLoading = false;
 		}
@@ -56,10 +77,14 @@
 				name: newDeptName.trim(),
 				description: newDeptDesc.trim(),
 				head_principal: newDeptHead.trim() || undefined,
+				fund_code: newDeptFund.trim() || undefined,
+				threshold_m: parseInt(newThresholdM || '1', 10),
+				threshold_n: parseInt(newThresholdN || '1', 10),
 			});
 			if (res?.success) {
-				addToast(`Department "${newDeptName}" created`);
-				newDeptName = ''; newDeptDesc = ''; newDeptHead = '';
+				addToast(`Organization "${newDeptName}" created`);
+				newDeptName = ''; newDeptDesc = ''; newDeptHead = ''; newDeptFund = '';
+				newThresholdM = '1'; newThresholdN = '1';
 				showNewDept = false;
 				await loadDepartments();
 			} else {
@@ -70,12 +95,78 @@
 		}
 	}
 
+	async function savePolicy(name: string) {
+		const draft = policyDraft[name];
+		if (!draft) return;
+		try {
+			const res = await callExt('update_department', {
+				name,
+				threshold_m: parseInt(draft.m || '1', 10),
+				threshold_n: parseInt(draft.n || '1', 10),
+				quorum_percent: parseInt(draft.quorum || '0', 10),
+				veto_principals: draft.veto,
+				fund_code: draft.fund.trim(),
+			});
+			if (res?.success) {
+				addToast(`Policy saved for ${name}`);
+				await loadDepartments();
+			} else {
+				addToast(res?.error || 'Failed to save policy', 'error');
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	async function grantAuthorityFromRoot() {
+		if (!authTarget.trim() && !(authRemoteCanister.trim() && authRemoteOrg.trim())) {
+			addToast('Set a local target or remote quarter + org', 'error');
+			return;
+		}
+		try {
+			const args: Record<string, unknown> = {
+				grantor: 'root',
+				permissions: authPerms.split(',').map((p) => p.trim()).filter(Boolean),
+			};
+			if (authRemoteCanister.trim()) {
+				args.target_quarter_canister_id = authRemoteCanister.trim();
+				args.target_org_name = authRemoteOrg.trim();
+			} else {
+				args.target = authTarget.trim();
+			}
+			const res = await callExt('grant_authority', args);
+			if (res?.success) {
+				addToast('Authority granted');
+				authTarget = ''; authRemoteCanister = ''; authRemoteOrg = '';
+				await loadDepartments();
+			} else {
+				addToast(res?.error || 'Failed', 'error');
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	async function revokeAuthority(id: string) {
+		try {
+			const res = await callExt('revoke_authority', { id });
+			if (res?.success) {
+				addToast('Authority revoked');
+				await loadDepartments();
+			} else {
+				addToast(res?.error || 'Failed', 'error');
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
 	async function deleteDepartment(name: string) {
-		if (!confirm(`Delete department "${name}"?`)) return;
+		if (!confirm(`Delete organization "${name}"?`)) return;
 		try {
 			const res = await callExt('delete_department', { name });
 			if (res?.success) {
-				addToast(`Department "${name}" deleted`);
+				addToast(`Organization "${name}" deleted`);
 				await loadDepartments();
 			} else {
 				addToast(res?.error || 'Failed', 'error');
@@ -224,8 +315,8 @@
 <div class="max-w-5xl mx-auto p-4 sm:p-6">
 	<!-- Header -->
 	<div class="mb-6">
-		<h1 class="text-2xl font-bold text-gray-900">Departments</h1>
-		<p class="text-sm text-gray-500 mt-1">Manage departments and membership</p>
+		<h1 class="text-2xl font-bold text-gray-900">Organizations</h1>
+		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, and org-over-org authority</p>
 	</div>
 
 	<!-- Toasts -->
@@ -244,17 +335,23 @@
 
 	<div class="space-y-4">
 		<div class="flex items-center justify-between">
-			<h2 class="text-lg font-semibold text-gray-800">Departments ({departments.length})</h2>
+			<h2 class="text-lg font-semibold text-gray-800">Organizations ({departments.length})</h2>
 			<button onclick={() => showNewDept = !showNewDept} class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800">
-				{showNewDept ? 'Cancel' : '+ New Department'}
+				{showNewDept ? 'Cancel' : '+ New Organization'}
 			</button>
 		</div>
 
 		{#if showNewDept}
 			<div class="p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-3">
-				<input bind:value={newDeptName} placeholder="Department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={newDeptName} placeholder="Organization name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptDesc} placeholder="Description (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptHead} placeholder="Head principal (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={newDeptFund} placeholder="Fund code (optional budget)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<div class="flex gap-2">
+					<input bind:value={newThresholdM} placeholder="M" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+					<span class="self-center text-sm text-gray-500">of</span>
+					<input bind:value={newThresholdN} placeholder="N" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				</div>
 				<button onclick={createDepartment} disabled={!newDeptName.trim()} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50">
 					Create
 				</button>
@@ -269,7 +366,7 @@
 				</svg>
 			</div>
 		{:else if departments.length === 0}
-			<p class="text-center text-gray-500 py-8">No departments yet. Create one to get started.</p>
+			<p class="text-center text-gray-500 py-8">No organizations yet. Root is created on realm init.</p>
 		{:else}
 			{#each departments as dept (dept.name)}
 				<div class="border border-gray-200 rounded-xl overflow-hidden">
@@ -283,11 +380,15 @@
 					>
 						<div>
 							<span class="font-medium text-gray-900">{dept.name}</span>
+							{#if dept.is_root}
+								<span class="ml-2 text-xs font-semibold uppercase tracking-wide text-indigo-600">root</span>
+							{/if}
 							{#if dept.description}
 								<span class="ml-2 text-sm text-gray-500">— {dept.description}</span>
 							{/if}
 						</div>
 						<div class="flex items-center gap-3 text-sm text-gray-500">
+							<span class="text-xs">{dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}</span>
 							<span>{dept.member_count} members</span>
 							<span class="text-xs">{expandedDept === dept.name ? '▲' : '▼'}</span>
 						</div>
@@ -300,6 +401,31 @@
 							{/if}
 							{#if dept.extensions?.length > 0}
 								<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
+							{/if}
+
+							<!-- Policy + budget -->
+							{#if policyDraft[dept.name]}
+							<div class="mt-3 pt-3 border-t border-gray-200 space-y-2">
+								<div class="text-sm font-medium text-gray-700">Policy & budget</div>
+								<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+									<label class="text-xs text-gray-500">M
+										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
+									</label>
+									<label class="text-xs text-gray-500">N
+										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].n} />
+									</label>
+									<label class="text-xs text-gray-500">Quorum %
+										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].quorum} />
+									</label>
+									<label class="text-xs text-gray-500">Fund code
+										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].fund} />
+									</label>
+								</div>
+								<label class="block text-xs text-gray-500">Veto principals (comma-separated)
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].veto} />
+								</label>
+								<button onclick={() => savePolicy(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Save policy</button>
+							</div>
 							{/if}
 
 							<!-- Permissions -->
@@ -321,7 +447,7 @@
 
 								{#if (deptPermissions[dept.name] ?? []).length > 0}
 									<div class="flex flex-wrap gap-1 mb-2">
-										{#each deptPermissions[dept.name] ?? [] as perm}
+										{#each deptPermissions[dept.name] ?? [] as perm (perm)}
 											<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
 												{perm}
 												<button onclick={() => toggleDeptPerm(perm, dept.name)} class="text-amber-400 hover:text-red-600" title="Revoke">&times;</button>
@@ -345,7 +471,7 @@
 										(op.description || '').toLowerCase().includes(q)
 									).slice(0, 15)}
 									<div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
-										{#each filtered as op}
+										{#each filtered as op (op.name)}
 											{@const checked = isDeptPermChecked(op.name, dept.name)}
 											<label class="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-b border-gray-100 last:border-b-0">
 												<input
@@ -370,7 +496,7 @@
 								<p class="text-sm text-gray-400">No members</p>
 							{:else}
 								<div class="space-y-1">
-									{#each dept.members as m}
+									{#each dept.members as m (m.principal)}
 										<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg">
 											<span>{m.nickname || shortPrincipal(m.principal)}</span>
 											<button onclick={() => removeMember(dept.name, m.principal)} class="text-red-500 hover:text-red-700 text-xs">Remove</button>
@@ -384,11 +510,43 @@
 								<button onclick={() => addMember(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Add</button>
 							</div>
 
-							<button onclick={() => deleteDepartment(dept.name)} class="mt-2 text-sm text-red-600 hover:text-red-800">Delete department</button>
+							{#if !dept.is_root}
+								<button onclick={() => deleteDepartment(dept.name)} class="mt-2 text-sm text-red-600 hover:text-red-800">Delete organization</button>
+							{/if}
 						</div>
 					{/if}
 				</div>
 			{/each}
 		{/if}
+
+		<!-- Authority grants -->
+		<div class="mt-8 pt-6 border-t border-gray-200 space-y-3">
+			<h2 class="text-lg font-semibold text-gray-800">Authority (org over org)</h2>
+			<p class="text-sm text-gray-500">Grant permissions from root (or another org) over a local or remote-quarter organization.</p>
+			<div class="p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-2">
+				<input bind:value={authTarget} placeholder="Local target org name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={authRemoteCanister} placeholder="Remote quarter canister id (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={authRemoteOrg} placeholder="Remote org name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={authPerms} placeholder="Permissions (comma-separated)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<button onclick={grantAuthorityFromRoot} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant from root</button>
+			</div>
+			{#if authorities.length === 0}
+				<p class="text-sm text-gray-400">No authority grants yet.</p>
+			{:else}
+				<div class="space-y-2">
+					{#each authorities as auth (auth.id)}
+						<div class="flex items-center justify-between text-sm bg-white border border-gray-200 px-3 py-2 rounded-lg">
+							<div>
+								<span class="font-medium">{auth.grantor}</span>
+								<span class="text-gray-400"> → </span>
+								<span class="font-medium">{auth.target || `${auth.target_org_name}@${shortPrincipal(auth.target_quarter_canister_id)}`}</span>
+								<div class="text-xs text-gray-500">{(auth.permissions || []).join(', ')}</div>
+							</div>
+							<button onclick={() => revokeAuthority(auth.id)} class="text-red-500 hover:text-red-700 text-xs">Revoke</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>

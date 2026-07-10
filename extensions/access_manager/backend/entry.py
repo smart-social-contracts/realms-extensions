@@ -1,19 +1,33 @@
 """
 Access Manager Extension Backend
 
-Comprehensive admin interface for managing:
-  - Departments (create, edit, hierarchy, member management)
-  - Extension access (grant/revoke per user, department, or profile)
-  - Profile/role assignment with scoped delegation
+Admin interface for governance organizations (GGG ``Department`` entity;
+product name: Organization — issue #240):
+  - Organizations (create, edit, members) — no nesting
+  - Policy (M/N, quorum, veto)
+  - Budget (fund link)
+  - Authority grants (org-over-org, including cross-quarter targets)
+  - Extension access and profile assignment
 
 Supersedes the basic role_manager extension.
 """
 
 import json
 import traceback
+import uuid
 from typing import Any, Dict, List
 
-from ggg import Department, Extension, Permission, User, UserProfile
+from ggg import (
+    Department,
+    DepartmentAuthority,
+    Extension,
+    Fund,
+    FundType,
+    Permission,
+    ROOT_ORG_NAME,
+    User,
+    UserProfile,
+)
 from ggg.system.user_profile import Operations, Profiles, OPERATIONS_SEPARATOR
 from basilisk import ic
 from ic_python_logging import get_logger
@@ -74,73 +88,146 @@ def _is_dept_head(user: User, dept: Department) -> bool:
         return False
 
 
+def _caller_in_root(user: User) -> bool:
+    root = Department[ROOT_ORG_NAME]
+    if not root:
+        return False
+    try:
+        if root.head and root.head.id == user.id:
+            return True
+        for m in root.members:
+            if m.id == user.id:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _can_manage_dept(user: User, dept: Department) -> bool:
-    """Admin or department head can manage a department."""
+    """Admin, role.assign, dept head, or root member can manage an org."""
     if _is_allowed(user, Operations.ALL):
         return True
     if _is_allowed(user, Operations.ROLE_ASSIGN):
         return True
-    return _is_dept_head(user, dept)
+    if _is_allowed(user, Operations.ORG_APPOINT):
+        return True
+    if _is_dept_head(user, dept):
+        return True
+    if _caller_in_root(user):
+        return True
+    return False
+
+
+def _serialize_org(dept: Department) -> dict:
+    members = []
+    try:
+        for m in dept.members:
+            members.append({"principal": m.id, "nickname": m.nickname or ""})
+    except Exception:
+        pass
+
+    extensions = []
+    try:
+        for ext in dept.extensions:
+            extensions.append(ext.name)
+    except Exception:
+        pass
+
+    head_info = None
+    try:
+        if dept.head:
+            head_info = {"principal": dept.head.id, "nickname": dept.head.nickname or ""}
+    except Exception:
+        pass
+
+    permissions = []
+    try:
+        for perm in dept.permissions:
+            permissions.append(perm.name)
+    except Exception:
+        pass
+
+    fund_info = None
+    try:
+        if dept.fund:
+            fund_info = {
+                "code": dept.fund.code,
+                "name": dept.fund.name,
+                "fund_type": dept.fund.fund_type or "",
+            }
+    except Exception:
+        pass
+
+    vetoes = []
+    try:
+        vetoes = dept.veto_principal_list()
+    except Exception:
+        raw = getattr(dept, "policy_veto_principals", "") or ""
+        vetoes = [p.strip() for p in raw.split(",") if p.strip()]
+
+    return {
+        "name": dept.name,
+        "description": dept.description or "",
+        "head": head_info,
+        "is_root": bool(getattr(dept, "is_root", False) or dept.name == ROOT_ORG_NAME),
+        "member_count": len(members),
+        "members": members,
+        "extensions": extensions,
+        "permissions": permissions,
+        "policy": {
+            "threshold_m": int(getattr(dept, "policy_threshold_m", 1) or 1),
+            "threshold_n": int(getattr(dept, "policy_threshold_n", 1) or 1),
+            "quorum_percent": int(getattr(dept, "policy_quorum_percent", 0) or 0),
+            "veto_principals": vetoes,
+        },
+        "fund": fund_info,
+    }
+
+
+def _serialize_authority(auth: DepartmentAuthority) -> dict:
+    target_name = None
+    try:
+        if auth.target:
+            target_name = auth.target.name
+    except Exception:
+        pass
+    grantor_name = None
+    try:
+        if auth.grantor:
+            grantor_name = auth.grantor.name
+    except Exception:
+        pass
+    return {
+        "id": auth.id,
+        "grantor": grantor_name,
+        "target": target_name,
+        "target_quarter_canister_id": getattr(auth, "target_quarter_canister_id", "") or "",
+        "target_org_name": getattr(auth, "target_org_name", "") or "",
+        "permissions": auth.permission_list() if hasattr(auth, "permission_list") else [],
+        "description": auth.description or "",
+    }
 
 
 # ---------------------------------------------------------------------------
-# Department Management
+# Department / Organization Management
 # ---------------------------------------------------------------------------
 
 def list_departments(args) -> str:
-    """List all departments with member counts."""
+    """List all organizations with members, policy, and budget."""
     try:
         _parse_args(args)
         caller = _get_caller_user()
         _require_operation(caller, Operations.PERMISSION_VIEW)
 
-        depts = []
-        for dept in Department.instances():
-            members = []
-            try:
-                for m in dept.members:
-                    members.append({"principal": m.id, "nickname": m.nickname or ""})
-            except Exception:
-                pass
+        try:
+            from core.org_policy import ensure_root_org
 
-            extensions = []
-            try:
-                for ext in dept.extensions:
-                    extensions.append(ext.name)
-            except Exception:
-                pass
+            ensure_root_org()
+        except Exception:
+            pass
 
-            head_info = None
-            try:
-                if dept.head:
-                    head_info = {"principal": dept.head.id, "nickname": dept.head.nickname or ""}
-            except Exception:
-                pass
-
-            parent_name = None
-            try:
-                if dept.parent:
-                    parent_name = dept.parent.name
-            except Exception:
-                pass
-
-            permissions = []
-            try:
-                for perm in dept.permissions:
-                    permissions.append(perm.name)
-            except Exception:
-                pass
-
-            depts.append({
-                "name": dept.name,
-                "description": dept.description or "",
-                "head": head_info,
-                "parent": parent_name,
-                "member_count": len(members),
-                "members": members,
-                "extensions": extensions,
-                "permissions": permissions,
-            })
+        depts = [_serialize_org(dept) for dept in Department.instances()]
+        depts.sort(key=lambda d: (0 if d.get("is_root") else 1, d.get("name") or ""))
 
         return json.dumps({"success": True, "data": {"departments": depts, "total": len(depts)}})
     except PermissionError as e:
@@ -151,13 +238,13 @@ def list_departments(args) -> str:
 
 
 def create_department(args) -> str:
-    """Create a new department."""
+    """Create a new organization (no nesting)."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
         _require_operation(caller, Operations.ROLE_ASSIGN)
 
-        name = args_dict.get("name")
+        name = (args_dict.get("name") or "").strip()
         description = args_dict.get("description", "")
         head_principal = args_dict.get("head_principal")
         parent_name = args_dict.get("parent")
@@ -165,24 +252,61 @@ def create_department(args) -> str:
         if not name:
             return json.dumps({"success": False, "error": "name is required"})
 
+        if parent_name:
+            return json.dumps({
+                "success": False,
+                "error": "Organization nesting is not allowed (issue #240)",
+            })
+
+        if name == ROOT_ORG_NAME or args_dict.get("is_root"):
+            existing_root = Department[ROOT_ORG_NAME]
+            if existing_root:
+                return json.dumps({"success": False, "error": "root organization already exists"})
+
         existing = Department[name]
         if existing:
-            return json.dumps({"success": False, "error": f"Department '{name}' already exists"})
+            return json.dumps({"success": False, "error": f"Organization '{name}' already exists"})
 
-        dept = Department(name=name, description=description)
+        is_root = name == ROOT_ORG_NAME
+        dept = Department(
+            name=name,
+            description=description,
+            is_root=is_root,
+            policy_threshold_m=int(args_dict.get("threshold_m") or 1),
+            policy_threshold_n=int(args_dict.get("threshold_n") or 1),
+            policy_quorum_percent=int(args_dict.get("quorum_percent") or 0),
+        )
 
         if head_principal:
             head_user = User[head_principal]
             if head_user:
                 dept.head = head_user
+                try:
+                    dept.members.add(head_user)
+                except Exception:
+                    pass
 
-        if parent_name:
-            parent_dept = Department[parent_name]
-            if parent_dept:
-                dept.parent = parent_dept
+        fund_code = (args_dict.get("fund_code") or "").strip()
+        if fund_code:
+            fund = Fund[fund_code]
+            if not fund:
+                fund = Fund(
+                    code=fund_code[:16],
+                    name=args_dict.get("fund_name") or f"{name} Fund",
+                    fund_type=args_dict.get("fund_type") or FundType.SPECIAL_REVENUE,
+                    description=f"Budget for organization {name}",
+                )
+            dept.fund = fund
 
-        logger.info(f"Department '{name}' created by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"name": name, "message": f"Department '{name}' created"}})
+        try:
+            from core.org_policy import grant_root_authority_over_local_orgs
+
+            grant_root_authority_over_local_orgs()
+        except Exception:
+            pass
+
+        logger.info(f"Organization '{name}' created by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"name": name, "message": f"Organization '{name}' created"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -191,7 +315,7 @@ def create_department(args) -> str:
 
 
 def update_department(args) -> str:
-    """Update a department's description or head."""
+    """Update an organization's description, head, policy, or fund."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -202,10 +326,16 @@ def update_department(args) -> str:
 
         dept = Department[name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Department '{name}' not found"})
+            return json.dumps({"success": False, "error": f"Organization '{name}' not found"})
 
         if not _can_manage_dept(caller, dept):
             return json.dumps({"success": False, "error": "Access denied"})
+
+        if args_dict.get("parent"):
+            return json.dumps({
+                "success": False,
+                "error": "Organization nesting is not allowed (issue #240)",
+            })
 
         if "description" in args_dict:
             dept.description = args_dict["description"]
@@ -213,16 +343,35 @@ def update_department(args) -> str:
             head_user = User[args_dict["head_principal"]]
             if head_user:
                 dept.head = head_user
-        if "parent" in args_dict:
-            if args_dict["parent"]:
-                parent_dept = Department[args_dict["parent"]]
-                if parent_dept:
-                    dept.parent = parent_dept
+        if "threshold_m" in args_dict:
+            dept.policy_threshold_m = int(args_dict["threshold_m"] or 1)
+        if "threshold_n" in args_dict:
+            dept.policy_threshold_n = int(args_dict["threshold_n"] or 1)
+        if "quorum_percent" in args_dict:
+            dept.policy_quorum_percent = int(args_dict["quorum_percent"] or 0)
+        if "veto_principals" in args_dict:
+            v = args_dict["veto_principals"]
+            if isinstance(v, list):
+                dept.policy_veto_principals = ",".join(str(x).strip() for x in v if str(x).strip())
             else:
-                dept.parent = None
+                dept.policy_veto_principals = str(v or "")
+        if "fund_code" in args_dict:
+            code = (args_dict.get("fund_code") or "").strip()
+            if not code:
+                dept.fund = None
+            else:
+                fund = Fund[code]
+                if not fund:
+                    fund = Fund(
+                        code=code[:16],
+                        name=args_dict.get("fund_name") or f"{name} Fund",
+                        fund_type=args_dict.get("fund_type") or FundType.SPECIAL_REVENUE,
+                        description=f"Budget for organization {name}",
+                    )
+                dept.fund = fund
 
-        logger.info(f"Department '{name}' updated by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"name": name, "message": f"Department '{name}' updated"}})
+        logger.info(f"Organization '{name}' updated by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"name": name, "message": f"Organization '{name}' updated"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -231,7 +380,7 @@ def update_department(args) -> str:
 
 
 def delete_department(args) -> str:
-    """Delete a department."""
+    """Delete an organization (root cannot be deleted)."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -243,11 +392,14 @@ def delete_department(args) -> str:
 
         dept = Department[name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Department '{name}' not found"})
+            return json.dumps({"success": False, "error": f"Organization '{name}' not found"})
+
+        if getattr(dept, "is_root", False) or name == ROOT_ORG_NAME:
+            return json.dumps({"success": False, "error": "Cannot delete the root organization"})
 
         dept.delete()
-        logger.info(f"Department '{name}' deleted by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"message": f"Department '{name}' deleted"}})
+        logger.info(f"Organization '{name}' deleted by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"message": f"Organization '{name}' deleted"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -256,7 +408,7 @@ def delete_department(args) -> str:
 
 
 def add_department_member(args) -> str:
-    """Add a user to a department."""
+    """Add a user to an organization."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -268,7 +420,7 @@ def add_department_member(args) -> str:
 
         dept = Department[dept_name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
 
         if not _can_manage_dept(caller, dept):
             return json.dumps({"success": False, "error": "Access denied"})
@@ -278,7 +430,7 @@ def add_department_member(args) -> str:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
         dept.members.add(user)
-        logger.info(f"User {user_principal} added to department '{dept_name}' by {_get_caller_principal()}")
+        logger.info(f"User {user_principal} added to organization '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"User added to '{dept_name}'"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -288,7 +440,7 @@ def add_department_member(args) -> str:
 
 
 def remove_department_member(args) -> str:
-    """Remove a user from a department."""
+    """Remove a user from an organization."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -300,7 +452,7 @@ def remove_department_member(args) -> str:
 
         dept = Department[dept_name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
 
         if not _can_manage_dept(caller, dept):
             return json.dumps({"success": False, "error": "Access denied"})
@@ -310,12 +462,155 @@ def remove_department_member(args) -> str:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
         dept.members.remove(user)
-        logger.info(f"User {user_principal} removed from department '{dept_name}' by {_get_caller_principal()}")
+        logger.info(f"User {user_principal} removed from organization '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"User removed from '{dept_name}'"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
         logger.error(f"remove_department_member error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Authority grants (org-over-org)
+# ---------------------------------------------------------------------------
+
+def list_authorities(args) -> str:
+    """List authority grants, optionally filtered by grantor or target."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        _require_operation(caller, Operations.PERMISSION_VIEW)
+
+        grantor_name = (args_dict.get("grantor") or "").strip()
+        target_name = (args_dict.get("target") or "").strip()
+
+        rows = []
+        for auth in DepartmentAuthority.instances():
+            row = _serialize_authority(auth)
+            if grantor_name and row.get("grantor") != grantor_name:
+                continue
+            if target_name and row.get("target") != target_name and row.get("target_org_name") != target_name:
+                continue
+            rows.append(row)
+
+        return json.dumps({"success": True, "data": {"authorities": rows, "total": len(rows)}})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"list_authorities error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def grant_authority(args) -> str:
+    """Grant org-over-org permissions (local or cross-quarter target)."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        if not (
+            _is_allowed(caller, Operations.ALL)
+            or _is_allowed(caller, Operations.ORG_GRANT_AUTHORITY)
+            or _is_allowed(caller, Operations.ROLE_ASSIGN)
+            or _caller_in_root(caller)
+        ):
+            return json.dumps({"success": False, "error": "Access denied"})
+
+        grantor_name = (args_dict.get("grantor") or ROOT_ORG_NAME).strip()
+        grantor = Department[grantor_name]
+        if not grantor:
+            return json.dumps({"success": False, "error": f"Grantor '{grantor_name}' not found"})
+
+        perms = args_dict.get("permissions") or []
+        if isinstance(perms, str):
+            perm_str = perms
+        else:
+            perm_str = ",".join(str(p).strip() for p in perms if str(p).strip())
+        if not perm_str:
+            return json.dumps({"success": False, "error": "permissions required"})
+
+        target_name = (args_dict.get("target") or "").strip()
+        remote_canister = (args_dict.get("target_quarter_canister_id") or "").strip()
+        remote_org = (args_dict.get("target_org_name") or "").strip()
+
+        target = None
+        if remote_canister:
+            if not remote_org:
+                return json.dumps({
+                    "success": False,
+                    "error": "target_org_name required for cross-quarter grants",
+                })
+        else:
+            if not target_name:
+                return json.dumps({"success": False, "error": "target required"})
+            target = Department[target_name]
+            if not target:
+                return json.dumps({"success": False, "error": f"Target '{target_name}' not found"})
+            if target.name == grantor.name:
+                return json.dumps({"success": False, "error": "Cannot grant authority over self"})
+
+        auth_id = args_dict.get("id") or f"auth-{uuid.uuid4().hex[:12]}"
+        auth = DepartmentAuthority(
+            id=auth_id,
+            grantor=grantor,
+            target=target,
+            target_quarter_canister_id=remote_canister,
+            target_org_name=remote_org if remote_canister else "",
+            permissions=perm_str,
+            description=args_dict.get("description") or "",
+        )
+        logger.info(f"Authority {auth.id} granted by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": _serialize_authority(auth)})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"grant_authority error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def revoke_authority(args) -> str:
+    """Revoke an authority grant by id."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        if not (
+            _is_allowed(caller, Operations.ALL)
+            or _is_allowed(caller, Operations.ORG_REVOKE_AUTHORITY)
+            or _is_allowed(caller, Operations.ROLE_ASSIGN)
+            or _caller_in_root(caller)
+        ):
+            return json.dumps({"success": False, "error": "Access denied"})
+
+        auth_id = args_dict.get("id")
+        if not auth_id:
+            return json.dumps({"success": False, "error": "id is required"})
+
+        auth = DepartmentAuthority[auth_id]
+        if not auth:
+            return json.dumps({"success": False, "error": f"Authority '{auth_id}' not found"})
+
+        auth.delete()
+        return json.dumps({"success": True, "data": {"message": f"Authority '{auth_id}' revoked"}})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"revoke_authority error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def ensure_root(args) -> str:
+    """Ensure the root organization exists and has default local authorities."""
+    try:
+        caller = _get_caller_user()
+        _require_operation(caller, Operations.ROLE_ASSIGN)
+        from core.org_policy import ensure_root_org, grant_root_authority_over_local_orgs
+
+        root = ensure_root_org()
+        grant_root_authority_over_local_orgs()
+        return json.dumps({"success": True, "data": _serialize_org(root)})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"ensure_root error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -978,19 +1273,37 @@ def get_available_profiles(args) -> str:
 # ---------------------------------------------------------------------------
 
 EXTENSION_FUNCTIONS = {
-    # Departments
+    # Organizations (Department entity)
     "list_departments": list_departments,
     "create_department": create_department,
     "update_department": update_department,
     "delete_department": delete_department,
     "add_department_member": add_department_member,
     "remove_department_member": remove_department_member,
+    "ensure_root": ensure_root,
+    "list_authorities": list_authorities,
+    "grant_authority": grant_authority,
+    "revoke_authority": revoke_authority,
     # Department permissions
     "get_department_permissions": get_department_permissions,
     "grant_department_permission": grant_department_permission,
     "revoke_department_permission": revoke_department_permission,
     "batch_grant_department_permissions": batch_grant_department_permissions,
     "batch_revoke_department_permissions": batch_revoke_department_permissions,
+    # Extensions
+    "list_extensions": list_extensions,
+    "grant_extension_to_user": grant_extension_to_user,
+    "revoke_extension_from_user": revoke_extension_from_user,
+    "grant_extension_to_department": grant_extension_to_department,
+    "revoke_extension_from_department": revoke_extension_from_department,
+    "grant_extension_to_profile": grant_extension_to_profile,
+    "revoke_extension_from_profile": revoke_extension_from_profile,
+    # Users / profiles
+    "list_users": list_users,
+    "get_user_access_summary": get_user_access_summary,
+    "assign_profile": assign_profile,
+    "revoke_profile": revoke_profile,
+    "get_available_profiles": get_available_profiles,
 }
 
 
