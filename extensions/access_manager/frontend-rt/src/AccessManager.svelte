@@ -21,6 +21,24 @@
 	let newThresholdN = $state('1');
 	let expandedDept: string | null = $state(null);
 	let addMemberPrincipal = $state('');
+	// Member principal autocomplete — realm directory from host `directory_list`.
+	let directory: any[] = $state([]);
+	let directoryLoaded = $state(false);
+	let directoryLoading = $state(false);
+	let showMemberSuggestions = $state(false);
+	let memberSuggestionIndex = $state(0);
+	let memberSuggestions = $derived.by(() => {
+		const q = addMemberPrincipal.trim().toLowerCase();
+		if (!q) return [];
+		return directory
+			.filter(
+				(e) =>
+					e.kind === 'user' &&
+					((e.label || '').toLowerCase().includes(q) ||
+						(e.principal || '').toLowerCase().includes(q)),
+			)
+			.slice(0, 8);
+	});
 	let deptPermissions: Record<string, string[]> = $state({});
 	let deptPermLoading: string | null = $state(null);
 	let deptPermFilter = $state('');
@@ -176,6 +194,63 @@
 		}
 	}
 
+	async function loadDirectory() {
+		if (directoryLoaded || directoryLoading || !ctx.backend?.directory_list) return;
+		directoryLoading = true;
+		try {
+			const resp: any = await ctx.backend.directory_list();
+			if (resp?.success && resp?.data?.message) {
+				const parsed = JSON.parse(resp.data.message);
+				directory = Array.isArray(parsed?.entries) ? parsed.entries : [];
+			}
+			directoryLoaded = true;
+		} catch (e) {
+			console.warn('[access_manager] directory load failed', e);
+		} finally {
+			directoryLoading = false;
+		}
+	}
+
+	function selectMemberSuggestion(entry: any) {
+		if (!entry) return;
+		addMemberPrincipal = entry.principal || '';
+		showMemberSuggestions = false;
+		memberSuggestionIndex = 0;
+	}
+
+	function handleMemberPrincipalKeydown(e: KeyboardEvent) {
+		if (e.key === 'Tab') {
+			const q = addMemberPrincipal.trim();
+			if (!q) return;
+
+			e.preventDefault();
+			void loadDirectory();
+
+			if (!showMemberSuggestions || memberSuggestions.length === 0) {
+				showMemberSuggestions = true;
+				memberSuggestionIndex = 0;
+				return;
+			}
+
+			const pick = memberSuggestions[memberSuggestionIndex];
+			if (pick) selectMemberSuggestion(pick);
+			return;
+		}
+
+		if (!showMemberSuggestions) return;
+
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			memberSuggestionIndex = Math.min(memberSuggestionIndex + 1, memberSuggestions.length - 1);
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			memberSuggestionIndex = Math.max(memberSuggestionIndex - 1, 0);
+		} else if (e.key === 'Escape') {
+			showMemberSuggestions = false;
+			memberSuggestionIndex = 0;
+		}
+	}
+
 	async function addMember(deptName: string) {
 		if (!addMemberPrincipal.trim()) return;
 		try {
@@ -309,6 +384,7 @@
 	$effect(() => {
 		loadDepartments();
 		loadAllOperations();
+		loadDirectory();
 	});
 </script>
 
@@ -505,9 +581,53 @@
 								</div>
 							{/if}
 
-							<div class="flex gap-2 mt-2">
-								<input bind:value={addMemberPrincipal} placeholder="User principal" class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm" />
-								<button onclick={() => addMember(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Add</button>
+							<div class="mt-2">
+								<div class="flex gap-2">
+									<div class="relative flex-1">
+										<input
+											bind:value={addMemberPrincipal}
+											onkeydown={handleMemberPrincipalKeydown}
+											oninput={() => {
+												showMemberSuggestions = false;
+												memberSuggestionIndex = 0;
+											}}
+											onblur={() => setTimeout(() => (showMemberSuggestions = false), 200)}
+											autocomplete="off"
+											placeholder="Name or principal"
+											aria-describedby="am-member-hint"
+											class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+										/>
+										{#if showMemberSuggestions && memberSuggestions.length > 0}
+											<ul
+												class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1"
+											>
+												{#each memberSuggestions as s, i (s.principal)}
+													<li>
+														<button
+															type="button"
+															onmousedown={() => selectMemberSuggestion(s)}
+															class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors {i ===
+															memberSuggestionIndex
+																? 'bg-indigo-50'
+																: ''}"
+														>
+															<span class="block font-medium text-gray-900 truncate">{s.label}</span>
+															{#if s.principal && s.principal !== s.label}
+																<span class="block font-mono text-xs text-gray-500 truncate">{s.principal}</span>
+															{/if}
+														</button>
+													</li>
+												{/each}
+											</ul>
+										{/if}
+									</div>
+									<button onclick={() => addMember(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Add</button>
+								</div>
+								<p id="am-member-hint" class="mt-1 text-xs text-gray-500">
+									Type a name or principal, then press
+									<kbd class="mx-0.5 px-1 py-0.5 rounded border border-gray-300 bg-gray-100 text-[10px] font-mono text-gray-600">Tab</kbd>
+									to open autocomplete. Use ↑↓ and Tab again to pick a match, or paste a principal directly.
+								</p>
 							</div>
 
 							{#if !dept.is_root}
