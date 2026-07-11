@@ -478,7 +478,7 @@
 					</label>
 					<div>
 						<span class="text-sm font-medium text-gray-700">AI Assistant</span>
-						<p class="text-xs text-gray-500">Show the sidebar assistant and Explain actions. The core llm_chat extension stays installed.</p>
+						<p class="text-xs text-gray-500">Enable Explain actions and realm-context hooks. Chat UI lives on the mundus Realms Assistant (registry portal).</p>
 					</div>
 				</div>
 
