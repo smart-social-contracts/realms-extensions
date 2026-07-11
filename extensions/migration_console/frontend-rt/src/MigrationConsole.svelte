@@ -71,6 +71,88 @@
 		return p.slice(0, 5) + '...' + p.slice(-5);
 	}
 
+	// --- Citizen import ---
+	let importJson = $state('');
+	let importing = $state(false);
+	let importReport: any = $state(null);
+	let pendingInvites: any[] = $state([]);
+	let pendingTotal = $state(0);
+	let pendingLoading = $state(false);
+	let showPending = $state(false);
+
+	async function runImport() {
+		let records: any;
+		try {
+			records = JSON.parse(importJson);
+		} catch {
+			addToast('Invalid JSON — expected an array of citizen records', 'error');
+			return;
+		}
+		if (!Array.isArray(records)) {
+			addToast('Expected a JSON array of citizen records', 'error');
+			return;
+		}
+		importing = true;
+		importReport = null;
+		try {
+			const res = await ctx.callSync('import_citizens', { citizens: records });
+			if (res?.success) {
+				importReport = res.data;
+				addToast(`${res.data.created_count} citizens imported, ${res.data.skipped_count} skipped`);
+				importJson = '';
+				await load();
+				if (showPending) await loadPending();
+			} else {
+				addToast(res?.error || 'Import failed', 'error');
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Import failed', 'error');
+		} finally {
+			importing = false;
+		}
+	}
+
+	async function loadPending() {
+		pendingLoading = true;
+		try {
+			const res = await ctx.callSync('list_citizen_invites', { only_pending: true, limit: 50 });
+			if (res?.success) {
+				pendingInvites = res.data.citizens ?? [];
+				pendingTotal = res.data.total ?? 0;
+			} else {
+				addToast(res?.error || 'Failed to load pending invites', 'error');
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Failed to load pending invites', 'error');
+		} finally {
+			pendingLoading = false;
+		}
+	}
+
+	async function togglePending() {
+		showPending = !showPending;
+		if (showPending && pendingInvites.length === 0) await loadPending();
+	}
+
+	async function copyCitizenUrl(row: any) {
+		if (!row.url) {
+			addToast('No URL available (frontend URL not configured)', 'error');
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(row.url);
+			addToast(`Invite URL for ${row.name || row.id} copied`);
+		} catch {
+			addToast('Could not copy to clipboard', 'error');
+		}
+	}
+
+	const claimPercent = $derived(
+		data?.citizen_import?.total > 0
+			? Math.round((data.citizen_import.claimed / data.citizen_import.total) * 100)
+			: 0,
+	);
+
 	const progressPercent = $derived(
 		data && data.checklist_total > 0
 			? Math.round((data.checklist_done / data.checklist_total) * 100)
@@ -153,6 +235,128 @@
 				{/each}
 			</ul>
 		</div>
+
+		<!-- Migration status: citizens / quarters / currency -->
+		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+			<div class="border border-gray-200 rounded-xl p-4">
+				<h3 class="text-sm font-semibold text-gray-700 mb-2">Citizen import</h3>
+				{#if data.citizen_import?.total > 0}
+					<p class="text-2xl font-bold text-gray-900">
+						{data.citizen_import.claimed}
+						<span class="text-sm font-normal text-gray-400">of {data.citizen_import.total} claimed</span>
+					</p>
+					<div class="w-full bg-gray-100 rounded-full h-1.5 mt-2">
+						<div class="bg-blue-500 h-1.5 rounded-full transition-all" style="width: {claimPercent}%"></div>
+					</div>
+					<p class="text-xs text-gray-400 mt-1">{data.citizen_import.pending} pending</p>
+				{:else}
+					<p class="text-sm text-gray-400">No citizens imported yet.</p>
+				{/if}
+			</div>
+			<div class="border border-gray-200 rounded-xl p-4">
+				<h3 class="text-sm font-semibold text-gray-700 mb-2">Quarters</h3>
+				{#if data.quarters?.length > 0}
+					<ul class="space-y-1">
+						{#each data.quarters as q (q.canister_id)}
+							<li class="flex justify-between text-sm">
+								<span class="text-gray-700">#{q.index} {q.name}</span>
+								<span class="text-gray-400">{q.population} · {q.status}</span>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="text-sm text-gray-400">Single-quarter realm (autoscale adds more under load).</p>
+				{/if}
+			</div>
+			<div class="border border-gray-200 rounded-xl p-4">
+				<h3 class="text-sm font-semibold text-gray-700 mb-2">Currency</h3>
+				<p class="text-2xl font-bold text-gray-900">{data.currency?.accounting_currency || '—'}</p>
+				<p class="text-xs mt-1 {data.currency?.token_canister_id ? 'text-green-600' : 'text-amber-600'}">
+					{data.currency?.token_canister_id
+						? `token canister ${data.currency.token_canister_id}`
+						: 'token canister not linked'}
+				</p>
+			</div>
+		</div>
+
+		<!-- Citizen import panel (admin) -->
+		{#if data.is_admin}
+			<div class="border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">
+				<div class="flex items-center justify-between mb-2">
+					<h2 class="text-lg font-semibold text-gray-800">Import citizens</h2>
+					<button
+						class="px-3 py-1.5 text-xs border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+						onclick={togglePending}
+					>
+						{showPending ? 'Hide pending invites' : 'Show pending invites'}
+					</button>
+				</div>
+				<p class="text-xs text-gray-500 mb-3">
+					Paste a JSON array of citizen records:
+					<code class="bg-gray-100 px-1 rounded">{'[{"id": "C-1001", "name": "Ada", "quarter": "North Quarter", "email": ""}]'}</code>
+					— up to 200 per batch. Each citizen gets a single-use personal invite URL; logging in with
+					Internet Identity binds their record to their principal.
+				</p>
+				<textarea
+					bind:value={importJson}
+					rows="4"
+					placeholder="[ &#123;&quot;id&quot;: &quot;C-1001&quot;, &quot;name&quot;: &quot;Ada Lovelace&quot;&#125;, … ]"
+					class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
+				></textarea>
+				<div class="mt-2 flex items-center gap-3">
+					<button
+						class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+						disabled={importing || !importJson.trim()}
+						onclick={runImport}
+					>
+						{importing ? 'Importing…' : 'Import'}
+					</button>
+					{#if importReport}
+						<span class="text-xs text-gray-500">
+							{importReport.created_count} created · {importReport.skipped_count} skipped ·
+							{importReport.error_count} errors
+						</span>
+					{/if}
+				</div>
+				{#if importReport?.errors?.length > 0}
+					<ul class="mt-2 text-xs text-red-600 space-y-0.5">
+						{#each importReport.errors as err, idx (idx)}
+							<li>Record {err.index}{err.id ? ` (${err.id})` : ''}: {err.error}</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if showPending}
+					<div class="mt-4 border-t border-gray-100 pt-3">
+						<h3 class="text-sm font-semibold text-gray-700 mb-2">
+							Pending invites {pendingTotal > 50 ? `(first 50 of ${pendingTotal})` : `(${pendingTotal})`}
+						</h3>
+						{#if pendingLoading}
+							<p class="text-sm text-gray-400">Loading…</p>
+						{:else if pendingInvites.length === 0}
+							<p class="text-sm text-gray-400">Every imported citizen has claimed their record.</p>
+						{:else}
+							<div class="space-y-1 max-h-64 overflow-y-auto">
+								{#each pendingInvites as row (row.id)}
+									<div class="flex items-center justify-between gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded">
+										<span class="text-xs text-gray-700 truncate">
+											{row.id}{row.name ? ` — ${row.name}` : ''}{row.quarter ? ` · ${row.quarter}` : ''}
+										</span>
+										<button
+											class="px-2 py-0.5 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 shrink-0"
+											disabled={!row.url}
+											onclick={() => copyCitizenUrl(row)}
+										>
+											Copy URL
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Organizations -->
 		<div class="space-y-4">

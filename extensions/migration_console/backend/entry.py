@@ -5,10 +5,13 @@ Codex-driven admin console for incumbent migrations (issue #241). Content is
 driven by the codex configuration stored in ``Realm.manifest_data`` (dashboard
 profile ``incumbent_migration``), not hard-coded per codex.
 
-Panels served (shell slice):
+Panels served:
   - Readiness checklist — live milestones toward the alpha→beta gate
+    (computed by core.lifecycle_gate, which also enforces the hard gate)
   - Organizations — seeded departments with policy, budget, member counts
   - Staff invites — per-(department, profile) invite URLs and redemption counts
+  - Citizen import — bulk census import, claim progress, pending invite URLs
+  - Quarters & currency — population per quarter, accounting currency status
 
 Visible to admins and members of any seeded department (a Treasury clerk sees
 the console, but regenerating invites stays admin/root-only).
@@ -159,98 +162,6 @@ def _serialize_org(dept: Department, base_url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Readiness checklist
-# ---------------------------------------------------------------------------
-
-def _build_checklist(realm, config, orgs) -> list:
-    """Milestones toward the alpha→beta gate. Each item: id, label, done, detail."""
-    items = []
-
-    non_root = [o for o in orgs if not o["is_root"]]
-    expected = config.get("departments", []) or []
-    items.append({
-        "id": "departments_seeded",
-        "label": "Departments seeded",
-        "done": len(non_root) > 0 and len(non_root) >= len(expected),
-        "detail": f"{len(non_root)} organizations (template lists {len(expected)})",
-    })
-
-    staffed = [o for o in non_root if o["member_count"] > 0]
-    items.append({
-        "id": "departments_staffed",
-        "label": "Civil servants onboarded",
-        "done": len(non_root) > 0 and len(staffed) == len(non_root),
-        "detail": f"{len(staffed)} of {len(non_root)} departments have members",
-    })
-
-    budgets = [o for o in non_root if o["fund"]]
-    items.append({
-        "id": "budgets_linked",
-        "label": "Department budgets linked",
-        "done": len(non_root) > 0 and len(budgets) == len(non_root),
-        "detail": f"{len(budgets)} of {len(non_root)} departments have a fund",
-    })
-
-    population = User.count()
-    target = int((config.get("lifecycle", {}) or {}).get("population_target", 0) or 0)
-    items.append({
-        "id": "citizens_imported",
-        "label": "Citizens imported",
-        "done": target > 0 and population >= target,
-        "detail": f"{population} members (target {target})",
-    })
-
-    token_id = (getattr(realm, "token_canister_id", "") or "").strip()
-    items.append({
-        "id": "treasury_configured",
-        "label": "Currency / treasury configured",
-        "done": bool(token_id),
-        "detail": f"token canister: {token_id or 'not set'}",
-    })
-
-    try:
-        from ggg import Zone
-
-        zone_count = Zone.count()
-    except Exception:
-        zone_count = 0
-    items.append({
-        "id": "zones_defined",
-        "label": "Geographic zones defined",
-        "done": zone_count > 0,
-        "detail": f"{zone_count} zones",
-    })
-
-    deps = config.get("dependencies", []) or []
-    try:
-        from core.runtime_extensions import list_installed
-
-        installed = set(list_installed())
-    except Exception:
-        installed = set()
-    missing = [d for d in deps if d not in installed]
-    items.append({
-        "id": "extensions_installed",
-        "label": "Required extensions installed",
-        "done": len(deps) > 0 and not missing,
-        "detail": f"missing: {', '.join(missing) if missing else 'none'}",
-    })
-
-    # Root handover: the root org has members beyond the realm creator, i.e.
-    # governance has been transferred to the top authority (usually congress).
-    root_orgs = [o for o in orgs if o["is_root"]]
-    root_members = root_orgs[0]["member_count"] if root_orgs else 0
-    items.append({
-        "id": "root_handover",
-        "label": "Root handed to governance authority",
-        "done": root_members > 1,
-        "detail": f"root organization has {root_members} member(s)",
-    })
-
-    return items
-
-
-# ---------------------------------------------------------------------------
 # Extension API
 # ---------------------------------------------------------------------------
 
@@ -271,8 +182,28 @@ def get_console_data(args) -> str:
         orgs = [_serialize_org(d, base_url) for d in Department.instances()]
         orgs.sort(key=lambda o: (0 if o["is_root"] else 1, o["name"]))
 
-        checklist = _build_checklist(realm, config, orgs)
+        from core.lifecycle_gate import readiness_checklist
+
+        checklist = readiness_checklist(realm)
         done = sum(1 for i in checklist if i["done"])
+
+        from core.citizen_import import import_status
+
+        quarters = []
+        try:
+            from ggg import Quarter
+
+            for q in Quarter.instances():
+                quarters.append({
+                    "name": q.name or "",
+                    "canister_id": q.canister_id or "",
+                    "population": int(q.population or 0),
+                    "status": q.status or "active",
+                    "index": int(q.index or 0),
+                })
+            quarters.sort(key=lambda q: q["index"])
+        except Exception:
+            pass
 
         return json.dumps({
             "success": True,
@@ -292,6 +223,12 @@ def get_console_data(args) -> str:
                 "checklist_done": done,
                 "checklist_total": len(checklist),
                 "organizations": orgs,
+                "citizen_import": import_status(),
+                "quarters": quarters,
+                "currency": {
+                    "accounting_currency": getattr(realm, "accounting_currency", "") or "",
+                    "token_canister_id": (getattr(realm, "token_canister_id", "") or "").strip(),
+                },
                 "is_admin": _is_admin(caller),
             },
         })
@@ -347,9 +284,93 @@ def regenerate_invite(args) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def import_citizens(args) -> str:
+    """Bulk-import citizens: one single-use personal invite per record."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        if not _is_admin(caller):
+            raise PermissionError("Access denied: admin required")
+
+        records = args_dict.get("citizens")
+        if records is None:
+            return json.dumps({"success": False, "error": "citizens (array) is required"})
+
+        realm = _get_realm()
+        base_url = _frontend_base_url(realm) if realm else ""
+
+        from core.citizen_import import DEFAULT_EXPIRES_HOURS, import_citizens as _import
+
+        result = _import(
+            records,
+            created_by=ic.caller().to_str(),
+            frontend_url=args_dict.get("frontend_url") or base_url,
+            expires_in_hours=int(args_dict.get("expires_in_hours", DEFAULT_EXPIRES_HOURS)),
+        )
+        return json.dumps(result)
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"import_citizens error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def list_citizen_invites(args) -> str:
+    """Imported citizens with claim state and personal invite URLs (admin).
+
+    Paginated via offset/limit so a multi-thousand census stays under
+    message-size limits.
+    """
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        if not _is_admin(caller):
+            raise PermissionError("Access denied: admin required")
+
+        offset = max(0, int(args_dict.get("offset", 0)))
+        limit = min(500, max(1, int(args_dict.get("limit", 100))))
+        only_pending = bool(args_dict.get("only_pending", False))
+
+        realm = _get_realm()
+        base_url = _frontend_base_url(realm) if realm else ""
+
+        from core.citizen_import import _citizen_codes
+
+        rows = []
+        for code, meta in _citizen_codes():
+            claimed = bool(code.uses_count and code.uses_count > 0)
+            if only_pending and (claimed or code.revoked == 1):
+                continue
+            rows.append({
+                "id": code.user_id or "",
+                "name": meta.get("name", ""),
+                "quarter": meta.get("quarter", ""),
+                "email": code.email or "",
+                "claimed": claimed,
+                "claimed_by": (code.principals_redeemed or "").split(",")[0] if claimed else "",
+                "revoked": code.revoked == 1,
+                "url": _invite_url(code, base_url),
+            })
+        rows.sort(key=lambda r: r["id"])
+        total = len(rows)
+        page = rows[offset:offset + limit]
+
+        return json.dumps({
+            "success": True,
+            "data": {"citizens": page, "total": total, "offset": offset, "limit": limit},
+        })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"list_citizen_invites error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 EXTENSION_FUNCTIONS = {
     "get_console_data": get_console_data,
     "regenerate_invite": regenerate_invite,
+    "import_citizens": import_citizens,
+    "list_citizen_invites": list_citizen_invites,
 }
 
 

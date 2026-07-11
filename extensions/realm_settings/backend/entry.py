@@ -133,6 +133,26 @@ def set_realm_stage(args: dict):
                          f"next allowed: '{VALID_STAGES[current_idx + 1]}'.",
             }
 
+        # Hard gate (issue #241): when the codex declares the transition as
+        # mode "checklist", block it until every readiness milestone passes.
+        try:
+            from core.lifecycle_gate import alpha_to_beta_ready, transition_mode
+
+            if transition_mode(realm, current_stage, new_stage) == "checklist":
+                ready, missing = alpha_to_beta_ready(realm)
+                if not ready:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Readiness checklist not passed for {current_stage}→{new_stage}. "
+                            f"Missing: {'; '.join(missing)}"
+                        ),
+                        "checklist_blocked": True,
+                        "missing": missing,
+                    }
+        except ImportError:
+            pass  # older backend without the gate module
+
         realm.status = new_stage
 
         manifest_raw = getattr(realm, "manifest_data", "{}") or "{}"
