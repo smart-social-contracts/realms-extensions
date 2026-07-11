@@ -91,6 +91,7 @@ def generate_registration_url(args: dict):
             user_id=user_id,
             frontend_url=args.get("frontend_url", "https://localhost:3000"),
             email=args.get("email", ""),
+            department=args.get("department", ""),
         )
 
         canister_id = _self_canister_id()
@@ -116,6 +117,7 @@ def generate_registration_url(args: dict):
                 "expires_at": datetime.fromtimestamp(reg_code.expires_at).isoformat(),
                 "user_id": reg_code.user_id,
                 "profile": args.get("profile", "member"),
+                "department": reg_code.department or "",
                 "canister_id": canister_id,
             },
         }
