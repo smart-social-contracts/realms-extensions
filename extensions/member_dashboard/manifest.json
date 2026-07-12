@@ -1,8 +1,9 @@
 {
   "name": "member_dashboard",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Personal dashboard for members to manage their government services and documents",
   "author": "Smart Social Contracts",
+  "system": true,
   "permissions": [],
   "profiles": [
     "member",

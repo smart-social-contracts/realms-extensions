@@ -99,27 +99,33 @@ def _can_manage_department(department: str, caller: str) -> bool:
 
 
 def _department_member_principals(department: str) -> list[str]:
-    principals: list[str] = []
     try:
+        from core.membership import department_member_principals
+
         dept = Department[department]
         if not dept:
-            return principals
-        for m in dept.members:
-            pid = getattr(m, "id", None)
-            if pid:
-                principals.append(str(pid))
-        head = getattr(dept, "head", None)
-        if head is not None:
-            hid = getattr(head, "id", None)
-            if hid and str(hid) not in principals:
-                principals.append(str(hid))
+            return []
+        return department_member_principals(dept, include_head=True)
     except Exception as e:
         logger.warning(f"_department_member_principals({department}): {e}")
-    return principals
+        return []
 
 
 def _is_department_member(department: str, caller: str) -> bool:
-    return caller in _department_member_principals(department)
+    """Forward membership check — cheap, no user scan (issue #242)."""
+    try:
+        from core.membership import user_in_department
+        from ggg import User
+
+        dept = Department[department]
+        if not dept:
+            return False
+        head = getattr(dept, "head", None)
+        if head is not None and getattr(head, "id", None) == caller:
+            return True
+        return user_in_department(User[caller], dept)
+    except Exception:
+        return caller in _department_member_principals(department)
 
 
 def _can_view_department(department: str, caller: str) -> bool:

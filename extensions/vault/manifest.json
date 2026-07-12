@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Admin treasury dashboard for Realms. View token balances, transaction history, and perform ad-hoc transfers. Powered by the ic-basilisk-toolkit Wallet.",
   "author": "Smart Social Contracts",
   "repository": "https://github.com/smart-social-contracts/realms-extension-vault",

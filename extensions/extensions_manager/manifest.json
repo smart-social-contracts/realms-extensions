@@ -1,6 +1,6 @@
 {
   "name": "extensions_manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Manage extensions, codexes, assistants, and access control",
   "author": "Realms Team",
   "categories": [

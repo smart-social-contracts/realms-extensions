@@ -95,9 +95,9 @@ def _caller_in_root(user: User) -> bool:
     try:
         if root.head and root.head.id == user.id:
             return True
-        for m in root.members:
-            if m.id == user.id:
-                return True
+        from core.membership import user_in_department
+
+        return user_in_department(user, root)
     except Exception:
         pass
     return False
@@ -118,13 +118,35 @@ def _can_manage_dept(user: User, dept: Department) -> bool:
     return False
 
 
-def _serialize_org(dept: Department) -> dict:
-    members = []
+def _members_by_dept() -> dict:
+    """One user scan → {dept_name: [{principal, nickname}, ...]}.
+
+    The reverse dept.members index no longer exists (issue #242); membership
+    is stored one-way on the user.
+    """
+    by_dept: dict = {}
     try:
-        for m in dept.members:
-            members.append({"principal": m.id, "nickname": m.nickname or ""})
-    except Exception:
-        pass
+        from core.membership import iter_users
+
+        for u in iter_users():
+            pid = getattr(u, "id", None)
+            if not pid:
+                continue
+            try:
+                for d in u.departments:
+                    by_dept.setdefault(d.name, []).append(
+                        {"principal": pid, "nickname": u.nickname or ""}
+                    )
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"_members_by_dept: {e}")
+    return by_dept
+
+
+def _serialize_org(dept: Department, members: list = None) -> dict:
+    if members is None:
+        members = _members_by_dept().get(dept.name, [])
 
     extensions = []
     try:
@@ -270,7 +292,11 @@ def list_departments(args) -> str:
         except Exception:
             pass
 
-        depts = [_serialize_org(dept) for dept in Department.instances()]
+        members_map = _members_by_dept()
+        depts = [
+            _serialize_org(dept, members=members_map.get(dept.name, []))
+            for dept in Department.instances()
+        ]
         depts.sort(key=lambda d: (0 if d.get("is_root") else 1, d.get("name") or ""))
 
         return json.dumps({"success": True, "data": {"departments": depts, "total": len(depts)}})
@@ -326,7 +352,9 @@ def create_department(args) -> str:
             if head_user:
                 dept.head = head_user
                 try:
-                    dept.members.add(head_user)
+                    from core.membership import add_department_member
+
+                    add_department_member(dept, head_user)
                 except Exception:
                     pass
 
@@ -473,7 +501,9 @@ def add_department_member(args) -> str:
         if not user:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
-        dept.members.add(user)
+        from core.membership import add_department_member
+
+        add_department_member(dept, user)
         logger.info(f"User {user_principal} added to organization '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"User added to '{dept_name}'"}})
     except PermissionError as e:
@@ -505,7 +535,7 @@ def remove_department_member(args) -> str:
         if not user:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
-        dept.members.remove(user)
+        user.departments.remove(dept)
         logger.info(f"User {user_principal} removed from organization '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"User removed from '{dept_name}'"}})
     except PermissionError as e:
@@ -858,15 +888,28 @@ def list_extensions(args) -> str:
         caller = _get_caller_user()
         _require_operation(caller, Operations.PERMISSION_VIEW)
 
+        # One user scan → ext_name → direct-grant users (the reverse ext.users
+        # index no longer exists — issue #242).
+        users_by_ext: dict = {}
+        try:
+            from core.membership import iter_users
+
+            for u in iter_users():
+                pid = getattr(u, "id", None)
+                if not pid:
+                    continue
+                try:
+                    for e in u.extensions:
+                        users_by_ext.setdefault(e.name, []).append(
+                            {"principal": pid, "nickname": u.nickname or ""}
+                        )
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"list_extensions user grants scan: {e}")
+
         extensions = []
         for ext in Extension.instances():
-            users = []
-            try:
-                for u in ext.users:
-                    users.append({"principal": u.id, "nickname": u.nickname or ""})
-            except Exception:
-                pass
-
             departments = []
             try:
                 for d in ext.departments:
@@ -884,7 +927,7 @@ def list_extensions(args) -> str:
             extensions.append({
                 "name": ext.name,
                 "description": ext.description or "",
-                "users": users,
+                "users": users_by_ext.get(ext.name, []),
                 "departments": departments,
                 "profiles": profiles,
             })
@@ -917,7 +960,7 @@ def grant_extension_to_user(args) -> str:
         if not user:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
-        ext.users.add(user)
+        user.extensions.add(ext)
         logger.info(f"Extension '{ext_name}' granted to user {user_principal} by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' granted to user"}})
     except PermissionError as e:
@@ -947,7 +990,7 @@ def revoke_extension_from_user(args) -> str:
         if not user:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
-        ext.users.remove(user)
+        user.extensions.remove(ext)
         logger.info(f"Extension '{ext_name}' revoked from user {user_principal} by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' revoked from user"}})
     except PermissionError as e:
@@ -1322,7 +1365,9 @@ def get_available_profiles(args) -> str:
 
 def _is_dept_member(user: User, dept: Department) -> bool:
     try:
-        return any(m.id == user.id for m in dept.members)
+        from core.membership import user_in_department
+
+        return user_in_department(user, dept)
     except Exception:
         return False
 

@@ -64,14 +64,29 @@ def list_extensions(args) -> str:
         caller = _get_caller_user()
         _require_operation(caller, Operations.PERMISSION_VIEW)
 
+        # One user scan → ext_name → direct-grant users (the reverse ext.users
+        # index no longer exists — issue #242).
+        users_by_ext: dict = {}
+        try:
+            from core.membership import iter_users
+
+            for u in iter_users():
+                pid = getattr(u, "id", None)
+                if not pid:
+                    continue
+                try:
+                    for e in u.extensions:
+                        users_by_ext.setdefault(e.name, []).append(
+                            {"principal": pid, "nickname": u.nickname or ""}
+                        )
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"list_extensions user grants scan: {e}")
+
         extensions = []
         for ext in Extension.instances():
-            users = []
-            try:
-                for u in ext.users:
-                    users.append({"principal": u.id, "nickname": u.nickname or ""})
-            except Exception:
-                pass
+            users = users_by_ext.get(ext.name, [])
 
             departments = []
             try:
@@ -122,7 +137,7 @@ def grant_extension_to_user(args) -> str:
         if not user:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
-        ext.users.add(user)
+        user.extensions.add(ext)
         logger.info(f"Extension '{ext_name}' granted to user {user_principal} by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' granted to user"}})
     except PermissionError as e:
@@ -151,7 +166,7 @@ def revoke_extension_from_user(args) -> str:
         if not user:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
-        ext.users.remove(user)
+        user.extensions.remove(ext)
         logger.info(f"Extension '{ext_name}' revoked from user {user_principal} by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' revoked from user"}})
     except PermissionError as e:

@@ -190,17 +190,11 @@ def _justice_member_principals() -> List[str]:
             dept = None
         if dept is not None:
             try:
-                for m in dept.members:
-                    pid = getattr(m, "id", None)
-                    if pid and str(pid) not in principals:
-                        principals.append(str(pid))
+                from core.membership import department_member_principals
+
+                principals = department_member_principals(dept, include_head=True)
             except Exception:
                 pass
-            head = getattr(dept, "head", None)
-            if head is not None:
-                hid = getattr(head, "id", None)
-                if hid and str(hid) not in principals:
-                    principals.append(str(hid))
     except Exception as e:
         logger.warning(f"_justice_member_principals: {e}")
 
@@ -220,7 +214,23 @@ def _justice_member_principals() -> List[str]:
 
 
 def _is_justice_member(caller: str) -> bool:
-    return bool(caller) and caller in _justice_member_principals()
+    """Forward membership check (cheap) with the admin-group fallback of
+    ``_justice_member_principals`` when no Justice department exists."""
+    if not caller:
+        return False
+    try:
+        from core.membership import user_in_department
+        from ggg import Department, User
+
+        dept = Department[JUSTICE_DEPARTMENT_NAME]
+        if dept is not None:
+            head = getattr(dept, "head", None)
+            if head is not None and getattr(head, "id", None) == caller:
+                return True
+            return user_in_department(User[caller], dept)
+    except Exception:
+        pass
+    return caller in _justice_member_principals()
 
 
 def _case_submitter(case: "Case") -> str:

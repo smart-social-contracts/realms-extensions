@@ -1,6 +1,6 @@
 {
   "name": "department_docs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Encrypted documents shared within a department — a worked example of the reusable consent-based sharing layer (dept: scopes)",
   "author": "Smart Social Contracts",
   "categories": [

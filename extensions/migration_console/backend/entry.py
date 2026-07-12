@@ -157,13 +157,32 @@ def _serialize_position(pos) -> dict:
     }
 
 
-def _serialize_org(dept: Department, base_url: str) -> dict:
-    members = []
+def _members_by_dept() -> dict:
+    """One user scan → {dept_name: [{principal, nickname}, ...]} (issue #242:
+    the reverse dept.members index no longer exists)."""
+    by_dept: dict = {}
     try:
-        for m in dept.members:
-            members.append({"principal": m.id, "nickname": m.nickname or ""})
-    except Exception:
-        pass
+        from core.membership import iter_users
+
+        for u in iter_users():
+            pid = getattr(u, "id", None)
+            if not pid:
+                continue
+            try:
+                for d in u.departments:
+                    by_dept.setdefault(d.name, []).append(
+                        {"principal": pid, "nickname": u.nickname or ""}
+                    )
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"_members_by_dept: {e}")
+    return by_dept
+
+
+def _serialize_org(dept: Department, base_url: str, members: list = None) -> dict:
+    if members is None:
+        members = _members_by_dept().get(dept.name, [])
 
     fund_info = None
     try:
@@ -224,7 +243,11 @@ def get_console_data(args) -> str:
         config = _codex_config(realm)
         base_url = _frontend_base_url(realm)
 
-        orgs = [_serialize_org(d, base_url) for d in Department.instances()]
+        members_map = _members_by_dept()
+        orgs = [
+            _serialize_org(d, base_url, members=members_map.get(d.name, []))
+            for d in Department.instances()
+        ]
         orgs.sort(key=lambda o: (0 if o["is_root"] else 1, o["name"]))
 
         from core.lifecycle_gate import readiness_checklist

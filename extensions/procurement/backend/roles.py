@@ -90,25 +90,16 @@ def is_realm_admin(caller: str) -> bool:
 
 
 def _department_member_principals(department: str) -> list[str]:
-    principals: list[str] = []
     try:
+        from core.membership import department_member_principals
         from ggg import Department
 
         dept = Department[department]
         if not dept:
-            return principals
-        for member in dept.members:
-            pid = getattr(member, "id", None)
-            if pid:
-                principals.append(str(pid))
-        head = getattr(dept, "head", None)
-        if head is not None:
-            hid = getattr(head, "id", None)
-            if hid and str(hid) not in principals:
-                principals.append(str(hid))
+            return []
+        return department_member_principals(dept, include_head=True)
     except Exception:
-        pass
-    return principals
+        return []
 
 
 def is_evaluator(user: User) -> bool:
@@ -116,7 +107,20 @@ def is_evaluator(user: User) -> bool:
         return True
     if is_allowed(user, PROCUREMENT_EVALUATE):
         return True
-    return str(user.id) in _department_member_principals(PROCUREMENT_DEPARTMENT)
+    # Forward membership check — cheap, no user scan (issue #242).
+    try:
+        from core.membership import user_in_department
+        from ggg import Department
+
+        dept = Department[PROCUREMENT_DEPARTMENT]
+        if dept is None:
+            return False
+        head = getattr(dept, "head", None)
+        if head is not None and getattr(head, "id", None) == str(user.id):
+            return True
+        return user_in_department(user, dept)
+    except Exception:
+        return str(user.id) in _department_member_principals(PROCUREMENT_DEPARTMENT)
 
 
 def is_approver(user: User) -> bool:

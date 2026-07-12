@@ -1,6 +1,6 @@
 {
   "name": "procurement",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Structured procurement — RFP lifecycle, vetKeys sealed bids, scoring, vendor reputation.",
   "author": "Smart Social Contracts",
   "permissions": [],

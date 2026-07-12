@@ -869,9 +869,11 @@ def list_profiles_with_permissions(args) -> str:
             except Exception:
                 pass
 
+            # O(1) reverse counter — the User→profiles relation is
+            # unidirectional (issue #242), there is no profile.users list.
             user_count = 0
             try:
-                user_count = len(list(profile.users))
+                user_count = int(profile.reverse_count("users"))
             except Exception:
                 pass
 

@@ -248,7 +248,9 @@ def _check_org_policy(proposal: Proposal, dept) -> tuple:
         elif v.vote_choice == "no":
             no_voters.add(v.voter.id)
 
-    eligible = {m.id for m in dept.members}
+    from core.membership import department_member_principals
+
+    eligible = set(department_member_principals(dept, include_head=False))
     veto_principals = parse_veto_principals(getattr(dept, "policy_veto_principals", ""))
 
     ok, reason = policy_satisfied(
@@ -1065,7 +1067,9 @@ def cast_vote(args: str) -> str:
         scope_dept = _org_scoped_department(proposal)
         if scope_dept is not None:
             try:
-                is_member = any(m.id == voter.id for m in scope_dept.members)
+                from core.membership import user_in_department
+
+                is_member = user_in_department(voter, scope_dept)
             except Exception:
                 is_member = False
             if not is_member:

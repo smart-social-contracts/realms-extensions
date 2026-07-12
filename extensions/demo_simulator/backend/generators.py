@@ -845,7 +845,9 @@ def generate_department_batch(state_data, count):
                 member = User[f"demo_user_{m_idx:04d}"]
                 if member:
                     try:
-                        dept.members.add(member)
+                        from core.membership import add_department_member
+
+                        add_department_member(dept, member)
                     except Exception:
                         pass
 
