@@ -211,6 +211,59 @@ def _get_governance_params(proposal: Proposal) -> dict:
     return defaults
 
 
+def _org_scoped_department(proposal: Proposal):
+    """Department governing this proposal, or None for realm-wide ballots.
+
+    Org-scoped proposals (metadata ``org_scope``, e.g. position changes,
+    issue #241) are voted only by that organization's members and tallied
+    against its M/N/quorum/veto policy instead of realm-wide thresholds.
+    """
+    metadata = _load_metadata(proposal)
+    dept_name = (metadata.get("org_scope") or "").strip()
+    if not dept_name:
+        return None
+    try:
+        from ggg import Department
+
+        return Department[dept_name]
+    except Exception:
+        return None
+
+
+def _check_org_policy(proposal: Proposal, dept) -> tuple:
+    """Tally an org-scoped proposal against the department policy.
+
+    Returns ``(approved, vetoed, reason)``.
+    """
+    from core.org_policy import parse_veto_principals, policy_satisfied
+
+    yes_voters, no_voters = set(), set()
+    for v in Vote.instances():
+        if not (v.proposal and v.voter):
+            continue
+        if v.proposal.proposal_id != proposal.proposal_id:
+            continue
+        if v.vote_choice == "yes":
+            yes_voters.add(v.voter.id)
+        elif v.vote_choice == "no":
+            no_voters.add(v.voter.id)
+
+    eligible = {m.id for m in dept.members}
+    veto_principals = parse_veto_principals(getattr(dept, "policy_veto_principals", ""))
+
+    ok, reason = policy_satisfied(
+        approvals=yes_voters,
+        vetoes=no_voters,
+        eligible=eligible,
+        threshold_m=int(getattr(dept, "policy_threshold_m", 1) or 1),
+        threshold_n=int(getattr(dept, "policy_threshold_n", 1) or 1),
+        quorum_percent=int(getattr(dept, "policy_quorum_percent", 0) or 0),
+        veto_principals=veto_principals,
+    )
+    vetoed = (not ok) and reason.startswith("vetoed")
+    return ok, vetoed, reason
+
+
 def _check_threshold_and_quorum(proposal: Proposal) -> bool:
     """Check if both threshold and quorum are met for auto-approval.
 
@@ -1008,6 +1061,19 @@ def cast_vote(args: str) -> str:
         if not voter:
             return json.dumps({"success": False, "error": f"User {voter_id} not found"})
 
+        # Org-scoped ballots (issue #241): only that organization's members vote.
+        scope_dept = _org_scoped_department(proposal)
+        if scope_dept is not None:
+            try:
+                is_member = any(m.id == voter.id for m in scope_dept.members)
+            except Exception:
+                is_member = False
+            if not is_member:
+                return json.dumps({
+                    "success": False,
+                    "error": f"Only members of '{scope_dept.name}' can vote on this proposal",
+                })
+
         # Check for existing vote by this user on this proposal
         existing_vote = None
         for v in Vote.instances():
@@ -1046,9 +1112,23 @@ def cast_vote(args: str) -> str:
         elif vote_choice == "abstain":
             proposal.votes_abstain = (proposal.votes_abstain or 0.0) + 1.0
 
-        # Check threshold AND quorum for auto-approval
+        # Check for auto-approval: org policy for scoped ballots,
+        # realm-wide threshold + quorum otherwise.
         auto_approved = False
-        if _check_threshold_and_quorum(proposal):
+        if scope_dept is not None:
+            approved, vetoed, reason = _check_org_policy(proposal, scope_dept)
+            if vetoed:
+                proposal.status = "rejected"
+                logger.info(f"Proposal {proposal_id} rejected: {reason}")
+            elif approved:
+                proposal.status = "accepted"
+                auto_approved = True
+                logger.info(
+                    f"Proposal {proposal_id} auto-approved "
+                    f"(org policy of '{scope_dept.name}' satisfied)"
+                )
+                _schedule_execution(proposal_id)
+        elif _check_threshold_and_quorum(proposal):
             proposal.status = "accepted"
             auto_approved = True
             logger.info(f"Proposal {proposal_id} auto-approved (threshold and quorum met)")

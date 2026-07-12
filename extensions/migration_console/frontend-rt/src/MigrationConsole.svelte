@@ -36,15 +36,52 @@
 		}
 	}
 
+	/** Copy text in portal iframes where Clipboard API is blocked by permissions policy. */
+	async function copyTextToClipboard(text: string): Promise<boolean> {
+		const execCopy = (): boolean => {
+			try {
+				const ta = document.createElement('textarea');
+				ta.value = text;
+				ta.setAttribute('readonly', '');
+				ta.style.position = 'fixed';
+				ta.style.left = '-9999px';
+				document.body.appendChild(ta);
+				ta.select();
+				const ok = document.execCommand('copy');
+				document.body.removeChild(ta);
+				return ok;
+			} catch {
+				return false;
+			}
+		};
+
+		if (execCopy()) return true;
+
+		if (navigator.clipboard?.writeText) {
+			try {
+				await navigator.clipboard.writeText(text);
+				return true;
+			} catch {
+				// Permissions policy blocks Clipboard API in embedded realm iframes.
+			}
+		}
+
+		try {
+			ctx.host?.dispatch?.({ type: 'clipboard.write', text });
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
 	async function copyInviteUrl(invite: any) {
 		if (!invite.url) {
 			addToast('No URL available for this invite (frontend URL not configured)', 'error');
 			return;
 		}
-		try {
-			await navigator.clipboard.writeText(invite.url);
+		if (await copyTextToClipboard(invite.url)) {
 			addToast(`Invite URL for ${invite.profile} copied`);
-		} catch {
+		} else {
 			addToast('Could not copy to clipboard', 'error');
 		}
 	}
@@ -139,10 +176,9 @@
 			addToast('No URL available (frontend URL not configured)', 'error');
 			return;
 		}
-		try {
-			await navigator.clipboard.writeText(row.url);
+		if (await copyTextToClipboard(row.url)) {
 			addToast(`Invite URL for ${row.name || row.id} copied`);
-		} catch {
+		} else {
 			addToast('Could not copy to clipboard', 'error');
 		}
 	}
@@ -396,6 +432,41 @@
 						<div class="px-4 py-3 border-t border-gray-100 bg-gray-50 space-y-4">
 							{#if org.description}
 								<p class="text-sm text-gray-600">{org.description}</p>
+							{/if}
+
+							<!-- Position seats with fill state (issue #241) -->
+							{#if org.positions?.length > 0}
+								<div>
+									<h3 class="text-sm font-semibold text-gray-700 mb-2">Positions</h3>
+									<div class="space-y-2">
+										{#each org.positions as pos (pos.key)}
+											<div class="flex items-center justify-between gap-2 p-2 bg-white border border-gray-200 rounded-lg">
+												<div class="min-w-0">
+													<span class="text-sm font-medium text-gray-800">{pos.title}</span>
+													<span class="ml-2 text-xs text-gray-400">profile: {pos.profile}</span>
+													{#if pos.salary_amount > 0}
+														<span class="ml-2 text-xs text-gray-400">{pos.salary_amount}/{pos.salary_period}</span>
+													{/if}
+													{#if pos.holders?.length > 0}
+														<div class="mt-1 flex flex-wrap gap-1">
+															{#each pos.holders as h (h.principal)}
+																<span class="px-1.5 py-0.5 text-xs bg-gray-100 border border-gray-200 rounded-full text-gray-600" title={h.principal}>
+																	{h.nickname || shortPrincipal(h.principal)}
+																</span>
+															{/each}
+														</div>
+													{/if}
+												</div>
+												<span class={cn(
+													'text-xs font-medium shrink-0',
+													pos.filled >= pos.headcount ? 'text-green-600' : 'text-amber-600'
+												)}>
+													{pos.filled}/{pos.headcount} filled
+												</span>
+											</div>
+										{/each}
+									</div>
+								</div>
 							{/if}
 
 							<!-- Staff invites -->

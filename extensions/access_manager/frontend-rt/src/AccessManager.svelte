@@ -19,7 +19,7 @@
 	let newDeptFund = $state('');
 	let newThresholdM = $state('1');
 	let newThresholdN = $state('1');
-	let expandedDept: string | null = $state(null);
+	let selectedDeptName = $state('');
 	let addMemberPrincipal = $state('');
 	// Member principal autocomplete — realm directory from host `directory_list`.
 	let directory: any[] = $state([]);
@@ -53,6 +53,30 @@
 	let authRemoteCanister = $state('');
 	let authRemoteOrg = $state('');
 
+	const sortedDepartments = $derived(
+		[...departments].sort((a, b) => {
+			if (a.is_root && !b.is_root) return -1;
+			if (!a.is_root && b.is_root) return 1;
+			return (a.name || '').localeCompare(b.name || '');
+		}),
+	);
+
+	const selectedDept = $derived(
+		selectedDeptName ? departments.find((d) => d.name === selectedDeptName) ?? null : null,
+	);
+
+	function selectOrganization(name: string) {
+		selectedDeptName = name;
+		showNewPosition = null;
+		editingPosition = null;
+		assigningPosition = null;
+		assignPrincipal = '';
+		deptPermFilter = '';
+		deptPendingGrants = new Set();
+		deptPendingRevokes = new Set();
+		void loadDeptPermissions(name);
+	}
+
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const id = ++toastCounter;
 		toasts = [...toasts, { id, text: message, type }];
@@ -81,6 +105,18 @@
 			policyDraft = { ...policyDraft };
 			const authRes = await callExt('list_authorities');
 			authorities = authRes?.data?.authorities ?? [];
+
+			// Keep selection when reloading; otherwise pick the first org.
+			if (departments.length === 0) {
+				selectedDeptName = '';
+			} else if (!selectedDeptName || !departments.some((d) => d.name === selectedDeptName)) {
+				const first = [...departments].sort((a, b) => {
+					if (a.is_root && !b.is_root) return -1;
+					if (!a.is_root && b.is_root) return 1;
+					return (a.name || '').localeCompare(b.name || '');
+				})[0];
+				if (first) selectOrganization(first.name);
+			}
 		} catch (e: any) {
 			addToast(e?.message || 'Failed to load organizations', 'error');
 		} finally {
@@ -101,16 +137,147 @@
 			});
 			if (res?.success) {
 				addToast(`Organization "${newDeptName}" created`);
+				const createdName = newDeptName.trim();
 				newDeptName = ''; newDeptDesc = ''; newDeptHead = ''; newDeptFund = '';
 				newThresholdM = '1'; newThresholdN = '1';
 				showNewDept = false;
 				await loadDepartments();
+				selectOrganization(createdName);
 			} else {
 				addToast(res?.error || 'Failed to create', 'error');
 			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
+	}
+
+	// --- Positions (issue #241) ---
+	let showNewPosition: string | null = $state(null);
+	let newPosTitle = $state('');
+	let newPosProfile = $state('');
+	let newPosHeadcount = $state('1');
+	let newPosSalary = $state('0');
+	let editingPosition: string | null = $state(null);
+	let assigningPosition: string | null = $state(null);
+	let assignPrincipal = $state('');
+	let posDraft: { title: string; headcount: string; salary: string } = $state({ title: '', headcount: '1', salary: '0' });
+
+	function handlePositionResult(res: any, successMsg: string): boolean {
+		if (!res?.success) {
+			addToast(res?.error || 'Position action failed', 'error');
+			return false;
+		}
+		if (res.data?.applied === 'proposal') {
+			addToast(`Proposal ${res.data.proposal_id} created — organization members must vote (see Voting)`);
+		} else {
+			addToast(successMsg);
+		}
+		return true;
+	}
+
+	async function createPosition(deptName: string) {
+		if (!newPosTitle.trim()) return;
+		try {
+			const res = await callExt('manage_position', {
+				action: 'create',
+				department: deptName,
+				title: newPosTitle.trim(),
+				profile: newPosProfile.trim() || newPosTitle.trim(),
+				headcount: parseInt(newPosHeadcount || '1', 10),
+				salary_amount: parseInt(newPosSalary || '0', 10),
+			});
+			if (handlePositionResult(res, `Position "${newPosTitle}" created`)) {
+				showNewPosition = null;
+				newPosTitle = ''; newPosProfile = ''; newPosHeadcount = '1'; newPosSalary = '0';
+				await loadDepartments();
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	function startEditPosition(pos: any) {
+		editingPosition = pos.key;
+		posDraft = {
+			title: pos.title,
+			headcount: String(pos.headcount ?? 1),
+			salary: String(pos.salary_amount ?? 0),
+		};
+	}
+
+	async function saveEditPosition(pos: any) {
+		try {
+			const res = await callExt('manage_position', {
+				action: 'update',
+				key: pos.key,
+				new_title: posDraft.title.trim(),
+				headcount: parseInt(posDraft.headcount || '1', 10),
+				salary_amount: parseInt(posDraft.salary || '0', 10),
+			});
+			if (handlePositionResult(res, `Position "${pos.title}" updated`)) {
+				editingPosition = null;
+				await loadDepartments();
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	async function togglePositionStatus(pos: any) {
+		const action = pos.status === 'closed' ? 'reopen' : 'close';
+		try {
+			const res = await callExt('manage_position', { action, key: pos.key });
+			if (handlePositionResult(res, `Position "${pos.title}" ${action}${action === 'close' ? 'd' : 'ed'}`)) {
+				await loadDepartments();
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	async function endAppointment(pos: any, principal: string) {
+		try {
+			const res = await callExt('manage_position', {
+				action: 'end_appointment',
+				key: pos.key,
+				principal,
+			});
+			if (handlePositionResult(res, 'Appointment ended')) {
+				await loadDepartments();
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	async function appointMember(pos: any, principal: string) {
+		if (!principal.trim()) return;
+		try {
+			const res = await callExt('manage_position', {
+				action: 'appoint',
+				key: pos.key,
+				principal: principal.trim(),
+			});
+			if (handlePositionResult(res, `Appointed to "${pos.title}"`)) {
+				assigningPosition = null;
+				assignPrincipal = '';
+				await loadDepartments();
+			}
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		}
+	}
+
+	function eligibleAppointees(pos: any, members: any[]) {
+		const holders = new Set((pos.holders ?? []).map((h: any) => h.principal));
+		return members.filter((m) => m.principal && !holders.has(m.principal));
+	}
+
+	function startAssignPosition(pos: any, dept: any) {
+		assigningPosition = pos.key;
+		editingPosition = null;
+		const eligible = eligibleAppointees(pos, dept.members ?? []);
+		assignPrincipal = eligible[0]?.principal ?? '';
 	}
 
 	async function savePolicy(name: string) {
@@ -185,6 +352,7 @@
 			const res = await callExt('delete_department', { name });
 			if (res?.success) {
 				addToast(`Organization "${name}" deleted`);
+				if (selectedDeptName === name) selectedDeptName = '';
 				await loadDepartments();
 			} else {
 				addToast(res?.error || 'Failed', 'error');
@@ -388,11 +556,11 @@
 	});
 </script>
 
-<div class="max-w-5xl mx-auto p-4 sm:p-6">
+<div class="w-full min-h-full p-4 sm:p-6 lg:p-8">
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-gray-900">Organizations</h1>
-		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, and org-over-org authority</p>
+		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, positions, and org-over-org authority</p>
 	</div>
 
 	<!-- Toasts -->
@@ -410,9 +578,32 @@
 	{/if}
 
 	<div class="space-y-4">
-		<div class="flex items-center justify-between">
-			<h2 class="text-lg font-semibold text-gray-800">Organizations ({departments.length})</h2>
-			<button onclick={() => showNewDept = !showNewDept} class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800">
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+			<div class="flex-1 min-w-0">
+				<label for="org-select" class="block text-xs font-medium text-gray-500 mb-1">
+					Organization
+				</label>
+				<select
+					id="org-select"
+					class="w-full max-w-xl px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 disabled:opacity-50"
+					disabled={deptLoading || sortedDepartments.length === 0}
+					bind:value={selectedDeptName}
+					onchange={() => {
+						if (selectedDeptName) selectOrganization(selectedDeptName);
+					}}
+				>
+					{#if sortedDepartments.length === 0}
+						<option value="">No organizations</option>
+					{:else}
+						{#each sortedDepartments as dept (dept.name)}
+							<option value={dept.name}>
+								{dept.name}{dept.is_root ? ' (root)' : ''} — {dept.member_count} member{dept.member_count === 1 ? '' : 's'}
+							</option>
+						{/each}
+					{/if}
+				</select>
+			</div>
+			<button onclick={() => showNewDept = !showNewDept} class="shrink-0 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800">
 				{showNewDept ? 'Cancel' : '+ New Organization'}
 			</button>
 		</div>
@@ -443,200 +634,333 @@
 			</div>
 		{:else if departments.length === 0}
 			<p class="text-center text-gray-500 py-8">No organizations yet. Root is created on realm init.</p>
-		{:else}
-			{#each departments as dept (dept.name)}
-				<div class="border border-gray-200 rounded-xl overflow-hidden">
-					<button
-						onclick={() => {
-							const next = expandedDept === dept.name ? null : dept.name;
-							expandedDept = next;
-							if (next) { loadDeptPermissions(next); deptPermFilter = ''; deptPendingGrants = new Set(); deptPendingRevokes = new Set(); }
-						}}
-						class="w-full px-4 py-3 flex items-center justify-between bg-white hover:bg-gray-50 text-left"
-					>
-						<div>
-							<span class="font-medium text-gray-900">{dept.name}</span>
+		{:else if selectedDept}
+			{@const dept = selectedDept}
+			<div class="border border-gray-200 rounded-xl overflow-hidden">
+				<div class="px-4 py-4 sm:px-6 bg-white border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
+					<div class="min-w-0 flex-1">
+						<div class="flex flex-wrap items-center gap-2">
+							<h2 class="text-lg font-semibold text-gray-900">{dept.name}</h2>
 							{#if dept.is_root}
-								<span class="ml-2 text-xs font-semibold uppercase tracking-wide text-indigo-600">root</span>
-							{/if}
-							{#if dept.description}
-								<span class="ml-2 text-sm text-gray-500">— {dept.description}</span>
+								<span class="text-xs font-semibold uppercase tracking-wide text-indigo-600">root</span>
 							{/if}
 						</div>
-						<div class="flex items-center gap-3 text-sm text-gray-500">
-							<span class="text-xs">{dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}</span>
-							<span>{dept.member_count} members</span>
-							<span class="text-xs">{expandedDept === dept.name ? '▲' : '▼'}</span>
-						</div>
-					</button>
+						{#if dept.description}
+							<p class="text-sm text-gray-500 mt-1">{dept.description}</p>
+						{/if}
+					</div>
+					<div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 shrink-0">
+						<span>Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}</span>
+						<span>{dept.member_count} member{dept.member_count === 1 ? '' : 's'}</span>
+						{#if dept.fund}
+							<span>Fund {dept.fund.code}</span>
+						{/if}
+					</div>
+				</div>
 
-					{#if expandedDept === dept.name}
-						<div class="px-4 py-3 border-t border-gray-100 bg-gray-50 space-y-3">
-							{#if dept.head}
-								<div class="text-sm"><span class="font-medium text-gray-700">Head:</span> {dept.head.nickname || shortPrincipal(dept.head.principal)}</div>
-							{/if}
-							{#if dept.extensions?.length > 0}
-								<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
-							{/if}
+				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+					{#if dept.head}
+						<div class="text-sm"><span class="font-medium text-gray-700">Head:</span> {dept.head.nickname || shortPrincipal(dept.head.principal)}</div>
+					{/if}
+					{#if dept.extensions?.length > 0}
+						<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
+					{/if}
 
-							<!-- Policy + budget -->
-							{#if policyDraft[dept.name]}
-							<div class="mt-3 pt-3 border-t border-gray-200 space-y-2">
-								<div class="text-sm font-medium text-gray-700">Policy & budget</div>
-								<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-									<label class="text-xs text-gray-500">M
-										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
-									</label>
-									<label class="text-xs text-gray-500">N
-										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].n} />
-									</label>
-									<label class="text-xs text-gray-500">Quorum %
-										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].quorum} />
-									</label>
-									<label class="text-xs text-gray-500">Fund code
-										<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].fund} />
-									</label>
-								</div>
-								<label class="block text-xs text-gray-500">Veto principals (comma-separated)
-									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].veto} />
-								</label>
-								<button onclick={() => savePolicy(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Save policy</button>
-							</div>
-							{/if}
-
-							<!-- Permissions -->
-							<div class="mt-3 pt-3 border-t border-gray-200">
-								<div class="flex items-center justify-between mb-2">
-									<div class="text-sm font-medium text-gray-700">Permissions ({(deptPermissions[dept.name] ?? []).length})</div>
-									{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
-										<div class="flex items-center gap-2">
-											<span class="text-xs text-gray-500">
-												{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
-												{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
-												{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
-											</span>
-											<button onclick={() => { deptPendingGrants = new Set(); deptPendingRevokes = new Set(); }} class="text-xs text-gray-500 hover:text-gray-700">Discard</button>
-											<button onclick={() => applyDeptPermChanges(dept.name)} disabled={deptPermApplying} class="px-2 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">Apply</button>
-										</div>
-									{/if}
-								</div>
-
-								{#if (deptPermissions[dept.name] ?? []).length > 0}
-									<div class="flex flex-wrap gap-1 mb-2">
-										{#each deptPermissions[dept.name] ?? [] as perm (perm)}
-											<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
-												{perm}
-												<button onclick={() => toggleDeptPerm(perm, dept.name)} class="text-amber-400 hover:text-red-600" title="Revoke">&times;</button>
-											</span>
-										{/each}
-									</div>
-								{/if}
-
-								<input
-									type="text"
-									bind:value={deptPermFilter}
-									placeholder="Search permissions to add..."
-									class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm mb-2"
-								/>
-
-								{#if deptPermFilter.trim()}
-									{@const q = deptPermFilter.trim().toLowerCase()}
-									{@const filtered = allOperations.filter((op: any) =>
-										op.name.toLowerCase().includes(q) ||
-										(op.category || '').toLowerCase().includes(q) ||
-										(op.description || '').toLowerCase().includes(q)
-									).slice(0, 15)}
-									<div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
-										{#each filtered as op (op.name)}
-											{@const checked = isDeptPermChecked(op.name, dept.name)}
-											<label class="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-b border-gray-100 last:border-b-0">
-												<input
-													type="checkbox"
-													checked={checked}
-													onchange={() => toggleDeptPerm(op.name, dept.name)}
-													class="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
-												/>
-												<code class="text-xs font-medium text-gray-800">{op.name}</code>
-												<span class="text-xs text-gray-400 truncate">{op.description || ''}</span>
-											</label>
-										{/each}
-										{#if filtered.length === 0}
-											<div class="px-3 py-2 text-xs text-gray-400">No matching permissions</div>
-										{/if}
-									</div>
-								{/if}
+					<!-- Positions -->
+					{#if !dept.is_root}
+						<div class="pt-2 border-t border-gray-200">
+							<div class="flex items-center justify-between mb-2">
+								<div class="text-sm font-medium text-gray-700">Positions ({dept.positions?.length ?? 0})</div>
+								<button
+									onclick={() => { showNewPosition = showNewPosition === dept.name ? null : dept.name; }}
+									class="px-2 py-1 text-xs border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100"
+								>
+									{showNewPosition === dept.name ? 'Cancel' : '+ Add position'}
+								</button>
 							</div>
 
-							<div class="text-sm font-medium text-gray-700 mt-2">Members:</div>
-							{#if dept.members.length === 0}
-								<p class="text-sm text-gray-400">No members</p>
-							{:else}
-								<div class="space-y-1">
-									{#each dept.members as m (m.principal)}
-										<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg">
-											<span>{m.nickname || shortPrincipal(m.principal)}</span>
-											<button onclick={() => removeMember(dept.name, m.principal)} class="text-red-500 hover:text-red-700 text-xs">Remove</button>
+							{#if showNewPosition === dept.name}
+								<div class="mb-2 p-3 bg-white border border-gray-200 rounded-lg space-y-2">
+									<div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+										<label class="text-xs text-gray-500">Title
+											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosTitle} placeholder="e.g. inspector" />
+										</label>
+										<label class="text-xs text-gray-500">Profile (role)
+											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosProfile} placeholder="defaults to title" />
+										</label>
+										<label class="text-xs text-gray-500">Headcount
+											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosHeadcount} />
+										</label>
+										<label class="text-xs text-gray-500">Salary / month
+											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosSalary} />
+										</label>
+									</div>
+									<div class="flex flex-wrap items-center gap-2">
+										<button onclick={() => createPosition(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">
+											Create position
+										</button>
+										<span class="text-xs text-gray-400">
+											Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
+											{(dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0
+												? '— requires a vote'
+												: '— applies immediately'}
+										</span>
+									</div>
+								</div>
+							{/if}
+
+							{#if dept.positions?.length > 0}
+								<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+									{#each dept.positions as pos (pos.key)}
+										<div class="px-3 py-2 bg-white border border-gray-200 rounded-lg">
+											{#if editingPosition === pos.key}
+												<div class="flex flex-wrap items-end gap-2">
+													<label class="text-xs text-gray-500">Title
+														<input class="mt-1 w-full min-w-[6rem] px-2 py-1 border border-gray-300 rounded text-sm" bind:value={posDraft.title} />
+													</label>
+													<label class="text-xs text-gray-500">Headcount
+														<input class="mt-1 w-16 px-2 py-1 border border-gray-300 rounded text-sm" bind:value={posDraft.headcount} />
+													</label>
+													<label class="text-xs text-gray-500">Salary
+														<input class="mt-1 w-20 px-2 py-1 border border-gray-300 rounded text-sm" bind:value={posDraft.salary} />
+													</label>
+													<button onclick={() => saveEditPosition(pos)} class="px-2 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800">Save</button>
+													<button onclick={() => { editingPosition = null; }} class="px-2 py-1 text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-100">Cancel</button>
+												</div>
+											{:else}
+												<div class="flex items-start justify-between gap-2">
+													<div class="min-w-0 text-sm">
+														<span class="font-medium text-gray-800">{pos.title}</span>
+														{#if pos.status === 'closed'}
+															<span class="ml-2 text-xs text-red-500">closed</span>
+														{/if}
+														<div class="text-xs text-gray-400 mt-0.5">
+															profile: {pos.profile}
+															{#if pos.salary_amount > 0}
+																· {pos.salary_amount}/{pos.salary_period}
+															{/if}
+														</div>
+													</div>
+													<div class="flex flex-col items-end gap-1 shrink-0">
+														<span class={`text-xs font-medium ${pos.filled >= pos.headcount ? 'text-green-600' : 'text-amber-600'}`}>
+															{pos.filled}/{pos.headcount} filled
+														</span>
+														<div class="flex gap-1">
+															{#if pos.status !== 'closed' && pos.filled < pos.headcount}
+																<button onclick={() => startAssignPosition(pos, dept)} class="px-1.5 py-0.5 text-xs border border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50">Assign</button>
+															{/if}
+															<button onclick={() => startEditPosition(pos)} class="px-1.5 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100">Edit</button>
+															<button onclick={() => togglePositionStatus(pos)} class="px-1.5 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100">
+																{pos.status === 'closed' ? 'Reopen' : 'Close'}
+															</button>
+														</div>
+													</div>
+												</div>
+												{#if pos.holders?.length > 0}
+													<div class="mt-2 flex flex-wrap gap-1">
+														{#each pos.holders as h (h.principal)}
+															<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-gray-100 border border-gray-200 rounded-full text-gray-600" title={h.principal}>
+																{h.nickname || shortPrincipal(h.principal)}
+																<button onclick={() => endAppointment(pos, h.principal)} class="text-gray-400 hover:text-red-600" title="End appointment">&times;</button>
+															</span>
+														{/each}
+													</div>
+												{/if}
+												{#if assigningPosition === pos.key}
+													{@const eligible = eligibleAppointees(pos, dept.members ?? [])}
+													<div class="mt-2 p-2 bg-indigo-50 border border-indigo-100 rounded-lg space-y-2">
+														{#if eligible.length === 0}
+															<p class="text-xs text-gray-500">Add organization members first, then assign them to this position.</p>
+														{:else}
+															<div class="flex flex-wrap items-end gap-2">
+																<label class="text-xs text-gray-600 flex-1 min-w-[10rem]">
+																	Member
+																	<select bind:value={assignPrincipal} class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+																		<option value="">Select member…</option>
+																		{#each eligible as m (m.principal)}
+																			<option value={m.principal}>{m.nickname || shortPrincipal(m.principal)}</option>
+																		{/each}
+																	</select>
+																</label>
+																<button
+																	onclick={() => appointMember(pos, assignPrincipal)}
+																	disabled={!assignPrincipal}
+																	class="px-2 py-1.5 text-xs bg-indigo-700 text-white rounded-lg hover:bg-indigo-800 disabled:opacity-50"
+																>
+																	Assign
+																</button>
+																<button
+																	onclick={() => { assigningPosition = null; assignPrincipal = ''; }}
+																	class="px-2 py-1.5 text-xs border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100"
+																>
+																	Cancel
+																</button>
+															</div>
+														{/if}
+													</div>
+												{/if}
+											{/if}
 										</div>
 									{/each}
 								</div>
-							{/if}
-
-							<div class="mt-2">
-								<div class="flex gap-2">
-									<div class="relative flex-1">
-										<input
-											bind:value={addMemberPrincipal}
-											onkeydown={handleMemberPrincipalKeydown}
-											oninput={() => {
-												showMemberSuggestions = false;
-												memberSuggestionIndex = 0;
-											}}
-											onblur={() => setTimeout(() => (showMemberSuggestions = false), 200)}
-											autocomplete="off"
-											placeholder="Name or principal"
-											aria-describedby="am-member-hint"
-											class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-										/>
-										{#if showMemberSuggestions && memberSuggestions.length > 0}
-											<ul
-												class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1"
-											>
-												{#each memberSuggestions as s, i (s.principal)}
-													<li>
-														<button
-															type="button"
-															onmousedown={() => selectMemberSuggestion(s)}
-															class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors {i ===
-															memberSuggestionIndex
-																? 'bg-indigo-50'
-																: ''}"
-														>
-															<span class="block font-medium text-gray-900 truncate">{s.label}</span>
-															{#if s.principal && s.principal !== s.label}
-																<span class="block font-mono text-xs text-gray-500 truncate">{s.principal}</span>
-															{/if}
-														</button>
-													</li>
-												{/each}
-											</ul>
-										{/if}
-									</div>
-									<button onclick={() => addMember(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Add</button>
-								</div>
-								<p id="am-member-hint" class="mt-1 text-xs text-gray-500">
-									Type a name or principal, then press
-									<kbd class="mx-0.5 px-1 py-0.5 rounded border border-gray-300 bg-gray-100 text-[10px] font-mono text-gray-600">Tab</kbd>
-									to open autocomplete. Use ↑↓ and Tab again to pick a match, or paste a principal directly.
-								</p>
-							</div>
-
-							{#if !dept.is_root}
-								<button onclick={() => deleteDepartment(dept.name)} class="mt-2 text-sm text-red-600 hover:text-red-800">Delete organization</button>
+							{:else}
+								<p class="text-xs text-gray-400">No positions defined for this organization.</p>
 							{/if}
 						</div>
 					{/if}
+
+					<!-- Policy + budget -->
+					{#if policyDraft[dept.name]}
+						<div class="pt-2 border-t border-gray-200 space-y-2">
+							<div class="text-sm font-medium text-gray-700">Policy & budget</div>
+							<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+								<label class="text-xs text-gray-500">M
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
+								</label>
+								<label class="text-xs text-gray-500">N
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].n} />
+								</label>
+								<label class="text-xs text-gray-500">Quorum %
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].quorum} />
+								</label>
+								<label class="text-xs text-gray-500 sm:col-span-2 lg:col-span-2">Fund code
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].fund} />
+								</label>
+							</div>
+							<label class="block text-xs text-gray-500">Veto principals (comma-separated)
+								<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].veto} />
+							</label>
+							<button onclick={() => savePolicy(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Save policy</button>
+						</div>
+					{/if}
+
+					<!-- Permissions -->
+					<div class="pt-2 border-t border-gray-200">
+						<div class="flex items-center justify-between mb-2">
+							<div class="text-sm font-medium text-gray-700">Permissions ({(deptPermissions[dept.name] ?? []).length})</div>
+							{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
+								<div class="flex items-center gap-2">
+									<span class="text-xs text-gray-500">
+										{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
+										{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
+										{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
+									</span>
+									<button onclick={() => { deptPendingGrants = new Set(); deptPendingRevokes = new Set(); }} class="text-xs text-gray-500 hover:text-gray-700">Discard</button>
+									<button onclick={() => applyDeptPermChanges(dept.name)} disabled={deptPermApplying} class="px-2 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">Apply</button>
+								</div>
+							{/if}
+						</div>
+
+						{#if (deptPermissions[dept.name] ?? []).length > 0}
+							<div class="flex flex-wrap gap-1 mb-2">
+								{#each deptPermissions[dept.name] ?? [] as perm (perm)}
+									<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
+										{perm}
+										<button onclick={() => toggleDeptPerm(perm, dept.name)} class="text-amber-400 hover:text-red-600" title="Revoke">&times;</button>
+									</span>
+								{/each}
+							</div>
+						{/if}
+
+						<input
+							type="text"
+							bind:value={deptPermFilter}
+							placeholder="Search permissions to add..."
+							class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm mb-2"
+						/>
+
+						{#if deptPermFilter.trim()}
+							{@const q = deptPermFilter.trim().toLowerCase()}
+							{@const filtered = allOperations.filter((op: any) =>
+								op.name.toLowerCase().includes(q) ||
+								(op.category || '').toLowerCase().includes(q) ||
+								(op.description || '').toLowerCase().includes(q)
+							).slice(0, 15)}
+							<div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+								{#each filtered as op (op.name)}
+									{@const checked = isDeptPermChecked(op.name, dept.name)}
+									<label class="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-b border-gray-100 last:border-b-0">
+										<input
+											type="checkbox"
+											checked={checked}
+											onchange={() => toggleDeptPerm(op.name, dept.name)}
+											class="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+										/>
+										<code class="text-xs font-medium text-gray-800">{op.name}</code>
+										<span class="text-xs text-gray-400 truncate">{op.description || ''}</span>
+									</label>
+								{/each}
+								{#if filtered.length === 0}
+									<div class="px-3 py-2 text-xs text-gray-400">No matching permissions</div>
+								{/if}
+							</div>
+						{/if}
+					</div>
+
+					<!-- Members -->
+					<div class="pt-2 border-t border-gray-200">
+						<div class="text-sm font-medium text-gray-700 mb-2">Members</div>
+						{#if dept.members.length === 0}
+							<p class="text-sm text-gray-400 mb-2">No members</p>
+						{:else}
+							<div class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3 mb-2">
+								{#each dept.members as m (m.principal)}
+									<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg border border-gray-200">
+										<span class="truncate">{m.nickname || shortPrincipal(m.principal)}</span>
+										<button onclick={() => removeMember(dept.name, m.principal)} class="text-red-500 hover:text-red-700 text-xs shrink-0 ml-2">Remove</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						<div class="flex gap-2 max-w-2xl">
+							<div class="relative flex-1">
+								<input
+									bind:value={addMemberPrincipal}
+									onkeydown={handleMemberPrincipalKeydown}
+									oninput={() => {
+										showMemberSuggestions = false;
+										memberSuggestionIndex = 0;
+									}}
+									onblur={() => setTimeout(() => (showMemberSuggestions = false), 200)}
+									autocomplete="off"
+									placeholder="Name or principal"
+									aria-describedby="am-member-hint"
+									class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+								/>
+								{#if showMemberSuggestions && memberSuggestions.length > 0}
+									<ul class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+										{#each memberSuggestions as s, i (s.principal)}
+											<li>
+												<button
+													type="button"
+													onmousedown={() => selectMemberSuggestion(s)}
+													class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors {i === memberSuggestionIndex ? 'bg-indigo-50' : ''}"
+												>
+													<span class="block font-medium text-gray-900 truncate">{s.label}</span>
+													{#if s.principal && s.principal !== s.label}
+														<span class="block font-mono text-xs text-gray-500 truncate">{s.principal}</span>
+													{/if}
+												</button>
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</div>
+							<button onclick={() => addMember(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 shrink-0">Add</button>
+						</div>
+						<p id="am-member-hint" class="mt-1 text-xs text-gray-500">
+							Type a name or principal, then press
+							<kbd class="mx-0.5 px-1 py-0.5 rounded border border-gray-300 bg-gray-100 text-[10px] font-mono text-gray-600">Tab</kbd>
+							to open autocomplete.
+						</p>
+					</div>
+
+					{#if !dept.is_root}
+						<button onclick={() => deleteDepartment(dept.name)} class="text-sm text-red-600 hover:text-red-800">Delete organization</button>
+					{/if}
 				</div>
-			{/each}
+			</div>
 		{/if}
 
 		<!-- Authority grants -->

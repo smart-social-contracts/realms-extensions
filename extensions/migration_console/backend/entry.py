@@ -116,11 +116,44 @@ def _serialize_invite(code: "RegistrationCode", base_url: str) -> dict:
         "code_hash": (code.code_hash or "")[:8],
         "profile": code.profile or "member",
         "department": code.department or "",
+        "position": getattr(code, "position", "") or "",
         "url": _invite_url(code, base_url),
         "uses_count": int(code.uses_count or 0),
         "max_uses": int(code.max_uses or 1),
         "is_valid": code.is_valid(),
         "revoked": code.revoked == 1,
+    }
+
+
+def _serialize_position(pos) -> dict:
+    holders = []
+    try:
+        for a in pos.active_appointments():
+            u = a.user
+            if u is not None:
+                holders.append({"principal": u.id, "nickname": u.nickname or ""})
+    except Exception:
+        pass
+
+    profile_name = ""
+    try:
+        if pos.profile:
+            profile_name = pos.profile.name or ""
+    except Exception:
+        pass
+
+    headcount = int(pos.headcount or 1)
+    return {
+        "key": pos.key or "",
+        "title": pos.title or "",
+        "profile": profile_name,
+        "headcount": headcount,
+        "filled": len(holders),
+        "vacancies": max(0, headcount - len(holders)),
+        "salary_amount": int(pos.salary_amount or 0),
+        "salary_period": pos.salary_period or "monthly",
+        "status": pos.status or "open",
+        "holders": holders,
     }
 
 
@@ -145,6 +178,17 @@ def _serialize_org(dept: Department, base_url: str) -> dict:
     ]
     invites.sort(key=lambda i: (i["profile"], i["code_hash"]))
 
+    # Position seats with fill state (issue #241) — absent on old backends.
+    positions = []
+    try:
+        from ggg import Position
+
+        for pos in Position.for_department(dept.name):
+            positions.append(_serialize_position(pos))
+        positions.sort(key=lambda p: p["title"])
+    except Exception:
+        pass
+
     return {
         "name": dept.name,
         "description": dept.description or "",
@@ -158,6 +202,7 @@ def _serialize_org(dept: Department, base_url: str) -> dict:
         },
         "fund": fund_info,
         "invites": invites,
+        "positions": positions,
     }
 
 
@@ -256,9 +301,14 @@ def regenerate_invite(args) -> str:
         if not dept:
             return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
 
+        # Keep the position link across regenerations so redeeming the new
+        # code still appoints to the same seat.
+        position_key = ""
         for c in RegistrationCode.find_by_department(dept_name):
-            if c.profile == profile and c.revoked != 1:
-                c.revoked = 1
+            if c.profile == profile:
+                position_key = getattr(c, "position", "") or position_key
+                if c.revoked != 1:
+                    c.revoked = 1
 
         realm = _get_realm()
         base_url = _frontend_base_url(realm) if realm else ""
@@ -273,6 +323,7 @@ def regenerate_invite(args) -> str:
             created_by=ic.caller().to_str(),
             frontend_url=base_url,
             department=dept_name,
+            position=position_key,
         )
 
         logger.info(f"Invite regenerated for '{dept_name}'/'{profile}' by {ic.caller().to_str()}")

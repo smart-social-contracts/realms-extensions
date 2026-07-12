@@ -165,6 +165,17 @@ def _serialize_org(dept: Department) -> dict:
         raw = getattr(dept, "policy_veto_principals", "") or ""
         vetoes = [p.strip() for p in raw.split(",") if p.strip()]
 
+    # Position seats (issue #241) — absent on backends without the entity.
+    positions = []
+    try:
+        from ggg import Position
+
+        for pos in Position.for_department(dept.name):
+            positions.append(_serialize_position(pos))
+        positions.sort(key=lambda p: p["title"])
+    except Exception:
+        pass
+
     return {
         "name": dept.name,
         "description": dept.description or "",
@@ -181,6 +192,39 @@ def _serialize_org(dept: Department) -> dict:
             "veto_principals": vetoes,
         },
         "fund": fund_info,
+        "positions": positions,
+    }
+
+
+def _serialize_position(pos) -> dict:
+    holders = []
+    try:
+        for a in pos.active_appointments():
+            u = a.user
+            if u is not None:
+                holders.append({"principal": u.id, "nickname": u.nickname or ""})
+    except Exception:
+        pass
+
+    profile_name = ""
+    try:
+        if pos.profile:
+            profile_name = pos.profile.name or ""
+    except Exception:
+        pass
+
+    headcount = int(pos.headcount or 1)
+    return {
+        "key": pos.key or "",
+        "title": pos.title or "",
+        "profile": profile_name,
+        "headcount": headcount,
+        "filled": len(holders),
+        "vacancies": max(0, headcount - len(holders)),
+        "salary_amount": int(pos.salary_amount or 0),
+        "salary_period": pos.salary_period or "monthly",
+        "status": pos.status or "open",
+        "holders": holders,
     }
 
 
@@ -1272,6 +1316,154 @@ def get_available_profiles(args) -> str:
 # Extension API registry
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Positions (issue #241) — policy-gated lifecycle management
+# ---------------------------------------------------------------------------
+
+def _is_dept_member(user: User, dept: Department) -> bool:
+    try:
+        return any(m.id == user.id for m in dept.members)
+    except Exception:
+        return False
+
+
+def _submit_position_proposal(action: dict, dept: Department, summary: str) -> dict:
+    """Create a department-scoped Proposal that replays *action* on approval.
+
+    Voting is opened immediately; the voting extension tallies it against the
+    department's M/N/quorum/veto policy (org-scoped ballots).
+    """
+    from core.position_admin import build_proposal_code
+    from ggg import Proposal
+
+    proposer = _get_caller_user()
+
+    proposal_num = len(Proposal.instances()) + 1
+    proposal_id = f"prop_{proposal_num:03d}"
+
+    metadata = {
+        "proposal_type": "position_action",
+        "org_scope": dept.name,
+        "position_action": action,
+        "code_inline": build_proposal_code(action),
+        "codex_name": f"position_action_{proposal_id}",
+    }
+
+    voting_window = 604_800
+    try:
+        from ggg import Realm
+
+        realm = Realm[1]
+        if realm and realm.calendar and realm.calendar.voting_window:
+            voting_window = int(realm.calendar.voting_window)
+    except Exception:
+        pass
+    deadline_s = ic.time() // 1_000_000_000 + voting_window
+
+    proposal = Proposal(
+        proposal_id=proposal_id,
+        title=summary,
+        description=(
+            f"Position change in organization '{dept.name}' "
+            f"(policy {dept.policy_threshold_m}/{dept.policy_threshold_n}). "
+            f"Proposed by {proposer.id}."
+        ),
+        code_url="",
+        code_checksum="",
+        proposer=proposer,
+        status="voting",
+        voting_deadline=str(deadline_s),
+        votes_yes=0.0,
+        votes_no=0.0,
+        votes_abstain=0.0,
+        total_voters=0.0,
+        required_threshold=1.0,  # org policy decides; realm threshold unused
+        metadata=json.dumps(metadata),
+    )
+    logger.info(f"Position proposal {proposal_id} submitted for '{dept.name}': {summary}")
+    return {
+        "proposal_id": proposal.proposal_id,
+        "status": proposal.status,
+        "org_scope": dept.name,
+    }
+
+
+def manage_position(args) -> str:
+    """Create/update/close/reopen a position, appoint a member, or end an appointment.
+
+    Applies immediately when the org's policy is 1/1 (single manager
+    suffices); any other policy turns the request into a department-scoped
+    proposal that must pass the org's M/N/quorum/veto vote first.
+    """
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+
+        from core.position_admin import (
+            ACTIONS,
+            apply_position_action,
+            describe_action,
+            policy_is_direct,
+        )
+        from ggg import Position
+
+        action = {
+            k: v for k, v in args_dict.items()
+            if k in (
+                "action", "department", "key", "title", "new_title",
+                "description", "profile", "headcount", "salary_amount",
+                "salary_period", "principal",
+            )
+        }
+        kind = (action.get("action") or "").strip()
+        if kind not in ACTIONS:
+            return json.dumps({"success": False, "error": f"action must be one of {', '.join(ACTIONS)}"})
+
+        # Resolve the department that governs this action.
+        if kind == "create":
+            dept_name = (action.get("department") or "").strip()
+        else:
+            key = (action.get("key") or "").strip()
+            pos = Position[key] if key else None
+            if not pos:
+                return json.dumps({"success": False, "error": f"Position '{key}' not found"})
+            dept = pos.department
+            dept_name = getattr(dept, "name", "") if dept is not None else ""
+            action["department"] = dept_name
+        if not dept_name:
+            return json.dumps({"success": False, "error": "department could not be resolved"})
+
+        dept = Department[dept_name]
+        if not dept:
+            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
+
+        # Managers may act; plain department members may still *propose*
+        # under an M/N policy (their vote is what counts).
+        is_manager = _can_manage_dept(caller, dept)
+        if not is_manager and not _is_dept_member(caller, dept):
+            return json.dumps({"success": False, "error": "Access denied: not a manager or member of this organization"})
+
+        if policy_is_direct(dept):
+            if not is_manager:
+                return json.dumps({"success": False, "error": "Access denied: managing this organization requires admin/head rights"})
+            result = apply_position_action(action)
+            if result.get("success"):
+                result["data"] = {**(result.get("data") or {}), "applied": "direct"}
+            return json.dumps(result)
+
+        summary = describe_action(action)
+        data = _submit_position_proposal(action, dept, summary)
+        return json.dumps({
+            "success": True,
+            "data": {**data, "applied": "proposal", "summary": summary},
+        })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"manage_position error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 EXTENSION_FUNCTIONS = {
     # Organizations (Department entity)
     "list_departments": list_departments,
@@ -1304,6 +1496,8 @@ EXTENSION_FUNCTIONS = {
     "assign_profile": assign_profile,
     "revoke_profile": revoke_profile,
     "get_available_profiles": get_available_profiles,
+    # Positions (issue #241)
+    "manage_position": manage_position,
 }
 
 
