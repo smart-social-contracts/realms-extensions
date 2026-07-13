@@ -42,6 +42,8 @@
 	let deptPermissions: Record<string, string[]> = $state({});
 	let deptPermLoading: string | null = $state(null);
 	let deptPermFilter = $state('');
+	// Collapsed/expanded state of permission categories, keyed "<dept>/<category>".
+	let openPermCats: Record<string, boolean> = $state({});
 	let deptPendingGrants: Set<string> = $state(new Set());
 	let deptPendingRevokes: Set<string> = $state(new Set());
 	let deptPermApplying = $state(false);
@@ -470,12 +472,18 @@
 	}
 
 	async function loadAllOperations() {
+		// The permission catalog lives in role_manager, not in this extension —
+		// ctx.callSync scopes to access_manager, so call the host backend directly.
 		try {
-			const res = await ctx.callSync('get_all_operations');
+			const raw = await ctx.backend.extension_sync_call('role_manager', 'get_all_operations', '{}');
+			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			const inner = envelope?.response ?? envelope;
+			const res = typeof inner === 'string' ? JSON.parse(inner) : inner;
 			if (res?.success) {
 				allOperations = res.data?.operations ?? [];
 			}
 		} catch {
+			// Catalog stays empty; the UI shows a hint instead of the browser.
 		}
 	}
 
@@ -542,6 +550,23 @@
 		if (deptPendingGrants.has(opName)) return true;
 		if (deptPendingRevokes.has(opName)) return false;
 		return current.includes(opName);
+	}
+
+	/** Permission catalog grouped by category, optionally narrowed by a filter. */
+	function groupedOps(filter: string): { category: string; ops: any[] }[] {
+		const q = filter.trim().toLowerCase();
+		const ops = q
+			? allOperations.filter((op: any) =>
+				op.name.toLowerCase().includes(q) ||
+				(op.category || '').toLowerCase().includes(q) ||
+				(op.description || '').toLowerCase().includes(q))
+			: allOperations;
+		const byCat: Record<string, any[]> = {};
+		for (const op of ops) (byCat[op.category || 'Other'] ??= []).push(op);
+		return Object.keys(byCat).sort().map((category) => ({
+			category,
+			ops: [...byCat[category]].sort((a: any, b: any) => a.name.localeCompare(b.name)),
+		}));
 	}
 
 	function shortPrincipal(p: string): string {
@@ -865,32 +890,60 @@
 						<input
 							type="text"
 							bind:value={deptPermFilter}
-							placeholder="Search permissions to add..."
+							placeholder="Filter permissions (name, category, description)..."
 							class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm mb-2"
 						/>
 
-						{#if deptPermFilter.trim()}
-							{@const q = deptPermFilter.trim().toLowerCase()}
-							{@const filtered = allOperations.filter((op: any) =>
-								op.name.toLowerCase().includes(q) ||
-								(op.category || '').toLowerCase().includes(q) ||
-								(op.description || '').toLowerCase().includes(q)
-							).slice(0, 15)}
-							<div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white">
-								{#each filtered as op (op.name)}
-									{@const checked = isDeptPermChecked(op.name, dept.name)}
-									<label class="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-b border-gray-100 last:border-b-0">
-										<input
-											type="checkbox"
-											checked={checked}
-											onchange={() => toggleDeptPerm(op.name, dept.name)}
-											class="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
-										/>
-										<code class="text-xs font-medium text-gray-800">{op.name}</code>
-										<span class="text-xs text-gray-400 truncate">{op.description || ''}</span>
-									</label>
+						<!-- Browsable catalog: every permission, grouped by category, so
+						     admins can discover what exists instead of guessing names.
+						     Filtering auto-expands the matching categories. -->
+						{#if allOperations.length === 0}
+							<p class="text-xs text-gray-400">Permission catalog unavailable — the role_manager extension is not installed or you lack permission.view.</p>
+						{:else}
+							{@const groups = groupedOps(deptPermFilter)}
+							{@const filtering = deptPermFilter.trim().length > 0}
+							<div class="max-h-72 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
+								{#each groups as group (group.category)}
+									{@const catKey = `${dept.name}/${group.category}`}
+									{@const isOpen = filtering || openPermCats[catKey]}
+									{@const grantedCount = group.ops.filter((op: any) => isDeptPermChecked(op.name, dept.name)).length}
+									<div>
+										<button
+											type="button"
+											onclick={() => openPermCats = { ...openPermCats, [catKey]: !openPermCats[catKey] }}
+											class="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50"
+										>
+											<span class="font-medium text-gray-700">{group.category}</span>
+											<span class="flex items-center gap-2 text-xs text-gray-400">
+												{#if grantedCount > 0}
+													<span class="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium">{grantedCount} granted</span>
+												{/if}
+												<span>{group.ops.length}</span>
+												<svg class="w-3.5 h-3.5 transition-transform {isOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+											</span>
+										</button>
+										{#if isOpen}
+											{#each group.ops as op (op.name)}
+												{@const checked = isDeptPermChecked(op.name, dept.name)}
+												<label class="flex items-start gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-t border-gray-50">
+													<input
+														type="checkbox"
+														checked={checked}
+														onchange={() => toggleDeptPerm(op.name, dept.name)}
+														class="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+													/>
+													<span class="min-w-0">
+														<code class="text-xs font-medium text-gray-800">{op.name}</code>
+														{#if op.description}
+															<span class="block text-xs text-gray-400">{op.description}</span>
+														{/if}
+													</span>
+												</label>
+											{/each}
+										{/if}
+									</div>
 								{/each}
-								{#if filtered.length === 0}
+								{#if groups.length === 0}
 									<div class="px-3 py-2 text-xs text-gray-400">No matching permissions</div>
 								{/if}
 							</div>
