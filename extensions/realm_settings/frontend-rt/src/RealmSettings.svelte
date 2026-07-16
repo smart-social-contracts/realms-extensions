@@ -28,6 +28,9 @@
 	let realmSettingsAiAssistantEnabled = $state(true);
 	let realmSettingsFileRegistryId = $state('');
 	let realmSettingsMarketplaceId = $state('');
+	let realmSettingsCurrency = $state('ckBTC');
+	let realmSettingsCurrencyDecimals = $state(8);
+	let realmSettingsTokenCanisterId = $state('');
 
 	// Lifecycle state
 	let lifecycleLoading = $state(true);
@@ -75,6 +78,10 @@
 		if (realmSettingsBackgroundUrl) lines.push(`realm.background_image_url = ${JSON.stringify(realmSettingsBackgroundUrl)}`);
 		lines.push(`realm.open_registration = ${realmSettingsOpenRegistration ? 'True' : 'False'}`);
 		lines.push(`realm.ai_assistant_enabled = ${realmSettingsAiAssistantEnabled ? 'True' : 'False'}`);
+		if (realmSettingsCurrency) {
+			lines.push(`realm.accounting_currency = ${JSON.stringify(realmSettingsCurrency)}`);
+		}
+		lines.push(`realm.accounting_currency_decimals = ${Number(realmSettingsCurrencyDecimals) || 0}`);
 		if (realmSettingsFileRegistryId) lines.push(`realm.file_registry_canister_id = ${JSON.stringify(realmSettingsFileRegistryId)}`);
 		if (realmSettingsMarketplaceId) lines.push(`realm.marketplace_canister_id = ${JSON.stringify(realmSettingsMarketplaceId)}`);
 		return lines.join('\n');
@@ -82,7 +89,7 @@
 
 	function openProposalForSettings(deniedOp: string) {
 		proposalModalTitle = 'Update realm settings';
-		proposalModalDescription = 'This proposal updates the realm configuration (name, manifesto, welcome message, branding, and registration settings) as specified in the code below.';
+		proposalModalDescription = 'This proposal updates the realm configuration (identity, branding, registration, currency, and infrastructure) as specified in the code below.';
 		proposalModalCode = buildRealmConfigCode();
 		proposalModalOperation = deniedOp;
 		proposalModalOpen = true;
@@ -104,6 +111,12 @@
 				realmSettingsAiAssistantEnabled = s.ai_assistant_enabled !== false;
 				realmSettingsFileRegistryId = s.file_registry_canister_id || '';
 				realmSettingsMarketplaceId = s.marketplace_canister_id || '';
+				realmSettingsCurrency = s.accounting_currency || 'ckBTC';
+				realmSettingsCurrencyDecimals = Number(s.accounting_currency_decimals ?? 8);
+				const token = (s.canisters || []).find(
+					(c: { canister_type?: string }) => c.canister_type === 'token_backend',
+				);
+				realmSettingsTokenCanisterId = token?.canister_id || '';
 			}
 		} catch (e: any) {
 			settingsError = e?.message || String(e);
@@ -125,6 +138,8 @@
 				background_image_url: realmSettingsBackgroundUrl,
 				open_registration: realmSettingsOpenRegistration,
 				ai_assistant_enabled: realmSettingsAiAssistantEnabled,
+				accounting_currency: realmSettingsCurrency.trim(),
+				accounting_currency_decimals: Number(realmSettingsCurrencyDecimals),
 				file_registry_canister_id: realmSettingsFileRegistryId,
 				marketplace_canister_id: realmSettingsMarketplaceId,
 			};
@@ -159,7 +174,14 @@
 
 	let fileRegistryIdValid = $derived(isValidCanisterId(realmSettingsFileRegistryId));
 	let marketplaceIdValid = $derived(isValidCanisterId(realmSettingsMarketplaceId));
-	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid);
+	let currencyValid = $derived(
+		!!realmSettingsCurrency.trim() &&
+			realmSettingsCurrency.trim().length <= 16 &&
+			Number.isInteger(Number(realmSettingsCurrencyDecimals)) &&
+			Number(realmSettingsCurrencyDecimals) >= 0 &&
+			Number(realmSettingsCurrencyDecimals) <= 18,
+	);
+	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid && currencyValid);
 
 	let nextStage = $derived(
 		stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null
@@ -268,7 +290,7 @@
 	<div class="flex justify-between items-center mb-6">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Settings</h1>
-			<p class="text-gray-600 mt-1">Configure your realm's name, manifesto, branding, and registration settings.</p>
+			<p class="text-gray-600 mt-1">Configure identity, branding, currency, registration, and infrastructure for this realm.</p>
 		</div>
 	</div>
 
@@ -296,7 +318,6 @@
 					{#each STAGES as stage, i}
 						{@const isCurrent = i === stageIndex}
 						{@const isPast = i < stageIndex}
-						{@const isFuture = i > stageIndex}
 						<div class="flex flex-col items-center relative z-10" style="flex: 1;">
 							<div class={cn(
 								'w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all',
@@ -411,31 +432,41 @@
 	<!-- Quarters & Auto-Scaling -->
 	<QuartersPanel {ctx} {addToast} />
 
-	<div class="bg-white shadow-sm rounded-lg p-6">
-		{#if settingsLoading}
+	{#if settingsLoading}
+		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
 			<div class="flex items-center justify-center py-10">
 				<div class="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
 			</div>
-		{:else}
+		</div>
+	{:else}
+		<!-- Identity -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Identity</h2>
+			<p class="text-sm text-gray-500 mb-5">How this realm presents itself to members and visitors.</p>
 			<div class="space-y-5">
 				<div>
 					<label for="rs-name" class="block text-sm font-medium text-gray-700 mb-1">Realm Name</label>
 					<input id="rs-name" type="text" bind:value={realmSettingsName}
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
 				</div>
-
 				<div>
 					<label for="rs-desc" class="block text-sm font-medium text-gray-700 mb-1">Manifesto</label>
 					<textarea id="rs-desc" bind:value={realmSettingsManifesto} rows="2"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"></textarea>
 				</div>
-
 				<div>
 					<label for="rs-welcome" class="block text-sm font-medium text-gray-700 mb-1">Welcome Message</label>
 					<textarea id="rs-welcome" bind:value={realmSettingsWelcome} rows="3"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"></textarea>
 				</div>
+			</div>
+		</section>
 
+		<!-- Branding -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Branding</h2>
+			<p class="text-sm text-gray-500 mb-5">Logo and background imagery used across the realm UI.</p>
+			<div class="space-y-5">
 				<div>
 					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
 					<input id="rs-logo" type="url" bind:value={realmSettingsLogoUrl} placeholder="https://example.com/logo.png"
@@ -447,7 +478,6 @@
 						</div>
 					{/if}
 				</div>
-
 				<div>
 					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mb-1">Background Image URL</label>
 					<input id="rs-bg" type="url" bind:value={realmSettingsBackgroundUrl} placeholder="https://example.com/background.png"
@@ -459,7 +489,49 @@
 						</div>
 					{/if}
 				</div>
+			</div>
+		</section>
 
+		<!-- Currency -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency</h2>
+			<p class="text-sm text-gray-500 mb-5">
+				Accounting currency used for balances, invoices, and transfers in this realm.
+			</p>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+				<div>
+					<label for="rs-currency" class="block text-sm font-medium text-gray-700 mb-1">Currency symbol</label>
+					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="ckBTC" maxlength="16"
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+					<p class="mt-1 text-xs text-gray-500">Short symbol shown in the UI (e.g. ckBTC, ICP).</p>
+				</div>
+				<div>
+					<label for="rs-decimals" class="block text-sm font-medium text-gray-700 mb-1">Decimals</label>
+					<input id="rs-decimals" type="number" bind:value={realmSettingsCurrencyDecimals} min="0" max="18" step="1"
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+					<p class="mt-1 text-xs text-gray-500">Fractional digits for amounts (0–18). ckBTC uses 8.</p>
+				</div>
+			</div>
+			<div class="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3">
+				<div class="text-xs font-medium text-gray-500 mb-1">Token canister</div>
+				{#if realmSettingsTokenCanisterId}
+					<p class="text-sm font-mono text-green-700 break-all">{realmSettingsTokenCanisterId}</p>
+					<p class="text-xs text-gray-500 mt-1">Linked via deployment / canister config.</p>
+				{:else}
+					<p class="text-sm text-amber-700">token canister not linked</p>
+					<p class="text-xs text-gray-500 mt-1">Link a token backend during deploy or via canister config if this realm uses on-chain transfers.</p>
+				{/if}
+			</div>
+			{#if !currencyValid}
+				<p class="mt-3 text-xs text-red-600">Enter a non-empty currency symbol (max 16 chars) and decimals between 0 and 18.</p>
+			{/if}
+		</section>
+
+		<!-- Registration & features -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Registration &amp; features</h2>
+			<p class="text-sm text-gray-500 mb-5">Membership access and optional realm features.</p>
+			<div class="space-y-5">
 				<div class="flex items-center gap-3">
 					<label for="rs-open-reg" class="relative inline-flex items-center cursor-pointer">
 						<input id="rs-open-reg" type="checkbox" bind:checked={realmSettingsOpenRegistration} class="sr-only peer" />
@@ -470,7 +542,6 @@
 						<p class="text-xs text-gray-500">When enabled, anyone can join without an invite code.</p>
 					</div>
 				</div>
-
 				<div class="flex items-center gap-3">
 					<label for="rs-ai-assistant" class="relative inline-flex items-center cursor-pointer">
 						<input id="rs-ai-assistant" type="checkbox" bind:checked={realmSettingsAiAssistantEnabled} class="sr-only peer" />
@@ -481,67 +552,65 @@
 						<p class="text-xs text-gray-500">Enable Explain actions and realm-context hooks. Chat UI lives on the mundus Realms Assistant (registry portal).</p>
 					</div>
 				</div>
+			</div>
+		</section>
 
-				<!-- Infrastructure: Registry & Marketplace -->
-				<div class="border-t border-gray-200 pt-5 mt-2">
-					<h3 class="text-base font-semibold text-gray-900 mb-1">Registry & Marketplace</h3>
-					<p class="text-xs text-gray-500 mb-4">
-						Configure where this realm downloads and purchases extensions, codices, and assistants.
-						Changing these requires the <code class="bg-gray-100 px-1 rounded">realm.configure.infrastructure</code> permission.
-					</p>
-
-					<div class="space-y-4">
-						<div>
-							<label for="rs-file-registry" class="block text-sm font-medium text-gray-700 mb-1">File Registry Canister ID</label>
-							<input id="rs-file-registry" type="text" bind:value={realmSettingsFileRegistryId}
-								placeholder="e.g. uq2mu-kaaaa-aaaah-avqcq-cai"
-								class={cn(
-									'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
-									realmSettingsFileRegistryId && !fileRegistryIdValid
-										? 'border-red-300 focus:ring-red-300'
-										: 'border-gray-300 focus:ring-blue-500'
-								)} />
-							{#if realmSettingsFileRegistryId && !fileRegistryIdValid}
-								<p class="mt-1 text-xs text-red-600">Invalid canister ID format. Expected format: xxxxx-xxxxx-...-cai</p>
-							{/if}
-							<p class="mt-1 text-xs text-gray-500">The canister that stores extension, codex, and assistant artifact files.</p>
-						</div>
-
-						<div>
-							<label for="rs-marketplace" class="block text-sm font-medium text-gray-700 mb-1">Marketplace Canister ID</label>
-							<input id="rs-marketplace" type="text" bind:value={realmSettingsMarketplaceId}
-								placeholder="e.g. u4hsn-kaaaa-aaaah-avqda-cai"
-								class={cn(
-									'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
-									realmSettingsMarketplaceId && !marketplaceIdValid
-										? 'border-red-300 focus:ring-red-300'
-										: 'border-gray-300 focus:ring-blue-500'
-								)} />
-							{#if realmSettingsMarketplaceId && !marketplaceIdValid}
-								<p class="mt-1 text-xs text-red-600">Invalid canister ID format. Expected format: xxxxx-xxxxx-...-cai</p>
-							{/if}
-							<p class="mt-1 text-xs text-gray-500">The canister that hosts the marketplace for discovering and purchasing packages.</p>
-						</div>
-					</div>
+		<!-- Infrastructure -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Infrastructure</h2>
+			<p class="text-sm text-gray-500 mb-5">
+				Where this realm downloads and purchases extensions, codices, and assistants.
+				Changing these requires the <code class="bg-gray-100 px-1 rounded">realm.configure.infrastructure</code> permission.
+			</p>
+			<div class="space-y-4">
+				<div>
+					<label for="rs-file-registry" class="block text-sm font-medium text-gray-700 mb-1">File Registry Canister ID</label>
+					<input id="rs-file-registry" type="text" bind:value={realmSettingsFileRegistryId}
+						placeholder="e.g. uq2mu-kaaaa-aaaah-avqcq-cai"
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
+							realmSettingsFileRegistryId && !fileRegistryIdValid
+								? 'border-red-300 focus:ring-red-300'
+								: 'border-gray-300 focus:ring-blue-500'
+						)} />
+					{#if realmSettingsFileRegistryId && !fileRegistryIdValid}
+						<p class="mt-1 text-xs text-red-600">Invalid canister ID format. Expected format: xxxxx-xxxxx-...-cai</p>
+					{/if}
+					<p class="mt-1 text-xs text-gray-500">Stores extension, codex, and assistant artifact files.</p>
 				</div>
-
-				{#if settingsMessage}
-					<div class="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{settingsMessage}</div>
-				{/if}
-				{#if settingsError}
-					<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{settingsError}</div>
-				{/if}
-
-				<div class="pt-2">
-					<button
-						onclick={saveRealmSettings}
-						disabled={settingsSaving || !infraValid}
-						class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-					>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
+				<div>
+					<label for="rs-marketplace" class="block text-sm font-medium text-gray-700 mb-1">Marketplace Canister ID</label>
+					<input id="rs-marketplace" type="text" bind:value={realmSettingsMarketplaceId}
+						placeholder="e.g. u4hsn-kaaaa-aaaah-avqda-cai"
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
+							realmSettingsMarketplaceId && !marketplaceIdValid
+								? 'border-red-300 focus:ring-red-300'
+								: 'border-gray-300 focus:ring-blue-500'
+						)} />
+					{#if realmSettingsMarketplaceId && !marketplaceIdValid}
+						<p class="mt-1 text-xs text-red-600">Invalid canister ID format. Expected format: xxxxx-xxxxx-...-cai</p>
+					{/if}
+					<p class="mt-1 text-xs text-gray-500">Marketplace for discovering and purchasing packages.</p>
 				</div>
 			</div>
-		{/if}
-	</div>
+		</section>
+
+		<!-- Save bar -->
+		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			{#if settingsMessage}
+				<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{settingsMessage}</div>
+			{/if}
+			{#if settingsError}
+				<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{settingsError}</div>
+			{/if}
+			<button
+				onclick={saveRealmSettings}
+				disabled={settingsSaving || !infraValid}
+				class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+			>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
+		</div>
+	{/if}
 </div>
 
 <ProposalModal

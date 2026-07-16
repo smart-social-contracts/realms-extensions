@@ -272,8 +272,8 @@
 			</ul>
 		</div>
 
-		<!-- Migration status: citizens / quarters / currency -->
-		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+		<!-- Migration status: citizens / quarters (currency is edited in Realm Settings) -->
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
 			<div class="border border-gray-200 rounded-xl p-4">
 				<h3 class="text-sm font-semibold text-gray-700 mb-2">Citizen import</h3>
 				{#if data.citizen_import?.total > 0}
@@ -303,15 +303,6 @@
 				{:else}
 					<p class="text-sm text-gray-400">Single-quarter realm (autoscale adds more under load).</p>
 				{/if}
-			</div>
-			<div class="border border-gray-200 rounded-xl p-4">
-				<h3 class="text-sm font-semibold text-gray-700 mb-2">Currency</h3>
-				<p class="text-2xl font-bold text-gray-900">{data.currency?.accounting_currency || '—'}</p>
-				<p class="text-xs mt-1 {data.currency?.token_canister_id ? 'text-green-600' : 'text-amber-600'}">
-					{data.currency?.token_canister_id
-						? `token canister ${data.currency.token_canister_id}`
-						: 'token canister not linked'}
-				</p>
 			</div>
 		</div>
 
