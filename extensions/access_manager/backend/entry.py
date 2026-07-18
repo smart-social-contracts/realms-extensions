@@ -1373,10 +1373,12 @@ def _is_dept_member(user: User, dept: Department) -> bool:
 
 
 def _submit_position_proposal(action: dict, dept: Department, summary: str) -> dict:
-    """Create a department-scoped Proposal that replays *action* on approval.
+    """Create an org-scoped Proposal that replays *action* on approval.
 
-    Voting is opened immediately; the voting extension tallies it against the
-    department's M/N/quorum/veto policy (org-scoped ballots).
+    ``dept`` is the *governing* org — the org whose members vote and whose
+    M/N/quorum/veto policy applies. For root-initiated actions on another
+    org this is the root org, not the target (root authority is absolute;
+    only root's own policy gates it). Voting is opened immediately.
     """
     from core.position_admin import build_proposal_code
     from ggg import Proposal
@@ -1405,11 +1407,17 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
         pass
     deadline_s = ic.time() // 1_000_000_000 + voting_window
 
+    target_org = (action.get("department") or "").strip() or dept.name
+    governed_note = (
+        f"Position change in organization '{target_org}'"
+        if target_org == dept.name
+        else f"Position change in organization '{target_org}', decided by '{dept.name}'"
+    )
     proposal = Proposal(
         proposal_id=proposal_id,
         title=summary,
         description=(
-            f"Position change in organization '{dept.name}' "
+            f"{governed_note} "
             f"(policy {dept.policy_threshold_m}/{dept.policy_threshold_n}). "
             f"Proposed by {proposer.id}."
         ),
@@ -1436,9 +1444,11 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
 def manage_position(args) -> str:
     """Create/update/close/reopen a position, appoint a member, or end an appointment.
 
-    Applies immediately when the org's policy is 1/1 (single manager
-    suffices); any other policy turns the request into a department-scoped
-    proposal that must pass the org's M/N/quorum/veto vote first.
+    Applies immediately when the *governing* org's policy is 1/1; any other
+    policy turns the request into an org-scoped proposal that must pass that
+    org's M/N/quorum/veto vote first. The governing org is the root org when
+    a root member acts on another org (root authority is absolute — only
+    root's own policy gates it); otherwise it is the target org itself.
     """
     try:
         args_dict = _parse_args(args)
@@ -1488,16 +1498,37 @@ def manage_position(args) -> str:
         if not is_manager and not _is_dept_member(caller, dept):
             return json.dumps({"success": False, "error": "Access denied: not a manager or member of this organization"})
 
-        if policy_is_direct(dept):
+        # Root authority is absolute: a root member acting on another org is
+        # governed by root's OWN policy, never the target's. While the creator
+        # alone holds root (1/1 policy) actions apply directly at any stage;
+        # once root passes to e.g. a Congress, root-initiated actions become
+        # proposals voted by the root org's members. Actions initiated from
+        # within the org (head/members, not via root) keep the org's policy.
+        governing = dept
+        if not getattr(dept, "is_root", False) and _caller_in_root(caller):
+            try:
+                from core.org_policy import org_has_authority
+
+                root = Department[ROOT_ORG_NAME]
+                if root and org_has_authority(root.name, "org.appoint", target_name=dept.name):
+                    governing = root
+            except Exception as e:
+                logger.warning(f"root authority resolution failed, using target policy: {e}")
+
+        if policy_is_direct(governing):
             if not is_manager:
                 return json.dumps({"success": False, "error": "Access denied: managing this organization requires admin/head rights"})
             result = apply_position_action(action)
             if result.get("success"):
-                result["data"] = {**(result.get("data") or {}), "applied": "direct"}
+                result["data"] = {
+                    **(result.get("data") or {}),
+                    "applied": "direct",
+                    "governed_by": governing.name,
+                }
             return json.dumps(result)
 
         summary = describe_action(action)
-        data = _submit_position_proposal(action, dept, summary)
+        data = _submit_position_proposal(action, governing, summary)
         return json.dumps({
             "success": True,
             "data": {**data, "applied": "proposal", "summary": summary},
