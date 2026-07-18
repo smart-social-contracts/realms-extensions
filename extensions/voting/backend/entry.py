@@ -912,6 +912,34 @@ def get_proposals(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def get_org_scopes(args: str) -> str:
+    """Organization names for the proposal-list org filter dropdown.
+
+    Names only (no members/policy/budget — that is access_manager's
+    list_departments, which is permission-gated). Sorted, root org first.
+    """
+    try:
+        from ggg import Department
+
+        names = []
+        root_names = []
+        for dept in Department.instances():
+            name = (dept.name or "").strip()
+            if not name:
+                continue
+            if getattr(dept, "is_root", False):
+                root_names.append(name)
+            else:
+                names.append(name)
+        return json.dumps({
+            "success": True,
+            "data": {"org_scopes": sorted(root_names) + sorted(names)},
+        })
+    except Exception as e:
+        logger.error(f"get_org_scopes error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def get_proposal(args: str) -> str:
     """Get a specific proposal by ID."""
     try:

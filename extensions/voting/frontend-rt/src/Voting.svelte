@@ -41,6 +41,18 @@
 	let listLoadingMore = $state(false);
 	let listHasMore = $state(false);
 	let listNextFromId = $state(1);
+	let orgFilter = $state('');
+	let statusFilter = $state('');
+	let orgOptions: string[] = $state([]);
+	const STATUS_OPTIONS = [
+		'voting',
+		'pending_vote',
+		'approved',
+		'executed',
+		'rejected',
+		'failed',
+		'no_quorum',
+	];
 	const LIST_FETCH_SIZE = 30;
 	let error = $state('');
 	let accessDeniedOp = $state('');
@@ -107,7 +119,10 @@
 	}
 
 	async function fetchProposalsPage(fromId: number) {
-		const res = await callSync('get_proposals', { from_id: fromId, page_size: LIST_FETCH_SIZE });
+		const args: Record<string, any> = { from_id: fromId, page_size: LIST_FETCH_SIZE };
+		if (orgFilter) args.org_scope = orgFilter;
+		if (statusFilter) args.status = statusFilter;
+		const res = await callSync('get_proposals', args);
 		if (res?.success) {
 			const batch = res.data?.proposals ?? res.data ?? [];
 			return {
@@ -177,6 +192,29 @@
 				listLoading = false;
 			}
 		}
+	}
+
+	async function loadOrgOptions() {
+		try {
+			const res = await callSync('get_org_scopes');
+			const names = res?.data?.org_scopes;
+			if (Array.isArray(names) && names.length) {
+				orgOptions = names;
+				return;
+			}
+		} catch {
+			// fall through to deriving from loaded proposals
+		}
+		const seen = new Set<string>();
+		for (const p of proposals) {
+			const scope = (p.org_scope || '').trim();
+			if (scope) seen.add(scope);
+		}
+		orgOptions = [...seen].sort();
+	}
+
+	function onFilterChange() {
+		loadProposals();
 	}
 
 	async function loadMoreProposals() {
@@ -652,6 +690,7 @@
 		} else {
 			void loadProposals();
 		}
+		void loadOrgOptions();
 		window.addEventListener('popstate', handlePopState);
 	});
 
@@ -723,6 +762,12 @@
 					<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold {statusColor(selectedProposal.status)}">
 						{statusLabel(selectedProposal.status)}
 					</span>
+					{#if selectedProposal.org_scope}
+						<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+							{selectedProposal.org_scope}
+						</span>
+					{/if}
 				</div>
 				<div class="flex flex-wrap gap-4 text-sm text-gray-500">
 					<span>Proposer: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{truncatePrincipal(selectedProposal.proposer)}</code></span>
@@ -1146,6 +1191,41 @@
 				</button>
 			</div>
 
+			<!-- Filters -->
+			<div class="flex flex-wrap items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50">
+				<div class="flex items-center gap-2">
+					<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+					<select
+						bind:value={orgFilter}
+						onchange={() => onFilterChange()}
+						class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					>
+						<option value="">All organizations</option>
+						{#each orgOptions as org}
+							<option value={org}>{org}</option>
+						{/each}
+					</select>
+				</div>
+				<select
+					bind:value={statusFilter}
+					onchange={() => onFilterChange()}
+					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+				>
+					<option value="">All statuses</option>
+					{#each STATUS_OPTIONS as status}
+						<option value={status}>{statusLabel(status)}</option>
+					{/each}
+				</select>
+				{#if orgFilter || statusFilter}
+					<button
+						onclick={() => { orgFilter = ''; statusFilter = ''; onFilterChange(); }}
+						class="text-xs text-indigo-600 hover:text-indigo-800"
+					>
+						Clear filters
+					</button>
+				{/if}
+			</div>
+
 			<!-- Content -->
 			{#if listLoading && proposals.length === 0}
 				<div class="flex items-center justify-center py-12">
@@ -1155,8 +1235,13 @@
 			{:else if !listLoading && proposals.length === 0}
 				<div class="text-center py-12">
 					<svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-					<p class="text-gray-500 text-sm">No proposals yet</p>
-					<p class="text-gray-400 text-xs mt-1">Be the first to submit a proposal for this realm.</p>
+					{#if orgFilter || statusFilter}
+						<p class="text-gray-500 text-sm">No proposals match the current filters</p>
+						<p class="text-gray-400 text-xs mt-1">Try clearing the organization or status filter.</p>
+					{:else}
+						<p class="text-gray-500 text-sm">No proposals yet</p>
+						<p class="text-gray-400 text-xs mt-1">Be the first to submit a proposal for this realm.</p>
+					{/if}
 				</div>
 			{:else}
 			<div class="divide-y divide-gray-100">
@@ -1165,9 +1250,17 @@
 							<div class="flex items-start justify-between mb-2">
 								<div class="flex-1 min-w-0">
 									<h3 class="text-sm font-medium text-gray-900 truncate">{proposal.title}</h3>
-									<span class="inline-flex mt-1 px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(proposal.status)}">
-										{statusLabel(proposal.status)}
-									</span>
+									<div class="flex flex-wrap items-center gap-1.5 mt-1">
+										<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(proposal.status)}">
+											{statusLabel(proposal.status)}
+										</span>
+										{#if proposal.org_scope}
+											<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+												{proposal.org_scope}
+											</span>
+										{/if}
+									</div>
 								</div>
 								<button
 									onclick={() => viewProposal(proposal)}
