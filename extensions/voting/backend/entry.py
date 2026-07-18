@@ -139,6 +139,7 @@ def _proposal_to_dict(proposal: Proposal, *, summary: bool = False) -> Dict[str,
         "code_checksum": proposal.code_checksum,
         "proposer": proposal.proposer.id if proposal.proposer else "unknown",
         "status": proposal.status,
+        "org_scope": _proposal_org_scope(proposal),
         "created_at": created_at,
         "voting_deadline": voting_deadline,
         "votes": {
@@ -211,15 +212,28 @@ def _get_governance_params(proposal: Proposal) -> dict:
     return defaults
 
 
+def _proposal_org_scope(proposal: Proposal) -> str:
+    """Governing org name for this proposal, or "" for realm-wide ballots.
+
+    Prefers the first-class ``org_scope`` field (Proposal v2, indexed);
+    falls back to metadata for rows written by pre-v2 extensions that have
+    not been migrated yet.
+    """
+    scope = (getattr(proposal, "org_scope", None) or "").strip()
+    if scope:
+        return scope
+    metadata = _load_metadata(proposal)
+    return (metadata.get("org_scope") or "").strip()
+
+
 def _org_scoped_department(proposal: Proposal):
     """Department governing this proposal, or None for realm-wide ballots.
 
-    Org-scoped proposals (metadata ``org_scope``, e.g. position changes,
-    issue #241) are voted only by that organization's members and tallied
-    against its M/N/quorum/veto policy instead of realm-wide thresholds.
+    Org-scoped proposals (e.g. position changes, issue #241) are voted only
+    by that organization's members and tallied against its M/N/quorum/veto
+    policy instead of realm-wide thresholds.
     """
-    metadata = _load_metadata(proposal)
-    dept_name = (metadata.get("org_scope") or "").strip()
+    dept_name = _proposal_org_scope(proposal)
     if not dept_name:
         return None
     try:
@@ -760,16 +774,32 @@ def _build_file_preview(
 # Extension API functions
 # ---------------------------------------------------------------------------
 
-def get_proposals(args: str) -> str:
-    """Get proposals with optional status filtering and pagination.
+def _org_index_ready() -> bool:
+    """True once main.py's post-upgrade backfill has completed the
+    Proposal field indexes (ic-python-db#11); before that, index lookups
+    would silently miss pre-existing rows."""
+    try:
+        from ic_python_db import Database
 
-    Uses ``Proposal.load_some`` so large realms (demo data, justice cases,
-    procurement tenders sharing the Proposal entity) stay under the IC
-    per-message instruction limit.
+        return bool(Database.get_instance().load("_system", "fi_backfill:Proposal:v2"))
+    except Exception:
+        return False
+
+
+def get_proposals(args: str) -> str:
+    """Get proposals with optional status/org filtering and pagination.
+
+    ``org_scope`` filters to one organization's ballots. Once the field-index
+    backfill has run, matching rows come from the persistent index
+    (``Proposal.find_by``) — cost proportional to matches; until then the
+    filter falls back to the scan path. The scan uses ``Proposal.load_some``
+    so large realms (demo data, justice cases, procurement tenders sharing
+    the Proposal entity) stay under the IC per-message instruction limit.
     """
     try:
         args_dict = _parse_args(args)
         status_filter = args_dict.get("status")
+        org_filter = (args_dict.get("org_scope") or "").strip()
         include_non_voting = bool(args_dict.get("include_non_voting", False))
         from_id = max(1, int(args_dict.get("from_id", 1)))
         page_size = min(
@@ -782,6 +812,46 @@ def get_proposals(args: str) -> str:
         current_from = from_id
         next_from_id = from_id
         attempts = 0
+
+        if org_filter and _org_index_ready():
+            # Indexed path: walk only the org's matches, in ascending ID order.
+            has_more = False
+            while len(proposals) < page_size and attempts < 20:
+                attempts += 1
+                batch, next_cursor = Proposal.find_by(
+                    "org_scope", org_filter, from_id=current_from, count=page_size
+                )
+                if not batch:
+                    break
+                page_filled = False
+                for proposal in batch:
+                    if len(proposals) >= page_size:
+                        page_filled = True
+                        break
+                    entity_id = int(getattr(proposal, "_id", 0) or 0)
+                    next_from_id = entity_id + 1 if entity_id else next_from_id + 1
+                    if not include_non_voting and not _is_voting_proposal(proposal):
+                        continue
+                    if status_filter and proposal.status != status_filter:
+                        continue
+                    proposals.append(_proposal_to_dict(proposal, summary=True))
+                if page_filled:
+                    has_more = True
+                    break
+                if next_cursor is None:
+                    break
+                current_from = next_cursor
+
+            return json.dumps({
+                "success": True,
+                "data": {
+                    "proposals": proposals,
+                    "total": len(proposals),
+                    "from_id": from_id,
+                    "next_from_id": next_from_id if has_more else None,
+                    "has_more": has_more,
+                }
+            })
 
         while len(proposals) < page_size and current_from <= max_id and attempts < 20:
             try:
@@ -813,6 +883,8 @@ def get_proposals(args: str) -> str:
                 if not include_non_voting and not _is_voting_proposal(proposal):
                     continue
                 if status_filter and proposal.status != status_filter:
+                    continue
+                if org_filter and _proposal_org_scope(proposal) != org_filter:
                     continue
 
                 proposals.append(_proposal_to_dict(proposal, summary=True))

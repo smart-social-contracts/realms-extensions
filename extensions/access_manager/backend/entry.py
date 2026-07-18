@@ -1431,6 +1431,9 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
         votes_abstain=0.0,
         total_voters=0.0,
         required_threshold=1.0,  # org policy decides; realm threshold unused
+        # First-class indexed field (Proposal v2); kept in metadata too so
+        # older voting bundles that only read metadata still scope the vote.
+        org_scope=dept.name,
         metadata=json.dumps(metadata),
     )
     logger.info(f"Position proposal {proposal_id} submitted for '{dept.name}': {summary}")
