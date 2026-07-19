@@ -488,6 +488,20 @@
 		updateLayerVisibility();
 	}
 
+	function destroyMap() {
+		landPopup?.remove?.();
+		landPopup = null;
+		if (map) {
+			try {
+				map.remove();
+			} catch {
+				/* already torn down */
+			}
+			map = null;
+		}
+		mapReady = false;
+	}
+
 	async function initMap() {
 		if (!mapContainer || map) return;
 
@@ -585,14 +599,24 @@
 		}
 	}
 
+	function leaveMapTab(next: 'table' | 'admin') {
+		destroyMap();
+		activeTab = next;
+	}
+
 	async function switchToMapTab() {
 		activeTab = 'geographic';
 		await tick();
-		if (mapContainer && !map) {
+		if (!mapContainer) return;
+		try {
+			if (map) {
+				resizeMapSoon();
+				renderMapData();
+				return;
+			}
 			await initMap();
-		} else if (map) {
-			resizeMapSoon();
-			renderMapData();
+		} catch (e: any) {
+			error = e?.message || String(e);
 		}
 	}
 
@@ -761,10 +785,7 @@
 		window.removeEventListener('keydown', onWindowKeydown);
 		document.body.classList.remove('land-registry-expanded');
 		document.body.style.overflow = '';
-		landPopup?.remove?.();
-		map?.remove?.();
-		map = null;
-		mapReady = false;
+		destroyMap();
 	});
 </script>
 
@@ -795,8 +816,8 @@
 
 			<nav class="tab-nav">
 				<button type="button" class="tab-btn active" onclick={switchToMapTab}>Map View</button>
-				<button type="button" class="tab-btn" onclick={() => (activeTab = 'table')}>Table View</button>
-				<button type="button" class="tab-btn" onclick={() => (activeTab = 'admin')}>Admin Controls</button>
+				<button type="button" class="tab-btn" onclick={() => leaveMapTab('table')}>Table View</button>
+				<button type="button" class="tab-btn" onclick={() => leaveMapTab('admin')}>Admin Controls</button>
 			</nav>
 
 			{#if loading}
