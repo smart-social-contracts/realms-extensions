@@ -112,23 +112,10 @@
 				return idx;
 			} catch {}
 		}
-
-		const lat = land.latitude ?? land.zones?.[0]?.latitude;
-		const lng = land.longitude ?? land.zones?.[0]?.longitude;
-		if (lat == null || lng == null) return null;
-
-		const resolution = Math.round(Number(land.zones?.[0]?.resolution ?? DEFAULT_H3_RESOLUTION));
-		try {
-			return h3Api.latLngToCell(Number(lat), Number(lng), resolution);
-		} catch {
-			return null;
-		}
+		return null;
 	}
 
-	function getLandLatLng(land: any, h3Api: any, h3Index: string | null): [number, number] | null {
-		if (land.latitude != null && land.longitude != null) {
-			return [Number(land.latitude), Number(land.longitude)];
-		}
+	function getLandLatLng(_land: any, h3Api: any, h3Index: string | null): [number, number] | null {
 		if (h3Index && h3Api) {
 			try {
 				const c = h3Api.cellToLatLng(h3Index);
@@ -533,7 +520,7 @@
 							<tr>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">H3 Cell</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
@@ -547,8 +534,8 @@
 										<span class="px-2 py-0.5 rounded-full text-xs font-medium {getTypeColor(land.land_type)}">{land.land_type}</span>
 									</td>
 									<td class="px-4 py-3 text-sm text-gray-600">
-										{#if land.latitude && land.longitude}
-											{land.latitude.toFixed(4)}, {land.longitude.toFixed(4)}
+										{#if land.h3_index}
+											<code class="text-xs">{land.h3_index}</code>
 										{:else}
 											<span class="text-gray-400">-</span>
 										{/if}

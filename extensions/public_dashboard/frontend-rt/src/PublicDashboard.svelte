@@ -68,7 +68,7 @@
 		}
 
 		const allZones = parseEntities(zonesResp);
-		zones = allZones.filter((z: any) => z.h3_index || (z.latitude && z.longitude));
+		zones = allZones.filter((z: any) => z.h3_index);
 		latestUsers = parseEntities(latestResp);
 
 		await loadLifecycleData(backend);
@@ -185,65 +185,47 @@
 		const renderedHexes = new Set<string>();
 
 		for (const zone of zones) {
-			if (zone.h3_index) {
-				try {
-					const disk = gridDisk(zone.h3_index, INFLUENCE_RINGS);
-					for (const hexIndex of disk) {
-						if (renderedHexes.has(hexIndex)) continue;
-						renderedHexes.add(hexIndex);
+			if (!zone.h3_index) continue;
+			try {
+				const disk = gridDisk(zone.h3_index, INFLUENCE_RINGS);
+				for (const hexIndex of disk) {
+					if (renderedHexes.has(hexIndex)) continue;
+					renderedHexes.add(hexIndex);
 
-						const boundary = cellToBoundary(hexIndex);
-						const latLngs: [number, number][] = boundary.map(
-							(c: number[]) => [c[0], c[1]] as [number, number],
-						);
+					const boundary = cellToBoundary(hexIndex);
+					const latLngs: [number, number][] = boundary.map(
+						(c: number[]) => [c[0], c[1]] as [number, number],
+					);
 
-						const isCenter = hexIndex === zone.h3_index;
-						const opacity = isCenter ? 0.45 : 0.15;
-						const weight = isCenter ? 2 : 0.8;
+					const isCenter = hexIndex === zone.h3_index;
+					const opacity = isCenter ? 0.45 : 0.15;
+					const weight = isCenter ? 2 : 0.8;
 
-						L.polygon(latLngs, {
-							color: '#4338ca',
-							weight,
-							fillColor: '#6366f1',
-							fillOpacity: opacity,
-						}).addTo(map);
+					L.polygon(latLngs, {
+						color: '#4338ca',
+						weight,
+						fillColor: '#6366f1',
+						fillOpacity: opacity,
+					}).addTo(map);
 
-						if (isCenter) {
-							latLngs.forEach((c) => allLatLngs.push(c));
-						}
-					}
-				} catch {
-					if (zone.latitude && zone.longitude) {
-						allLatLngs.push([Number(zone.latitude), Number(zone.longitude)]);
+					const center = h3.cellToLatLng(hexIndex);
+					const marker = L.circleMarker(center, {
+						radius: 8,
+						fillColor: '#6366f1',
+						color: '#fff',
+						weight: 2,
+						fillOpacity: 0.9,
+					}).addTo(map);
+					const name = zone.name || zone.h3_index || '';
+					const desc = zone.description || '';
+					marker.bindPopup(`<strong>${name}</strong>${desc ? '<br/>' + desc : ''}`);
+
+					if (isCenter) {
+						latLngs.forEach((c) => allLatLngs.push(c));
 					}
 				}
-			}
-
-			if (zone.latitude && zone.longitude) {
-				const lat = Number(zone.latitude);
-				const lng = Number(zone.longitude);
-				L.circleMarker([lat, lng], {
-					radius: 14,
-					fillColor: '#6366f1',
-					color: '#6366f1',
-					weight: 0,
-					fillOpacity: 0.25,
-				}).addTo(map);
-				const marker = L.circleMarker([lat, lng], {
-					radius: 8,
-					fillColor: '#6366f1',
-					color: '#fff',
-					weight: 2,
-					fillOpacity: 0.9,
-				}).addTo(map);
-
-				const name = zone.name || zone.h3_index || '';
-				const desc = zone.description || '';
-				marker.bindPopup(`<strong>${name}</strong>${desc ? '<br/>' + desc : ''}`);
-
-				if (!allLatLngs.some((c) => c[0] === lat && c[1] === lng)) {
-					allLatLngs.push([lat, lng]);
-				}
+			} catch {
+				// Invalid h3_index: skip. Geometry is frontend-only now.
 			}
 		}
 

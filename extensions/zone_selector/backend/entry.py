@@ -1,26 +1,71 @@
 """
 Zone Selector extension entry point
-Allows users to set their zones of influence via geolocation or map selection
+
+Zoning authority for the realm's territory (issue #254): admins define typed
+zones (residential/commercial/…) on the H3 hexagonal grid. The backend stores
+only the H3 cell index; all geometry is computed by the browser using h3-js.
 """
 
 import json
 import traceback
 from typing import Any, Dict
 
-try:
-    from core.h3 import latlng_to_cell, cell_to_latlng
-    H3_AVAILABLE = True
-except ImportError:
-    H3_AVAILABLE = False
-
 from ggg import Zone, User
 from ic_python_logging import get_logger
 
 logger = get_logger("extensions.zone_selector")
 
+ZONE_TYPES = (
+    "unassigned",
+    "residential",
+    "commercial",
+    "agricultural",
+    "industrial",
+    "public",
+    "mixed",
+)
+
+
+def _is_territory_zone(zone) -> bool:
+    """Territory zones classify realm land; parcel-geometry zones belong to a Land."""
+    try:
+        return zone.land is None
+    except Exception:
+        return True
+
+
+def _caller_is_admin() -> bool:
+    try:
+        from basilisk import ic
+        from ggg.system.user_profile import OPERATIONS_SEPARATOR, Operations
+
+        user = User[ic.caller().to_str()]
+        if not user:
+            return False
+        for profile in user.profiles:
+            allowed = str(profile.allowed_to or "").split(OPERATIONS_SEPARATOR)
+            if Operations.ALL in allowed:
+                return True
+            if getattr(profile, "name", "") == "admin":
+                return True
+    except Exception as e:
+        logger.warning(f"admin check failed: {e}")
+    return False
+
+
+def _serialize_zone(zone) -> Dict[str, Any]:
+    return {
+        "id": zone.h3_index,
+        "h3_index": zone.h3_index,
+        "name": zone.name,
+        "description": zone.description,
+        "zone_type": getattr(zone, "zone_type", "") or "unassigned",
+        "metadata": zone.metadata,
+    }
+
 
 def get_my_zones(args: str) -> str:
-    """Get zones for the current user"""
+    """Get zones for the current user."""
     logger.info(f"zone_selector.get_my_zones called with args: {args}")
 
     try:
@@ -32,17 +77,8 @@ def get_my_zones(args: str) -> str:
 
         zones = []
         for zone in Zone.instances():
-            if zone.user and zone.user.id == user_id:
-                zones.append({
-                    "id": zone.h3_index,
-                    "h3_index": zone.h3_index,
-                    "name": zone.name,
-                    "description": zone.description,
-                    "latitude": zone.latitude,
-                    "longitude": zone.longitude,
-                    "resolution": zone.resolution,
-                    "metadata": zone.metadata,
-                })
+            if zone.user and zone.user.id == user_id and _is_territory_zone(zone):
+                zones.append(_serialize_zone(zone))
 
         return json.dumps({"success": True, "data": zones})
 
@@ -52,72 +88,55 @@ def get_my_zones(args: str) -> str:
 
 
 def add_zone(args: str) -> str:
-    """Add a new zone for a user based on coordinates or H3 index"""
+    """Add a typed territory zone. Requires an explicit h3_index from the caller."""
     logger.info(f"zone_selector.add_zone called with args: {args}")
 
     try:
         params = json.loads(args) if args else {}
 
         user_id = params.get("user_id")
-        latitude = params.get("latitude")
-        longitude = params.get("longitude")
         h3_index = params.get("h3_index")
-        name = params.get("name", "My Zone")
+        name = params.get("name", "Zone")
         description = params.get("description", "")
-        resolution = params.get("resolution", 6)
+        zone_type = (params.get("zone_type") or "unassigned").strip().lower()
+
+        if zone_type not in ZONE_TYPES:
+            return json.dumps({
+                "success": False,
+                "error": f"zone_type must be one of {', '.join(ZONE_TYPES)}",
+            })
 
         if not user_id:
             return json.dumps({"success": False, "error": "user_id is required"})
+        if not h3_index:
+            return json.dumps({
+                "success": False,
+                "error": "h3_index is required (geometry is computed on the frontend)",
+            })
 
-        # Find user
         user = None
         for u in User.instances():
             if u.id == user_id:
                 user = u
                 break
-
         if not user:
             return json.dumps({"success": False, "error": "User not found"})
 
-        # Calculate H3 index from coordinates if not provided
-        if not h3_index and latitude is not None and longitude is not None:
-            if H3_AVAILABLE:
-                h3_index = latlng_to_cell(latitude, longitude, resolution)
-            else:
-                # Fallback: create a pseudo h3 index from coords
-                h3_index = f"manual_{latitude:.4f}_{longitude:.4f}"
-        elif h3_index and (latitude is None or longitude is None):
-            # Get center of H3 cell if only h3_index provided
-            if H3_AVAILABLE:
-                lat, lng = cell_to_latlng(h3_index)
-                latitude = lat
-                longitude = lng
-
-        if not h3_index:
-            return json.dumps({
-                "success": False, 
-                "error": "Either h3_index or latitude/longitude is required"
-            })
-
-        # Check if user already has this zone
+        # One territory zone per cell, realm-wide.
         for existing_zone in Zone.instances():
-            if existing_zone.user and existing_zone.user.id == user_id:
-                if existing_zone.h3_index == h3_index:
-                    return json.dumps({
-                        "success": False,
-                        "error": "You already have a zone at this location"
-                    })
+            if existing_zone.h3_index == h3_index and _is_territory_zone(existing_zone):
+                return json.dumps({
+                    "success": False,
+                    "error": "A zone already exists at this location",
+                })
 
-        # Create the zone
         zone = Zone(
             h3_index=h3_index,
             name=name,
             description=description,
-            latitude=latitude,
-            longitude=longitude,
-            resolution=float(resolution),
+            zone_type=zone_type,
             metadata=json.dumps(params.get("metadata", {})),
-            user=user
+            user=user,
         )
 
         return json.dumps({
@@ -126,9 +145,8 @@ def add_zone(args: str) -> str:
                 "id": zone.h3_index,
                 "h3_index": zone.h3_index,
                 "name": zone.name,
-                "latitude": zone.latitude,
-                "longitude": zone.longitude,
-                "message": "Zone added successfully"
+                "zone_type": zone.zone_type,
+                "message": "Zone added successfully",
             }
         })
 
@@ -137,8 +155,134 @@ def add_zone(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def add_zones_batch(args: str) -> str:
+    """Paint many H3 cells at once with the same type (freehand-fill tool).
+
+    Cells already claimed by another territory zone are skipped rather than
+    erroring the whole batch, so re-painting over an edited area is safe.
+    """
+    logger.info(f"zone_selector.add_zones_batch called with {len(args or '')} bytes")
+
+    try:
+        params = json.loads(args) if args else {}
+
+        user_id = params.get("user_id")
+        h3_indexes = params.get("h3_indexes") or []
+        name = params.get("name", "Zone")
+        description = params.get("description", "")
+        zone_type = (params.get("zone_type") or "unassigned").strip().lower()
+
+        if zone_type not in ZONE_TYPES:
+            return json.dumps({
+                "success": False,
+                "error": f"zone_type must be one of {', '.join(ZONE_TYPES)}",
+            })
+        if not user_id:
+            return json.dumps({"success": False, "error": "user_id is required"})
+        if not isinstance(h3_indexes, list) or not h3_indexes:
+            return json.dumps({"success": False, "error": "h3_indexes (non-empty list) is required"})
+
+        user = None
+        for u in User.instances():
+            if u.id == user_id:
+                user = u
+                break
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
+
+        existing_cells = {
+            z.h3_index for z in Zone.instances() if _is_territory_zone(z)
+        }
+
+        created = []
+        skipped = []
+        # Cap defensively — a huge freehand fill shouldn't stall an update call.
+        for h3_index in h3_indexes[:3000]:
+            if not h3_index or h3_index in existing_cells:
+                skipped.append(h3_index)
+                continue
+
+            zone = Zone(
+                h3_index=h3_index,
+                name=name,
+                description=description,
+                zone_type=zone_type,
+                metadata="{}",
+                user=user,
+            )
+            existing_cells.add(h3_index)
+            created.append(zone.h3_index)
+
+        return json.dumps({
+            "success": True,
+            "data": {
+                "created_count": len(created),
+                "skipped_count": len(skipped),
+                "created": created,
+                "message": f"Painted {len(created)} zone(s), skipped {len(skipped)} already-claimed cell(s)",
+            },
+        })
+
+    except Exception as e:
+        logger.error(f"Error in add_zones_batch: {str(e)}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def update_zone(args: str) -> str:
+    """Update a territory zone's type, name, or description (creator or admin)."""
+    logger.info(f"zone_selector.update_zone called with args: {args}")
+
+    try:
+        params = json.loads(args) if args else {}
+        zone_id = params.get("zone_id") or params.get("h3_index")
+        if not zone_id:
+            return json.dumps({"success": False, "error": "zone_id is required"})
+
+        zone = None
+        for z in Zone.instances():
+            if z.h3_index == zone_id and _is_territory_zone(z):
+                zone = z
+                break
+        if not zone:
+            return json.dumps({"success": False, "error": "Zone not found"})
+
+        user_id = params.get("user_id")
+        is_owner = zone.user and user_id and zone.user.id == user_id
+        if not is_owner and not _caller_is_admin():
+            return json.dumps({
+                "success": False,
+                "error": "You don't have permission to update this zone",
+            })
+
+        updated = []
+        if "zone_type" in params:
+            zone_type = (params.get("zone_type") or "unassigned").strip().lower()
+            if zone_type not in ZONE_TYPES:
+                return json.dumps({
+                    "success": False,
+                    "error": f"zone_type must be one of {', '.join(ZONE_TYPES)}",
+                })
+            zone.zone_type = zone_type
+            updated.append("zone_type")
+        if "name" in params:
+            zone.name = params.get("name") or zone.name
+            updated.append("name")
+        if "description" in params:
+            zone.description = params.get("description") or ""
+            updated.append("description")
+
+        return json.dumps({
+            "success": True,
+            "data": {**_serialize_zone(zone), "updated_fields": updated},
+        })
+
+    except Exception as e:
+        logger.error(f"Error in update_zone: {str(e)}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def remove_zone(args: str) -> str:
-    """Remove a zone for a user"""
+    """Remove a territory zone (creator or admin)."""
     logger.info(f"zone_selector.remove_zone called with args: {args}")
 
     try:
@@ -147,26 +291,24 @@ def remove_zone(args: str) -> str:
         user_id = params.get("user_id")
         zone_id = params.get("zone_id")
 
-        if not user_id:
-            return json.dumps({"success": False, "error": "user_id is required"})
         if not zone_id:
             return json.dumps({"success": False, "error": "zone_id is required"})
 
-        # Find the zone
         zone = None
         for z in Zone.instances():
-            if z.h3_index == zone_id:
+            if z.h3_index == zone_id and _is_territory_zone(z):
                 zone = z
                 break
 
         if not zone:
             return json.dumps({"success": False, "error": "Zone not found"})
 
-        # Verify ownership
-        if not zone.user or zone.user.id != user_id:
+        # Creator may remove their own zone; admins may remove any.
+        is_owner = zone.user and user_id and zone.user.id == user_id
+        if not is_owner and not _caller_is_admin():
             return json.dumps({
-                "success": False, 
-                "error": "You don't have permission to remove this zone"
+                "success": False,
+                "error": "You don't have permission to remove this zone",
             })
 
         # Delete the zone
@@ -183,7 +325,7 @@ def remove_zone(args: str) -> str:
 
 
 def get_all_zones(args: str) -> str:
-    """Get all zones (for map visualization)"""
+    """Get all territory zones (for map visualization and zoning admin)."""
     logger.info(f"zone_selector.get_all_zones called with args: {args}")
 
     try:
@@ -191,19 +333,19 @@ def get_all_zones(args: str) -> str:
 
         zones = []
         for zone in Zone.instances():
-            zone_data = {
-                "id": zone.h3_index,
-                "h3_index": zone.h3_index,
-                "name": zone.name,
-                "latitude": zone.latitude,
-                "longitude": zone.longitude,
-                "resolution": zone.resolution,
-            }
+            if not _is_territory_zone(zone):
+                continue  # parcel geometry owned by land_registry
+            zone_data = _serialize_zone(zone)
             if zone.user:
                 zone_data["user_id"] = zone.user.id
             zones.append(zone_data)
 
-        return json.dumps({"success": True, "data": zones})
+        return json.dumps({
+            "success": True,
+            "data": zones,
+            "zone_types": list(ZONE_TYPES),
+            "is_admin": _caller_is_admin(),
+        })
 
     except Exception as e:
         logger.error(f"Error in get_all_zones: {str(e)}\n{traceback.format_exc()}")

@@ -35,17 +35,15 @@ def get_lands(args: str) -> str:
                 zone_data.append({
                     "h3_index": zone.h3_index,
                     "name": zone.name,
-                    "latitude": zone.latitude,
-                    "longitude": zone.longitude,
-                    "resolution": zone.resolution,
+                    "zone_type": getattr(zone, "zone_type", None) or "unassigned",
                 })
-            
+
             # Parse metadata to get price info
             try:
                 metadata_obj = json.loads(land.metadata) if land.metadata else {}
             except:
                 metadata_obj = {}
-            
+
             land_dict = {
                 "id": land.id,
                 "x_coordinate": land.x_coordinate,
@@ -61,10 +59,8 @@ def get_lands(args: str) -> str:
                 "owner_organization_id": (
                     land.owner_organization.id if land.owner_organization else None
                 ),
-                # Zone/geographic data
+                # Zone/geographic data: backend stores only the H3 index.
                 "zones": zone_data,
-                "latitude": zone_data[0]["latitude"] if zone_data else None,
-                "longitude": zone_data[0]["longitude"] if zone_data else None,
                 "h3_index": zone_data[0]["h3_index"] if zone_data else None,
                 # Parsed metadata fields
                 "price_realm_tokens": metadata_obj.get("price_realm_tokens"),
@@ -323,11 +319,10 @@ def get_land(args: str) -> str:
             zone = land_zones[0]
             zone_data = {
                 "h3_index": zone.h3_index,
-                "latitude": zone.latitude,
-                "longitude": zone.longitude,
-                "resolution": zone.resolution,
+                "name": zone.name,
+                "zone_type": getattr(zone, "zone_type", None) or "unassigned",
             }
-        
+
         # Parse metadata for price and for_sale
         metadata_parsed = {}
         if land.metadata:
@@ -335,7 +330,7 @@ def get_land(args: str) -> str:
                 metadata_parsed = json.loads(land.metadata)
             except json.JSONDecodeError:
                 pass
-        
+
         land_data = {
             "id": land.id,
             "x_coordinate": land.x_coordinate,
@@ -355,10 +350,8 @@ def get_land(args: str) -> str:
             "owner_organization_name": (
                 land.owner_organization.name if land.owner_organization else None
             ),
-            # Zone data
+            # Zone data: H3 index only; geometry is computed on the frontend.
             "h3_index": zone_data.get("h3_index"),
-            "latitude": zone_data.get("latitude"),
-            "longitude": zone_data.get("longitude"),
             # Parsed metadata
             "price_realm_tokens": metadata_parsed.get("price_realm_tokens"),
             "for_sale": metadata_parsed.get("for_sale", False),
