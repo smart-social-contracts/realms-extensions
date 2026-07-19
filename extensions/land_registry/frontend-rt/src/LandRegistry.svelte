@@ -3,7 +3,6 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	let activeTab = $state<'geographic' | 'table' | 'admin'>('geographic');
 	let lands: any[] = $state([]);
 	let loading = $state(true);
 	let refreshing = $state(false);
@@ -11,6 +10,18 @@
 	let accessDeniedOp = $state('');
 	let success = $state('');
 	let expanded = $state(false);
+	let sidebarWidth = $state(380);
+	let isResizing = $state(false);
+
+	let selectedLandId = $state('');
+	let drawMode = $state(false);
+	let isDrawing = $state(false);
+	let drawPoints: [number, number][] = $state([]);
+	let paintCells: string[] = $state([]);
+	let paintableCount = $state(0);
+	let paintResolution = $state(8);
+	let drawLandType = $state('unassigned');
+	let drawLandName = $state('');
 
 	let mapContainer: HTMLDivElement | undefined = $state();
 	let mapReady = $state(false);
@@ -20,10 +31,19 @@
 	let landPopup: any = null;
 	let didFitBounds = false;
 
+	let ownership = $state({ land_id: '', owner_user_id: '', owner_organization_id: '', owner_type: 'none' });
+	let landUpdate = $state({ land_id: '', land_type: '', status: '' });
+	let nftMint = $state({ land_id: '', owner_principal: '' });
+	let submitting = $state(false);
+
 	const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 	const SOURCE_ZONES = 'land-zones';
 	const SOURCE_LANDS = 'land-parcels';
 	const SOURCE_POINTS = 'land-points';
+	const SOURCE_HIGHLIGHT = 'land-highlight';
+	const SOURCE_DRAFT_LINE = 'draft-line';
+	const SOURCE_DRAFT_POINTS = 'draft-points';
+	const SOURCE_PREVIEW = 'draw-preview';
 
 	const landTypes = [
 		{ value: 'unassigned', label: 'Unassigned' },
@@ -50,16 +70,7 @@
 	const INFLUENCE_RINGS = 2;
 	const HEX_ZOOM_THRESHOLD = 10;
 
-	let tablePage = $state(0);
-	const tablePageSize = 10;
-	let tableTotalPages = $derived(Math.ceil(lands.length / tablePageSize));
-	let paginatedLands = $derived(lands.slice(tablePage * tablePageSize, (tablePage + 1) * tablePageSize));
-
-	let newLand = $state({ x_coordinate: 0, y_coordinate: 0, land_type: 'unassigned', size_width: 1, size_height: 1 });
-	let ownership = $state({ land_id: '', owner_user_id: '', owner_organization_id: '', owner_type: 'none' });
-	let landUpdate = $state({ land_id: '', land_type: '', status: '' });
-	let nftMint = $state({ land_id: '', owner_principal: '' });
-	let submitting = $state(false);
+	let selectedLand = $derived(lands.find((l) => l.id === selectedLandId) ?? null);
 
 	function loadScript(src: string): Promise<void> {
 		return new Promise((resolve, reject) => {
@@ -104,7 +115,7 @@
 		return (window as any).maplibregl;
 	}
 
-	async function loadH3() {
+	async function loadH3Lib() {
 		if ((window as any).h3) return (window as any).h3;
 		const res = await fetch('https://unpkg.com/h3-js@4.2.1/dist/h3-js.umd.js');
 		if (!res.ok) throw new Error(`Failed to load h3-js: HTTP ${res.status}`);
@@ -120,16 +131,8 @@
 			const sourceLayer = String(layer['source-layer'] || '').toLowerCase();
 			const type = String(layer.type || '').toLowerCase();
 			const isBoundary =
-				sourceLayer.includes('boundary') ||
-				sourceLayer === 'admin' ||
-				id.includes('boundary') ||
-				id.includes('admin');
-			const isLabel =
-				type === 'symbol' ||
-				id.includes('label') ||
-				id.includes('name') ||
-				sourceLayer.includes('place') ||
-				sourceLayer === 'poi';
+				sourceLayer.includes('boundary') || sourceLayer === 'admin' || id.includes('boundary');
+			const isLabel = type === 'symbol' || id.includes('label') || sourceLayer.includes('place');
 			if (!isBoundary && !isLabel) filtered.layers.push(layer);
 		}
 		delete filtered.light;
@@ -145,22 +148,24 @@
 		}
 	}
 
-	function resolveH3Index(land: any): string | null {
-		const candidates: (string | null | undefined)[] = [land.h3_index, land.zones?.[0]?.h3_index];
-		const meta = parseMetadata(land.metadata);
-		if (meta?.parent_zone) candidates.push(String(meta.parent_zone));
+	function landColor(type: string) {
+		return LAND_COLORS[type] || LAND_COLORS.unassigned;
+	}
 
-		for (const idx of candidates) {
-			if (!idx || String(idx).includes('manual')) continue;
-			try {
-				if (h3?.isValidCell && !h3.isValidCell(idx)) continue;
-				h3.cellToLatLng(idx);
-				return idx;
-			} catch {
-				/* skip */
-			}
-		}
+	function resolveH3Index(land: any): string | null {
+		if (land.h3_index) return land.h3_index;
+		if (land.h3_indexes?.length) return land.h3_indexes[0];
+		if (land.zones?.[0]?.h3_index) return land.zones[0].h3_index;
+		const meta = parseMetadata(land.metadata);
+		if (meta?.parent_zone) return String(meta.parent_zone);
 		return null;
+	}
+
+	function resolveAllH3Indexes(land: any): string[] {
+		if (land.h3_indexes?.length) return land.h3_indexes;
+		if (land.zones?.length) return land.zones.map((z: any) => z.h3_index).filter(Boolean);
+		const idx = resolveH3Index(land);
+		return idx ? [idx] : [];
 	}
 
 	function getLandLatLng(h3Index: string | null): [number, number] | null {
@@ -174,29 +179,100 @@
 		}
 	}
 
-	function landColor(type: string) {
-		return LAND_COLORS[type] || LAND_COLORS.unassigned;
+	function resolutionForZoom(zoom: number) {
+		if (zoom <= 8) return 6;
+		if (zoom <= 10) return 7;
+		if (zoom <= 13) return 8;
+		return 9;
 	}
 
-	function landPopupHtml(land: any, h3Index: string | null) {
-		const color = landColor(land.land_type);
-		const isOwned = !!(land.owner_user_id || land.owner_organization_id);
-		const ownerInfo = land.owner_user_id
-			? `Owner: User ${land.owner_user_id}`
-			: land.owner_organization_id
-				? `Owner: Org ${land.owner_organization_id}`
-				: '<span style="color:#2563eb">Available</span>';
-		const priceInfo =
-			land.for_sale && land.price_realm_tokens
-				? `<br><span style="color:#16a34a;font-weight:600">${land.price_realm_tokens} REALM</span>`
-				: '';
-		return `<div style="padding:4px;font-size:13px;line-height:1.45">
-			<strong>${land.id}</strong><br>
-			Type: <span style="color:${color}">${land.land_type}</span><br>
-			${ownerInfo}${priceInfo}
-			${h3Index ? `<br><span style="font-size:10px;color:#9ca3af">H3: ${h3Index}</span>` : ''}
-			${isOwned ? '' : ''}
-		</div>`;
+	function maxCellsForResolution(res: number) {
+		if (res <= 6) return 800;
+		if (res <= 8) return 1500;
+		return 2500;
+	}
+
+	function polygonToCells(points: [number, number][], resolution: number): string[] {
+		if (points.length < 3 || !h3) return [];
+		const ring = [...points];
+		const [lat0, lng0] = points[0];
+		const [latN, lngN] = points[points.length - 1];
+		if (lat0 !== latN || lng0 !== lngN) ring.push(points[0]);
+		try {
+			const cells = h3.polygonToCells(ring, resolution, false);
+			const cap = maxCellsForResolution(resolution);
+			return cells.length > cap ? cells.slice(0, cap) : cells;
+		} catch {
+			return [];
+		}
+	}
+
+	function occupiedH3Cells(): Set<string> {
+		const out = new Set<string>();
+		for (const land of lands) {
+			for (const idx of resolveAllH3Indexes(land)) out.add(idx);
+		}
+		return out;
+	}
+
+	function syncDraftPreview() {
+		if (!isDrawing || !h3 || !map) return;
+		if (drawPoints.length < 3) {
+			paintCells = [];
+			paintableCount = 0;
+			paintResolution = 0;
+			refreshPreviewLayer();
+			return;
+		}
+		const res = resolutionForZoom(map.getZoom());
+		const cells = polygonToCells(drawPoints, res);
+		const occupied = occupiedH3Cells();
+		paintCells = cells;
+		paintableCount = cells.filter((c) => !occupied.has(c)).length;
+		paintResolution = res;
+		refreshPreviewLayer();
+	}
+
+	function draftGeoJson() {
+		const coords = drawPoints.map(([lat, lng]) => [lng, lat]);
+		return {
+			line: {
+				type: 'FeatureCollection',
+				features:
+					coords.length >= 2
+						? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }]
+						: [],
+			},
+			points: {
+				type: 'FeatureCollection',
+				features: coords.map((c, i) => ({
+					type: 'Feature',
+					properties: { first: i === 0 },
+					geometry: { type: 'Point', coordinates: c },
+				})),
+			},
+		};
+	}
+
+	function refreshDraftLayers() {
+		if (!map || !mapReady) return;
+		const { line, points } = draftGeoJson();
+		map.getSource(SOURCE_DRAFT_LINE)?.setData(line);
+		map.getSource(SOURCE_DRAFT_POINTS)?.setData(points);
+	}
+
+	function refreshPreviewLayer() {
+		if (!map || !mapReady || !h3) return;
+		const color = landColor(drawLandType);
+		const features = paintCells.map((cell) => {
+			const boundary = h3.cellToBoundary(cell, true);
+			return {
+				type: 'Feature',
+				properties: { h3_index: cell, color },
+				geometry: { type: 'Polygon', coordinates: [boundary] },
+			};
+		});
+		map.getSource(SOURCE_PREVIEW)?.setData({ type: 'FeatureCollection', features });
 	}
 
 	function buildZoneGeoJson() {
@@ -206,7 +282,7 @@
 		const parentZones = new Map<string, { landCount: number; landTypes: Record<string, number> }>();
 		for (const land of lands) {
 			const meta = parseMetadata(land.metadata);
-			const parentZone = meta?.parent_zone ? String(meta.parent_zone) : null;
+			const parentZone = meta?.parent_zone ? String(meta.parent_zone) : resolveH3Index(land);
 			if (!parentZone) continue;
 			if (!parentZones.has(parentZone)) parentZones.set(parentZone, { landCount: 0, landTypes: {} });
 			const zd = parentZones.get(parentZone)!;
@@ -214,11 +290,7 @@
 			zd.landTypes[land.land_type] = (zd.landTypes[land.land_type] || 0) + 1;
 		}
 
-		const hexData: Record<
-			string,
-			{ minDistance: number; landCount: number; landTypes: Record<string, number> }
-		> = {};
-
+		const hexData: Record<string, any> = {};
 		parentZones.forEach((zoneInfo, centerHex) => {
 			let disk: string[];
 			try {
@@ -246,21 +318,17 @@
 			try {
 				const boundary = h3.cellToBoundary(hexIdx, true);
 				const distOp = 1 - (data.minDistance / (INFLUENCE_RINGS + 1)) * 0.7;
-				const fillOpacity = (data.minDistance === 0 ? 0.5 : 0.25) * distOp;
 				features.push({
 					type: 'Feature',
 					properties: {
 						h3_index: hexIdx,
 						color: ZONE_COLOR,
-						fillOpacity,
+						fillOpacity: (data.minDistance === 0 ? 0.5 : 0.25) * distOp,
 						lineOpacity: data.minDistance === 0 ? 0.8 : 0.4,
 						lineWidth: data.minDistance === 0 ? 2 : 1,
 						dashed: data.minDistance > 0 ? 1 : 0,
 						isCenter: data.minDistance === 0 ? 1 : 0,
 						landCount: data.landCount,
-						typeSummary: Object.entries(data.landTypes)
-							.map(([t, c]) => `${t}: ${c}`)
-							.join(', '),
 					},
 					geometry: { type: 'Polygon', coordinates: [boundary] },
 				});
@@ -268,7 +336,6 @@
 				/* skip */
 			}
 		}
-
 		return { type: 'FeatureCollection', features };
 	}
 
@@ -277,29 +344,29 @@
 		if (!h3) return { type: 'FeatureCollection', features };
 
 		for (const land of lands) {
-			const h3Index = resolveH3Index(land);
-			if (!h3Index) continue;
-			const isOwned = !!(land.owner_user_id || land.owner_organization_id);
-			try {
-				const boundary = h3.cellToBoundary(h3Index, true);
-				features.push({
-					type: 'Feature',
-					properties: {
-						land_id: land.id,
-						color: landColor(land.land_type),
-						fillOpacity: isOwned ? 0.7 : 0.5,
-						lineColor: isOwned ? '#1f2937' : '#9ca3af',
-						lineWidth: isOwned ? 2 : 1,
-						land_json: JSON.stringify(land),
-						h3_index: h3Index,
-					},
-					geometry: { type: 'Polygon', coordinates: [boundary] },
-				});
-			} catch {
-				/* skip */
+			for (const h3Index of resolveAllH3Indexes(land)) {
+				const isOwned = !!(land.owner_user_id || land.owner_organization_id);
+				const selected = land.id === selectedLandId;
+				try {
+					const boundary = h3.cellToBoundary(h3Index, true);
+					features.push({
+						type: 'Feature',
+						properties: {
+							land_id: land.id,
+							color: landColor(land.land_type),
+							fillOpacity: selected ? 0.85 : isOwned ? 0.7 : 0.5,
+							lineColor: selected ? '#2563eb' : isOwned ? '#1f2937' : '#9ca3af',
+							lineWidth: selected ? 3 : isOwned ? 2 : 1,
+							land_json: JSON.stringify(land),
+							h3_index: h3Index,
+						},
+						geometry: { type: 'Polygon', coordinates: [boundary] },
+					});
+				} catch {
+					/* skip */
+				}
 			}
 		}
-
 		return { type: 'FeatureCollection', features };
 	}
 
@@ -313,60 +380,88 @@
 			if (!coords) continue;
 			const [lat, lng] = coords;
 			const isOwned = !!(land.owner_user_id || land.owner_organization_id);
+			const selected = land.id === selectedLandId;
 			features.push({
 				type: 'Feature',
 				properties: {
 					land_id: land.id,
 					color: landColor(land.land_type),
-					strokeColor: isOwned ? '#1f2937' : '#22c55e',
+					strokeColor: selected ? '#2563eb' : isOwned ? '#1f2937' : '#22c55e',
+					radius: selected ? 11 : 8,
 					land_json: JSON.stringify(land),
 					h3_index: h3Index,
 				},
 				geometry: { type: 'Point', coordinates: [lng, lat] },
 			});
 		}
-
 		return { type: 'FeatureCollection', features };
 	}
 
-	function fitMapToData() {
-		if (!map || !maplibregl || !h3 || didFitBounds) return;
-		const bounds = new maplibregl.LngLatBounds();
-		let hasBounds = false;
-
-		for (const land of lands) {
-			const h3Index = resolveH3Index(land);
-			if (!h3Index) continue;
+	function buildHighlightGeoJson() {
+		if (!selectedLand || !h3) return { type: 'FeatureCollection', features: [] };
+		const features: any[] = [];
+		for (const h3Index of resolveAllH3Indexes(selectedLand)) {
 			try {
 				const boundary = h3.cellToBoundary(h3Index, true);
-				for (const [lng, lat] of boundary) {
-					bounds.extend([lng, lat]);
-					hasBounds = true;
-				}
+				features.push({
+					type: 'Feature',
+					properties: { land_id: selectedLand.id },
+					geometry: { type: 'Polygon', coordinates: [boundary] },
+				});
 			} catch {
-				const coords = getLandLatLng(h3Index);
-				if (coords) {
-					bounds.extend([coords[1], coords[0]]);
-					hasBounds = true;
+				/* skip */
+			}
+		}
+		return { type: 'FeatureCollection', features };
+	}
+
+	function fitMapToData(force = false) {
+		if (!map || !maplibregl || !h3 || (didFitBounds && !force)) return;
+		const bounds = new maplibregl.LngLatBounds();
+		let hasBounds = false;
+		for (const land of lands) {
+			for (const h3Index of resolveAllH3Indexes(land)) {
+				try {
+					for (const [lng, lat] of h3.cellToBoundary(h3Index, true)) {
+						bounds.extend([lng, lat]);
+						hasBounds = true;
+					}
+				} catch {
+					const coords = getLandLatLng(h3Index);
+					if (coords) {
+						bounds.extend([coords[1], coords[0]]);
+						hasBounds = true;
+					}
 				}
 			}
 		}
-
 		if (hasBounds) {
-			map.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 0 });
+			map.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: force ? 600 : 0 });
 			didFitBounds = true;
+		}
+	}
+
+	function flyToLand(land: any) {
+		if (!map || !h3) return;
+		const idx = resolveH3Index(land);
+		const coords = getLandLatLng(idx);
+		if (coords) {
+			map.flyTo({ center: [coords[1], coords[0]], zoom: Math.max(map.getZoom(), 12), duration: 700 });
 		}
 	}
 
 	function updateLayerVisibility() {
 		if (!map || !mapReady) return;
-		const zoom = map.getZoom();
-		const showHex = zoom >= HEX_ZOOM_THRESHOLD;
-		for (const id of ['lands-fill', 'lands-line']) {
+		const showHex = map.getZoom() >= HEX_ZOOM_THRESHOLD;
+		for (const id of ['lands-fill', 'lands-line', 'land-highlight-fill', 'land-highlight-line']) {
 			if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showHex ? 'visible' : 'none');
 		}
 		if (map.getLayer('land-points')) {
 			map.setLayoutProperty('land-points', 'visibility', showHex ? 'none' : 'visible');
+		}
+		const previewVis = drawMode && paintCells.length > 0 ? 'visible' : 'none';
+		for (const id of ['preview-fill', 'preview-line', 'draft-line-layer', 'draft-points-layer']) {
+			if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', previewVis);
 		}
 	}
 
@@ -375,38 +470,58 @@
 		map.getSource(SOURCE_ZONES)?.setData(buildZoneGeoJson());
 		map.getSource(SOURCE_LANDS)?.setData(buildLandGeoJson());
 		map.getSource(SOURCE_POINTS)?.setData(buildPointGeoJson());
+		map.getSource(SOURCE_HIGHLIGHT)?.setData(buildHighlightGeoJson());
+		refreshPreviewLayer();
 		updateLayerVisibility();
-		fitMapToData();
 	}
 
-	function showFeaturePopup(e: any, layerId: string) {
-		if (!map || !maplibregl) return;
-		const feature = e.features?.[0];
-		if (!feature) return;
+	function selectLand(land: any | null, fly = false) {
+		selectedLandId = land?.id || '';
+		if (land) {
+			ownership = { ...ownership, land_id: land.id };
+			landUpdate = { land_id: land.id, land_type: land.land_type || '', status: land.status || '' };
+			nftMint = { ...nftMint, land_id: land.id };
+			if (fly) flyToLand(land);
+		}
+		renderMapData();
+	}
 
-		if (layerId === 'zones-fill' && feature.properties?.isCenter) {
-			const html = `<div style="padding:4px;font-size:13px">
-				<strong>Land Zone</strong><br>
-				Parcels: ${feature.properties.landCount}<br>
-				${feature.properties.typeSummary ? `Types: ${feature.properties.typeSummary}<br>` : ''}
-				<span style="font-size:10px;color:#9ca3af">H3: ${feature.properties.h3_index}</span>
-			</div>`;
-			landPopup?.remove();
-			landPopup = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
-				.setLngLat(e.lngLat)
-				.setHTML(html)
-				.addTo(map);
+	function landPopupHtml(land: any, h3Index: string | null) {
+		const color = landColor(land.land_type);
+		const ownerInfo = land.owner_user_id
+			? `Owner: User ${land.owner_user_id}`
+			: land.owner_organization_id
+				? `Owner: Org ${land.owner_organization_id}`
+				: 'Available';
+		return `<div style="padding:4px;font-size:13px;line-height:1.45">
+			<strong>${land.id}</strong><br>
+			Type: <span style="color:${color}">${land.land_type}</span><br>
+			${ownerInfo}
+			${h3Index ? `<br><span style="font-size:10px;color:#9ca3af">H3: ${h3Index}</span>` : ''}
+		</div>`;
+	}
+
+	function onMapClick(e: any) {
+		if (isDrawing) {
+			drawPoints = [...drawPoints, [e.lngLat.lat, e.lngLat.lng]];
+			refreshDraftLayers();
+			syncDraftPreview();
 			return;
 		}
+		if (drawMode) return;
+	}
 
-		const landRaw = feature.properties?.land_json;
-		if (!landRaw) return;
+	function onFeatureClick(e: any) {
+		if (isDrawing || drawMode) return;
+		const feature = e.features?.[0];
+		if (!feature?.properties?.land_json) return;
 		try {
-			const land = JSON.parse(landRaw);
+			const land = JSON.parse(feature.properties.land_json);
+			selectLand(land, false);
 			landPopup?.remove();
 			landPopup = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
 				.setLngLat(e.lngLat)
-				.setHTML(landPopupHtml(land, feature.properties?.h3_index || null))
+				.setHTML(landPopupHtml(land, feature.properties.h3_index || null))
 				.addTo(map);
 		} catch {
 			/* ignore */
@@ -417,46 +532,16 @@
 		if (!map) return;
 
 		map.addSource(SOURCE_ZONES, { type: 'geojson', data: buildZoneGeoJson() });
-		map.addLayer({
-			id: 'zones-fill',
-			type: 'fill',
-			source: SOURCE_ZONES,
-			paint: {
-				'fill-color': ['get', 'color'],
-				'fill-opacity': ['get', 'fillOpacity'],
-			},
-		});
-		map.addLayer({
-			id: 'zones-line',
-			type: 'line',
-			source: SOURCE_ZONES,
-			paint: {
-				'line-color': ['get', 'color'],
-				'line-width': ['get', 'lineWidth'],
-				'line-opacity': ['get', 'lineOpacity'],
-				'line-dasharray': ['case', ['==', ['get', 'dashed'], 1], ['literal', [4, 4]], ['literal', [1, 0]]],
-			},
-		});
+		map.addLayer({ id: 'zones-fill', type: 'fill', source: SOURCE_ZONES, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] } });
+		map.addLayer({ id: 'zones-line', type: 'line', source: SOURCE_ZONES, paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'lineWidth'], 'line-opacity': ['get', 'lineOpacity'] } });
 
 		map.addSource(SOURCE_LANDS, { type: 'geojson', data: buildLandGeoJson() });
-		map.addLayer({
-			id: 'lands-fill',
-			type: 'fill',
-			source: SOURCE_LANDS,
-			paint: {
-				'fill-color': ['get', 'color'],
-				'fill-opacity': ['get', 'fillOpacity'],
-			},
-		});
-		map.addLayer({
-			id: 'lands-line',
-			type: 'line',
-			source: SOURCE_LANDS,
-			paint: {
-				'line-color': ['get', 'lineColor'],
-				'line-width': ['get', 'lineWidth'],
-			},
-		});
+		map.addLayer({ id: 'lands-fill', type: 'fill', source: SOURCE_LANDS, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] } });
+		map.addLayer({ id: 'lands-line', type: 'line', source: SOURCE_LANDS, paint: { 'line-color': ['get', 'lineColor'], 'line-width': ['get', 'lineWidth'] } });
+
+		map.addSource(SOURCE_HIGHLIGHT, { type: 'geojson', data: buildHighlightGeoJson() });
+		map.addLayer({ id: 'land-highlight-fill', type: 'fill', source: SOURCE_HIGHLIGHT, paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
+		map.addLayer({ id: 'land-highlight-line', type: 'line', source: SOURCE_HIGHLIGHT, paint: { 'line-color': '#2563eb', 'line-width': 3 } });
 
 		map.addSource(SOURCE_POINTS, { type: 'geojson', data: buildPointGeoJson() });
 		map.addLayer({
@@ -464,71 +549,62 @@
 			type: 'circle',
 			source: SOURCE_POINTS,
 			paint: {
-				'circle-radius': 8,
+				'circle-radius': ['get', 'radius'],
 				'circle-color': ['get', 'color'],
 				'circle-stroke-color': ['get', 'strokeColor'],
 				'circle-stroke-width': 2,
-				'circle-opacity': 0.9,
 			},
 		});
 
-		for (const layerId of ['lands-fill', 'land-points', 'zones-fill']) {
-			map.on('click', layerId, (e: any) => {
-				showFeaturePopup(e, layerId);
-			});
+		map.addSource(SOURCE_PREVIEW, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+		map.addLayer({ id: 'preview-fill', type: 'fill', source: SOURCE_PREVIEW, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 } });
+		map.addLayer({ id: 'preview-line', type: 'line', source: SOURCE_PREVIEW, paint: { 'line-color': '#171717', 'line-width': 1, 'line-dasharray': [2, 1] } });
+
+		map.addSource(SOURCE_DRAFT_LINE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+		map.addLayer({ id: 'draft-line-layer', type: 'line', source: SOURCE_DRAFT_LINE, paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [1, 1] } });
+		map.addSource(SOURCE_DRAFT_POINTS, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+		map.addLayer({
+			id: 'draft-points-layer',
+			type: 'circle',
+			source: SOURCE_DRAFT_POINTS,
+			paint: { 'circle-radius': 5, 'circle-color': ['case', ['get', 'first'], '#dc2626', '#2563eb'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
+		});
+
+		for (const layerId of ['lands-fill', 'land-points']) {
+			map.on('click', layerId, onFeatureClick);
 			map.on('mouseenter', layerId, () => {
-				map.getCanvas().style.cursor = 'pointer';
+				if (!isDrawing) map.getCanvas().style.cursor = 'pointer';
 			});
 			map.on('mouseleave', layerId, () => {
-				map.getCanvas().style.cursor = '';
+				map.getCanvas().style.cursor = isDrawing ? 'crosshair' : '';
 			});
 		}
 
-		map.on('zoomend', updateLayerVisibility);
+		map.on('click', onMapClick);
+		map.on('zoomend', () => {
+			if (isDrawing) syncDraftPreview();
+			updateLayerVisibility();
+		});
 		updateLayerVisibility();
-	}
-
-	function destroyMap() {
-		landPopup?.remove?.();
-		landPopup = null;
-		if (map) {
-			try {
-				map.remove();
-			} catch {
-				/* already torn down */
-			}
-			map = null;
-		}
-		mapReady = false;
 	}
 
 	async function initMap() {
 		if (!mapContainer || map) return;
-
 		maplibregl = await loadMapLibre();
-		if (!maplibregl) throw new Error('MapLibre GL failed to initialize');
-		h3 = await loadH3();
-
+		h3 = await loadH3Lib();
 		let style: any = STYLE_URL;
 		try {
 			const res = await fetch(STYLE_URL);
 			if (res.ok) style = stripNoisyLayers(await res.json());
 		} catch {
-			/* keep URL fallback */
+			/* fallback */
 		}
-
-		map = new maplibregl.Map({
-			container: mapContainer,
-			style,
-			center: [0, 20],
-			zoom: 2,
-			attributionControl: true,
-		});
-
+		map = new maplibregl.Map({ container: mapContainer, style, center: [0, 20], zoom: 2, attributionControl: true });
 		map.on('load', () => {
 			addMapLayers();
 			mapReady = true;
 			renderMapData();
+			fitMapToData();
 			requestAnimationFrame(() => map?.resize());
 		});
 	}
@@ -545,15 +621,14 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const res = await callExt('get_lands');
-			if (res?.success) {
-				lands = res.data ?? [];
-			} else {
-				lands = res?.data ?? (Array.isArray(res) ? res : []);
-			}
+			const res = await callExt('get_lands', { all: true });
+			if (res?.success) lands = res.data ?? [];
+			else lands = res?.data ?? [];
+			if (selectedLandId && !lands.some((l) => l.id === selectedLandId)) selectedLandId = '';
 			if (mapReady) {
 				didFitBounds = false;
 				renderMapData();
+				if (lands.length) fitMapToData(true);
 				await tick();
 				map?.resize();
 			}
@@ -572,6 +647,87 @@
 		}
 	}
 
+	function startDrawMode() {
+		drawMode = true;
+		isDrawing = false;
+		drawPoints = [];
+		paintCells = [];
+		paintableCount = 0;
+		selectedLandId = '';
+		refreshDraftLayers();
+		refreshPreviewLayer();
+		updateLayerVisibility();
+		if (map) map.getCanvas().style.cursor = '';
+	}
+
+	function cancelDrawMode() {
+		drawMode = false;
+		isDrawing = false;
+		drawPoints = [];
+		paintCells = [];
+		paintableCount = 0;
+		refreshDraftLayers();
+		refreshPreviewLayer();
+		updateLayerVisibility();
+		if (map) map.getCanvas().style.cursor = '';
+	}
+
+	function startDrawing() {
+		isDrawing = true;
+		drawPoints = [];
+		paintCells = [];
+		if (map) map.getCanvas().style.cursor = 'crosshair';
+		refreshDraftLayers();
+		syncDraftPreview();
+	}
+
+	function undoPoint() {
+		drawPoints = drawPoints.slice(0, -1);
+		refreshDraftLayers();
+		syncDraftPreview();
+	}
+
+	function finishShape() {
+		if (drawPoints.length < 3) return;
+		syncDraftPreview();
+		isDrawing = false;
+		drawPoints = [];
+		refreshDraftLayers();
+		if (map) map.getCanvas().style.cursor = '';
+		updateLayerVisibility();
+	}
+
+	async function createDrawnParcel() {
+		if (paintableCount === 0) return;
+		const newCells = paintCells.filter((c) => !occupiedH3Cells().has(c));
+		if (!newCells.length) return;
+		submitting = true;
+		error = '';
+		success = '';
+		try {
+			const res = await callExt('create_land', {
+				h3_indexes: newCells,
+				land_type: drawLandType,
+				name: drawLandName.trim() || undefined,
+			});
+			if (res?.success) {
+				success = res.data?.message || 'Land parcel created.';
+				cancelDrawMode();
+				await loadLands(true);
+				if (res.data?.id) {
+					const created = lands.find((l) => l.id === res.data.id);
+					if (created) selectLand(created, true);
+				}
+			} else {
+				error = res?.error || 'Failed to create land parcel';
+			}
+		} catch (e: any) {
+			error = e?.message ?? String(e);
+		} finally {
+			submitting = false;
+		}
+	}
+
 	function resizeMapSoon() {
 		requestAnimationFrame(() => {
 			map?.resize();
@@ -581,80 +737,48 @@
 
 	function setExpanded(next: boolean) {
 		expanded = next;
-		if (typeof document !== 'undefined') {
-			document.body.classList.toggle('land-registry-expanded', next);
-			document.body.style.overflow = next ? 'hidden' : '';
-		}
+		document.body.classList.toggle('land-registry-expanded', next);
+		document.body.style.overflow = next ? 'hidden' : '';
 		resizeMapSoon();
 	}
 
-	function toggleExpanded() {
-		setExpanded(!expanded);
-	}
-
 	function onWindowKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape' && expanded) {
-			e.preventDefault();
-			setExpanded(false);
-		}
-	}
-
-	function leaveMapTab(next: 'table' | 'admin') {
-		destroyMap();
-		activeTab = next;
-	}
-
-	async function switchToMapTab() {
-		activeTab = 'geographic';
-		await tick();
-		if (!mapContainer) return;
-		try {
-			if (map) {
-				resizeMapSoon();
-				renderMapData();
-				return;
+		if (e.key === 'Escape') {
+			if (expanded) {
+				e.preventDefault();
+				setExpanded(false);
+			} else if (drawMode) {
+				cancelDrawMode();
 			}
-			await initMap();
-		} catch (e: any) {
-			error = e?.message || String(e);
 		}
+	}
+
+	function onResizeStart(e: MouseEvent) {
+		e.preventDefault();
+		isResizing = true;
+		const startX = e.clientX;
+		const startWidth = sidebarWidth;
+		const onMove = (ev: MouseEvent) => {
+			sidebarWidth = Math.min(560, Math.max(280, startWidth + (ev.clientX - startX)));
+			resizeMapSoon();
+		};
+		const onUp = () => {
+			isResizing = false;
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
 	}
 
 	function getTypeColor(type: string) {
 		const colors: Record<string, string> = {
-			residential: 'bg-green-100 text-green-800',
-			agricultural: 'bg-yellow-100 text-yellow-800',
-			industrial: 'bg-gray-100 text-gray-800',
-			commercial: 'bg-blue-100 text-blue-800',
+			residential: 'chip-green',
+			agricultural: 'chip-yellow',
+			industrial: 'chip-gray',
+			commercial: 'chip-blue',
 		};
-		return colors[type] || 'bg-gray-100 text-gray-600';
-	}
-
-	async function createLand() {
-		submitting = true;
-		error = '';
-		success = '';
-		try {
-			const res = await callExt('create_land', newLand);
-			if (res?.success) {
-				success = 'Land created successfully!';
-				newLand = { x_coordinate: 0, y_coordinate: 0, land_type: 'unassigned', size_width: 1, size_height: 1 };
-				await loadLands(true);
-			} else {
-				error = res?.error || 'Failed to create land';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			submitting = false;
-		}
+		return colors[type] || 'chip-muted';
 	}
 
 	async function updateOwnership() {
@@ -668,20 +792,10 @@
 			const res = await callExt('update_land_ownership', data);
 			if (res?.success) {
 				success = 'Ownership updated!';
-				ownership = { land_id: '', owner_user_id: '', owner_organization_id: '', owner_type: 'none' };
 				await loadLands(true);
-			} else {
-				error = res?.error || 'Failed to update ownership';
-			}
+			} else error = res?.error || 'Failed to update ownership';
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			error = e?.message ?? String(e);
 		} finally {
 			submitting = false;
 		}
@@ -698,20 +812,10 @@
 			const res = await callExt('update_land', data);
 			if (res?.success) {
 				success = res?.data?.message || 'Land updated!';
-				landUpdate = { land_id: '', land_type: '', status: '' };
 				await loadLands(true);
-			} else {
-				error = res?.error || 'Failed to update land';
-			}
+			} else error = res?.error || 'Failed to update land';
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			error = e?.message ?? String(e);
 		} finally {
 			submitting = false;
 		}
@@ -731,39 +835,37 @@
 				error = prepRes?.error || 'Failed to prepare NFT';
 				return;
 			}
-			const mintData = prepRes.data;
 			const mintRaw = await ctx.backend.mint_land_nft_for_parcel(
 				nftMint.land_id,
 				nftMint.owner_principal,
-				BigInt(mintData.token_id),
+				BigInt(prepRes.data.token_id),
 				''
 			);
 			const mintRes = JSON.parse(mintRaw);
 			if (mintRes.success) {
 				await callExt('update_land_nft_token', { land_id: nftMint.land_id, nft_token_id: mintRes.token_id });
 				success = `NFT minted! Token ID: ${mintRes.token_id}`;
-				nftMint = { land_id: '', owner_principal: '' };
+				nftMint = { ...nftMint, owner_principal: '' };
 				await loadLands(true);
-			} else {
-				error = mintRes.error || 'Mint failed';
-			}
+			} else error = mintRes.error || 'Mint failed';
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			error = e?.message ?? String(e);
 		} finally {
 			submitting = false;
 		}
 	}
 
 	$effect(() => {
-		if (activeTab === 'geographic' && mapReady && lands.length >= 0) {
+		if (mapReady && paintCells.length >= 0 && drawMode) {
+			drawLandType;
+			refreshPreviewLayer();
+		}
+	});
+
+	$effect(() => {
+		if (mapReady) {
 			lands;
+			selectedLandId;
 			renderMapData();
 		}
 	});
@@ -772,7 +874,7 @@
 		window.addEventListener('keydown', onWindowKeydown);
 		await loadLands(false);
 		await tick();
-		if (activeTab === 'geographic' && mapContainer) {
+		if (mapContainer) {
 			try {
 				await initMap();
 			} catch (e: any) {
@@ -785,255 +887,165 @@
 		window.removeEventListener('keydown', onWindowKeydown);
 		document.body.classList.remove('land-registry-expanded');
 		document.body.style.overflow = '';
-		destroyMap();
+		landPopup?.remove?.();
+		map?.remove?.();
+		map = null;
+		mapReady = false;
 	});
 </script>
 
-<div class="land-registry" class:expanded class:map-tab={activeTab === 'geographic'}>
+<div class="land-registry" class:expanded class:resizing={isResizing}>
 	{#if accessDeniedOp}
-		<div class="panel-shell">
+		<div class="denied-shell">
 			{#if ctx.ui?.AccessDenied}
 				<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
 			{:else}
 				<p class="muted">You need additional permissions to view this page.</p>
 			{/if}
 		</div>
-	{:else if activeTab === 'geographic'}
-		<div bind:this={mapContainer} class="land-map"></div>
-
-		<div class="land-overlay land-overlay-top">
-			<div class="land-header">
-				<div class="land-header-copy">
+	{:else}
+		<aside class="sidebar" style="width: {sidebarWidth}px">
+			<div class="sidebar-head">
+				<div>
 					<h2>Land Registry</h2>
-					<p class="land-header-desc">Manage land parcels, ownership, and NFT minting on the map.</p>
+					<p class="muted">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</p>
 				</div>
-				<div class="land-header-actions">
-					<button type="button" class="ghost-btn" onclick={toggleExpanded} aria-pressed={expanded}>
+				<button type="button" class="ghost-btn" onclick={() => loadLands(true)} disabled={refreshing}>Refresh</button>
+			</div>
+
+			{#if error}<div class="alert error">{error}</div>{/if}
+			{#if success}<div class="alert success">{success}</div>{/if}
+
+			<div class="sidebar-toolbar">
+				{#if drawMode}
+					<button type="button" class="ghost-btn" onclick={cancelDrawMode}>Cancel draw</button>
+					{#if !isDrawing && paintCells.length === 0}
+						<button type="button" class="primary-btn" onclick={startDrawing}>Start drawing</button>
+					{:else if isDrawing}
+						<button type="button" class="ghost-btn" onclick={undoPoint} disabled={drawPoints.length === 0}>Undo</button>
+						<button type="button" class="primary-btn" onclick={finishShape} disabled={drawPoints.length < 3}>Finish shape</button>
+					{:else if paintCells.length > 0}
+						<button type="button" class="primary-btn" onclick={createDrawnParcel} disabled={submitting || paintableCount === 0}>
+							Create {paintableCount} cell(s)
+						</button>
+					{/if}
+				{:else}
+					<button type="button" class="primary-btn" onclick={startDrawMode}>Draw parcel</button>
+				{/if}
+			</div>
+
+			{#if drawMode}
+				<div class="draw-panel">
+					<label>Type
+						<select bind:value={drawLandType}>
+							{#each landTypes as t}<option value={t.value}>{t.label}</option>{/each}
+						</select>
+					</label>
+					<label>Name (optional)
+						<input type="text" bind:value={drawLandName} placeholder="Parcel name" />
+					</label>
+					{#if isDrawing}
+						<p class="muted">Click the map to add points ({drawPoints.length}). Need at least 3.</p>
+					{:else if paintCells.length > 0}
+						<p class="muted">Previewing {paintableCount} new cell(s) at H3 res {paintResolution}.</p>
+					{:else}
+						<p class="muted">Draw a shape on the map to define the parcel area.</p>
+					{/if}
+				</div>
+			{/if}
+
+			<div class="parcel-list">
+				{#if loading}
+					<p class="muted center">Loading lands…</p>
+				{:else if lands.length === 0}
+					<p class="muted center">No parcels yet. Use “Draw parcel” on the map.</p>
+				{:else}
+					{#each lands as land}
+						<button
+							type="button"
+							class="parcel-row"
+							class:selected={land.id === selectedLandId}
+							onclick={() => selectLand(land, true)}
+						>
+							<span class="dot" style="background:{landColor(land.land_type)}"></span>
+							<span class="parcel-main">
+								<strong>{land.id}</strong>
+								<span class="muted">{land.land_type}{land.h3_index ? ` · ${land.h3_index.slice(0, 10)}…` : ''}</span>
+							</span>
+							<span class="parcel-status">
+								{#if land.for_sale}Sale{:else if land.owner_user_id || land.owner_organization_id}Owned{:else}Open{/if}
+							</span>
+						</button>
+					{/each}
+				{/if}
+			</div>
+
+			{#if selectedLand && !drawMode}
+				<div class="detail-panel">
+					<h3>{selectedLand.id}</h3>
+					<p class="muted">{selectedLand.land_type} · {selectedLand.status || 'active'}</p>
+					{#if selectedLand.h3_index}<code class="h3-code">{selectedLand.h3_index}</code>{/if}
+
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); updateOwnership(); }}>
+						<h4>Ownership</h4>
+						<select bind:value={ownership.owner_type}>
+							<option value="none">No owner</option>
+							<option value="user">Citizen</option>
+							<option value="organization">Organization</option>
+						</select>
+						{#if ownership.owner_type === 'user'}
+							<input type="text" bind:value={ownership.owner_user_id} placeholder="User ID" />
+						{:else if ownership.owner_type === 'organization'}
+							<input type="text" bind:value={ownership.owner_organization_id} placeholder="Organization ID" />
+						{/if}
+						<button type="submit" class="primary-btn green" disabled={submitting}>Update ownership</button>
+					</form>
+
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); updateLandProps(); }}>
+						<h4>Properties</h4>
+						<select bind:value={landUpdate.land_type}>
+							{#each landTypes as t}<option value={t.value}>{t.label}</option>{/each}
+						</select>
+						<select bind:value={landUpdate.status}>
+							{#each landStatuses as s}<option value={s.value}>{s.label}</option>{/each}
+						</select>
+						<button type="submit" class="primary-btn amber" disabled={submitting}>Update land</button>
+					</form>
+
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); mintNFT(); }}>
+						<h4>Mint NFT</h4>
+						<input type="text" bind:value={nftMint.owner_principal} placeholder="Owner principal" />
+						<button type="submit" class="primary-btn purple" disabled={submitting}>Mint NFT</button>
+					</form>
+				</div>
+			{/if}
+		</aside>
+
+		<div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={onResizeStart}></div>
+
+		<div class="map-column">
+			<div bind:this={mapContainer} class="land-map" class:drawing={isDrawing}></div>
+			<div class="map-overlay map-overlay-top">
+				<div class="map-actions">
+					<button type="button" class="ghost-btn" onclick={() => setExpanded(!expanded)} aria-pressed={expanded}>
 						{expanded ? 'Exit full screen' : 'Expand'}
 					</button>
 				</div>
 			</div>
-
-			<nav class="tab-nav">
-				<button type="button" class="tab-btn active" onclick={switchToMapTab}>Map View</button>
-				<button type="button" class="tab-btn" onclick={() => leaveMapTab('table')}>Table View</button>
-				<button type="button" class="tab-btn" onclick={() => leaveMapTab('admin')}>Admin Controls</button>
-			</nav>
-
-			{#if loading}
-				<div class="status-banner">Loading lands…</div>
-			{:else if refreshing}
-				<div class="status-banner">Updating lands…</div>
-			{/if}
-			{#if error}
-				<div class="alert error">{error}</div>
-			{/if}
-			{#if success}
-				<div class="alert success">{success}</div>
-			{/if}
-		</div>
-
-		<div class="land-overlay land-overlay-bottom">
-			<div class="legend">
-				{#each Object.entries(LAND_COLORS) as [type, color]}
-					<span class="legend-item">
-						<span class="legend-dot" style="background:{color}"></span>
-						<span class="capitalize">{type}</span>
-					</span>
-				{/each}
-				<span class="legend-item">
-					<span class="legend-dot ring-owned"></span>
-					Owned
-				</span>
-				<span class="legend-item">
-					<span class="legend-dot ring-available"></span>
-					Available
-				</span>
-				<span class="legend-spacer"></span>
-				<button type="button" class="ghost-btn" onclick={() => loadLands(true)}>Refresh</button>
-				<span class="parcel-count">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</span>
+			<div class="map-overlay map-overlay-bottom">
+				<div class="legend">
+					{#each Object.entries(LAND_COLORS) as [type, color]}
+						<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{type}</span>
+					{/each}
+				</div>
 			</div>
-		</div>
-	{:else}
-		<div class="panel-shell">
-			<div class="panel-head">
-				<div>
-					<h2>Land Registry</h2>
-					<p class="muted">Manage land parcels, ownership, and NFT minting</p>
-				</div>
-				<button type="button" class="ghost-btn" onclick={switchToMapTab}>Back to map</button>
-			</div>
-
-			<nav class="tab-nav panel-tabs">
-				<button type="button" class="tab-btn" onclick={switchToMapTab}>Map View</button>
-				<button type="button" class="tab-btn" class:active={activeTab === 'table'} onclick={() => (activeTab = 'table')}>Table View</button>
-				<button type="button" class="tab-btn" class:active={activeTab === 'admin'} onclick={() => (activeTab = 'admin')}>Admin Controls</button>
-			</nav>
-
-			{#if error}
-				<div class="alert error">{error}</div>
-			{/if}
-			{#if success}
-				<div class="alert success">{success}</div>
-			{/if}
-
-			{#if loading}
-				<div class="loading-row">Loading lands…</div>
-			{:else if activeTab === 'table'}
-				<div class="panel-block">
-					<div class="panel-block-head">
-						<div>
-							<h3>Land Registry Table</h3>
-							<p class="muted">Showing {paginatedLands.length} of {lands.length} parcels</p>
-						</div>
-						<button type="button" class="ghost-btn" onclick={() => loadLands(true)}>Refresh</button>
-					</div>
-
-					{#if lands.length > 0}
-						<div class="table-wrap">
-							<table>
-								<thead>
-									<tr>
-										<th>ID</th>
-										<th>Type</th>
-										<th>H3 Cell</th>
-										<th>Owner</th>
-										<th>Status</th>
-										<th>Price</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each paginatedLands as land}
-										<tr>
-											<td><strong>{land.id}</strong></td>
-											<td><span class="badge {getTypeColor(land.land_type)}">{land.land_type}</span></td>
-											<td>{land.h3_index ? land.h3_index : '—'}</td>
-											<td>{land.owner_user_id || land.owner_organization_id || '—'}</td>
-											<td>
-												{#if land.for_sale}
-													For Sale
-												{:else if land.owner_user_id || land.owner_organization_id}
-													Owned
-												{:else}
-													Available
-												{/if}
-											</td>
-											<td>{land.for_sale && land.price_realm_tokens ? `${land.price_realm_tokens} REALM` : '—'}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-
-						{#if tableTotalPages > 1}
-							<div class="pager">
-								<button type="button" class="ghost-btn" disabled={tablePage === 0} onclick={() => (tablePage = Math.max(0, tablePage - 1))}>Previous</button>
-								<span class="muted">Page {tablePage + 1} of {tableTotalPages}</span>
-								<button type="button" class="ghost-btn" disabled={tablePage >= tableTotalPages - 1} onclick={() => (tablePage = Math.min(tableTotalPages - 1, tablePage + 1))}>Next</button>
-							</div>
-						{/if}
-					{:else}
-						<p class="muted center">No land parcels registered yet.</p>
-					{/if}
-				</div>
-			{:else if activeTab === 'admin'}
-				<div class="admin-grid">
-					<section class="admin-card">
-						<h3>Create New Land Parcel</h3>
-						<form
-							onsubmit={(e) => {
-								e.preventDefault();
-								createLand();
-							}}
-							class="form-grid"
-						>
-							<label>X Coordinate<input type="number" bind:value={newLand.x_coordinate} min="0" max="19" required /></label>
-							<label>Y Coordinate<input type="number" bind:value={newLand.y_coordinate} min="0" max="19" required /></label>
-							<label class="full">Land Type
-								<select bind:value={newLand.land_type}>
-									{#each landTypes as type}<option value={type.value}>{type.label}</option>{/each}
-								</select>
-							</label>
-							<button type="submit" class="primary-btn" disabled={submitting}>{submitting ? 'Creating…' : 'Create Land Parcel'}</button>
-						</form>
-					</section>
-
-					<section class="admin-card">
-						<h3>Update Land Ownership</h3>
-						<form
-							onsubmit={(e) => {
-								e.preventDefault();
-								updateOwnership();
-							}}
-							class="form-grid"
-						>
-							<label class="full">Land ID<input type="text" bind:value={ownership.land_id} required /></label>
-							<label class="full">Owner Type
-								<select bind:value={ownership.owner_type}>
-									<option value="none">No Owner</option>
-									<option value="user">Citizen</option>
-									<option value="organization">Organization</option>
-								</select>
-							</label>
-							{#if ownership.owner_type === 'user'}
-								<label class="full">User ID<input type="text" bind:value={ownership.owner_user_id} required /></label>
-							{:else if ownership.owner_type === 'organization'}
-								<label class="full">Organization ID<input type="text" bind:value={ownership.owner_organization_id} required /></label>
-							{/if}
-							<button type="submit" class="primary-btn green" disabled={submitting}>{submitting ? 'Updating…' : 'Update Ownership'}</button>
-						</form>
-					</section>
-
-					<section class="admin-card">
-						<h3>Update Land Properties</h3>
-						<form
-							onsubmit={(e) => {
-								e.preventDefault();
-								updateLandProps();
-							}}
-							class="form-grid"
-						>
-							<label class="full">Land ID<input type="text" bind:value={landUpdate.land_id} required /></label>
-							<label>Land Type
-								<select bind:value={landUpdate.land_type}>
-									<option value="">— No change —</option>
-									{#each landTypes as type}<option value={type.value}>{type.label}</option>{/each}
-								</select>
-							</label>
-							<label>Status
-								<select bind:value={landUpdate.status}>
-									<option value="">— No change —</option>
-									{#each landStatuses as s}<option value={s.value}>{s.label}</option>{/each}
-								</select>
-							</label>
-							<button type="submit" class="primary-btn amber" disabled={submitting}>{submitting ? 'Updating…' : 'Update Land'}</button>
-						</form>
-					</section>
-
-					<section class="admin-card">
-						<h3>Mint Land NFT</h3>
-						<p class="muted">Register a land parcel and mint an NFT representing ownership.</p>
-						<form
-							onsubmit={(e) => {
-								e.preventDefault();
-								mintNFT();
-							}}
-							class="form-grid"
-						>
-							<label class="full">Land ID<input type="text" bind:value={nftMint.land_id} required /></label>
-							<label class="full">Owner Principal<input type="text" bind:value={nftMint.owner_principal} required /></label>
-							<button type="submit" class="primary-btn purple" disabled={submitting}>{submitting ? 'Minting…' : 'Mint NFT'}</button>
-						</form>
-					</section>
-				</div>
-			{/if}
 		</div>
 	{/if}
 </div>
 
 <style>
 	.land-registry {
-		position: relative;
+		display: flex;
 		width: 100%;
 		height: 100%;
 		min-height: 0;
@@ -1049,12 +1061,46 @@
 		height: 100vh;
 	}
 
+	.land-registry.resizing {
+		cursor: col-resize;
+		user-select: none;
+	}
+
+	.sidebar {
+		flex: none;
+		display: flex;
+		flex-direction: column;
+		min-width: 280px;
+		max-width: 560px;
+		background: rgba(255, 255, 255, 0.98);
+		border-right: 1px solid #e5e5e5;
+		overflow: hidden;
+	}
+
+	.resize-handle {
+		flex: none;
+		width: 6px;
+		cursor: col-resize;
+		background: linear-gradient(to right, transparent, #e5e5e5, transparent);
+	}
+
+	.map-column {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+	}
+
 	.land-map {
 		position: absolute;
 		inset: 0;
 	}
 
-	.land-overlay {
+	.land-map.drawing {
+		cursor: crosshair;
+	}
+
+	.map-overlay {
 		position: absolute;
 		left: 0;
 		right: 0;
@@ -1062,82 +1108,148 @@
 		pointer-events: none;
 	}
 
-	.land-overlay > :global(*) {
+	.map-overlay > :global(*) {
 		pointer-events: auto;
 	}
 
-	.land-overlay-top {
+	.map-overlay-top {
 		top: 0;
-		padding: 1rem 1.25rem 0.75rem;
-		background: linear-gradient(to bottom, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0));
+		padding: 0.75rem 1rem;
+		display: flex;
+		justify-content: flex-end;
+		background: linear-gradient(to bottom, rgba(255, 255, 255, 0.92), transparent);
 	}
 
-	.land-overlay-bottom {
+	.map-overlay-bottom {
 		bottom: 0;
-		padding: 0.75rem 1.25rem 1rem;
-		background: linear-gradient(to top, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0));
+		padding: 0.75rem 1rem;
+		background: linear-gradient(to top, rgba(255, 255, 255, 0.92), transparent);
 	}
 
-	.land-header {
+	.sidebar-head {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 0.75rem;
+		gap: 0.75rem;
+		padding: 1rem 1rem 0.5rem;
 	}
 
-	.land-header-actions {
-		display: flex;
-		gap: 0.5rem;
+	.sidebar-head h2 {
+		margin: 0 0 0.15rem;
+		font-size: 1.15rem;
 	}
 
-	.land-header-copy h2 {
-		margin: 0 0 0.25rem;
-		font-size: 1.5rem;
-		font-weight: 700;
-		color: #171717;
-	}
-
-	.land-header-copy p {
-		margin: 0;
-		font-size: 0.875rem;
-		color: #525252;
-	}
-
-	.land-header-desc {
-		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
-	}
-
-	.tab-nav {
+	.sidebar-toolbar,
+	.draw-panel {
+		padding: 0 1rem 0.75rem;
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
-		margin-bottom: 0.75rem;
 	}
 
-	.tab-btn {
-		padding: 0.4rem 0.85rem;
+	.draw-panel {
+		flex-direction: column;
+		border-bottom: 1px solid #f0f0f0;
+	}
+
+	.draw-panel label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		font-size: 0.75rem;
+		color: #525252;
+	}
+
+	.draw-panel input,
+	.draw-panel select,
+	.mini-form input,
+	.mini-form select {
+		padding: 0.45rem 0.6rem;
 		border: 1px solid #d4d4d4;
-		border-radius: 999px;
+		border-radius: 0.45rem;
+		font-size: 0.85rem;
+	}
+
+	.parcel-list {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+		border-top: 1px solid #f0f0f0;
+		border-bottom: 1px solid #f0f0f0;
+	}
+
+	.parcel-row {
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		width: 100%;
+		padding: 0.7rem 1rem;
+		border: none;
+		border-bottom: 1px solid #f5f5f5;
 		background: #fff;
-		font-size: 0.8rem;
-		color: #404040;
+		text-align: left;
 		cursor: pointer;
 	}
 
-	.tab-btn.active {
-		background: #171717;
-		border-color: #171717;
-		color: #fff;
+	.parcel-row:hover,
+	.parcel-row.selected {
+		background: #eff6ff;
+	}
+
+	.dot {
+		width: 0.7rem;
+		height: 0.7rem;
+		border-radius: 999px;
+		flex-shrink: 0;
+	}
+
+	.parcel-main {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		flex: 1;
+	}
+
+	.parcel-main strong {
+		font-size: 0.85rem;
+	}
+
+	.parcel-status {
+		font-size: 0.7rem;
+		color: #737373;
+	}
+
+	.detail-panel {
+		padding: 1rem;
+		overflow: auto;
+		max-height: 42%;
+	}
+
+	.detail-panel h3,
+	.detail-panel h4 {
+		margin: 0 0 0.35rem;
+	}
+
+	.h3-code {
+		display: block;
+		margin: 0.35rem 0 0.75rem;
+		font-size: 0.7rem;
+		color: #a3a3a3;
+		word-break: break-all;
+	}
+
+	.mini-form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.45rem;
+		margin-top: 0.85rem;
+		padding-top: 0.85rem;
+		border-top: 1px solid #f0f0f0;
 	}
 
 	.legend {
 		display: flex;
 		flex-wrap: wrap;
-		align-items: center;
 		gap: 0.75rem;
 		font-size: 0.75rem;
 		color: #525252;
@@ -1146,223 +1258,67 @@
 	.legend-item {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.35rem;
+		gap: 0.3rem;
+		text-transform: capitalize;
 	}
 
 	.legend-dot {
-		width: 0.75rem;
-		height: 0.75rem;
+		width: 0.65rem;
+		height: 0.65rem;
 		border-radius: 999px;
 	}
 
-	.legend-dot.ring-owned {
-		background: #4ade80;
-		border: 2px solid #1f2937;
-	}
-
-	.legend-dot.ring-available {
-		background: #4ade80;
-		border: 1px solid #9ca3af;
-	}
-
-	.parcel-count {
-		color: #737373;
-	}
-
-	.legend-spacer {
-		flex: 1;
+	.ghost-btn,
+	.primary-btn {
+		padding: 0.45rem 0.75rem;
+		border-radius: 0.45rem;
+		font-size: 0.8rem;
+		cursor: pointer;
 	}
 
 	.ghost-btn {
-		padding: 0.45rem 0.85rem;
 		border: 1px solid #d4d4d4;
-		border-radius: 0.5rem;
 		background: #fff;
-		font-size: 0.8rem;
 		color: #404040;
-		cursor: pointer;
-	}
-
-	.status-banner,
-	.alert {
-		margin-bottom: 0.5rem;
-		padding: 0.65rem 0.85rem;
-		border-radius: 0.5rem;
-		font-size: 0.85rem;
-	}
-
-	.status-banner {
-		background: rgba(250, 250, 250, 0.92);
-		color: #737373;
-	}
-
-	.alert.error {
-		background: #fef2f2;
-		border: 1px solid #fecaca;
-		color: #991b1b;
-	}
-
-	.alert.success {
-		background: #f0fdf4;
-		border: 1px solid #bbf7d0;
-		color: #166534;
-	}
-
-	.panel-shell {
-		height: 100%;
-		min-height: 0;
-		overflow: auto;
-		padding: 1rem 1.25rem 1.5rem;
-		background: #fff;
-	}
-
-	.panel-head {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 1rem;
-	}
-
-	.panel-head h2,
-	.panel-block h3,
-	.admin-card h3 {
-		margin: 0 0 0.35rem;
-		font-size: 1.1rem;
-		color: #171717;
-	}
-
-	.muted {
-		margin: 0;
-		color: #737373;
-		font-size: 0.875rem;
-	}
-
-	.panel-tabs {
-		margin-bottom: 1rem;
-	}
-
-	.panel-block,
-	.admin-card {
-		margin-top: 1rem;
-		padding: 1rem;
-		border: 1px solid #e5e5e5;
-		border-radius: 0.75rem;
-		background: #fafafa;
-	}
-
-	.panel-block-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 0.75rem;
-	}
-
-	.table-wrap {
-		overflow: auto;
-		border: 1px solid #e5e5e5;
-		border-radius: 0.5rem;
-		background: #fff;
-	}
-
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.875rem;
-	}
-
-	th,
-	td {
-		padding: 0.75rem 1rem;
-		text-align: left;
-		border-bottom: 1px solid #f0f0f0;
-	}
-
-	th {
-		background: #fafafa;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		color: #737373;
-	}
-
-	.badge {
-		display: inline-block;
-		padding: 0.15rem 0.55rem;
-		border-radius: 999px;
-		font-size: 0.75rem;
-	}
-
-	.pager {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.75rem;
-		margin-top: 1rem;
-	}
-
-	.admin-grid {
-		display: grid;
-		gap: 1rem;
-	}
-
-	.form-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.75rem;
-	}
-
-	.form-grid label {
-		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
-		font-size: 0.8rem;
-		color: #525252;
-	}
-
-	.form-grid label.full {
-		grid-column: 1 / -1;
-	}
-
-	.form-grid input,
-	.form-grid select {
-		padding: 0.5rem 0.65rem;
-		border: 1px solid #d4d4d4;
-		border-radius: 0.5rem;
-		font-size: 0.875rem;
 	}
 
 	.primary-btn {
-		grid-column: 1 / -1;
-		padding: 0.55rem 1rem;
 		border: none;
-		border-radius: 0.5rem;
 		background: #2563eb;
 		color: #fff;
-		font-size: 0.875rem;
-		cursor: pointer;
 	}
 
-	.primary-btn.green {
-		background: #16a34a;
-	}
-
-	.primary-btn.amber {
-		background: #d97706;
-	}
-
-	.primary-btn.purple {
-		background: #7c3aed;
-	}
-
-	.primary-btn:disabled {
+	.primary-btn.green { background: #16a34a; }
+	.primary-btn.amber { background: #d97706; }
+	.primary-btn.purple { background: #7c3aed; }
+	.primary-btn:disabled,
+	.ghost-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
-	.loading-row,
+	.alert {
+		margin: 0 1rem 0.5rem;
+		padding: 0.6rem 0.75rem;
+		border-radius: 0.45rem;
+		font-size: 0.8rem;
+	}
+
+	.alert.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+	.alert.success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+
+	.muted {
+		margin: 0;
+		color: #737373;
+		font-size: 0.8rem;
+	}
+
 	.center {
 		text-align: center;
-		padding: 2rem 0;
+		padding: 1.5rem 1rem;
+	}
+
+	.denied-shell {
+		padding: 1.5rem;
 	}
 </style>

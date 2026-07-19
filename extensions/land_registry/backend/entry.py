@@ -14,12 +14,91 @@ logger = get_logger("extensions.land_registry")
 DEFAULT_PAGE_SIZE = 10
 
 
+def _land_to_dict(land: Land) -> Dict[str, Any]:
+    land_zones = list(land.zones) if hasattr(land, "zones") and land.zones else []
+    zone_data = []
+    for zone in land_zones:
+        zone_data.append(
+            {
+                "h3_index": zone.h3_index,
+                "name": zone.name,
+                "zone_type": getattr(zone, "zone_type", None) or "unassigned",
+            }
+        )
+
+    try:
+        metadata_obj = json.loads(land.metadata) if land.metadata else {}
+    except Exception:
+        metadata_obj = {}
+
+    h3_indexes = [z["h3_index"] for z in zone_data if z.get("h3_index")]
+    if not h3_indexes and metadata_obj.get("parent_zone"):
+        h3_indexes = [str(metadata_obj["parent_zone"])]
+
+    return {
+        "id": land.id,
+        "x_coordinate": land.x_coordinate,
+        "y_coordinate": land.y_coordinate,
+        "land_type": land.land_type,
+        "status": land.status,
+        "size_width": land.size_width,
+        "size_height": land.size_height,
+        "metadata": land.metadata,
+        "registered_by": land.registered_by,
+        "nft_token_id": land.nft_token_id,
+        "owner_user_id": land.owner_user.id if land.owner_user else None,
+        "owner_organization_id": (
+            land.owner_organization.id if land.owner_organization else None
+        ),
+        "zones": zone_data,
+        "h3_index": h3_indexes[0] if h3_indexes else None,
+        "h3_indexes": h3_indexes,
+        "price_realm_tokens": metadata_obj.get("price_realm_tokens"),
+        "for_sale": metadata_obj.get("for_sale", False),
+    }
+
+
+def _zone_has_land(h3_index: str) -> bool:
+    try:
+        zone = Zone[h3_index]
+    except Exception:
+        zone = None
+    if not zone:
+        return False
+    try:
+        return zone.land is not None
+    except Exception:
+        return False
+
+
+def _synthetic_coords_from_h3(h3_indexes: list) -> tuple:
+    """Derive stable legacy x/y coordinates from H3 ids for NFT token_id math."""
+    primary = h3_indexes[0]
+    x_coord = int(abs(hash(primary)) % 900000) + 10000
+    y_coord = int(abs(hash("".join(h3_indexes))) % 900000) + 10000
+    return x_coord, y_coord
+
+
 def get_lands(args: str) -> str:
     """Get a page of land parcels using load_some pagination"""
     logger.info(f"land_registry.get_lands called with args: {args}")
 
     try:
         params = json.loads(args) if args else {}
+        if params.get("all"):
+            land_data = []
+            max_id = Land.max_id()
+            from_id = 1
+            page_size = int(params.get("page_size", 100))
+            while from_id <= max_id:
+                batch = Land.load_some(from_id=from_id, count=page_size)
+                if not batch:
+                    break
+                for land in batch:
+                    land_data.append(_land_to_dict(land))
+                from_id = int(batch[-1]._id) + 1
+            return json.dumps({"success": True, "data": land_data, "count": len(land_data)})
+
         from_id = int(params.get("from_id", 1))
         page_size = int(params.get("page_size", DEFAULT_PAGE_SIZE))
 
@@ -28,45 +107,7 @@ def get_lands(args: str) -> str:
 
         land_data = []
         for land in batch:
-            # Get zone data for this land (zones associated with this land parcel)
-            land_zones = list(land.zones) if hasattr(land, 'zones') and land.zones else []
-            zone_data = []
-            for zone in land_zones:
-                zone_data.append({
-                    "h3_index": zone.h3_index,
-                    "name": zone.name,
-                    "zone_type": getattr(zone, "zone_type", None) or "unassigned",
-                })
-
-            # Parse metadata to get price info
-            try:
-                metadata_obj = json.loads(land.metadata) if land.metadata else {}
-            except:
-                metadata_obj = {}
-
-            land_dict = {
-                "id": land.id,
-                "x_coordinate": land.x_coordinate,
-                "y_coordinate": land.y_coordinate,
-                "land_type": land.land_type,
-                "status": land.status,
-                "size_width": land.size_width,
-                "size_height": land.size_height,
-                "metadata": land.metadata,
-                "registered_by": land.registered_by,
-                "nft_token_id": land.nft_token_id,
-                "owner_user_id": land.owner_user.id if land.owner_user else None,
-                "owner_organization_id": (
-                    land.owner_organization.id if land.owner_organization else None
-                ),
-                # Zone/geographic data: backend stores only the H3 index.
-                "zones": zone_data,
-                "h3_index": zone_data[0]["h3_index"] if zone_data else None,
-                # Parsed metadata fields
-                "price_realm_tokens": metadata_obj.get("price_realm_tokens"),
-                "for_sale": metadata_obj.get("for_sale", False),
-            }
-            land_data.append(land_dict)
+            land_data.append(_land_to_dict(land))
 
         next_from_id = (int(batch[-1]._id) + 1) if batch else None
         if next_from_id and next_from_id > max_id:
@@ -92,9 +133,73 @@ def create_land(args: str) -> str:
     try:
         params = json.loads(args) if args else {}
 
+        land_type = params.get("land_type", LandType.UNASSIGNED)
+        land_name = (params.get("name") or "").strip()
+        custom_id = (params.get("id") or "").strip()
+
+        h3_indexes = list(params.get("h3_indexes") or [])
+        h3_index = params.get("h3_index")
+        if h3_index and h3_index not in h3_indexes:
+            h3_indexes.insert(0, h3_index)
+        h3_indexes = [str(idx) for idx in h3_indexes if idx and "manual" not in str(idx)]
+
+        if h3_indexes:
+            for idx in h3_indexes:
+                if _zone_has_land(idx):
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"Land parcel already exists at H3 cell {idx}",
+                        }
+                    )
+
+            x_coord, y_coord = _synthetic_coords_from_h3(h3_indexes)
+
+            metadata = params.get("metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata) if metadata else {}
+                except Exception:
+                    metadata = {}
+            metadata.setdefault("parent_zone", h3_indexes[0])
+            metadata["h3_indexes"] = h3_indexes
+
+            land = Land(
+                x_coordinate=x_coord,
+                y_coordinate=y_coord,
+                land_type=land_type,
+                size_width=max(1, len(h3_indexes)),
+                size_height=1,
+                metadata=json.dumps(metadata),
+            )
+            land.id = custom_id or f"land_{land._id}"
+
+            for i, idx in enumerate(h3_indexes):
+                zone_label = land_name or f"{land.id} parcel"
+                if len(h3_indexes) > 1:
+                    zone_label = f"{zone_label} ({i + 1}/{len(h3_indexes)})"
+                Zone(
+                    h3_index=idx,
+                    name=zone_label,
+                    description=f"Land parcel {land.id}",
+                    zone_type=land_type,
+                    land=land,
+                )
+
+            return json.dumps(
+                {
+                    "success": True,
+                    "data": {
+                        "id": land.id,
+                        "h3_index": h3_indexes[0],
+                        "h3_indexes": h3_indexes,
+                        "message": f"Land created with {len(h3_indexes)} H3 cell(s)",
+                    },
+                }
+            )
+
         x_coord = params.get("x_coordinate")
         y_coord = params.get("y_coordinate")
-        land_type = params.get("land_type", LandType.UNASSIGNED)
 
         if x_coord is None or y_coord is None:
             return json.dumps(
