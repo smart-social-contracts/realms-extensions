@@ -31,6 +31,7 @@
 	let realmSettingsCurrency = $state('ckBTC');
 	let realmSettingsCurrencyDecimals = $state(8);
 	let realmSettingsTokenCanisterId = $state('');
+	let realmSettingsNftCanisterId = $state('');
 
 	// Lifecycle state
 	let lifecycleLoading = $state(true);
@@ -117,6 +118,10 @@
 					(c: { canister_type?: string }) => c.canister_type === 'token_backend',
 				);
 				realmSettingsTokenCanisterId = token?.canister_id || '';
+				const nft = (s.canisters || []).find(
+					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
+				);
+				realmSettingsNftCanisterId = nft?.canister_id || '';
 			}
 		} catch (e: any) {
 			settingsError = e?.message || String(e);
@@ -494,37 +499,55 @@
 
 		<!-- Currency -->
 		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency</h2>
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency token</h2>
 			<p class="text-sm text-gray-500 mb-5">
-				Accounting currency used for balances, invoices, and transfers in this realm.
+				Fungible treasury token used for balances, invoices, and transfers in this realm.
 			</p>
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
 				<div>
 					<label for="rs-currency" class="block text-sm font-medium text-gray-700 mb-1">Currency symbol</label>
-					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="ckBTC" maxlength="16"
+					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="REALMS" maxlength="16"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					<p class="mt-1 text-xs text-gray-500">Short symbol shown in the UI (e.g. ckBTC, ICP).</p>
+					<p class="mt-1 text-xs text-gray-500">Display symbol (e.g. REALMS, ckBTC). Must match the linked ledger.</p>
 				</div>
 				<div>
 					<label for="rs-decimals" class="block text-sm font-medium text-gray-700 mb-1">Decimals</label>
 					<input id="rs-decimals" type="number" bind:value={realmSettingsCurrencyDecimals} min="0" max="18" step="1"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					<p class="mt-1 text-xs text-gray-500">Fractional digits for amounts (0–18). ckBTC uses 8.</p>
+					<p class="mt-1 text-xs text-gray-500">Fractional digits for amounts (0–18). REALMS uses 8.</p>
 				</div>
 			</div>
 			<div class="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3">
-				<div class="text-xs font-medium text-gray-500 mb-1">Token canister</div>
+				<div class="text-xs font-medium text-gray-500 mb-1">Treasury ledger canister</div>
 				{#if realmSettingsTokenCanisterId}
 					<p class="text-sm font-mono text-green-700 break-all">{realmSettingsTokenCanisterId}</p>
-					<p class="text-xs text-gray-500 mt-1">Linked via deployment / canister config.</p>
+					<p class="text-xs text-gray-500 mt-1">Linked at deploy from your wizard token choice.</p>
 				{:else}
-					<p class="text-sm text-amber-700">token canister not linked</p>
-					<p class="text-xs text-gray-500 mt-1">Link a token backend during deploy or via canister config if this realm uses on-chain transfers.</p>
+					<p class="text-sm text-amber-700">Treasury token not linked</p>
+					<p class="text-xs text-gray-500 mt-1">Deploy must wire the currency token (REALMS or a realm-native ledger).</p>
 				{/if}
 			</div>
 			{#if !currencyValid}
 				<p class="mt-3 text-xs text-red-600">Enter a non-empty currency symbol (max 16 chars) and decimals between 0 and 18.</p>
 			{/if}
+		</section>
+
+		<!-- Land NFT -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Land NFT collection</h2>
+			<p class="text-sm text-gray-500 mb-5">
+				Non-fungible token canister for land deeds minted from the Land Registry extension.
+			</p>
+			<div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+				<div class="text-xs font-medium text-gray-500 mb-1">Realm NFT canister</div>
+				{#if realmSettingsNftCanisterId}
+					<p class="text-sm font-mono text-green-700 break-all">{realmSettingsNftCanisterId}</p>
+					<p class="text-xs text-gray-500 mt-1">Provisioned automatically for this realm at deploy.</p>
+				{:else}
+					<p class="text-sm text-amber-700">Land NFT canister not linked</p>
+					<p class="text-xs text-gray-500 mt-1">Each realm receives its own NFT collection when deployed via Casals.</p>
+				{/if}
+			</div>
 		</section>
 
 		<!-- Registration & features -->
