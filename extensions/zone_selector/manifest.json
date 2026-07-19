@@ -1,6 +1,6 @@
 {
   "name": "zone_selector",
-  "version": "1.3.1",
+  "version": "1.3.3",
   "description": "Display the zones where the realm is operative on an interactive map",
   "permissions": [],
   "entry_points": [

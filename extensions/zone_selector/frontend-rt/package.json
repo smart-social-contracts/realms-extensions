@@ -4,16 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build && cp node_modules/leaflet/dist/leaflet.js node_modules/leaflet/dist/leaflet.css dist/"
+    "build": "vite build && cp node_modules/maplibre-gl/dist/maplibre-gl.js node_modules/maplibre-gl/dist/maplibre-gl.css dist/"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@types/leaflet": "^1.9.21",
     "svelte": "^5.19.0",
     "typescript": "^5.4.0",
     "vite": "^6.0.0"
   },
   "dependencies": {
-    "leaflet": "^1.9.4"
+    "maplibre-gl": "^5.24.0"
   }
 }
