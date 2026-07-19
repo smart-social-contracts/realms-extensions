@@ -12,7 +12,6 @@ export default defineConfig({
 			fileName: () => 'index.js',
 		},
 		rollupOptions: {
-			external: ['leaflet', 'h3-js'],
 			output: {
 				inlineDynamicImports: true,
 			},
