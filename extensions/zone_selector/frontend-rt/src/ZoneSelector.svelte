@@ -242,11 +242,12 @@
 
 	function refreshPreviewLayer() {
 		if (!map || !mapReady || !h3) return;
+		const color = zoneColor(zoneType);
 		const features = paintCells.map((cell) => {
 			const boundary = h3.cellToBoundary(cell, true);
 			return {
 				type: 'Feature',
-				properties: { h3_index: cell },
+				properties: { h3_index: cell, color },
 				geometry: { type: 'Polygon', coordinates: [boundary] },
 			};
 		});
@@ -278,7 +279,7 @@
 			id: 'preview-fill',
 			type: 'fill',
 			source: SOURCE_PREVIEW,
-			paint: { 'fill-color': zoneColor(zoneType), 'fill-opacity': 0.55 },
+			paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 },
 		});
 		map.addLayer({
 			id: 'preview-line',
@@ -584,8 +585,9 @@
 	}
 
 	$effect(() => {
-		if (map && mapReady && map.getLayer('preview-fill')) {
-			map.setPaintProperty('preview-fill', 'fill-color', zoneColor(zoneType));
+		if (mapReady && paintCells.length > 0) {
+			zoneType;
+			refreshPreviewLayer();
 		}
 	});
 
