@@ -254,6 +254,31 @@
 		map.getSource(SOURCE_PREVIEW)?.setData({ type: 'FeatureCollection', features });
 	}
 
+	function existingZoneCells() {
+		return new Set(zones.map((z) => z.h3_index));
+	}
+
+	/** Recompute preview hexes from the in-progress polygon while drawing. */
+	function syncDraftPreview() {
+		if (!isDrawing || !h3 || !map) return;
+
+		if (drawPoints.length < 3) {
+			paintCells = [];
+			paintableCount = 0;
+			paintResolution = 0;
+			refreshPreviewLayer();
+			return;
+		}
+
+		const res = resolutionForZoom(map.getZoom());
+		const cells = polygonToCells(drawPoints, res);
+		const existing = existingZoneCells();
+		paintCells = cells;
+		paintableCount = cells.filter((c) => !existing.has(c)).length;
+		paintResolution = res;
+		refreshPreviewLayer();
+	}
+
 	function addMapLayers() {
 		if (!map) return;
 
@@ -324,6 +349,9 @@
 		});
 
 		map.on('click', onMapClick);
+		map.on('zoomend', () => {
+			if (isDrawing) syncDraftPreview();
+		});
 		map.on('mouseenter', 'zones-fill', () => {
 			if (!isDrawing) map.getCanvas().style.cursor = 'pointer';
 		});
@@ -409,6 +437,7 @@
 		if (!isDrawing) return;
 		drawPoints = [...drawPoints, [e.lngLat.lat, e.lngLat.lng]];
 		refreshDraftLayers();
+		syncDraftPreview();
 	}
 
 	function startDrawing() {
@@ -432,21 +461,16 @@
 	function undoPoint() {
 		drawPoints = drawPoints.slice(0, -1);
 		refreshDraftLayers();
+		syncDraftPreview();
 	}
 
 	function finishShape() {
 		if (drawPoints.length < 3 || !h3 || !map) return;
-		const res = resolutionForZoom(map.getZoom());
-		const cells = polygonToCells(drawPoints, res);
-		const existing = new Set(zones.map((z) => z.h3_index));
-		paintCells = cells;
-		paintableCount = cells.filter((c) => !existing.has(c)).length;
-		paintResolution = res;
+		syncDraftPreview();
 		isDrawing = false;
 		drawPoints = [];
 		refreshDraftLayers();
-		refreshPreviewLayer();
-		if (cells.length === 0) {
+		if (paintCells.length === 0) {
 			notice = 'That shape produced no H3 cells — try drawing a larger area.';
 		}
 	}
@@ -706,7 +730,16 @@
 						<button type="button" class="draw-btn" onclick={startDrawing}>Start drawing a shape</button>
 					{:else if isDrawing}
 						<div class="draw-hint">
-							Click the globe to add points ({drawPoints.length} so far). Add at least 3, then finish.
+							Click the globe to add points ({drawPoints.length} so far).
+							{#if drawPoints.length >= 3}
+								Previewing <strong>{paintableCount}</strong> new cell(s) as
+								<strong>{ZONE_TYPES.find((t) => t.value === zoneType)?.label || zoneType}</strong>
+								(H3 res {paintResolution}{paintCells.length !== paintableCount
+									? `, ${paintCells.length - paintableCount} already zoned — skipped`
+									: ''}).
+							{:else}
+								Add at least 3 points to preview hexes.
+							{/if}
 							<div class="draw-actions">
 								<button type="button" disabled={drawPoints.length === 0} onclick={undoPoint}>
 									Undo point
