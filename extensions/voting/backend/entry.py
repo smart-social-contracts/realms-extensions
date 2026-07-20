@@ -1120,6 +1120,119 @@ def start_voting(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def finalize_proposal(args: str) -> str:
+    """Tally a proposal whose voting deadline has passed.
+
+    Voting has no background timer sweeping expired ballots; anyone may call
+    this after the deadline to settle the outcome deterministically:
+
+      - org-scoped ballots: the department policy decides (veto → rejected,
+        satisfied → accepted + execution, quorum unmet → no_quorum,
+        otherwise → failed);
+      - realm-wide ballots: required threshold + governance quorum.
+
+    ``force: true`` skips the deadline check — allowed only when the realm
+    runs in test mode (so E2E suites don't have to wait out real windows).
+    """
+    try:
+        args_dict = _parse_args(args)
+        proposal_id = args_dict.get("proposal_id")
+        if not proposal_id:
+            return json.dumps({"success": False, "error": "proposal_id is required"})
+
+        proposal = _find_proposal(proposal_id)
+        if not proposal:
+            return json.dumps({"success": False, "error": "Proposal not found"})
+
+        if proposal.status not in ("voting", "pending_vote"):
+            return json.dumps({
+                "success": False,
+                "error": f"Proposal is not open for voting. Status: {proposal.status}",
+            })
+
+        force = bool(args_dict.get("force", False))
+        if force:
+            try:
+                from core.runtime_flags import is_test_mode
+
+                if not is_test_mode():
+                    return json.dumps({
+                        "success": False,
+                        "error": "force finalization is only allowed in test mode",
+                    })
+            except ImportError:
+                return json.dumps({
+                    "success": False,
+                    "error": "force finalization is only allowed in test mode",
+                })
+
+        now_s = ic.time() // 1_000_000_000
+        deadline_str = str(proposal.voting_deadline or "")
+        deadline_s = None
+        if deadline_str and deadline_str not in ("None", ""):
+            try:
+                deadline_s = float(deadline_str)
+            except (TypeError, ValueError):
+                deadline_s = None
+
+        if not force:
+            if deadline_s is None:
+                return json.dumps({
+                    "success": False,
+                    "error": "Proposal has no voting deadline; cannot finalize",
+                })
+            if now_s < deadline_s:
+                return json.dumps({
+                    "success": False,
+                    "error": f"Voting is still open ({int(deadline_s - now_s)}s remaining)",
+                })
+        elif deadline_s is None or now_s < deadline_s:
+            # Make the stored deadline consistent with the forced outcome.
+            proposal.voting_deadline = str(now_s)
+
+        scope_dept = _org_scoped_department(proposal)
+        if scope_dept is not None:
+            approved, vetoed, reason = _check_org_policy(proposal, scope_dept)
+            if vetoed:
+                proposal.status = "rejected"
+            elif approved:
+                proposal.status = "accepted"
+                _schedule_execution(proposal_id)
+            elif "quorum" in reason.lower():
+                proposal.status = "no_quorum"
+            else:
+                proposal.status = "failed"
+            outcome_reason = reason
+        else:
+            if not _check_threshold(proposal):
+                proposal.status = "failed"
+                outcome_reason = "required threshold not met"
+            elif not _check_threshold_and_quorum(proposal):
+                proposal.status = "no_quorum"
+                outcome_reason = "participation quorum not met"
+            else:
+                proposal.status = "accepted"
+                outcome_reason = "threshold and quorum met"
+                _schedule_execution(proposal_id)
+
+        logger.info(
+            f"Proposal {proposal_id} finalized{' (forced)' if force else ''}: "
+            f"{proposal.status} — {outcome_reason}"
+        )
+        return json.dumps({
+            "success": True,
+            "data": {
+                "outcome": proposal.status,
+                "reason": outcome_reason,
+                "forced": force,
+                "proposal": _proposal_to_dict(proposal),
+            },
+        })
+    except Exception as e:
+        logger.error(f"finalize_proposal error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def cast_vote(args: str) -> str:
     """Cast a vote on a proposal. Auto-approves and schedules execution if threshold met."""
     try:
