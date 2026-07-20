@@ -276,10 +276,24 @@ export const idlFactory = ({ IDL }) => {
     'list_extensions' : IDL.Func([IDL.Text], [RealmResponse], ['query']),
     'list_runtime_extensions' : IDL.Func([], [IDL.Text], ['query']),
     'mint_land_nft_for_parcel' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [IDL.Text],
+        [],
+      ),
+    'force_transfer_land_nft' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [IDL.Text],
+        [],
+      ),
+    'freeze_land_nft' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+    'unfreeze_land_nft' : IDL.Func([IDL.Text], [IDL.Text], []),
+    'force_transfer_tokens' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Nat, IDL.Text],
         [IDL.Text],
         [],
       ),
+    'freeze_token_account' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+    'unfreeze_token_account' : IDL.Func([IDL.Text], [IDL.Text], []),
     'refresh_invoice' : IDL.Func([IDL.Text], [IDL.Text], []),
     'register_quarter' : IDL.Func([IDL.Text, IDL.Text], [RealmResponse], []),
     'register_realm_with_registry' : IDL.Func(

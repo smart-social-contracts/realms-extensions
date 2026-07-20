@@ -545,15 +545,11 @@ def register_land_nft(args: str) -> str:
             land.registered_by = registered_by
         land.status = LandStatus.ACTIVE
 
-        # Generate a token_id based on coordinates (unique per land)
-        token_id = land.x_coordinate * 10000 + land.y_coordinate
-
         return json.dumps({
             "success": True,
             "data": {
                 "land_id": land_id,
                 "owner_principal": owner_principal,
-                "token_id": token_id,
                 "x_coordinate": land.x_coordinate,
                 "y_coordinate": land.y_coordinate,
                 "message": "Land prepared for NFT minting. Call mint_land_nft_for_parcel.",

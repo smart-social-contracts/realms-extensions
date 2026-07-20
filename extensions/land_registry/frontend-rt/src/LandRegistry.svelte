@@ -480,7 +480,7 @@
 		if (land) {
 			ownership = { ...ownership, land_id: land.id };
 			landUpdate = { land_id: land.id, land_type: land.land_type || '', status: land.status || '' };
-			nftMint = { ...nftMint, land_id: land.id };
+			nftMint = { ...nftMint, land_id: land.id, owner_principal: ctx.principal || '' };
 			if (fly) flyToLand(land);
 		}
 		renderMapData();
@@ -838,7 +838,6 @@
 			const mintRaw = await ctx.backend.mint_land_nft_for_parcel(
 				nftMint.land_id,
 				nftMint.owner_principal,
-				BigInt(prepRes.data.token_id),
 				''
 			);
 			const mintRes = JSON.parse(mintRaw);

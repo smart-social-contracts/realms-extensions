@@ -1,6 +1,6 @@
 {
   "name": "land_registry",
-  "version": "1.3.0",
+  "version": "1.3.2",
   "description": "Property registration and land ownership management",
   "permissions": [],
   "entry_points": [

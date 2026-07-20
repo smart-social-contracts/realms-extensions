@@ -31,7 +31,11 @@
 	let realmSettingsCurrency = $state('ckBTC');
 	let realmSettingsCurrencyDecimals = $state(8);
 	let realmSettingsTokenCanisterId = $state('');
+	let realmSettingsTokenIndexerId = $state('');
 	let realmSettingsNftCanisterId = $state('');
+	let tokenResolving = $state(false);
+	let tokenResolveMessage = $state('');
+	let tokenResolveError = $state('');
 
 	// Lifecycle state
 	let lifecycleLoading = $state(true);
@@ -70,6 +74,31 @@
 		}, 4000);
 	}
 
+	function buildTokenWalletProposalLines(): string[] {
+		const lines: string[] = [];
+		if (!realmSettingsTokenCanisterId || !realmSettingsCurrency.trim()) {
+			return lines;
+		}
+		const indexer = realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim();
+		const sym = realmSettingsCurrency.trim();
+		const decimals = Number(realmSettingsCurrencyDecimals) || 0;
+		lines.push('');
+		lines.push('from ggg import Token');
+		lines.push(`_sym = ${JSON.stringify(sym)}`);
+		lines.push(`_existing = Token[_sym]`);
+		lines.push('if _existing:');
+		lines.push(`    _existing.ledger = ${JSON.stringify(realmSettingsTokenCanisterId.trim())}`);
+		lines.push(`    _existing.indexer = ${JSON.stringify(indexer)}`);
+		lines.push(`    _existing.decimals = ${decimals}`);
+		lines.push(`    _existing.symbol = _sym`);
+		lines.push('else:');
+		lines.push(
+			`    _t = Token(name=_sym, ledger=${JSON.stringify(realmSettingsTokenCanisterId.trim())}, indexer=${JSON.stringify(indexer)}, decimals=${decimals})`,
+		);
+		lines.push('    _t.symbol = _sym');
+		return lines;
+	}
+
 	function buildRealmConfigCode(): string {
 		const lines = ['from ggg import Realm', '', 'realm = Realm.load("1")'];
 		if (realmSettingsName) lines.push(`realm.name = ${JSON.stringify(realmSettingsName)}`);
@@ -80,11 +109,18 @@
 		lines.push(`realm.open_registration = ${realmSettingsOpenRegistration ? 'True' : 'False'}`);
 		lines.push(`realm.ai_assistant_enabled = ${realmSettingsAiAssistantEnabled ? 'True' : 'False'}`);
 		if (realmSettingsCurrency) {
-			lines.push(`realm.accounting_currency = ${JSON.stringify(realmSettingsCurrency)}`);
+			lines.push(`realm.accounting_currency = ${JSON.stringify(realmSettingsCurrency.trim())}`);
 		}
 		lines.push(`realm.accounting_currency_decimals = ${Number(realmSettingsCurrencyDecimals) || 0}`);
+		if (realmSettingsTokenCanisterId.trim()) {
+			lines.push(`realm.token_canister_id = ${JSON.stringify(realmSettingsTokenCanisterId.trim())}`);
+		}
+		if (realmSettingsNftCanisterId.trim()) {
+			lines.push(`realm.nft_canister_id = ${JSON.stringify(realmSettingsNftCanisterId.trim())}`);
+		}
 		if (realmSettingsFileRegistryId) lines.push(`realm.file_registry_canister_id = ${JSON.stringify(realmSettingsFileRegistryId)}`);
 		if (realmSettingsMarketplaceId) lines.push(`realm.marketplace_canister_id = ${JSON.stringify(realmSettingsMarketplaceId)}`);
+		lines.push(...buildTokenWalletProposalLines());
 		return lines.join('\n');
 	}
 
@@ -114,10 +150,14 @@
 				realmSettingsMarketplaceId = s.marketplace_canister_id || '';
 				realmSettingsCurrency = s.accounting_currency || 'ckBTC';
 				realmSettingsCurrencyDecimals = Number(s.accounting_currency_decimals ?? 8);
+				realmSettingsTokenIndexerId = s.token_indexer_canister_id || '';
 				const token = (s.canisters || []).find(
 					(c: { canister_type?: string }) => c.canister_type === 'token_backend',
 				);
 				realmSettingsTokenCanisterId = token?.canister_id || '';
+				if (!realmSettingsTokenIndexerId && realmSettingsTokenCanisterId) {
+					realmSettingsTokenIndexerId = realmSettingsTokenCanisterId;
+				}
 				const nft = (s.canisters || []).find(
 					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
 				);
@@ -127,6 +167,35 @@
 			settingsError = e?.message || String(e);
 		} finally {
 			settingsLoading = false;
+		}
+	}
+
+	async function resolveTokenLedger() {
+		tokenResolveError = '';
+		tokenResolveMessage = '';
+		const ledger = realmSettingsTokenCanisterId.trim();
+		if (!ledger || !isValidCanisterId(ledger)) {
+			tokenResolveError = 'Enter a valid treasury ledger canister ID first';
+			return;
+		}
+		tokenResolving = true;
+		try {
+			const raw = await ctx.backend.resolve_token_ledger(ledger);
+			const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			if (result?.success) {
+				realmSettingsCurrency = result.symbol || realmSettingsCurrency;
+				realmSettingsCurrencyDecimals = Number(result.decimals ?? realmSettingsCurrencyDecimals);
+				if (result.indexer_canister_id) {
+					realmSettingsTokenIndexerId = result.indexer_canister_id;
+				}
+				tokenResolveMessage = `Resolved ${result.symbol} (${result.decimals} decimals) from ledger`;
+			} else {
+				tokenResolveError = result?.error || 'Could not resolve token metadata';
+			}
+		} catch (e: any) {
+			tokenResolveError = e?.message || String(e);
+		} finally {
+			tokenResolving = false;
 		}
 	}
 
@@ -145,6 +214,10 @@
 				ai_assistant_enabled: realmSettingsAiAssistantEnabled,
 				accounting_currency: realmSettingsCurrency.trim(),
 				accounting_currency_decimals: Number(realmSettingsCurrencyDecimals),
+				token_canister_id: realmSettingsTokenCanisterId.trim(),
+				token_indexer_canister_id:
+					realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim(),
+				nft_canister_id: realmSettingsNftCanisterId.trim(),
 				file_registry_canister_id: realmSettingsFileRegistryId,
 				marketplace_canister_id: realmSettingsMarketplaceId,
 			};
@@ -179,14 +252,24 @@
 
 	let fileRegistryIdValid = $derived(isValidCanisterId(realmSettingsFileRegistryId));
 	let marketplaceIdValid = $derived(isValidCanisterId(realmSettingsMarketplaceId));
+	let tokenCanisterIdValid = $derived(isValidCanisterId(realmSettingsTokenCanisterId));
+	let tokenIndexerIdValid = $derived(isValidCanisterId(realmSettingsTokenIndexerId));
+	let nftCanisterIdValid = $derived(isValidCanisterId(realmSettingsNftCanisterId));
 	let currencyValid = $derived(
 		!!realmSettingsCurrency.trim() &&
 			realmSettingsCurrency.trim().length <= 16 &&
 			Number.isInteger(Number(realmSettingsCurrencyDecimals)) &&
 			Number(realmSettingsCurrencyDecimals) >= 0 &&
-			Number(realmSettingsCurrencyDecimals) <= 18,
+			Number(realmSettingsCurrencyDecimals) <= 18 &&
+			(!realmSettingsTokenCanisterId.trim() || tokenCanisterIdValid),
 	);
-	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid && currencyValid);
+	let tokensValid = $derived(
+		tokenCanisterIdValid &&
+			tokenIndexerIdValid &&
+			nftCanisterIdValid &&
+			(!realmSettingsTokenCanisterId.trim() || !!realmSettingsCurrency.trim()),
+	);
+	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid && currencyValid && tokensValid);
 
 	let nextStage = $derived(
 		stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null
@@ -502,33 +585,73 @@
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency token</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				Fungible treasury token used for balances, invoices, and transfers in this realm.
+				Changing ledger or indexer requires <code class="bg-gray-100 px-1 rounded">realm.configure.tokens</code>.
 			</p>
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+			<div class="space-y-4">
+				<div>
+					<label for="rs-token-ledger" class="block text-sm font-medium text-gray-700 mb-1">Treasury ledger canister</label>
+					<div class="flex flex-col sm:flex-row gap-2">
+						<input
+							id="rs-token-ledger"
+							type="text"
+							bind:value={realmSettingsTokenCanisterId}
+							onblur={resolveTokenLedger}
+							placeholder="e.g. 2rqin-xaaaa-aaaah-qunsq-cai"
+							class={cn(
+								'flex-1 px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
+								realmSettingsTokenCanisterId && !tokenCanisterIdValid
+									? 'border-red-300 focus:ring-red-300'
+									: 'border-gray-300 focus:ring-blue-500',
+							)}
+						/>
+						<button
+							type="button"
+							onclick={resolveTokenLedger}
+							disabled={tokenResolving || !realmSettingsTokenCanisterId.trim()}
+							class="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+						>{tokenResolving ? 'Resolving…' : 'Resolve from ledger'}</button>
+					</div>
+					<p class="mt-1 text-xs text-gray-500">ICRC-1 ledger for treasury balances and transfers.</p>
+				</div>
+				<div>
+					<label for="rs-token-indexer" class="block text-sm font-medium text-gray-700 mb-1">Token indexer canister</label>
+					<input
+						id="rs-token-indexer"
+						type="text"
+						bind:value={realmSettingsTokenIndexerId}
+						placeholder="Defaults to ledger when blank"
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
+							realmSettingsTokenIndexerId && !tokenIndexerIdValid
+								? 'border-red-300 focus:ring-red-300'
+								: 'border-gray-300 focus:ring-blue-500',
+						)}
+					/>
+					<p class="mt-1 text-xs text-gray-500">ICRC-1 indexer for invoice payment detection (ckBTC uses a separate index canister).</p>
+				</div>
+			</div>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
 				<div>
 					<label for="rs-currency" class="block text-sm font-medium text-gray-700 mb-1">Currency symbol</label>
-					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="REALMS" maxlength="16"
-						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					<p class="mt-1 text-xs text-gray-500">Display symbol (e.g. REALMS, ckBTC). Must match the linked ledger.</p>
+					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="REALMS" maxlength="16" readonly
+						class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-700" />
+					<p class="mt-1 text-xs text-gray-500">Auto-filled from the ledger canister metadata.</p>
 				</div>
 				<div>
 					<label for="rs-decimals" class="block text-sm font-medium text-gray-700 mb-1">Decimals</label>
-					<input id="rs-decimals" type="number" bind:value={realmSettingsCurrencyDecimals} min="0" max="18" step="1"
-						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					<p class="mt-1 text-xs text-gray-500">Fractional digits for amounts (0–18). REALMS uses 8.</p>
+					<input id="rs-decimals" type="number" bind:value={realmSettingsCurrencyDecimals} min="0" max="18" step="1" readonly
+						class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-700" />
+					<p class="mt-1 text-xs text-gray-500">Auto-filled from the ledger canister metadata.</p>
 				</div>
 			</div>
-			<div class="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3">
-				<div class="text-xs font-medium text-gray-500 mb-1">Treasury ledger canister</div>
-				{#if realmSettingsTokenCanisterId}
-					<p class="text-sm font-mono text-green-700 break-all">{realmSettingsTokenCanisterId}</p>
-					<p class="text-xs text-gray-500 mt-1">Linked at deploy from your wizard token choice.</p>
-				{:else}
-					<p class="text-sm text-amber-700">Treasury token not linked</p>
-					<p class="text-xs text-gray-500 mt-1">Deploy must wire the currency token (REALMS or a realm-native ledger).</p>
-				{/if}
-			</div>
+			{#if tokenResolveMessage}
+				<p class="mt-3 text-xs text-green-700">{tokenResolveMessage}</p>
+			{/if}
+			{#if tokenResolveError}
+				<p class="mt-3 text-xs text-red-600">{tokenResolveError}</p>
+			{/if}
 			{#if !currencyValid}
-				<p class="mt-3 text-xs text-red-600">Enter a non-empty currency symbol (max 16 chars) and decimals between 0 and 18.</p>
+				<p class="mt-3 text-xs text-red-600">Resolve a valid ledger canister to populate symbol and decimals.</p>
 			{/if}
 		</section>
 
@@ -538,15 +661,21 @@
 			<p class="text-sm text-gray-500 mb-5">
 				Non-fungible token canister for land deeds minted from the Land Registry extension.
 			</p>
-			<div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
-				<div class="text-xs font-medium text-gray-500 mb-1">Realm NFT canister</div>
-				{#if realmSettingsNftCanisterId}
-					<p class="text-sm font-mono text-green-700 break-all">{realmSettingsNftCanisterId}</p>
-					<p class="text-xs text-gray-500 mt-1">Provisioned automatically for this realm at deploy.</p>
-				{:else}
-					<p class="text-sm text-amber-700">Land NFT canister not linked</p>
-					<p class="text-xs text-gray-500 mt-1">Each realm receives its own NFT collection when deployed via Casals.</p>
-				{/if}
+			<div>
+				<label for="rs-nft-canister" class="block text-sm font-medium text-gray-700 mb-1">Realm NFT canister</label>
+				<input
+					id="rs-nft-canister"
+					type="text"
+					bind:value={realmSettingsNftCanisterId}
+					placeholder="e.g. 27sff-mqaaa-aaaah-quntq-cai"
+					class={cn(
+						'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
+						realmSettingsNftCanisterId && !nftCanisterIdValid
+							? 'border-red-300 focus:ring-red-300'
+							: 'border-gray-300 focus:ring-blue-500',
+					)}
+				/>
+				<p class="mt-1 text-xs text-gray-500">Shared platform NFT canister for this network. The realm backend must be an authorized minter.</p>
 			</div>
 		</section>
 
