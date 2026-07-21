@@ -1,6 +1,6 @@
 {
   "name": "metrics",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Financial statements, accounting data, and analytics dashboard for realm performance",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -12,7 +12,7 @@
     "finances"
   ],
   "sidebar_label": {
-    "en": "Financials"
+    "en": "Financial Reports"
   },
   "icon": "chart-bar",
   "doc_url": null,

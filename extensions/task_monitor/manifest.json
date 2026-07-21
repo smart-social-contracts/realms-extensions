@@ -1,10 +1,10 @@
 {
   "name": "task_monitor",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Task monitoring and management dashboard for administrators",
   "author": "Realms Team",
   "categories": [
-    "developer"
+    "realm_management"
   ],
   "permissions": [
     "admin"

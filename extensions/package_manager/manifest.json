@@ -1,10 +1,10 @@
 {
   "name": "package_manager",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Install, update and uninstall extensions and codex packages from connected file registries, and browse the marketplace",
   "author": "Realms Team",
   "categories": [
-    "settings"
+    "realm_management"
   ],
   "permissions": [
     "admin"

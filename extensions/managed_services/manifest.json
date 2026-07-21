@@ -1,6 +1,6 @@
 {
   "name": "managed_services",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Realm version management, self-upgrade, and credit purchasing for administrators",
   "author": "Realms Team",
   "permissions": [],
@@ -14,7 +14,7 @@
     "operator"
   ],
   "categories": [
-    "settings"
+    "realm_management"
   ],
   "sidebar_label": {
     "en": "Managed Services"

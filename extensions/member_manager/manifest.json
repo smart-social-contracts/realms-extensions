@@ -1,10 +1,10 @@
 {
   "name": "member_manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Admin view of individual member profiles: identity, status, and notification history",
   "author": "Smart Social Contracts",
   "categories": [
-    "administration"
+    "people_access"
   ],
   "sidebar_label": {
     "en": "Members"

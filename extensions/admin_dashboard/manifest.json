@@ -1,10 +1,10 @@
 {
   "name": "admin_dashboard",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "description": "Browse, export, and import entities",
   "author": "Realms Team",
   "categories": [
-    "administration"
+    "realm_management"
   ],
   "sidebar_label": {
     "en": "Data Explorer"

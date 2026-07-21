@@ -654,8 +654,8 @@
 				<div>
 					<h3 class="font-semibold mb-2">How permissions work</h3>
 					<ul class="space-y-1.5 text-blue-700">
-						<li><strong>Assign Role</strong> requires the <code class="bg-blue-100 px-1 rounded">role.assign</code> permission. Use <em>Propose</em> if you lack it.</li>
-						<li><strong>Revoke Role</strong> requires <code class="bg-blue-100 px-1 rounded">role.revoke</code>.</li>
+						<li><strong>Assign Profile</strong> requires the <code class="bg-blue-100 px-1 rounded">role.assign</code> permission. Use <em>Propose</em> if you lack it.</li>
+						<li><strong>Revoke Profile</strong> requires <code class="bg-blue-100 px-1 rounded">role.revoke</code>.</li>
 						<li><strong>Manage Permissions</strong> requires <code class="bg-blue-100 px-1 rounded">permission.grant</code> to grant and <code class="bg-blue-100 px-1 rounded">permission.revoke</code> to revoke.</li>
 						<li><strong>You can only grant permissions you hold yourself.</strong> Permissions you don't hold are shown but cannot be toggled.</li>
 						<li>Permissions inherited <em>via a profile</em> cannot be individually revoked — remove the profile instead.</li>
@@ -709,7 +709,7 @@
 							class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black transition-colors"
 						>
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-							Assign Role
+							Assign Profile
 						</button>
 						<button
 							onclick={() => { if (callerCanGrantPerms || callerCanRevokePerms) { view = 'permission'; permFilter = ''; pendingGrants = new Set(); pendingRevokes = new Set(); } }}
@@ -797,7 +797,7 @@
 
 		<div class="rounded-lg border border-gray-200 bg-white p-6 max-w-lg">
 			<h2 class="text-xl font-semibold text-gray-900 mb-1">Assign Profile</h2>
-			<p class="text-sm text-gray-500 mb-4">Assign a role to <strong>{selectedUser.nickname || truncatePrincipal(selectedUser.principal)}</strong></p>
+			<p class="text-sm text-gray-500 mb-4">Assign a profile to <strong>{selectedUser.nickname || truncatePrincipal(selectedUser.principal)}</strong></p>
 
 			<div class="mb-4">
 				<label for="profile-select" class="block text-sm font-medium text-gray-700 mb-1">Profile</label>

@@ -1,6 +1,6 @@
 {
   "name": "access_manager",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Manage departments (root, policy, budget, authority) — issue #240",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -9,11 +9,11 @@
     "user_manager"
   ],
   "categories": [
-    "administration"
+    "people_access"
   ],
   "icon": "building",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Departments"
+    "en": "Department Management"
   }
 }
