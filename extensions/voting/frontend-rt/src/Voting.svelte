@@ -1200,7 +1200,7 @@
 						onchange={() => onFilterChange()}
 						class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
 					>
-						<option value="">All organizations</option>
+						<option value="">All departments</option>
 						{#each orgOptions as org}
 							<option value={org}>{org}</option>
 						{/each}
@@ -1237,7 +1237,7 @@
 					<svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
 					{#if orgFilter || statusFilter}
 						<p class="text-gray-500 text-sm">No proposals match the current filters</p>
-						<p class="text-gray-400 text-xs mt-1">Try clearing the organization or status filter.</p>
+						<p class="text-gray-400 text-xs mt-1">Try clearing the department or status filter.</p>
 					{:else}
 						<p class="text-gray-500 text-sm">No proposals yet</p>
 						<p class="text-gray-400 text-xs mt-1">Be the first to submit a proposal for this realm.</p>

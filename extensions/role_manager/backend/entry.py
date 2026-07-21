@@ -603,9 +603,9 @@ OPERATIONS_CATALOG = {
     "user.delete": {"category": "User Management", "description": "Remove a user from the realm"},
     "user.update_status": {"category": "User Management", "description": "Change a user's active/suspended status"},
 
-    "organization.add": {"category": "Organizations", "description": "Create a new organization"},
-    "organization.edit": {"category": "Organizations", "description": "Edit organization details"},
-    "organization.delete": {"category": "Organizations", "description": "Delete an organization"},
+    "organization.add": {"category": "Departments", "description": "Create a new department"},
+    "organization.edit": {"category": "Departments", "description": "Edit department details"},
+    "organization.delete": {"category": "Departments", "description": "Delete a department"},
 
     "transfer.create": {"category": "Finance", "description": "Create token transfers between accounts"},
     "transfer.delete": {"category": "Finance", "description": "Revert or cancel a pending transfer"},

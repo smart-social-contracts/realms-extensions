@@ -140,7 +140,7 @@ def set_realm_stage(args: dict):
 
     Callable by realm admins. After root handover (``transfer_root``) the
     governance-org members hold the admin profile, so lifecycle control
-    follows the root organization.
+    follows the root department.
 
     Gates (issue #253):
       - alpha→beta ``checklist`` mode: readiness checklist must pass (#241).
@@ -148,7 +148,7 @@ def set_realm_stage(args: dict):
         ``critical_mass``) must be met.
       - beta→production: proving period elapsed + governance vote satisfied
         (approvals recorded via ``approve_stage_transition`` checked against
-        the root organization's policy).
+        the root department's policy).
     """
     from ggg import Realm
 
@@ -299,10 +299,10 @@ def set_realm_stage(args: dict):
 def approve_stage_transition(args: dict):
     """Record the caller's approval for an upcoming stage transition.
 
-    Only members of the root (governance) organization may approve — this is
+    Only members of the root (governance) department may approve — this is
     the "Congress votes to go live" mechanism (issue #253). Approvals are
     stored in ``manifest_data.lifecycle.stage_approvals.<stage>`` and are
-    checked against the root organization's policy by ``set_realm_stage``.
+    checked against the root department's policy by ``set_realm_stage``.
 
     Args: {"stage": "production", "approve": true}
     """
@@ -340,7 +340,7 @@ def approve_stage_transition(args: dict):
             None,
         )
         if root is None:
-            return {"success": False, "error": "Root organization not found"}
+            return {"success": False, "error": "Root department not found"}
 
         from core.membership import department_member_principals
 
@@ -350,7 +350,7 @@ def approve_stage_transition(args: dict):
                 "success": False,
                 "error": (
                     f"Access denied: {caller} is not a member of the "
-                    f"governance (root) organization"
+                    f"governance (root) department"
                 ),
             }
 
@@ -391,12 +391,12 @@ def approve_stage_transition(args: dict):
 
 
 def transfer_root(args: dict):
-    """Hand root over to a governance organization (issue #253).
+    """Hand root over to a governance department (issue #253).
 
     The creator (a realm admin) transfers all root permissions to the target
-    organization — typically **Congress**. Effects:
+    department — typically **Congress**. Effects:
 
-      1. Every member of the target org joins the root organization and is
+      1. Every member of the target department joins the root department and is
          granted the ``admin`` profile (full permissions follow the org).
       2. The root org's head becomes the target org's head (or its first
          member).
@@ -435,12 +435,12 @@ def transfer_root(args: dict):
         if not target:
             return {
                 "success": False,
-                "error": f"Organization '{target_name}' not found",
+                "error": f"Department '{target_name}' not found",
             }
         if getattr(target, "is_root", False) or target.name == ROOT_ORG_NAME:
             return {
                 "success": False,
-                "error": "Target organization is already the root organization",
+                "error": "Target department is already the root department",
             }
 
         from core.membership import (
@@ -456,7 +456,7 @@ def transfer_root(args: dict):
             return {
                 "success": False,
                 "error": (
-                    f"Organization '{target_name}' has no members besides the "
+                    f"Department '{target_name}' has no members besides the "
                     f"caller — transferring root would leave the realm without "
                     f"a governing authority"
                 ),
@@ -467,7 +467,7 @@ def transfer_root(args: dict):
 
             root = ensure_root_org()
         except Exception as e:
-            return {"success": False, "error": f"Root organization unavailable: {e}"}
+            return {"success": False, "error": f"Root department unavailable: {e}"}
 
         admin_profile = UserProfile["admin"]
         member_profile = UserProfile["member"]

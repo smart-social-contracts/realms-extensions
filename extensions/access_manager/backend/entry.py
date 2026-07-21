@@ -1,12 +1,11 @@
 """
 Access Manager Extension Backend
 
-Admin interface for governance organizations (GGG ``Department`` entity;
-product name: Organization — issue #240):
-  - Organizations (create, edit, members) — no nesting
+Admin interface for governance departments (GGG ``Department`` entity — issue #240):
+  - Departments (create, edit, members) — no nesting
   - Policy (M/N, quorum, veto)
   - Budget (fund link)
-  - Authority grants (org-over-org, including cross-quarter targets)
+  - Authority grants (department-over-department, including cross-quarter targets)
   - Extension access and profile assignment
 
 Supersedes the basic role_manager extension.
@@ -275,11 +274,11 @@ def _serialize_authority(auth: DepartmentAuthority) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Department / Organization Management
+# Department Management
 # ---------------------------------------------------------------------------
 
 def list_departments(args) -> str:
-    """List all organizations with members, policy, and budget."""
+    """List all departments with members, policy, and budget."""
     try:
         _parse_args(args)
         caller = _get_caller_user()
@@ -308,7 +307,7 @@ def list_departments(args) -> str:
 
 
 def create_department(args) -> str:
-    """Create a new organization (no nesting)."""
+    """Create a new department (no nesting)."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -325,17 +324,17 @@ def create_department(args) -> str:
         if parent_name:
             return json.dumps({
                 "success": False,
-                "error": "Organization nesting is not allowed (issue #240)",
+                "error": "Department nesting is not allowed (issue #240)",
             })
 
         if name == ROOT_ORG_NAME or args_dict.get("is_root"):
             existing_root = Department[ROOT_ORG_NAME]
             if existing_root:
-                return json.dumps({"success": False, "error": "root organization already exists"})
+                return json.dumps({"success": False, "error": "root department already exists"})
 
         existing = Department[name]
         if existing:
-            return json.dumps({"success": False, "error": f"Organization '{name}' already exists"})
+            return json.dumps({"success": False, "error": f"Department '{name}' already exists"})
 
         is_root = name == ROOT_ORG_NAME
         dept = Department(
@@ -366,7 +365,7 @@ def create_department(args) -> str:
                     code=fund_code[:16],
                     name=args_dict.get("fund_name") or f"{name} Fund",
                     fund_type=args_dict.get("fund_type") or FundType.SPECIAL_REVENUE,
-                    description=f"Budget for organization {name}",
+                    description=f"Budget for department {name}",
                 )
             dept.fund = fund
 
@@ -377,8 +376,8 @@ def create_department(args) -> str:
         except Exception:
             pass
 
-        logger.info(f"Organization '{name}' created by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"name": name, "message": f"Organization '{name}' created"}})
+        logger.info(f"Department '{name}' created by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"name": name, "message": f"Department '{name}' created"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -387,7 +386,7 @@ def create_department(args) -> str:
 
 
 def update_department(args) -> str:
-    """Update an organization's description, head, policy, or fund."""
+    """Update a department's description, head, policy, or fund."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -398,7 +397,7 @@ def update_department(args) -> str:
 
         dept = Department[name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Organization '{name}' not found"})
+            return json.dumps({"success": False, "error": f"Department '{name}' not found"})
 
         if not _can_manage_dept(caller, dept):
             return json.dumps({"success": False, "error": "Access denied"})
@@ -406,7 +405,7 @@ def update_department(args) -> str:
         if args_dict.get("parent"):
             return json.dumps({
                 "success": False,
-                "error": "Organization nesting is not allowed (issue #240)",
+                "error": "Department nesting is not allowed (issue #240)",
             })
 
         if "description" in args_dict:
@@ -438,12 +437,12 @@ def update_department(args) -> str:
                         code=code[:16],
                         name=args_dict.get("fund_name") or f"{name} Fund",
                         fund_type=args_dict.get("fund_type") or FundType.SPECIAL_REVENUE,
-                        description=f"Budget for organization {name}",
+                        description=f"Budget for department {name}",
                     )
                 dept.fund = fund
 
-        logger.info(f"Organization '{name}' updated by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"name": name, "message": f"Organization '{name}' updated"}})
+        logger.info(f"Department '{name}' updated by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"name": name, "message": f"Department '{name}' updated"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -452,7 +451,7 @@ def update_department(args) -> str:
 
 
 def delete_department(args) -> str:
-    """Delete an organization (root cannot be deleted)."""
+    """Delete a department (root cannot be deleted)."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -464,14 +463,14 @@ def delete_department(args) -> str:
 
         dept = Department[name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Organization '{name}' not found"})
+            return json.dumps({"success": False, "error": f"Department '{name}' not found"})
 
         if getattr(dept, "is_root", False) or name == ROOT_ORG_NAME:
-            return json.dumps({"success": False, "error": "Cannot delete the root organization"})
+            return json.dumps({"success": False, "error": "Cannot delete the root department"})
 
         dept.delete()
-        logger.info(f"Organization '{name}' deleted by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"message": f"Organization '{name}' deleted"}})
+        logger.info(f"Department '{name}' deleted by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"message": f"Department '{name}' deleted"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -480,7 +479,7 @@ def delete_department(args) -> str:
 
 
 def add_department_member(args) -> str:
-    """Add a user to an organization."""
+    """Add a user to a department."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -492,7 +491,7 @@ def add_department_member(args) -> str:
 
         dept = Department[dept_name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
 
         if not _can_manage_dept(caller, dept):
             return json.dumps({"success": False, "error": "Access denied"})
@@ -504,7 +503,7 @@ def add_department_member(args) -> str:
         from core.membership import add_department_member
 
         add_department_member(dept, user)
-        logger.info(f"User {user_principal} added to organization '{dept_name}' by {_get_caller_principal()}")
+        logger.info(f"User {user_principal} added to department '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"User added to '{dept_name}'"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -514,7 +513,7 @@ def add_department_member(args) -> str:
 
 
 def remove_department_member(args) -> str:
-    """Remove a user from an organization."""
+    """Remove a user from a department."""
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
@@ -526,7 +525,7 @@ def remove_department_member(args) -> str:
 
         dept = Department[dept_name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
 
         if not _can_manage_dept(caller, dept):
             return json.dumps({"success": False, "error": "Access denied"})
@@ -536,7 +535,7 @@ def remove_department_member(args) -> str:
             return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
 
         user.departments.remove(dept)
-        logger.info(f"User {user_principal} removed from organization '{dept_name}' by {_get_caller_principal()}")
+        logger.info(f"User {user_principal} removed from department '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"User removed from '{dept_name}'"}})
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -672,7 +671,7 @@ def revoke_authority(args) -> str:
 
 
 def ensure_root(args) -> str:
-    """Ensure the root organization exists and has default local authorities."""
+    """Ensure the root department exists and has default local authorities."""
     try:
         caller = _get_caller_user()
         _require_operation(caller, Operations.ROLE_ASSIGN)
@@ -1409,9 +1408,9 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
 
     target_org = (action.get("department") or "").strip() or dept.name
     governed_note = (
-        f"Position change in organization '{target_org}'"
+        f"Position change in department '{target_org}'"
         if target_org == dept.name
-        else f"Position change in organization '{target_org}', decided by '{dept.name}'"
+        else f"Position change in department '{target_org}', decided by '{dept.name}'"
     )
     proposal = Proposal(
         proposal_id=proposal_id,
@@ -1493,13 +1492,13 @@ def manage_position(args) -> str:
 
         dept = Department[dept_name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
 
         # Managers may act; plain department members may still *propose*
         # under an M/N policy (their vote is what counts).
         is_manager = _can_manage_dept(caller, dept)
         if not is_manager and not _is_dept_member(caller, dept):
-            return json.dumps({"success": False, "error": "Access denied: not a manager or member of this organization"})
+            return json.dumps({"success": False, "error": "Access denied: not a manager or member of this department"})
 
         # Root authority is absolute: a root member acting on another org is
         # governed by root's OWN policy, never the target's. While the creator
@@ -1520,7 +1519,7 @@ def manage_position(args) -> str:
 
         if policy_is_direct(governing):
             if not is_manager:
-                return json.dumps({"success": False, "error": "Access denied: managing this organization requires admin/head rights"})
+                return json.dumps({"success": False, "error": "Access denied: managing this department requires admin/head rights"})
             result = apply_position_action(action)
             if result.get("success"):
                 result["data"] = {
@@ -1544,7 +1543,7 @@ def manage_position(args) -> str:
 
 
 EXTENSION_FUNCTIONS = {
-    # Organizations (Department entity)
+    # Departments (Department entity)
     "list_departments": list_departments,
     "create_department": create_department,
     "update_department": update_department,

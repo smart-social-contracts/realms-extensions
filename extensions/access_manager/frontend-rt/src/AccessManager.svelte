@@ -67,7 +67,7 @@
 		selectedDeptName ? departments.find((d) => d.name === selectedDeptName) ?? null : null,
 	);
 
-	function selectOrganization(name: string) {
+	function selectDepartment(name: string) {
 		selectedDeptName = name;
 		showNewPosition = null;
 		editingPosition = null;
@@ -108,7 +108,7 @@
 			const authRes = await callExt('list_authorities');
 			authorities = authRes?.data?.authorities ?? [];
 
-			// Keep selection when reloading; otherwise pick the first org.
+			// Keep selection when reloading; otherwise pick the first department.
 			if (departments.length === 0) {
 				selectedDeptName = '';
 			} else if (!selectedDeptName || !departments.some((d) => d.name === selectedDeptName)) {
@@ -117,10 +117,10 @@
 					if (!a.is_root && b.is_root) return 1;
 					return (a.name || '').localeCompare(b.name || '');
 				})[0];
-				if (first) selectOrganization(first.name);
+				if (first) selectDepartment(first.name);
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Failed to load organizations', 'error');
+			addToast(e?.message || 'Failed to load departments', 'error');
 		} finally {
 			deptLoading = false;
 		}
@@ -138,13 +138,13 @@
 				threshold_n: parseInt(newThresholdN || '1', 10),
 			});
 			if (res?.success) {
-				addToast(`Organization "${newDeptName}" created`);
+				addToast(`Department "${newDeptName}" created`);
 				const createdName = newDeptName.trim();
 				newDeptName = ''; newDeptDesc = ''; newDeptHead = ''; newDeptFund = '';
 				newThresholdM = '1'; newThresholdN = '1';
 				showNewDept = false;
 				await loadDepartments();
-				selectOrganization(createdName);
+				selectDepartment(createdName);
 			} else {
 				addToast(res?.error || 'Failed to create', 'error');
 			}
@@ -170,7 +170,7 @@
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
-			addToast(`Proposal ${res.data.proposal_id} created — organization members must vote (see Voting)`);
+			addToast(`Proposal ${res.data.proposal_id} created — department members must vote (see Voting)`);
 		} else {
 			addToast(successMsg);
 		}
@@ -307,7 +307,7 @@
 
 	async function grantAuthorityFromRoot() {
 		if (!authTarget.trim() && !(authRemoteCanister.trim() && authRemoteOrg.trim())) {
-			addToast('Set a local target or remote quarter + org', 'error');
+			addToast('Set a local target or remote quarter + department', 'error');
 			return;
 		}
 		try {
@@ -349,11 +349,11 @@
 	}
 
 	async function deleteDepartment(name: string) {
-		if (!confirm(`Delete organization "${name}"?`)) return;
+		if (!confirm(`Delete department "${name}"?`)) return;
 		try {
 			const res = await callExt('delete_department', { name });
 			if (res?.success) {
-				addToast(`Organization "${name}" deleted`);
+				addToast(`Department "${name}" deleted`);
 				if (selectedDeptName === name) selectedDeptName = '';
 				await loadDepartments();
 			} else {
@@ -584,8 +584,8 @@
 <div class="w-full min-h-full p-4 sm:p-6 lg:p-8">
 	<!-- Header -->
 	<div class="mb-6">
-		<h1 class="text-2xl font-bold text-gray-900">Organizations</h1>
-		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, positions, and org-over-org authority</p>
+		<h1 class="text-2xl font-bold text-gray-900">Departments</h1>
+		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, positions, and department-over-department authority</p>
 	</div>
 
 	<!-- Toasts -->
@@ -606,7 +606,7 @@
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
 			<div class="flex-1 min-w-0">
 				<label for="org-select" class="block text-xs font-medium text-gray-500 mb-1">
-					Organization
+					Department
 				</label>
 				<select
 					id="org-select"
@@ -614,11 +614,11 @@
 					disabled={deptLoading || sortedDepartments.length === 0}
 					bind:value={selectedDeptName}
 					onchange={() => {
-						if (selectedDeptName) selectOrganization(selectedDeptName);
+						if (selectedDeptName) selectDepartment(selectedDeptName);
 					}}
 				>
 					{#if sortedDepartments.length === 0}
-						<option value="">No organizations</option>
+						<option value="">No departments</option>
 					{:else}
 						{#each sortedDepartments as dept (dept.name)}
 							<option value={dept.name}>
@@ -629,13 +629,13 @@
 				</select>
 			</div>
 			<button onclick={() => showNewDept = !showNewDept} class="shrink-0 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800">
-				{showNewDept ? 'Cancel' : '+ New Organization'}
+				{showNewDept ? 'Cancel' : '+ New Department'}
 			</button>
 		</div>
 
 		{#if showNewDept}
 			<div class="p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-3">
-				<input bind:value={newDeptName} placeholder="Organization name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={newDeptName} placeholder="Department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptDesc} placeholder="Description (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptHead} placeholder="Head principal (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptFund} placeholder="Fund code (optional budget)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
@@ -658,7 +658,7 @@
 				</svg>
 			</div>
 		{:else if departments.length === 0}
-			<p class="text-center text-gray-500 py-8">No organizations yet. Root is created on realm init.</p>
+			<p class="text-center text-gray-500 py-8">No departments yet. Root is created on realm init.</p>
 		{:else if selectedDept}
 			{@const dept = selectedDept}
 			<div class="border border-gray-200 rounded-xl overflow-hidden">
@@ -795,7 +795,7 @@
 													{@const eligible = eligibleAppointees(pos, dept.members ?? [])}
 													<div class="mt-2 p-2 bg-indigo-50 border border-indigo-100 rounded-lg space-y-2">
 														{#if eligible.length === 0}
-															<p class="text-xs text-gray-500">Add organization members first, then assign them to this position.</p>
+															<p class="text-xs text-gray-500">Add department members first, then assign them to this position.</p>
 														{:else}
 															<div class="flex flex-wrap items-end gap-2">
 																<label class="text-xs text-gray-600 flex-1 min-w-[10rem]">
@@ -829,7 +829,7 @@
 									{/each}
 								</div>
 							{:else}
-								<p class="text-xs text-gray-400">No positions defined for this organization.</p>
+								<p class="text-xs text-gray-400">No positions defined for this department.</p>
 							{/if}
 						</div>
 					{/if}
@@ -1010,7 +1010,7 @@
 					</div>
 
 					{#if !dept.is_root}
-						<button onclick={() => deleteDepartment(dept.name)} class="text-sm text-red-600 hover:text-red-800">Delete organization</button>
+						<button onclick={() => deleteDepartment(dept.name)} class="text-sm text-red-600 hover:text-red-800">Delete department</button>
 					{/if}
 				</div>
 			</div>
@@ -1018,12 +1018,12 @@
 
 		<!-- Authority grants -->
 		<div class="mt-8 pt-6 border-t border-gray-200 space-y-3">
-			<h2 class="text-lg font-semibold text-gray-800">Authority (org over org)</h2>
-			<p class="text-sm text-gray-500">Grant permissions from root (or another org) over a local or remote-quarter organization.</p>
+			<h2 class="text-lg font-semibold text-gray-800">Authority (department over department)</h2>
+			<p class="text-sm text-gray-500">Grant permissions from root (or another department) over a local or remote-quarter department.</p>
 			<div class="p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-2">
-				<input bind:value={authTarget} placeholder="Local target org name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={authTarget} placeholder="Local target department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={authRemoteCanister} placeholder="Remote quarter canister id (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-				<input bind:value={authRemoteOrg} placeholder="Remote org name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+				<input bind:value={authRemoteOrg} placeholder="Remote department name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={authPerms} placeholder="Permissions (comma-separated)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<button onclick={grantAuthorityFromRoot} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant from root</button>
 			</div>

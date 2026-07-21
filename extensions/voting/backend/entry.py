@@ -230,7 +230,7 @@ def _org_scoped_department(proposal: Proposal):
     """Department governing this proposal, or None for realm-wide ballots.
 
     Org-scoped proposals (e.g. position changes, issue #241) are voted only
-    by that organization's members and tallied against its M/N/quorum/veto
+    by that department's members and tallied against its M/N/quorum/veto
     policy instead of realm-wide thresholds.
     """
     dept_name = _proposal_org_scope(proposal)
@@ -789,7 +789,7 @@ def _org_index_ready() -> bool:
 def get_proposals(args: str) -> str:
     """Get proposals with optional status/org filtering and pagination.
 
-    ``org_scope`` filters to one organization's ballots. Once the field-index
+    ``org_scope`` filters to one department's ballots. Once the field-index
     backfill has run, matching rows come from the persistent index
     (``Proposal.find_by``) — cost proportional to matches; until then the
     filter falls back to the scan path. The scan uses ``Proposal.load_some``
@@ -913,7 +913,7 @@ def get_proposals(args: str) -> str:
 
 
 def get_org_scopes(args: str) -> str:
-    """Organization names for the proposal-list org filter dropdown.
+    """Department names for the proposal-list department filter dropdown.
 
     Names only (no members/policy/budget — that is access_manager's
     list_departments, which is permission-gated). Sorted, root org first.
@@ -1276,7 +1276,7 @@ def cast_vote(args: str) -> str:
         if not voter:
             return json.dumps({"success": False, "error": f"User {voter_id} not found"})
 
-        # Org-scoped ballots (issue #241): only that organization's members vote.
+        # Department-scoped ballots (issue #241): only that department's members vote.
         scope_dept = _org_scoped_department(proposal)
         if scope_dept is not None:
             try:

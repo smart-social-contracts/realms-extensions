@@ -204,7 +204,7 @@
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-gray-900">Migration Console</h1>
 		<p class="text-sm text-gray-500 mt-1">
-			Readiness, organizations, and staff onboarding for the incumbent migration
+			Readiness, departments, and staff onboarding for the incumbent migration
 		</p>
 	</div>
 
@@ -385,15 +385,15 @@
 			</div>
 		{/if}
 
-		<!-- Organizations -->
+		<!-- Departments -->
 		<div class="space-y-4">
 			<h2 class="text-lg font-semibold text-gray-800">
-				Organizations ({data.organizations.length})
+				Departments ({data.organizations.length})
 			</h2>
 
 			{#if data.organizations.length === 0}
 				<p class="text-center text-gray-500 py-8">
-					No organizations yet — install a codex with a department template.
+					No departments yet — install a codex with a department template.
 				</p>
 			{/if}
 
@@ -502,7 +502,7 @@
 									</div>
 								</div>
 							{:else if !org.is_root}
-								<p class="text-xs text-gray-400">No invite codes for this organization.</p>
+								<p class="text-xs text-gray-400">No invite codes for this department.</p>
 							{/if}
 
 							<!-- Members -->

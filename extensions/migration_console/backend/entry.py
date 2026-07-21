@@ -8,7 +8,7 @@ profile ``incumbent_migration``), not hard-coded per codex.
 Panels served:
   - Readiness checklist — live milestones toward the alpha→beta gate
     (computed by core.lifecycle_gate, which also enforces the hard gate)
-  - Organizations — seeded departments with policy, budget, member counts
+  - Departments — seeded departments with policy, budget, member counts
   - Staff invites — per-(department, profile) invite URLs and redemption counts
   - Citizen import — bulk census import, claim progress, pending invite URLs
   - Quarters & currency — population per quarter, accounting currency status
@@ -322,7 +322,7 @@ def regenerate_invite(args) -> str:
 
         dept = Department[dept_name]
         if not dept:
-            return json.dumps({"success": False, "error": f"Organization '{dept_name}' not found"})
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
 
         # Keep the position link across regenerations so redeeming the new
         # code still appoints to the same seat.
