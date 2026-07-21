@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import InvitationManager from './InvitationManager.svelte';
+	import ExtensionAccess from './ExtensionAccess.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
-	type Tab = 'people' | 'profiles' | 'invitations';
+	type Tab = 'people' | 'profiles' | 'invitations' | 'extensions';
 	type View = 'users' | 'detail' | 'assign' | 'permission' | 'profiles';
 
 	let activeTab: Tab = $state('people');
@@ -630,7 +631,7 @@
 	<!-- Tabs -->
 	<div class="border-b border-gray-200 mb-6">
 		<nav class="flex gap-6">
-			{#each [['people', 'People'], ['profiles', 'Profiles'], ['invitations', 'Invitations']] as [id, label]}
+			{#each [['people', 'People'], ['profiles', 'Profiles'], ['invitations', 'Invitations'], ['extensions', 'Extension Access']] as [id, label]}
 				<button
 					onclick={() => { activeTab = id as Tab; if (id === 'people') { view = 'users'; } else if (id === 'profiles') { view = 'profiles'; loadProfilesWithPermissions(); } }}
 					class="pb-3 text-sm font-medium border-b-2 transition-colors {activeTab === id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}"
@@ -643,6 +644,8 @@
 
 	{#if activeTab === 'invitations'}
 		<InvitationManager {ctx} />
+	{:else if activeTab === 'extensions'}
+		<ExtensionAccess {ctx} />
 	{:else}
 
 	{#if showHelp}

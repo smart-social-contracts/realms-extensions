@@ -4,7 +4,7 @@ Admin Dashboard Backend Extension Entry Point
 Provides a web UI for administrative operations: entity browsing,
 export/import, and data exploration.
 
-Note: Invitation management has moved to the `census` extension.
+Note: Invitation management has moved to the `role_manager` extension.
 Realm settings have moved to the `realm_settings` extension.
 """
 

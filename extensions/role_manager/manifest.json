@@ -1,7 +1,7 @@
 {
   "name": "role_manager",
-  "version": "1.0.2",
-  "description": "Manage people, profiles, permissions, and invitations",
+  "version": "1.1.0",
+  "description": "Manage people, profiles, permissions, invitations, and extension access",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

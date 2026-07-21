@@ -1,6 +1,6 @@
 {
   "name": "migration_console",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Codex-driven migration console for realm creators and civil servants — readiness checklist, org chart, staff invites, and citizen bulk import (issue #241)",
   "author": "Smart Social Contracts",
   "permissions": [],

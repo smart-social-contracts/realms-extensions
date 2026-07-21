@@ -4,7 +4,7 @@
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
 	type Kind = 'extension' | 'codex';
-	type TabId = 'installed' | 'available' | 'advanced';
+	type TabId = 'installed' | 'available' | 'marketplace' | 'advanced';
 	type KindFilter = 'all' | Kind;
 	type InstalledFilter = 'all' | 'updates';
 	type AvailableFilter = 'actionable' | 'all';
@@ -197,6 +197,18 @@
 	let uploadRunInit = $state(true);
 	let uploadBusy = $state(false);
 	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// Marketplace (merged from the deprecated market_place extension)
+	let mpAvailable = $derived(!!ctx.marketplace);
+	let mpLoading = $state(false);
+	let mpError = $state('');
+	let mpListings = $state<any[]>([]);
+	let mpPurchases = $state<any[]>([]);
+	let mpSearch = $state('');
+	let mpLoaded = $state(false);
+	let mpSelected = $state<any>(null);
+	let mpPurchasing = $state(false);
+	let mpPurchasedIds = $derived(new Set(mpPurchases.map((p: any) => p.extension_id || p.id)));
 
 	let uploadTotalBytes = $derived(uploadFiles.reduce((acc, f) => acc + f.size, 0));
 	let uploadOverIngressLimit = $derived(uploadTotalBytes > 1.8 * 1024 * 1024);
@@ -398,6 +410,60 @@
 	async function refreshAll() {
 		await loadRegistriesFromBackend();
 		await Promise.all([loadInstalled(), loadRegistryCatalog()]);
+	}
+
+	// --- Marketplace (merged from the deprecated market_place extension) ---
+
+	function formatICP(e8s: number | bigint): string {
+		const v = typeof e8s === 'bigint' ? Number(e8s) : Number(e8s ?? 0);
+		if (v === 0) return 'Free';
+		return `${(v / 100_000_000).toFixed(2)} ICP`;
+	}
+
+	async function loadMarketplace() {
+		if (!ctx.marketplace) return;
+		mpLoading = true;
+		mpError = '';
+		try {
+			const [listRes, purchasesRes] = await Promise.all([
+				mpSearch.trim()
+					? ctx.marketplace.search_marketplace(mpSearch.trim())
+					: ctx.marketplace.list_extensions(),
+				ctx.marketplace.get_my_purchases().catch(() => ({ data: [] })),
+			]);
+			mpListings = (listRes?.listings ?? []).map((e: any) => ({
+				...e,
+				price_e8s: Number(e.price_e8s ?? 0),
+				downloads: Number(e.downloads ?? 0),
+			}));
+			mpPurchases = purchasesRes?.data ?? [];
+			mpLoaded = true;
+		} catch (e: any) {
+			mpError = e?.message ?? String(e);
+		} finally {
+			mpLoading = false;
+		}
+	}
+
+	async function mpConfirmPurchase() {
+		if (!mpSelected || !ctx.marketplace) return;
+		mpPurchasing = true;
+		mpError = '';
+		try {
+			const extId = mpSelected.extension_id || mpSelected.id || mpSelected.name;
+			const res = await ctx.marketplace.buy_extension(extId);
+			if (res?.Err) {
+				mpError = String(res.Err);
+			} else {
+				pushToast('success', `Acquired ${extId}. Install it from the Available tab.`);
+				mpSelected = null;
+				await Promise.all([loadMarketplace(), loadRegistryCatalog()]);
+			}
+		} catch (e: any) {
+			mpError = e?.message ?? String(e);
+		} finally {
+			mpPurchasing = false;
+		}
 	}
 
 	async function uninstall(item: InstalledItem) {
@@ -662,21 +728,14 @@
 			<div>
 				<h1 class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>Package Manager</h1>
 				<p class={cn('text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-2xl')}>
-					Operate this realm's extensions and codex packages. To discover and purchase new offerings, use
+					Operate this realm's extensions and codex packages. Discover and purchase new offerings in
+					the Marketplace tab. Per-user visibility of installed extensions is managed in
 					<button
 						type="button"
-						onclick={() => ctx.navigate?.('/extensions/market_place')}
+						onclick={() => ctx.navigate?.('/extensions/role_manager')}
 						class={cn('text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-800')}
 					>
-						Marketplace
-					</button>
-					. Menu visibility and access control are managed under
-					<button
-						type="button"
-						onclick={() => ctx.navigate?.('/extensions/extensions_manager')}
-						class={cn('text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-800')}
-					>
-						Menus
+						Users &rarr; Extension Access
 					</button>
 					.
 				</p>
@@ -769,6 +828,24 @@
 				Available
 				<span class={cn('text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700')}>{actionableCount}</span>
 			</button>
+			{#if mpAvailable}
+				<button
+					role="tab"
+					aria-selected={activeTab === 'marketplace'}
+					onclick={() => {
+						activeTab = 'marketplace';
+						if (!mpLoaded) void loadMarketplace();
+					}}
+					class={cn(
+						'px-5 py-2.5 text-sm font-medium border-b-2 transition-colors',
+						activeTab === 'marketplace'
+							? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+							: 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
+					)}
+				>
+					Marketplace
+				</button>
+			{/if}
 			<button
 				role="tab"
 				aria-selected={activeTab === 'advanced'}
@@ -1105,6 +1182,100 @@
 			</div>
 		{/if}
 
+		{#if activeTab === 'marketplace'}
+			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5')}>
+				<div class={cn('flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4')}>
+					<p class={cn('text-sm text-gray-600 dark:text-gray-400')}>
+						Paid and third-party offerings from the shared marketplace. Once acquired, packages
+						appear in the file registry catalog under the Available tab.
+					</p>
+					<div class={cn('flex gap-2')}>
+						<input
+							type="search"
+							bind:value={mpSearch}
+							onkeydown={(e) => e.key === 'Enter' && loadMarketplace()}
+							placeholder="Search marketplace…"
+							class={cn(
+								'px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg',
+								'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
+							)}
+						/>
+						<button
+							onclick={() => loadMarketplace()}
+							disabled={mpLoading}
+							class={cn('px-3 py-1.5 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50')}
+						>
+							Search
+						</button>
+					</div>
+				</div>
+
+				{#if mpError}
+					<div class={cn('mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm')}>
+						{mpError}
+						<button onclick={() => (mpError = '')} class={cn('ml-2 text-red-600 hover:text-red-800 font-bold')}>&times;</button>
+					</div>
+				{/if}
+
+				{#if mpLoading}
+					<div class={cn('flex items-center justify-center py-12')}>
+						<svg class={cn('animate-spin h-6 w-6 text-gray-400')} viewBox="0 0 24 24" fill="none">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+						</svg>
+						<span class={cn('ml-3 text-sm text-gray-500')}>Loading marketplace…</span>
+					</div>
+				{:else if mpListings.length === 0}
+					<p class={cn('text-center text-sm text-gray-500 py-12')}>
+						{mpLoaded ? 'No marketplace listings found.' : 'Press Search to load marketplace listings.'}
+					</p>
+				{:else}
+					<div class={cn('grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4')}>
+						{#each mpListings as ext (ext.extension_id || ext.id || ext.name)}
+							{@const extId = ext.extension_id || ext.id || ext.name}
+							{@const owned = mpPurchasedIds.has(extId)}
+							{@const isFree = Number(ext.price_e8s) === 0}
+							<div class={cn('border border-gray-200 dark:border-gray-700 rounded-xl p-4 flex flex-col')}>
+								<div class={cn('flex justify-between items-start mb-2')}>
+									<div>
+										<h3 class={cn('font-semibold text-gray-900 dark:text-gray-100 capitalize')}>
+											{(ext.name || extId).replace(/_/g, ' ')}
+										</h3>
+										<p class={cn('text-xs text-gray-500')}>v{ext.version || '1.0'}</p>
+									</div>
+									<span class={cn(
+										'px-2.5 py-0.5 rounded-full text-xs font-medium',
+										isFree ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700',
+									)}>
+										{formatICP(ext.price_e8s)}
+									</span>
+								</div>
+								{#if ext.description}
+									<p class={cn('text-sm text-gray-600 dark:text-gray-400 mb-3 flex-grow line-clamp-2')}>{ext.description}</p>
+								{:else}
+									<div class={cn('flex-grow')}></div>
+								{/if}
+								<div class={cn('text-xs text-gray-500 mb-3')}>{ext.downloads ?? 0} downloads</div>
+								{#if owned}
+									<span class={cn('w-full py-1.5 text-center rounded-lg bg-green-100 text-green-700 text-sm font-medium')}>Acquired</span>
+								{:else}
+									<button
+										onclick={() => (mpSelected = ext)}
+										class={cn(
+											'w-full py-1.5 rounded-lg text-sm font-medium text-white',
+											isFree ? 'bg-gray-800 hover:bg-gray-900' : 'bg-indigo-600 hover:bg-indigo-700',
+										)}
+									>
+										{isFree ? 'Get' : 'Purchase'}
+									</button>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
+
 		{#if activeTab === 'advanced'}
 			<div class={cn('space-y-4 max-w-2xl')}>
 				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5')}>
@@ -1209,5 +1380,54 @@
 		{/if}
 	{/if}
 </div>
+
+{#if mpSelected}
+	{@const isFree = Number(mpSelected.price_e8s) === 0}
+	<div class={cn('fixed inset-0 z-50 flex items-center justify-center p-4')}>
+		<button
+			type="button"
+			aria-label="Close"
+			class={cn('absolute inset-0 bg-black/50')}
+			onclick={() => { if (!mpPurchasing) mpSelected = null; }}
+		></button>
+		<div class={cn('relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6')}>
+			<h3 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3')}>
+				{isFree ? 'Confirm' : 'Confirm Purchase'}
+			</h3>
+			<div class={cn('bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 mb-4')}>
+				<h4 class={cn('font-semibold text-gray-900 dark:text-gray-100 capitalize')}>
+					{(mpSelected.name || mpSelected.extension_id || '').replace(/_/g, ' ')}
+				</h4>
+				{#if mpSelected.description}
+					<p class={cn('text-sm text-gray-600 dark:text-gray-400 mt-1')}>{mpSelected.description}</p>
+				{/if}
+			</div>
+			<div class={cn('flex justify-between items-center py-3 border-t border-b border-gray-200 dark:border-gray-700 mb-4')}>
+				<span class={cn('text-sm text-gray-600 dark:text-gray-400')}>Price</span>
+				<span class={cn('text-xl font-bold text-gray-900 dark:text-gray-100')}>{formatICP(mpSelected.price_e8s)}</span>
+			</div>
+			{#if !isFree}
+				<p class={cn('text-sm text-gray-500 mb-4')}>Payment will be deducted from your ICP balance.</p>
+			{/if}
+			<div class={cn('flex justify-end gap-3')}>
+				<button
+					onclick={() => (mpSelected = null)}
+					disabled={mpPurchasing}
+					class={cn('px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50')}
+				>
+					Cancel
+				</button>
+				<button
+					onclick={mpConfirmPurchase}
+					disabled={mpPurchasing}
+					class={cn('px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg')}
+				>
+					{#if mpPurchasing}{@html spinnerSvg}{/if}
+					{isFree ? 'Get' : 'Purchase'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <svelte:window onclick={() => (openMenuKey = null)} />

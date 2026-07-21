@@ -1,7 +1,8 @@
 {
   "name": "extensions_manager",
-  "version": "1.0.1",
-  "description": "Manage extensions, codexes, assistants, and access control",
+  "version": "1.1.0",
+  "deprecated": true,
+  "description": "DEPRECATED — extension access control moved to role_manager; package operations live in package_manager",
   "author": "Realms Team",
   "categories": [
     "settings"
@@ -15,6 +16,6 @@
   "profiles": [
     "admin"
   ],
-  "show_in_sidebar": true,
+  "show_in_sidebar": false,
   "icon": "puzzle"
 }

@@ -1,7 +1,8 @@
 {
   "name": "market_place",
-  "version": "2.0.0",
-  "description": "Extensions marketplace for browsing, purchasing, and publishing extensions",
+  "version": "2.1.0",
+  "deprecated": true,
+  "description": "DEPRECATED — marketplace browsing moved to package_manager; publishing and developer licenses live in the mundus marketplace",
   "author": "Smart Social Contracts",
   "permissions": [
     "icp_transfer"
@@ -13,6 +14,7 @@
     "settings"
   ],
   "icon": "building-store",
+  "show_in_sidebar": false,
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/market_place",
   "path": "extensions",
   "sidebar_label": {

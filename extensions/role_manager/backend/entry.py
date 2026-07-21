@@ -10,7 +10,7 @@ import json
 import traceback
 from typing import Any, Dict
 
-from ggg import Permission, Proposal, User, UserProfile
+from ggg import Department, Extension, Permission, Proposal, User, UserProfile
 from ggg.system.user_profile import Operations, Profiles, OPERATIONS_SEPARATOR
 from ggg.system.registration_code import (
     RegistrationCode,
@@ -1246,6 +1246,147 @@ def get_registration_codes(args) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Extension access management (merged from the deprecated extensions_manager)
+# ---------------------------------------------------------------------------
+
+def list_extensions(args) -> str:
+    """List all Extension entities with their access grants."""
+    try:
+        _parse_args(args)
+        caller = _get_caller_user()
+        _require_operation(caller, Operations.PERMISSION_VIEW)
+
+        # One user scan → ext_name → direct-grant users (the reverse ext.users
+        # index no longer exists — issue #242).
+        users_by_ext: dict = {}
+        try:
+            from core.membership import iter_users
+
+            for u in iter_users():
+                pid = getattr(u, "id", None)
+                if not pid:
+                    continue
+                try:
+                    for e in u.extensions:
+                        users_by_ext.setdefault(e.name, []).append(
+                            {"principal": pid, "nickname": u.nickname or ""}
+                        )
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"list_extensions user grants scan: {e}")
+
+        extensions = []
+        for ext in Extension.instances():
+            users = users_by_ext.get(ext.name, [])
+
+            departments = []
+            try:
+                for d in ext.departments:
+                    departments.append(d.name)
+            except Exception:
+                pass
+
+            profiles = []
+            try:
+                for p in ext.profiles:
+                    profiles.append(p.name)
+            except Exception:
+                pass
+
+            extensions.append({
+                "name": ext.name,
+                "description": ext.description or "",
+                "users": users,
+                "departments": departments,
+                "profiles": profiles,
+            })
+
+        return json.dumps({"success": True, "data": {"extensions": extensions, "total": len(extensions)}})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"list_extensions error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def _extension_access_change(args, target_kind: str, grant: bool) -> str:
+    """Shared grant/revoke of extension access for a user/department/profile."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        _require_operation(caller, Operations.ROLE_ASSIGN)
+
+        ext_name = args_dict.get("extension")
+        target_keys = {
+            "user": "user_principal",
+            "department": "department",
+            "profile": "profile",
+        }
+        target = args_dict.get(target_keys[target_kind])
+        if not ext_name or not target:
+            return json.dumps({
+                "success": False,
+                "error": f"extension and {target_keys[target_kind]} are required",
+            })
+
+        ext = Extension[ext_name]
+        if not ext:
+            return json.dumps({"success": False, "error": f"Extension '{ext_name}' not found"})
+
+        if target_kind == "user":
+            entity = User[target]
+            relation, label = (entity.extensions if entity else None), "user"
+        elif target_kind == "department":
+            entity = Department[target]
+            relation, label = (ext.departments if entity else None), f"department '{target}'"
+        else:
+            entity = UserProfile[target]
+            relation, label = (ext.profiles if entity else None), f"profile '{target}'"
+
+        if not entity:
+            return json.dumps({"success": False, "error": f"{target_kind.capitalize()} '{target}' not found"})
+
+        if grant:
+            relation.add(ext if target_kind == "user" else entity)
+        else:
+            relation.remove(ext if target_kind == "user" else entity)
+
+        action = "granted to" if grant else "revoked from"
+        logger.info(f"Extension '{ext_name}' {action} {label} by {_get_caller_principal()}")
+        return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' {action} {label}"}})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"extension access change error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def grant_extension_to_user(args) -> str:
+    return _extension_access_change(args, "user", grant=True)
+
+
+def revoke_extension_from_user(args) -> str:
+    return _extension_access_change(args, "user", grant=False)
+
+
+def grant_extension_to_department(args) -> str:
+    return _extension_access_change(args, "department", grant=True)
+
+
+def revoke_extension_from_department(args) -> str:
+    return _extension_access_change(args, "department", grant=False)
+
+
+def grant_extension_to_profile(args) -> str:
+    return _extension_access_change(args, "profile", grant=True)
+
+
+def revoke_extension_from_profile(args) -> str:
+    return _extension_access_change(args, "profile", grant=False)
+
+
+# ---------------------------------------------------------------------------
 # Extension API registry
 # ---------------------------------------------------------------------------
 
@@ -1274,6 +1415,14 @@ EXTENSION_FUNCTIONS = {
     "consume_registration_code": consume_registration_code,
     "revoke_registration_code": revoke_registration_code,
     "get_registration_codes": get_registration_codes,
+    # Extension access (merged from extensions_manager)
+    "list_extensions": list_extensions,
+    "grant_extension_to_user": grant_extension_to_user,
+    "revoke_extension_from_user": revoke_extension_from_user,
+    "grant_extension_to_department": grant_extension_to_department,
+    "revoke_extension_from_department": revoke_extension_from_department,
+    "grant_extension_to_profile": grant_extension_to_profile,
+    "revoke_extension_from_profile": revoke_extension_from_profile,
 }
 
 

@@ -104,7 +104,7 @@ def _invite_url(code: "RegistrationCode", base_url: str) -> str:
     base = (code.frontend_url or base_url or "").rstrip("/")
     if not base:
         return ""
-    return f"{base}/extensions/census/user_registration?code={code.code}"
+    return f"{base}/join?invite={code.code}"
 
 
 # ---------------------------------------------------------------------------
