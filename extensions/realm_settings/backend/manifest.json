@@ -1,7 +1,0 @@
-{
-  "name": "realm_settings",
-  "version": "1.0.2",
-  "description": "Backend services for realm settings management",
-  "entry_point": "entry.py",
-  "dependencies": []
-}

@@ -1,6 +1,6 @@
 {
   "name": "member_manager",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Admin view of individual member profiles: identity, status, and notification history",
   "author": "Smart Social Contracts",
   "categories": [

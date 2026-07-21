@@ -1,7 +1,0 @@
-{
-  "name": "member_manager",
-  "version": "1.0.0",
-  "description": "Backend for admin member profile management",
-  "entry_point": "entry.py",
-  "dependencies": []
-}

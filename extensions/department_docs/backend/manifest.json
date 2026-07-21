@@ -1,7 +1,0 @@
-{
-  "name": "department_docs",
-  "version": "1.0.0",
-  "description": "Backend for encrypted department documents (dept: scope sharing)",
-  "entry_point": "entry.py",
-  "dependencies": []
-}
