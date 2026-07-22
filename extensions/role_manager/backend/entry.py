@@ -504,16 +504,70 @@ def revoke_permission(args) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-def propose_role_assignment(args) -> str:
-    """Create a typed governance proposal for role assignment.
+def _build_role_action_code(action: str, target_principal: str, profile_name: str) -> str:
+    """Build the inline proposal code that replays a role action on approval."""
+    if action == "assign":
+        mutate = (
+            f'if "{profile_name}" in current:\n'
+            f'    logger.info("Profile already assigned, skipping")\n'
+            f'else:\n'
+            f'    target.profiles.add(profile)\n'
+            f'    logger.info(f"Governance: assigned \'{profile_name}\' to {{target.id}}")\n'
+        )
+    else:
+        mutate = (
+            f'if "{profile_name}" not in current:\n'
+            f'    logger.info("Profile not assigned, skipping")\n'
+            f'else:\n'
+            f'    target.profiles.remove(profile)\n'
+            f'    logger.info(f"Governance: revoked \'{profile_name}\' from {{target.id}}")\n'
+        )
+    return (
+        f'from ggg import User, UserProfile\n'
+        f'\n'
+        f'target = User["{target_principal}"]\n'
+        f'profile = UserProfile["{profile_name}"]\n'
+        f'if not target:\n'
+        f'    raise ValueError("User {target_principal} not found")\n'
+        f'if not profile:\n'
+        f'    raise ValueError("Profile {profile_name} not found")\n'
+        f'current = [p.name for p in target.profiles]\n'
+        f'{mutate}'
+    )
 
-    Used in realms where the prehook rejects direct assignment and requires a vote.
-    The proposal carries structured metadata with proposal_type and requested_permissions.
+
+_ROLE_ACTIONS = {
+    "assign": {
+        "proposal_type": "role_assignment",
+        "operation": Operations.ROLE_ASSIGN,
+        "title": "Assign '{profile}' to {target}",
+        "description": "Governance proposal to assign the '{profile}' profile to user {principal}.",
+    },
+    "revoke": {
+        "proposal_type": "role_revocation",
+        "operation": Operations.ROLE_REVOKE,
+        "title": "Revoke '{profile}' from {target}",
+        "description": "Governance proposal to revoke the '{profile}' profile from user {principal}.",
+    },
+}
+
+
+def propose_role_action(args) -> str:
+    """Create a typed governance proposal for a role change (assign or revoke).
+
+    Used in realms where the prehook rejects direct changes and requires a vote.
+    The proposal carries structured metadata (proposal_type, requested_permissions)
+    and inline code that replays the action when the proposal is executed.
     """
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
         caller_principal = _get_caller_principal()
+
+        action = (args_dict.get("action") or "assign").strip()
+        spec = _ROLE_ACTIONS.get(action)
+        if not spec:
+            return json.dumps({"success": False, "error": f"action must be one of {', '.join(_ROLE_ACTIONS)}"})
 
         target_principal = args_dict.get("target_principal")
         profile_name = args_dict.get("profile_name")
@@ -528,43 +582,25 @@ def propose_role_assignment(args) -> str:
         if not profile:
             return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
 
-        # Generate proposal ID
-        existing = Proposal.instances()
-        proposal_num = len(existing) + 1
+        proposal_num = len(Proposal.instances()) + 1
         proposal_id = f"prop_{proposal_num:03d}"
 
         target_nickname = target_user.nickname or target_principal[:8]
 
-        code_inline = (
-            f'from ggg import User, UserProfile\n'
-            f'\n'
-            f'target = User["{target_principal}"]\n'
-            f'profile = UserProfile["{profile_name}"]\n'
-            f'if not target:\n'
-            f'    raise ValueError("User {target_principal} not found")\n'
-            f'if not profile:\n'
-            f'    raise ValueError("Profile {profile_name} not found")\n'
-            f'current = [p.name for p in target.profiles]\n'
-            f'if "{profile_name}" in current:\n'
-            f'    logger.info("Profile already assigned, skipping")\n'
-            f'else:\n'
-            f'    target.profiles.add(profile)\n'
-            f'    logger.info(f"Governance: assigned \'{profile_name}\' to {{target.id}}")\n'
-        )
-
         metadata = json.dumps({
-            "proposal_type": "role_assignment",
-            "requested_permissions": [Operations.ROLE_ASSIGN],
+            "proposal_type": spec["proposal_type"],
+            "role_action": action,
+            "requested_permissions": [spec["operation"]],
             "target_principal": target_principal,
             "profile_name": profile_name,
-            "code_inline": code_inline,
-            "codex_name": f"role_assign_{proposal_id}",
+            "code_inline": _build_role_action_code(action, target_principal, profile_name),
+            "codex_name": f"role_{action}_{proposal_id}",
         })
 
         proposal = Proposal(
             proposal_id=proposal_id,
-            title=f"Assign '{profile_name}' to {target_nickname}",
-            description=f"Governance proposal to assign the '{profile_name}' profile to user {target_principal}.",
+            title=spec["title"].format(profile=profile_name, target=target_nickname),
+            description=spec["description"].format(profile=profile_name, principal=target_principal),
             code_url="",
             code_checksum="",
             proposer=caller,
@@ -578,21 +614,28 @@ def propose_role_assignment(args) -> str:
             metadata=metadata,
         )
 
-        logger.info(f"Role assignment proposal {proposal_id} created by {caller_principal}: "
-                    f"assign '{profile_name}' to {target_principal}")
+        logger.info(f"Role {action} proposal {proposal_id} created by {caller_principal}: "
+                    f"{action} '{profile_name}' for {target_principal}")
 
         return json.dumps({
             "success": True,
             "data": {
-                "proposal_id": proposal_id,
-                "message": f"Governance proposal created to assign '{profile_name}' to user",
+                "proposal_id": proposal.proposal_id,
+                "message": f"Governance proposal created to {action} '{profile_name}'",
             },
         })
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
-        logger.error(f"propose_role_assignment error: {e}\n{traceback.format_exc()}")
+        logger.error(f"propose_role_action error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
+
+
+def propose_role_assignment(args) -> str:
+    """Back-compat wrapper around propose_role_action(action="assign")."""
+    args_dict = _parse_args(args)
+    args_dict["action"] = "assign"
+    return propose_role_action(args_dict)
 
 
 OPERATIONS_CATALOG = {
@@ -1399,6 +1442,7 @@ EXTENSION_FUNCTIONS = {
     "grant_permission": grant_permission,
     "revoke_permission": revoke_permission,
     "propose_role_assignment": propose_role_assignment,
+    "propose_role_action": propose_role_action,
     "get_all_operations": get_all_operations,  # also returns caller capabilities
     "batch_grant_permissions": batch_grant_permissions,
     "batch_revoke_permissions": batch_revoke_permissions,

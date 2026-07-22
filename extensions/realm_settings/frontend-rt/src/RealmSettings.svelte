@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ProposalModal from './ProposalModal.svelte';
 	import QuartersPanel from './QuartersPanel.svelte';
+	import SandboxPanel from './SandboxPanel.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -519,6 +520,9 @@
 
 	<!-- Quarters & Auto-Scaling -->
 	<QuartersPanel {ctx} {addToast} />
+
+	<!-- Extension / codex-hook sandboxing -->
+	<SandboxPanel {ctx} {addToast} />
 
 	{#if settingsLoading}
 		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">

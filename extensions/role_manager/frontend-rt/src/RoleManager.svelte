@@ -239,12 +239,26 @@
 		}
 	}
 
+	// When set, the confirmation modal is shown before a governance proposal
+	// is created. `reason` explains why the direct change is not possible.
+	let proposeConfirm: { action: 'assign' | 'revoke'; profileName: string; reason: string } | null = $state(null);
+
 	async function handleAssign() {
 		if (!selectedUser || !assignProfileName) return;
-		assignLoading = true;
 		error = '';
 		accessDeniedOp = '';
 		successMsg = '';
+
+		if (!callerCanAssign) {
+			proposeConfirm = {
+				action: 'assign',
+				profileName: assignProfileName,
+				reason: 'You do not have the role.assign permission, so this assignment must be approved by a governance vote.',
+			};
+			return;
+		}
+
+		assignLoading = true;
 		try {
 			const res = await callSync('assign_profile', {
 				target_principal: selectedUser.principal,
@@ -257,7 +271,11 @@
 				await viewUser({ ...selectedUser!, profiles: res.data?.profiles ?? selectedUser!.profiles });
 				await loadUsers();
 			} else if (res?.governance_blocked) {
-				error = res.error + ' Use "Propose" to create a governance proposal.';
+				proposeConfirm = {
+					action: 'assign',
+					profileName: assignProfileName,
+					reason: res.error || 'This realm requires a governance vote for role assignments.',
+				};
 			} else {
 				error = res?.error || 'Failed to assign profile';
 			}
@@ -289,6 +307,12 @@
 				successMsg = res.data?.message || 'Profile revoked';
 				await viewUser({ ...selectedUser!, profiles: res.data?.profiles ?? selectedUser!.profiles });
 				await loadUsers();
+			} else if (res?.governance_blocked) {
+				proposeConfirm = {
+					action: 'revoke',
+					profileName,
+					reason: res.error || 'This realm requires a governance vote for role revocations.',
+				};
 			} else {
 				error = res?.error || 'Failed to revoke profile';
 			}
@@ -551,24 +575,31 @@
 	}
 
 	async function handlePropose() {
-		if (!selectedUser || !assignProfileName) return;
+		if (!selectedUser || !proposeConfirm) return;
+		const { action, profileName } = proposeConfirm;
 		assignLoading = true;
 		error = '';
 		accessDeniedOp = '';
 		successMsg = '';
 		try {
-			const res = await callSync('propose_role_assignment', {
+			const res = await callSync('propose_role_action', {
+				action,
 				target_principal: selectedUser.principal,
-				profile_name: assignProfileName,
+				profile_name: profileName,
 			});
 			if (res?.success) {
 				successMsg = res.data?.message || 'Governance proposal created';
-				assignProfileName = '';
-				view = 'detail';
+				proposeConfirm = null;
+				if (action === 'assign') {
+					assignProfileName = '';
+					view = 'detail';
+				}
 			} else {
+				proposeConfirm = null;
 				error = res?.error || 'Failed to create proposal';
 			}
 		} catch (e: any) {
+			proposeConfirm = null;
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
 				accessDeniedOp = op;
@@ -654,7 +685,7 @@
 				<div>
 					<h3 class="font-semibold mb-2">How permissions work</h3>
 					<ul class="space-y-1.5 text-blue-700">
-						<li><strong>Assign Profile</strong> requires the <code class="bg-blue-100 px-1 rounded">role.assign</code> permission. Use <em>Propose</em> if you lack it.</li>
+						<li><strong>Assign Profile</strong> applies directly when you hold <code class="bg-blue-100 px-1 rounded">role.assign</code> and realm policy allows it; otherwise it creates a governance proposal after your confirmation.</li>
 						<li><strong>Revoke Profile</strong> requires <code class="bg-blue-100 px-1 rounded">role.revoke</code>.</li>
 						<li><strong>Manage Permissions</strong> requires <code class="bg-blue-100 px-1 rounded">permission.grant</code> to grant and <code class="bg-blue-100 px-1 rounded">permission.revoke</code> to revoke.</li>
 						<li><strong>You can only grant permissions you hold yourself.</strong> Permissions you don't hold are shown but cannot be toggled.</li>
@@ -662,6 +693,41 @@
 					</ul>
 				</div>
 				<button onclick={() => showHelp = false} class="text-blue-400 hover:text-blue-600 ml-3 flex-shrink-0">&times;</button>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Governance vote confirmation modal -->
+	{#if proposeConfirm}
+		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+			<div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+				<h3 class="text-lg font-semibold text-gray-900 mb-2">Governance vote required</h3>
+				<p class="text-sm text-gray-600 mb-3">{proposeConfirm.reason}</p>
+				<div class="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800">
+					{proposeConfirm.action === 'assign' ? 'Assign' : 'Revoke'} "{proposeConfirm.profileName}"
+					{proposeConfirm.action === 'assign' ? 'to' : 'from'}
+					{selectedUser?.nickname || truncatePrincipal(selectedUser?.principal || '')}
+				</div>
+				<p class="text-sm text-gray-600 mb-4">Create a proposal? Members will vote on it in <strong>Voting</strong>.</p>
+				<div class="flex justify-end gap-3">
+					<button
+						onclick={() => (proposeConfirm = null)}
+						disabled={assignLoading}
+						class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+					>
+						Cancel
+					</button>
+					<button
+						onclick={handlePropose}
+						disabled={assignLoading}
+						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40"
+					>
+						{#if assignLoading}
+							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+						{/if}
+						Create proposal
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -824,32 +890,19 @@
 				</div>
 			{/if}
 
-			<div class="flex gap-3">
-				<div class="relative group">
-					<button
-						onclick={handleAssign}
-						disabled={assignLoading || !assignProfileName || !callerCanAssign}
-						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-					>
-						{#if assignLoading}
-							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-						{/if}
-						Assign Directly
-					</button>
-					{#if !callerCanAssign}
-						<div class="absolute bottom-full left-0 mb-1.5 w-56 px-3 py-2 text-xs bg-gray-800 text-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-20">
-							You need the <strong>role.assign</strong> permission. Use "Propose" to request via governance vote instead.
-						</div>
-					{/if}
-				</div>
-				<button
-					onclick={handlePropose}
-					disabled={assignLoading || !assignProfileName}
-					class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 text-sm font-medium hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-				>
-					Propose (Governance Vote)
-				</button>
-			</div>
+			<button
+				onclick={handleAssign}
+				disabled={assignLoading || !assignProfileName}
+				class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+			>
+				{#if assignLoading}
+					<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+				{/if}
+				Assign
+			</button>
+			<p class="mt-2 text-xs text-gray-500">
+				Applied directly when you are allowed to; otherwise a governance proposal is created (after your confirmation).
+			</p>
 		</div>
 
 	<!-- Manage Permissions View -->

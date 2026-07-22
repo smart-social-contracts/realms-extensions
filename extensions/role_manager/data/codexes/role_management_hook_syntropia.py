@@ -12,8 +12,9 @@ from ic_python_logging import get_logger
 logger = get_logger("codex.role_management_hook")
 
 
-def _find_approved_role_proposal(user_id, profile_name):
-    """Check if there's an approved governance proposal for this action."""
+def _find_approved_role_proposal(user_id, profile_name, action="assign"):
+    """Check if there's an executed governance proposal for this role action."""
+    proposal_type = "role_assignment" if action == "assign" else "role_revocation"
     try:
         from ggg import Proposal
         import json
@@ -25,10 +26,18 @@ def _find_approved_role_proposal(user_id, profile_name):
                 meta = json.loads(proposal.metadata) if proposal.metadata else {}
             except Exception:
                 continue
+            if meta.get("target_principal") != user_id:
+                continue
             if (
-                meta.get("proposal_type") == "role_assignment"
-                and meta.get("target_principal") == user_id
+                meta.get("proposal_type") == proposal_type
                 and meta.get("profile_name") == profile_name
+            ):
+                return proposal
+            # Legacy revocation encoding: role_assignment + "revoke_<profile>"
+            if (
+                action == "revoke"
+                and meta.get("proposal_type") == "role_assignment"
+                and meta.get("profile_name") == f"revoke_{profile_name}"
             ):
                 return proposal
     except Exception as e:
@@ -38,11 +47,11 @@ def _find_approved_role_proposal(user_id, profile_name):
 
 def role_assign_prehook(user, profile_name, assigner_principal):
     """Syntropia: every role assignment requires collective approval."""
-    proposal = _find_approved_role_proposal(user.id, profile_name)
+    proposal = _find_approved_role_proposal(user.id, profile_name, "assign")
     if not proposal:
         raise PermissionError(
-            f"All role assignments require an approved governance proposal. "
-            f"Use 'Propose (Governance Vote)' to submit for collective approval."
+            "All role assignments require an approved governance proposal. "
+            "Confirm the prompt to submit one for collective approval."
         )
     logger.info(
         f"[Syntropia] Role '{profile_name}' assignment approved via collective vote "
@@ -53,10 +62,11 @@ def role_assign_prehook(user, profile_name, assigner_principal):
 
 def role_revoke_prehook(user, profile_name, revoker_principal):
     """Syntropia: every role revocation also requires collective approval."""
-    proposal = _find_approved_role_proposal(user.id, f"revoke_{profile_name}")
+    proposal = _find_approved_role_proposal(user.id, profile_name, "revoke")
     if not proposal:
         raise PermissionError(
-            f"All role revocations require an approved governance proposal."
+            "All role revocations require an approved governance proposal. "
+            "Confirm the prompt to submit one for collective approval."
         )
     return True
 

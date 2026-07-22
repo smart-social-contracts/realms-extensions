@@ -14,8 +14,9 @@ logger = get_logger("codex.role_management_hook")
 SENSITIVE_ROLES = ("judge", "admin", "treasurer", "operator")
 
 
-def _find_approved_role_proposal(user_id, profile_name):
-    """Check if there's an approved governance proposal for this role assignment."""
+def _find_approved_role_proposal(user_id, profile_name, action="assign"):
+    """Check if there's an executed governance proposal for this role action."""
+    proposal_type = "role_assignment" if action == "assign" else "role_revocation"
     try:
         from ggg import Proposal
         import json
@@ -27,10 +28,18 @@ def _find_approved_role_proposal(user_id, profile_name):
                 meta = json.loads(proposal.metadata) if proposal.metadata else {}
             except Exception:
                 continue
+            if meta.get("target_principal") != user_id:
+                continue
             if (
-                meta.get("proposal_type") == "role_assignment"
-                and meta.get("target_principal") == user_id
+                meta.get("proposal_type") == proposal_type
                 and meta.get("profile_name") == profile_name
+            ):
+                return proposal
+            # Legacy revocation encoding: role_assignment + "revoke_<profile>"
+            if (
+                action == "revoke"
+                and meta.get("proposal_type") == "role_assignment"
+                and meta.get("profile_name") == f"revoke_{profile_name}"
             ):
                 return proposal
     except Exception as e:
@@ -41,11 +50,11 @@ def _find_approved_role_proposal(user_id, profile_name):
 def role_assign_prehook(user, profile_name, assigner_principal):
     """Agora: sensitive roles require an approved governance proposal."""
     if profile_name in SENSITIVE_ROLES:
-        proposal = _find_approved_role_proposal(user.id, profile_name)
+        proposal = _find_approved_role_proposal(user.id, profile_name, "assign")
         if not proposal:
             raise PermissionError(
                 f"Assigning '{profile_name}' requires an approved governance proposal. "
-                f"Use 'Propose (Governance Vote)' to initiate a vote."
+                f"Confirm the prompt to submit one for a vote."
             )
         logger.info(
             f"[Agora] Sensitive role '{profile_name}' assignment approved via proposal "
@@ -62,10 +71,11 @@ def role_assign_prehook(user, profile_name, assigner_principal):
 def role_revoke_prehook(user, profile_name, revoker_principal):
     """Agora: revoking sensitive roles also requires governance approval."""
     if profile_name in SENSITIVE_ROLES:
-        proposal = _find_approved_role_proposal(user.id, f"revoke_{profile_name}")
+        proposal = _find_approved_role_proposal(user.id, profile_name, "revoke")
         if not proposal:
             raise PermissionError(
-                f"Revoking '{profile_name}' requires an approved governance proposal."
+                f"Revoking '{profile_name}' requires an approved governance proposal. "
+                f"Confirm the prompt to submit one for a vote."
             )
     return True
 

@@ -478,33 +478,110 @@ def delete_department(args) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def _resolve_governing_department(caller: User, dept: Department) -> Department:
+    """Org whose M/N/quorum policy gates an action on *dept*."""
+    governing = dept
+    if not getattr(dept, "is_root", False) and _caller_in_root(caller):
+        try:
+            from core.org_policy import org_has_authority
+
+            root = Department[ROOT_ORG_NAME]
+            if root and org_has_authority(root.name, "org.appoint", target_name=dept.name):
+                governing = root
+        except Exception as e:
+            logger.warning(f"root authority resolution failed, using target policy: {e}")
+    return governing
+
+
+def _manage_department_member(args_dict: dict, action_kind: str) -> str:
+    """Add/remove a department member, policy-gated like position actions."""
+    from core.org_member_admin import (
+        apply_member_action,
+        build_proposal_code,
+        describe_action,
+    )
+    from core.position_admin import policy_is_direct
+
+    caller = _get_caller_user()
+    dept_name = (args_dict.get("department") or "").strip()
+    user_principal = (args_dict.get("user_principal") or "").strip()
+    if not dept_name or not user_principal:
+        return json.dumps({"success": False, "error": "department and user_principal are required"})
+
+    dept = Department[dept_name]
+    if not dept:
+        return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+
+    user = User[user_principal]
+    if not user:
+        return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
+
+    is_manager = _can_manage_dept(caller, dept)
+    if not is_manager and not _is_dept_member(caller, dept):
+        return json.dumps({"success": False, "error": "Access denied: not a manager or member of this department"})
+
+    action = {
+        "action": action_kind,
+        "department": dept_name,
+        "user_principal": user_principal,
+    }
+    governing = _resolve_governing_department(caller, dept)
+
+    if policy_is_direct(governing):
+        if not is_manager:
+            return json.dumps({"success": False, "error": "Access denied: managing this department requires admin/head rights"})
+        result = apply_member_action(action)
+        if result.get("success"):
+            result["data"] = {
+                **(result.get("data") or {}),
+                "applied": "direct",
+                "governed_by": governing.name,
+            }
+        logger.info(
+            f"User {user_principal} {action_kind} on department '{dept_name}' "
+            f"by {_get_caller_principal()} (direct)"
+        )
+        return json.dumps(result)
+
+    summary = describe_action(action)
+
+    # A vote is needed — never create the proposal without explicit
+    # confirmation from the caller (the UI shows a confirmation modal).
+    if not args_dict.get("confirm"):
+        return json.dumps({
+            "success": True,
+            "data": {
+                "requires_confirmation": True,
+                "summary": summary,
+                "governed_by": governing.name,
+                "policy": f"{governing.policy_threshold_m}/{governing.policy_threshold_n}",
+            },
+        })
+
+    data = _submit_org_scoped_proposal(
+        action,
+        governing,
+        summary,
+        proposal_type="member_action",
+        action_field="member_action",
+        build_code=build_proposal_code,
+        target_note=lambda target, gov: (
+            f"Membership change in department '{target}'"
+            if target == gov
+            else f"Membership change in department '{target}', decided by '{gov}'"
+        ),
+    )
+    return json.dumps({
+        "success": True,
+        "data": {**data, "applied": "proposal", "summary": summary},
+    })
+
+
 def add_department_member(args) -> str:
     """Add a user to a department."""
     try:
         args_dict = _parse_args(args)
-        caller = _get_caller_user()
-
-        dept_name = args_dict.get("department")
-        user_principal = args_dict.get("user_principal")
-        if not dept_name or not user_principal:
-            return json.dumps({"success": False, "error": "department and user_principal are required"})
-
-        dept = Department[dept_name]
-        if not dept:
-            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
-
-        if not _can_manage_dept(caller, dept):
-            return json.dumps({"success": False, "error": "Access denied"})
-
-        user = User[user_principal]
-        if not user:
-            return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
-
-        from core.membership import add_department_member
-
-        add_department_member(dept, user)
-        logger.info(f"User {user_principal} added to department '{dept_name}' by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"message": f"User added to '{dept_name}'"}})
+        return _manage_department_member(args_dict, "add")
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -516,27 +593,7 @@ def remove_department_member(args) -> str:
     """Remove a user from a department."""
     try:
         args_dict = _parse_args(args)
-        caller = _get_caller_user()
-
-        dept_name = args_dict.get("department")
-        user_principal = args_dict.get("user_principal")
-        if not dept_name or not user_principal:
-            return json.dumps({"success": False, "error": "department and user_principal are required"})
-
-        dept = Department[dept_name]
-        if not dept:
-            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
-
-        if not _can_manage_dept(caller, dept):
-            return json.dumps({"success": False, "error": "Access denied"})
-
-        user = User[user_principal]
-        if not user:
-            return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
-
-        user.departments.remove(dept)
-        logger.info(f"User {user_principal} removed from department '{dept_name}' by {_get_caller_principal()}")
-        return json.dumps({"success": True, "data": {"message": f"User removed from '{dept_name}'"}})
+        return _manage_department_member(args_dict, "remove")
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
@@ -1271,8 +1328,19 @@ def assign_profile(args) -> str:
         if profile_name in current_profiles:
             return json.dumps({"success": False, "error": f"User already has profile '{profile_name}'"})
 
+        # Codex governance policy can reject (e.g. realms that require a vote).
+        try:
+            User.role_assign_prehook(target_user, profile_name, caller_principal)
+        except PermissionError as e:
+            return json.dumps({"success": False, "error": str(e), "governance_blocked": True})
+
         target_user.profiles.add(profile)
         logger.info(f"Profile '{profile_name}' assigned to {target_principal} by {caller_principal}")
+
+        try:
+            User.role_assign_posthook(target_user, profile_name, caller_principal)
+        except Exception as e:
+            logger.warning(f"role_assign_posthook error (non-fatal): {e}")
 
         return json.dumps({
             "success": True,
@@ -1371,15 +1439,17 @@ def _is_dept_member(user: User, dept: Department) -> bool:
         return False
 
 
-def _submit_position_proposal(action: dict, dept: Department, summary: str) -> dict:
-    """Create an org-scoped Proposal that replays *action* on approval.
-
-    ``dept`` is the *governing* org — the org whose members vote and whose
-    M/N/quorum/veto policy applies. For root-initiated actions on another
-    org this is the root org, not the target (root authority is absolute;
-    only root's own policy gates it). Voting is opened immediately.
-    """
-    from core.position_admin import build_proposal_code
+def _submit_org_scoped_proposal(
+    action: dict,
+    dept: Department,
+    summary: str,
+    *,
+    proposal_type: str,
+    action_field: str,
+    build_code,
+    target_note,
+) -> dict:
+    """Create an org-scoped Proposal that replays *action* on approval."""
     from ggg import Proposal
 
     proposer = _get_caller_user()
@@ -1388,11 +1458,11 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
     proposal_id = f"prop_{proposal_num:03d}"
 
     metadata = {
-        "proposal_type": "position_action",
+        "proposal_type": proposal_type,
         "org_scope": dept.name,
-        "position_action": action,
-        "code_inline": build_proposal_code(action),
-        "codex_name": f"position_action_{proposal_id}",
+        action_field: action,
+        "code_inline": build_code(action),
+        "codex_name": f"{proposal_type}_{proposal_id}",
     }
 
     voting_window = 604_800
@@ -1407,11 +1477,7 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
     deadline_s = ic.time() // 1_000_000_000 + voting_window
 
     target_org = (action.get("department") or "").strip() or dept.name
-    governed_note = (
-        f"Position change in department '{target_org}'"
-        if target_org == dept.name
-        else f"Position change in department '{target_org}', decided by '{dept.name}'"
-    )
+    governed_note = target_note(target_org, dept.name)
     proposal = Proposal(
         proposal_id=proposal_id,
         title=summary,
@@ -1429,18 +1495,34 @@ def _submit_position_proposal(action: dict, dept: Department, summary: str) -> d
         votes_no=0.0,
         votes_abstain=0.0,
         total_voters=0.0,
-        required_threshold=1.0,  # org policy decides; realm threshold unused
-        # First-class indexed field (Proposal v2); kept in metadata too so
-        # older voting bundles that only read metadata still scope the vote.
+        required_threshold=1.0,
         org_scope=dept.name,
         metadata=json.dumps(metadata),
     )
-    logger.info(f"Position proposal {proposal_id} submitted for '{dept.name}': {summary}")
+    logger.info(f"{proposal_type} proposal {proposal_id} submitted for '{dept.name}': {summary}")
     return {
         "proposal_id": proposal.proposal_id,
         "status": proposal.status,
         "org_scope": dept.name,
     }
+
+
+def _submit_position_proposal(action: dict, dept: Department, summary: str) -> dict:
+    from core.position_admin import build_proposal_code
+
+    return _submit_org_scoped_proposal(
+        action,
+        dept,
+        summary,
+        proposal_type="position_action",
+        action_field="position_action",
+        build_code=build_proposal_code,
+        target_note=lambda target, gov: (
+            f"Position change in department '{target}'"
+            if target == gov
+            else f"Position change in department '{target}', decided by '{gov}'"
+        ),
+    )
 
 
 def manage_position(args) -> str:
@@ -1500,22 +1582,7 @@ def manage_position(args) -> str:
         if not is_manager and not _is_dept_member(caller, dept):
             return json.dumps({"success": False, "error": "Access denied: not a manager or member of this department"})
 
-        # Root authority is absolute: a root member acting on another org is
-        # governed by root's OWN policy, never the target's. While the creator
-        # alone holds root (1/1 policy) actions apply directly at any stage;
-        # once root passes to e.g. a Congress, root-initiated actions become
-        # proposals voted by the root org's members. Actions initiated from
-        # within the org (head/members, not via root) keep the org's policy.
-        governing = dept
-        if not getattr(dept, "is_root", False) and _caller_in_root(caller):
-            try:
-                from core.org_policy import org_has_authority
-
-                root = Department[ROOT_ORG_NAME]
-                if root and org_has_authority(root.name, "org.appoint", target_name=dept.name):
-                    governing = root
-            except Exception as e:
-                logger.warning(f"root authority resolution failed, using target policy: {e}")
+        governing = _resolve_governing_department(caller, dept)
 
         if policy_is_direct(governing):
             if not is_manager:
@@ -1530,6 +1597,20 @@ def manage_position(args) -> str:
             return json.dumps(result)
 
         summary = describe_action(action)
+
+        # A vote is needed — never create the proposal without explicit
+        # confirmation from the caller (the UI shows a confirmation modal).
+        if not args_dict.get("confirm"):
+            return json.dumps({
+                "success": True,
+                "data": {
+                    "requires_confirmation": True,
+                    "summary": summary,
+                    "governed_by": governing.name,
+                    "policy": f"{governing.policy_threshold_m}/{governing.policy_threshold_n}",
+                },
+            })
+
         data = _submit_position_proposal(action, governing, summary)
         return json.dumps({
             "success": True,

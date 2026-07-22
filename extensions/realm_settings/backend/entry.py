@@ -33,6 +33,17 @@ def _is_realm_admin(principal: str) -> bool:
         return False
 
 
+def _can_configure_realm(principal: str) -> bool:
+    """True when the caller holds ``realm.configure``."""
+    try:
+        from core.access import _check_access
+        from ggg.system.user_profile import Operations
+
+        return _check_access(principal, Operations.REALM_CONFIGURE)
+    except Exception:
+        return False
+
+
 def _now_seconds() -> int:
     try:
         from _cdk import ic
@@ -58,6 +69,8 @@ def extension_sync_call(method_name: str, args: dict):
         "patch_manifest_data": (patch_manifest_data, True),
         "set_quarter_policy": (set_quarter_policy, True),
         "request_quarter_scale": (request_quarter_scale, True),
+        "get_sandbox_config": (get_sandbox_config, False),
+        "set_sandbox_config": (set_sandbox_config, True),
     }
 
     if method_name not in methods:
@@ -615,6 +628,67 @@ def request_quarter_scale(args: dict):
         }
     except Exception as e:
         logger.error(f"request_quarter_scale error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_sandbox_config(args=None):
+    """Return sandbox policy + resolved modes. Requires ``realm.configure``."""
+    try:
+        from core import runtime_sandbox
+        from ggg.system.user_profile import Operations
+
+        caller = _caller()
+        can = _can_configure_realm(caller)
+        if not can:
+            return {
+                "success": False,
+                "error": f"Access denied: you lack permission '{Operations.REALM_CONFIGURE}'",
+                "denied_operation": Operations.REALM_CONFIGURE,
+            }
+        data = runtime_sandbox.get_status()
+        data["caller_can_configure"] = True
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.error(f"get_sandbox_config error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def set_sandbox_config(args: dict):
+    """Update sandbox policy (partial merge). Requires ``realm.configure``.
+
+    When the root department policy is not 1/1, returns
+    ``requires_confirmation`` until called again with ``confirm: true``, then
+    creates a governance proposal that reapplies the same patch.
+    """
+    try:
+        from core.sandbox_admin import apply_sandbox_config_change
+        from ggg.system.user_profile import Operations
+
+        caller = _caller()
+        if not _can_configure_realm(caller):
+            return {
+                "success": False,
+                "error": f"Access denied: you lack permission '{Operations.REALM_CONFIGURE}'",
+                "denied_operation": Operations.REALM_CONFIGURE,
+            }
+
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                return {"success": False, "error": "args is not valid JSON"}
+        if not isinstance(args, dict):
+            return {"success": False, "error": "args must be an object"}
+
+        confirm = bool(args.get("confirm", False))
+        if isinstance(args.get("patch"), dict):
+            patch = args["patch"]
+        else:
+            patch = {k: v for k, v in args.items() if k not in ("confirm", "patch")}
+
+        return apply_sandbox_config_change(patch, confirm=confirm)
+    except Exception as e:
+        logger.error(f"set_sandbox_config error: {e}")
         return {"success": False, "error": str(e)}
 
 

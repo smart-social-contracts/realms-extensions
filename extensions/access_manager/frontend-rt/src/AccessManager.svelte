@@ -89,6 +89,46 @@
 		return await ctx.callSync(fn, args);
 	}
 
+	// Confirmation modal shown before any action that creates a governance
+	// proposal. The backend returns requires_confirmation instead of creating
+	// the proposal; on confirm we re-issue the call with confirm: true.
+	let voteConfirm: {
+		summary: string;
+		governedBy: string;
+		policy: string;
+		run: () => Promise<void>;
+	} | null = $state(null);
+	let voteConfirmBusy = $state(false);
+
+	async function callGated(
+		fn: string,
+		params: Record<string, unknown>,
+		handle: (res: any) => void | Promise<void>,
+	) {
+		const res = await callExt(fn, params);
+		if (res?.success && res.data?.requires_confirmation) {
+			voteConfirm = {
+				summary: res.data.summary || '',
+				governedBy: res.data.governed_by || '',
+				policy: res.data.policy || '',
+				run: async () => {
+					voteConfirmBusy = true;
+					try {
+						const confirmed = await callExt(fn, { ...params, confirm: true });
+						await handle(confirmed);
+						voteConfirm = null;
+					} catch (e: any) {
+						addToast(e?.message || 'Error', 'error');
+					} finally {
+						voteConfirmBusy = false;
+					}
+				},
+			};
+			return;
+		}
+		await handle(res);
+	}
+
 	// --- Departments ---
 	async function loadDepartments() {
 		deptLoading = true;
@@ -177,22 +217,37 @@
 		return true;
 	}
 
+	function handleMemberResult(res: any, successMsg: string): boolean {
+		if (!res?.success) {
+			addToast(res?.error || 'Member action failed', 'error');
+			return false;
+		}
+		if (res.data?.applied === 'proposal') {
+			addToast(`Proposal ${res.data.proposal_id} created — department members must vote (see Voting)`);
+		} else {
+			addToast(successMsg);
+		}
+		return true;
+	}
+
 	async function createPosition(deptName: string) {
 		if (!newPosTitle.trim()) return;
+		const title = newPosTitle.trim();
 		try {
-			const res = await callExt('manage_position', {
+			await callGated('manage_position', {
 				action: 'create',
 				department: deptName,
-				title: newPosTitle.trim(),
-				profile: newPosProfile.trim() || newPosTitle.trim(),
+				title,
+				profile: newPosProfile.trim() || title,
 				headcount: parseInt(newPosHeadcount || '1', 10),
 				salary_amount: parseInt(newPosSalary || '0', 10),
+			}, async (res) => {
+				if (handlePositionResult(res, `Position "${title}" created`)) {
+					showNewPosition = null;
+					newPosTitle = ''; newPosProfile = ''; newPosHeadcount = '1'; newPosSalary = '0';
+					await loadDepartments();
+				}
 			});
-			if (handlePositionResult(res, `Position "${newPosTitle}" created`)) {
-				showNewPosition = null;
-				newPosTitle = ''; newPosProfile = ''; newPosHeadcount = '1'; newPosSalary = '0';
-				await loadDepartments();
-			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -209,17 +264,18 @@
 
 	async function saveEditPosition(pos: any) {
 		try {
-			const res = await callExt('manage_position', {
+			await callGated('manage_position', {
 				action: 'update',
 				key: pos.key,
 				new_title: posDraft.title.trim(),
 				headcount: parseInt(posDraft.headcount || '1', 10),
 				salary_amount: parseInt(posDraft.salary || '0', 10),
+			}, async (res) => {
+				if (handlePositionResult(res, `Position "${pos.title}" updated`)) {
+					editingPosition = null;
+					await loadDepartments();
+				}
 			});
-			if (handlePositionResult(res, `Position "${pos.title}" updated`)) {
-				editingPosition = null;
-				await loadDepartments();
-			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -228,10 +284,11 @@
 	async function togglePositionStatus(pos: any) {
 		const action = pos.status === 'closed' ? 'reopen' : 'close';
 		try {
-			const res = await callExt('manage_position', { action, key: pos.key });
-			if (handlePositionResult(res, `Position "${pos.title}" ${action}${action === 'close' ? 'd' : 'ed'}`)) {
-				await loadDepartments();
-			}
+			await callGated('manage_position', { action, key: pos.key }, async (res) => {
+				if (handlePositionResult(res, `Position "${pos.title}" ${action}${action === 'close' ? 'd' : 'ed'}`)) {
+					await loadDepartments();
+				}
+			});
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -239,14 +296,15 @@
 
 	async function endAppointment(pos: any, principal: string) {
 		try {
-			const res = await callExt('manage_position', {
+			await callGated('manage_position', {
 				action: 'end_appointment',
 				key: pos.key,
 				principal,
+			}, async (res) => {
+				if (handlePositionResult(res, 'Appointment ended')) {
+					await loadDepartments();
+				}
 			});
-			if (handlePositionResult(res, 'Appointment ended')) {
-				await loadDepartments();
-			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -255,16 +313,17 @@
 	async function appointMember(pos: any, principal: string) {
 		if (!principal.trim()) return;
 		try {
-			const res = await callExt('manage_position', {
+			await callGated('manage_position', {
 				action: 'appoint',
 				key: pos.key,
 				principal: principal.trim(),
+			}, async (res) => {
+				if (handlePositionResult(res, `Appointed to "${pos.title}"`)) {
+					assigningPosition = null;
+					assignPrincipal = '';
+					await loadDepartments();
+				}
 			});
-			if (handlePositionResult(res, `Appointed to "${pos.title}"`)) {
-				assigningPosition = null;
-				assignPrincipal = '';
-				await loadDepartments();
-			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -424,17 +483,15 @@
 	async function addMember(deptName: string) {
 		if (!addMemberPrincipal.trim()) return;
 		try {
-			const res = await callExt('add_department_member', {
+			await callGated('add_department_member', {
 				department: deptName,
 				user_principal: addMemberPrincipal.trim(),
+			}, async (res) => {
+				if (handleMemberResult(res, 'Member added')) {
+					addMemberPrincipal = '';
+					await loadDepartments();
+				}
 			});
-			if (res?.success) {
-				addToast('Member added');
-				addMemberPrincipal = '';
-				await loadDepartments();
-			} else {
-				addToast(res?.error || 'Failed', 'error');
-			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -442,16 +499,14 @@
 
 	async function removeMember(deptName: string, principal: string) {
 		try {
-			const res = await callExt('remove_department_member', {
+			await callGated('remove_department_member', {
 				department: deptName,
 				user_principal: principal,
+			}, async (res) => {
+				if (handleMemberResult(res, 'Member removed')) {
+					await loadDepartments();
+				}
 			});
-			if (res?.success) {
-				addToast('Member removed');
-				await loadDepartments();
-			} else {
-				addToast(res?.error || 'Failed', 'error');
-			}
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
@@ -574,6 +629,12 @@
 		return p.slice(0, 5) + '...' + p.slice(-5);
 	}
 
+	function memberOptionLabel(m: { nickname?: string; principal: string }): string {
+		const nickname = (m.nickname || '').trim();
+		if (nickname) return `${nickname} (${shortPrincipal(m.principal)})`;
+		return shortPrincipal(m.principal);
+	}
+
 	$effect(() => {
 		loadDepartments();
 		loadAllOperations();
@@ -581,12 +642,61 @@
 	});
 </script>
 
+{#snippet identityLabel(person: { nickname?: string; principal: string })}
+	{#if (person.nickname || '').trim()}
+		<span class="truncate inline-flex items-baseline gap-1.5 min-w-0">
+			<span>{person.nickname}</span>
+			<span class="text-gray-400 font-mono text-xs shrink-0">{shortPrincipal(person.principal)}</span>
+		</span>
+	{:else}
+		<span class="truncate font-mono">{shortPrincipal(person.principal)}</span>
+	{/if}
+{/snippet}
+
 <div class="w-full min-h-full p-4 sm:p-6 lg:p-8">
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-gray-900">Departments</h1>
 		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, positions, and department-over-department authority</p>
 	</div>
+
+	<!-- Governance vote confirmation modal -->
+	{#if voteConfirm}
+		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+			<div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+				<h3 class="text-lg font-semibold text-gray-900 mb-2">Governance vote required</h3>
+				<p class="text-sm text-gray-600 mb-1">
+					This action cannot be applied directly — the policy of
+					<strong>{voteConfirm.governedBy}</strong> ({voteConfirm.policy}) requires a vote.
+				</p>
+				<div class="my-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800">
+					{voteConfirm.summary}
+				</div>
+				<p class="text-sm text-gray-600 mb-4">
+					Create a proposal? Department members will vote on it in <strong>Voting</strong>.
+				</p>
+				<div class="flex justify-end gap-3">
+					<button
+						onclick={() => (voteConfirm = null)}
+						disabled={voteConfirmBusy}
+						class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+					>
+						Cancel
+					</button>
+					<button
+						onclick={() => voteConfirm?.run()}
+						disabled={voteConfirmBusy}
+						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40"
+					>
+						{#if voteConfirmBusy}
+							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+						{/if}
+						Create proposal
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	<!-- Toasts -->
 	{#if toasts.length > 0}
@@ -685,7 +795,10 @@
 
 				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
 					{#if dept.head}
-						<div class="text-sm"><span class="font-medium text-gray-700">Head:</span> {dept.head.nickname || shortPrincipal(dept.head.principal)}</div>
+						<div class="text-sm">
+							<span class="font-medium text-gray-700">Head:</span>
+							{@render identityLabel(dept.head)}
+						</div>
 					{/if}
 					{#if dept.extensions?.length > 0}
 						<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
@@ -785,7 +898,7 @@
 													<div class="mt-2 flex flex-wrap gap-1">
 														{#each pos.holders as h (h.principal)}
 															<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-gray-100 border border-gray-200 rounded-full text-gray-600" title={h.principal}>
-																{h.nickname || shortPrincipal(h.principal)}
+																{@render identityLabel(h)}
 																<button onclick={() => endAppointment(pos, h.principal)} class="text-gray-400 hover:text-red-600" title="End appointment">&times;</button>
 															</span>
 														{/each}
@@ -803,7 +916,7 @@
 																	<select bind:value={assignPrincipal} class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
 																		<option value="">Select member…</option>
 																		{#each eligible as m (m.principal)}
-																			<option value={m.principal}>{m.nickname || shortPrincipal(m.principal)}</option>
+																			<option value={m.principal}>{memberOptionLabel(m)}</option>
 																		{/each}
 																	</select>
 																</label>
@@ -953,13 +1066,20 @@
 					<!-- Members -->
 					<div class="pt-2 border-t border-gray-200">
 						<div class="text-sm font-medium text-gray-700 mb-2">Members</div>
+						{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
+							<p class="text-xs text-gray-500 mb-2">
+								Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
+								{(dept.policy?.quorum_percent ?? 0) > 0 ? ` · quorum ${dept.policy?.quorum_percent}%` : ''}
+								— add/remove requires a vote
+							</p>
+						{/if}
 						{#if dept.members.length === 0}
 							<p class="text-sm text-gray-400 mb-2">No members</p>
 						{:else}
 							<div class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3 mb-2">
 								{#each dept.members as m (m.principal)}
 									<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg border border-gray-200">
-										<span class="truncate">{m.nickname || shortPrincipal(m.principal)}</span>
+										<div class="min-w-0 flex-1">{@render identityLabel(m)}</div>
 										<button onclick={() => removeMember(dept.name, m.principal)} class="text-red-500 hover:text-red-700 text-xs shrink-0 ml-2">Remove</button>
 									</div>
 								{/each}
