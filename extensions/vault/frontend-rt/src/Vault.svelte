@@ -13,6 +13,14 @@
 		name: string;
 	}
 
+	interface VaultSettings {
+		maxRefreshAgeMs: number;
+	}
+
+	const DEFAULT_MAX_REFRESH_AGE_MS = 60 * 60 * 1000; // 1 hour
+	const SETTINGS_KEY = 'vault_settings';
+	const LAST_REFRESH_KEY = 'vault_last_refresh';
+
 	let activeTab = $state<TabId>('balance');
 	let loading = $state(false);
 	let error = $state('');
@@ -30,6 +38,7 @@
 	let balanceObject = $state<any>(null);
 	let allBalances = $state<any[]>([]);
 	let balancePagination = $state<any>(null);
+	let userTokenBalances = $state<Record<string, number>>({});
 
 	let transactions = $state<any[]>([]);
 	let transferPagination = $state<any>(null);
@@ -39,6 +48,9 @@
 	let vaultBalanceLoading = $state(false);
 	let lastRefreshTime = $state<Date | null>(null);
 	let copiedText = $state('');
+
+	let settings = $state<VaultSettings>(loadVaultSettings());
+	let settingsInputMinutes = $state(Math.round(loadVaultSettings().maxRefreshAgeMs / 60000));
 
 	let transferToken = $state('');
 	let transferTo = $state('');
@@ -70,6 +82,58 @@
 
 	function walletTokenName(displayKey: string): string {
 		return ledgerCanisters[displayKey]?.name ?? displayKey;
+	}
+
+	function loadVaultSettings(): VaultSettings {
+		try {
+			const raw = localStorage.getItem(SETTINGS_KEY);
+			if (raw) {
+				const parsed = JSON.parse(raw);
+				if (typeof parsed.maxRefreshAgeMs === 'number' && parsed.maxRefreshAgeMs > 0) {
+					return { maxRefreshAgeMs: parsed.maxRefreshAgeMs };
+				}
+			}
+		} catch {
+			// ignore
+		}
+		return { maxRefreshAgeMs: DEFAULT_MAX_REFRESH_AGE_MS };
+	}
+
+	function saveVaultSettings(settings: VaultSettings) {
+		try {
+			localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+		} catch {
+			// ignore
+		}
+	}
+
+	function updateSettingsFromInput() {
+		const minutes = Math.max(1, Math.round(settingsInputMinutes || 1));
+		settings = { maxRefreshAgeMs: minutes * 60000 };
+		saveVaultSettings(settings);
+	}
+
+	function loadLastRefresh(): { timestamp: number; balances: Record<string, number> } | null {
+		try {
+			const raw = localStorage.getItem(LAST_REFRESH_KEY);
+			if (raw) {
+				const parsed = JSON.parse(raw);
+				if (parsed && typeof parsed.timestamp === 'number' && parsed.balances) {
+					return { timestamp: parsed.timestamp, balances: parsed.balances };
+				}
+			}
+		} catch {
+			// ignore
+		}
+		return null;
+	}
+
+	function saveLastRefresh(timestamp: number, balances: Record<string, number>) {
+		try {
+			localStorage.setItem(LAST_REFRESH_KEY, JSON.stringify({ timestamp, balances }));
+		} catch {
+			// ignore
+		}
 	}
 
 	async function copyToClipboard(text: string) {
@@ -138,6 +202,19 @@
 			ledgerCanisters = canisters;
 			selectedTokens = sel;
 			tokenBalances = bals;
+
+			// Restore last known vault balances so the UI is not blank on load
+			const last = loadLastRefresh();
+			if (last && last.balances) {
+				for (const key of Object.keys(canisters)) {
+					if (key in last.balances) {
+						bals[key] = last.balances[key];
+					}
+				}
+				tokenBalances = bals;
+				lastRefreshTime = new Date(last.timestamp);
+			}
+
 			const syms = Object.keys(canisters);
 			if (syms.length > 0 && !transferToken) transferToken = syms[0];
 			tokensLoaded = true;
@@ -164,9 +241,21 @@
 					(b: any) => b.principal === currentPrincipal || b.id === currentPrincipal || b._id === currentPrincipal,
 				);
 				balance = balanceObject ? balanceObject.amount || 0 : 0;
+
+				// Per-token user balances (may be empty if the user has no balances)
+				const perToken: Record<string, number> = {};
+				for (const b of allBalances) {
+					if (b.principal === currentPrincipal || b.id === currentPrincipal || b._id === currentPrincipal) {
+						if (b.token) {
+							perToken[b.token] = b.amount || 0;
+						}
+					}
+				}
+				userTokenBalances = perToken;
 			} else {
 				balance = 0;
 				balanceObject = null;
+				userTokenBalances = {};
 			}
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
@@ -318,6 +407,7 @@
 			applyRefreshBalances(refreshData.TransactionSummary.per_token || {});
 			await loadVaultPrincipal();
 			lastRefreshTime = new Date();
+			saveLastRefresh(lastRefreshTime.getTime(), tokenBalances);
 			await Promise.all([loadBalance(), loadTransactions(0)]);
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
@@ -443,7 +533,17 @@
 	$effect(() => {
 		(async () => {
 			await loadTokens();
-			await refreshVault();
+			const settings = loadVaultSettings();
+			const last = loadLastRefresh();
+			const now = Date.now();
+			const shouldRefresh = !last || (now - last.timestamp) > settings.maxRefreshAgeMs;
+
+			if (shouldRefresh) {
+				await refreshVault();
+			} else {
+				// Still load user-specific and transaction data in the background
+				await Promise.all([loadBalance(), loadTransactions(0)]);
+			}
 		})();
 	});
 </script>
@@ -605,17 +705,21 @@
 		<!-- ═══ Balance Tab ═══ -->
 		{#if activeTab === 'balance'}
 			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6')}>
-				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4')}>Your Balance</h2>
+				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2')}>Your Balance</h2>
+				<p class={cn('text-sm text-gray-500 dark:text-gray-400 mb-4')}>
+					Personal balance for the logged-in principal. The vault canister balance is shown at the top.
+				</p>
 				<div class={cn('space-y-3')}>
 					{#each tokenSymbols as token}
 						{#if selectedTokens[token]}
+							{@const userBal = userTokenBalances[token] ?? 0}
 							<div class={cn('flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg')}>
 								<span class={cn('text-base font-semibold text-gray-700 dark:text-gray-300')}>{ledgerCanisters[token].symbol}</span>
 								<div class={cn('text-right')}>
 									<div class={cn('text-xl font-bold text-indigo-600 dark:text-indigo-400')}>
-										{formatTokenAmount(balance, ledgerCanisters[token].decimals)}
+										{formatTokenAmount(userBal, ledgerCanisters[token].decimals)}
 									</div>
-									<div class={cn('text-xs text-gray-500 dark:text-gray-400')}>{balance.toLocaleString()} units</div>
+									<div class={cn('text-xs text-gray-500 dark:text-gray-400')}>{userBal.toLocaleString()} units</div>
 								</div>
 							</div>
 						{/if}
@@ -631,11 +735,6 @@
 							<span class={cn('font-mono text-xs ml-1')}>{balanceObject._id || balanceObject.id}</span>
 						</p>
 					</div>
-				{/if}
-				{#if balancePagination}
-					<p class={cn('mt-3 text-xs text-gray-500 dark:text-gray-400')}>
-						Showing {allBalances.length} balance(s) (Page {Number(balancePagination.page_num) + 1} of {balancePagination.total_pages})
-					</p>
 				{/if}
 			</div>
 
@@ -939,6 +1038,30 @@
 						{#if loading}{@html spinnerSvg}{/if}
 						{loading ? 'Refreshing…' : 'Full Vault Refresh'}
 					</button>
+				</div>
+
+				<div class={cn('mb-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700')}>
+					<h3 class={cn('text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2')}>Auto-refresh settings</h3>
+					<p class={cn('text-xs text-gray-500 dark:text-gray-400 mb-3')}>
+						The Vault will only run an expensive full refresh on load if the last refresh is older than this threshold.
+					</p>
+					<div class={cn('flex items-center gap-3')}>
+						<label for="v-refresh-age" class={cn('text-sm text-gray-700 dark:text-gray-300')}>Max refresh age:</label>
+						<input
+							id="v-refresh-age"
+							type="number"
+							min="1"
+							bind:value={settingsInputMinutes}
+							class={cn('w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100')}
+						/>
+						<span class={cn('text-sm text-gray-500 dark:text-gray-400')}>minutes</span>
+						<button
+							onclick={updateSettingsFromInput}
+							class={cn('px-3 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/40 rounded hover:bg-indigo-200 dark:hover:bg-indigo-900/60')}
+						>
+							Save
+						</button>
+					</div>
 				</div>
 
 				<div class={cn('space-y-6')}>
