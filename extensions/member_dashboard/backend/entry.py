@@ -485,8 +485,10 @@ def demo_mark_invoice_paid(args: str) -> str:
             )
 
         # Mark as paid (demo)
-        invoice.status = "Paid"
-        invoice.paid_at = datetime.utcnow().isoformat()
+        invoice.mark_paid(
+            payment_currency=invoice.currency,
+            payment_amount=invoice.amount,
+        )
 
         logger.info(f"[DEMO] Invoice {invoice_id} marked as Paid")
 

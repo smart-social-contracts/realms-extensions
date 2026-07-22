@@ -60,6 +60,18 @@
 		return typeof raw === 'string' ? JSON.parse(raw) : raw;
 	}
 
+	/** Vault extension endpoints return `{ success, data: { ...payload } }`. */
+	function unwrapExtensionPayload(raw: any): any {
+		if (raw && typeof raw === 'object' && raw.success === true && raw.data != null) {
+			return raw.data;
+		}
+		return raw;
+	}
+
+	function walletTokenName(displayKey: string): string {
+		return ledgerCanisters[displayKey]?.name ?? displayKey;
+	}
+
 	async function copyToClipboard(text: string) {
 		try {
 			await navigator.clipboard.writeText(text);
@@ -206,16 +218,18 @@
 		}
 	}
 
-	async function loadVaultBalance(token: string) {
+	async function loadVaultBalance(displayKey: string) {
 		try {
-			const data = await ctx.callSync('get_vault_balance', { token });
+			const data = unwrapExtensionPayload(
+				await ctx.callSync('get_vault_balance', { token: walletTokenName(displayKey) }),
+			);
 			if (data?.Balance) {
-				tokenBalances[token] = data.Balance.amount || 0;
+				tokenBalances[displayKey] = data.Balance.amount || 0;
 				tokenBalances = { ...tokenBalances };
 				vaultPrincipal = data.Balance.principal_id || vaultPrincipal;
 			}
 		} catch (e: any) {
-			console.error(`Failed to load vault balance for ${token}:`, e);
+			console.error(`Failed to load vault balance for ${displayKey}:`, e);
 		}
 	}
 
@@ -227,14 +241,16 @@
 
 	// ── Mutations ────────────────────────────────────────────
 
-	async function refreshVaultBalance(token: string) {
+	async function refreshVaultBalance(displayKey: string) {
 		vaultBalanceLoading = true;
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const data = await ctx.callAsync('refresh_vault_balance', { token });
+			const data = unwrapExtensionPayload(
+				await ctx.callAsync('refresh_vault_balance', { token: walletTokenName(displayKey) }),
+			);
 			if (data?.Balance) {
-				tokenBalances[token] = data.Balance.amount || 0;
+				tokenBalances[displayKey] = data.Balance.amount || 0;
 				tokenBalances = { ...tokenBalances };
 				lastRefreshTime = new Date();
 			} else {
@@ -268,7 +284,11 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			await ctx.callAsync('refresh', {});
+			const refreshData = unwrapExtensionPayload(await ctx.callAsync('refresh', {}));
+			if (refreshData?.TransactionSummary == null) {
+				error = 'Failed to sync vault transactions';
+				return;
+			}
 			lastRefreshTime = new Date();
 			await loadBalance();
 			await loadAllVaultBalances();
@@ -299,9 +319,9 @@
 			const args: any = { to_principal: transferTo, amount: transferAmount };
 			if (transferToSubaccount.trim()) args.to_subaccount = transferToSubaccount.trim();
 			if (transferFromSubaccount.trim()) args.from_subaccount = transferFromSubaccount.trim();
-			if (transferToken) args.token = transferToken;
+			if (transferToken) args.token = walletTokenName(transferToken);
 
-			await ctx.callAsync('transfer', args);
+			unwrapExtensionPayload(await ctx.callAsync('transfer', args));
 			transferTo = '';
 			transferAmount = 0;
 			transferToSubaccount = '';
@@ -341,7 +361,7 @@
 				return;
 			}
 
-			const data = await ctx.callAsync('lookup_balance', lookupArgs);
+			const data = unwrapExtensionPayload(await ctx.callAsync('lookup_balance', lookupArgs));
 			if (data?.LookupBalance) {
 				lookupResult = data.LookupBalance;
 			} else {
@@ -397,9 +417,7 @@
 	$effect(() => {
 		(async () => {
 			await loadTokens();
-			await loadBalance();
-			await loadAllVaultBalances();
-			await loadTransactions(0);
+			await refreshVault();
 		})();
 	});
 </script>
@@ -409,7 +427,7 @@
 	<div class={cn('flex justify-between items-center')}>
 		<h1 class={cn('text-2xl font-bold text-gray-900 dark:text-gray-100')}>Vault</h1>
 		<button
-			onclick={refreshAllVaultBalances}
+			onclick={refreshVault}
 			disabled={loading || vaultBalanceLoading}
 			class={cn(
 				'px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg',

@@ -240,6 +240,18 @@
 		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 	}
 
+	function formatInvoicePaidDate(paidOn: string | null | undefined): string {
+		if (!paidOn) return '—';
+		if (paidOn.startsWith('1970-01-01')) return '—';
+		try {
+			const d = new Date(paidOn);
+			if (Number.isNaN(d.getTime()) || d.getTime() <= 0) return '—';
+			return formatFullDate(d.getTime());
+		} catch {
+			return '—';
+		}
+	}
+
 	// Invoice actions
 	function getStatusColor(status: string): string {
 		switch (status?.toLowerCase()) {
@@ -531,6 +543,7 @@
 									<th class="px-4 py-3">Amount</th>
 									<th class="px-4 py-3">Currency</th>
 									<th class="px-4 py-3">Status</th>
+									<th class="px-4 py-3">Paid on</th>
 									<th class="px-4 py-3">Actions</th>
 								</tr>
 							</thead>
@@ -544,6 +557,9 @@
 									<td class="px-4 py-3 text-gray-700 dark:text-gray-300">{record.currency}</td>
 										<td class="px-4 py-3">
 											<span class={cn('px-2.5 py-0.5 text-xs font-medium rounded-full', getStatusColor(record.status))}>{record.status}</span>
+										</td>
+										<td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+											{formatInvoicePaidDate(record.paid_on)}
 										</td>
 										<td class="px-4 py-3">
 											{#if record.status === 'Pending' || record.status === 'Overdue'}
@@ -561,8 +577,10 @@
 														class="px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"
 													>Demo Pay</button>
 												</div>
+											{:else if record.status === 'Paid'}
+												<span class="text-xs text-green-600 dark:text-green-400">Paid</span>
 											{:else}
-												<span class="text-xs text-gray-400 dark:text-gray-500">{record.paid_on || '—'}</span>
+												<span class="text-xs text-gray-400 dark:text-gray-500">—</span>
 											{/if}
 										</td>
 									</tr>
