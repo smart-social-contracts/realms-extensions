@@ -3,8 +3,6 @@ import re
 import traceback
 from typing import Any, Dict
 
-from datetime import datetime
-
 from ggg import Invoice, PaymentAccount, Service, User
 from basilisk import Async, ic
 from ic_python_logging import get_logger
@@ -409,9 +407,13 @@ def check_invoice_payment(args: str) -> Async[str]:
         )
 
         if balance >= amount_satoshis:
-            # Payment received! Mark invoice as paid
-            invoice.status = "Paid"
-            invoice.paid_at = datetime.utcnow().isoformat()
+            # Payment received. Route through the Invoice domain method so
+            # core emits the active realm codex's accounting event.
+            invoice.mark_paid(
+                payment_currency=invoice.currency,
+                payment_amount=balance / 100_000_000,
+                payment_amount_raw=balance,
+            )
 
             logger.info(f"Invoice {invoice_id} marked as Paid")
 
