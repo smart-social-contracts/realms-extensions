@@ -32,20 +32,103 @@ def _get_wallet():
     return _wallet
 
 
+def _get_realm_accounting_currency() -> str:
+    """Return the realm's configured accounting currency symbol, if any."""
+    try:
+        from ggg import Realm
+
+        realm = Realm.load("1")
+        if realm:
+            return str(getattr(realm, "accounting_currency", "") or "").strip()
+    except Exception as e:
+        logger.warning(f"Could not read realm accounting currency: {e}")
+    return ""
+
+
+def _token_is_enabled(token) -> bool:
+    """Return True if a Token entity is enabled for display."""
+    enabled = getattr(token, "enabled", None) or getattr(token, "_prop_enabled", "true")
+    return str(enabled).lower() == "true"
+
+
+def _enabled_token_names() -> list:
+    """List names of registered tokens that are marked enabled."""
+    from ic_basilisk_toolkit.entities import Token
+
+    return [token.name for token in Token.instances() if _token_is_enabled(token)]
+
+
+def _target_token_names(wallet, token: str = None) -> list:
+    """Resolve the token(s) to operate on.
+
+    - If a specific token is requested, use it.
+    - Otherwise default to the realm's accounting currency if it is registered.
+    - Fallback to all enabled tokens.
+    - Last resort: every registered token (so the UI never goes blank).
+    """
+    if token:
+        return [token]
+    acct = _get_realm_accounting_currency()
+    if acct and wallet.get_token(acct):
+        return [acct]
+    enabled = _enabled_token_names()
+    if enabled:
+        return enabled
+    return [t["name"] for t in wallet.list_tokens()]
+
+
+# ------------------------------------------------------------------
+# Active token list (used by the frontend to avoid fetching all tokens)
+# ------------------------------------------------------------------
+
+
+def get_active_tokens(args: str) -> str:
+    """Return the active (enabled / treasury) token metadata for the Vault UI.
+
+    This avoids leaking disabled tokens into the frontend and lets the
+    backend decide which tokens are relevant (realm accounting currency).
+    """
+    from ic_basilisk_toolkit.entities import Token
+
+    try:
+        wallet = _get_wallet()
+        tokens = []
+        for name in _target_token_names(wallet):
+            token_obj = Token[name]
+            if token_obj is None:
+                continue
+            tokens.append(
+                {
+                    "name": token_obj.name,
+                    "symbol": getattr(token_obj, "symbol", token_obj.name) or token_obj.name,
+                    "ledger": token_obj.ledger,
+                    "indexer": token_obj.indexer,
+                    "decimals": token_obj.decimals,
+                    "fee": token_obj.fee,
+                }
+            )
+        return _ok({"ActiveTokens": tokens})
+    except Exception as e:
+        return _err(e)
+
+
 # ------------------------------------------------------------------
 # Lifecycle
 # ------------------------------------------------------------------
 
 
 def initialize(args: str):
-    """Called once after the extension is loaded.  Registers tokens from
-    the ``Token`` entity table into the Wallet (tokens are seeded by
-    the post-deploy script)."""
+    """Called once after the extension is loaded.  Registers enabled
+    tokens from the ``Token`` entity table into the Wallet."""
     from ic_basilisk_toolkit.entities import Token
 
     logger.info("Vault: initializing...")
     wallet = _get_wallet()
+    registered = []
     for token in Token.instances():
+        if not _token_is_enabled(token):
+            logger.info(f"Vault: skipping disabled token {token.name}")
+            continue
         wallet.register_token(
             name=token.name,
             ledger=token.ledger,
@@ -53,8 +136,9 @@ def initialize(args: str):
             decimals=getattr(token, "decimals", 8) or 8,
             fee=getattr(token, "fee", 10) or 10,
         )
+        registered.append(token.name)
     logger.info(
-        f"Vault: tokens registered: {[t['name'] for t in wallet.list_tokens()]}"
+        f"Vault: active tokens registered: {registered}"
     )
 
 
@@ -91,10 +175,10 @@ def get_vault_balance(args: str) -> str:
                 }
             )
 
-        # No token specified → return all token balances
+        # No token specified → refresh active tokens only
         balances = {}
-        for t in wallet.list_tokens():
-            balances[t["name"]] = wallet.cached_balance(t["name"])
+        for name in _target_token_names(wallet):
+            balances[name] = wallet.cached_balance(name)
         return _ok({"Balance": {"principal_id": vault_principal, "balances": balances}})
     except Exception as e:
         return _err(e)
@@ -127,10 +211,10 @@ def refresh_vault_balance(args: str):
                 }
             )
 
-        # No token specified → refresh all tokens
+        # No token specified → refresh active tokens only
         balances = {}
-        for t in wallet.list_tokens():
-            balances[t["name"]] = yield wallet.balance_of(t["name"])
+        for name in _target_token_names(wallet):
+            balances[name] = yield wallet.balance_of(name)
         return _ok({"Balance": {"principal_id": vault_principal, "balances": balances}})
     except Exception as e:
         return _err(e)
@@ -154,9 +238,9 @@ def refresh(args: str):
         if token:
             results[token] = yield wallet.refresh(token, subaccount=subaccount)
         else:
-            for t in wallet.list_tokens():
-                results[t["name"]] = yield wallet.refresh(
-                    t["name"], subaccount=subaccount
+            for name in _target_token_names(wallet):
+                results[name] = yield wallet.refresh(
+                    name, subaccount=subaccount
                 )
 
         total_new = sum(r.get("new_txs", 0) for r in results.values())
@@ -185,8 +269,8 @@ def get_transactions(args: str) -> str:
             txs = wallet.list_transfers(token, limit=limit)
         else:
             txs = []
-            for t in wallet.list_tokens():
-                txs.extend(wallet.list_transfers(t["name"], limit=limit))
+            for name in _target_token_names(wallet):
+                txs.extend(wallet.list_transfers(name, limit=limit))
             txs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             txs = txs[:limit]
 
@@ -259,12 +343,12 @@ def list_subaccounts(args: str) -> str:
             subs = wallet.list_subaccounts(token)
             return _ok({"Subaccounts": {token: subs}})
 
-        # All tokens
+        # All active tokens
         all_subs = {}
-        for t in wallet.list_tokens():
-            subs = wallet.list_subaccounts(t["name"])
+        for name in _target_token_names(wallet):
+            subs = wallet.list_subaccounts(name)
             if subs:
-                all_subs[t["name"]] = subs
+                all_subs[name] = subs
         return _ok({"Subaccounts": all_subs})
     except Exception as e:
         return _err(e)
@@ -316,9 +400,9 @@ def lookup_balance(args: str):
 
         wallet = _get_wallet()
         balances = {}
-        for t in wallet.list_tokens():
-            bal = yield wallet.balance_of(t["name"], subaccount=sub_bytes)
-            balances[t["name"]] = bal
+        for name in _target_token_names(wallet):
+            bal = yield wallet.balance_of(name, subaccount=sub_bytes)
+            balances[name] = bal
 
         return _ok(
             {
@@ -355,8 +439,8 @@ def transfer(args: str):
 
         wallet = _get_wallet()
         if not token:
-            tokens = wallet.list_tokens()
-            token = tokens[0]["name"] if tokens else "ckBTC"
+            tokens = _target_token_names(wallet)
+            token = tokens[0] if tokens else "ckBTC"
 
         to_subaccount = bytes.fromhex(to_sub) if to_sub else None
         from_subaccount = bytes.fromhex(from_sub) if from_sub else None
@@ -396,17 +480,17 @@ def get_status(args: str) -> str:
 
         wallet = _get_wallet()
         tokens_info = []
-        for t in wallet.list_tokens():
-            token_obj = Token[t["name"]]
+        for name in _target_token_names(wallet):
+            token_obj = Token[name]
             tx_count = sum(1 for _ in token_obj.transfers) if token_obj else 0
-            subs = wallet.list_subaccounts(t["name"])
+            subs = wallet.list_subaccounts(name)
             sub_balance = sum(s.get("balance", 0) for s in subs)
-            default_balance = wallet.cached_balance(t["name"])
+            default_balance = wallet.cached_balance(name)
             tokens_info.append(
                 {
-                    "name": t["name"],
-                    "ledger": t["ledger"],
-                    "indexer": t["indexer"],
+                    "name": name,
+                    "ledger": token_obj.ledger if token_obj else "",
+                    "indexer": token_obj.indexer if token_obj else "",
                     "cached_balance": default_balance,
                     "aggregate_balance": default_balance + sub_balance,
                     "transfer_count": tx_count,
@@ -449,9 +533,9 @@ def get_balance(args: str) -> str:
             )
 
         balances = {}
-        for t in wallet.list_tokens():
-            balances[t["name"]] = wallet.cached_balance(
-                t["name"], principal=principal_id
+        for name in _target_token_names(wallet):
+            balances[name] = wallet.cached_balance(
+                name, principal=principal_id
             )
         return _ok({"Balance": {"principal_id": principal_id, "balances": balances}})
     except Exception as e:

@@ -112,33 +112,35 @@
 
 	async function loadTokens() {
 		try {
-			const raw = await ctx.backend.get_objects_paginated('Token', 0, 100, 'asc');
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.objectsListPaginated) {
-				const tokens = resp.data.objectsListPaginated.objects.map((s: string) => JSON.parse(s));
-				const canisters: Record<string, TokenInfo> = {};
-				const sel: Record<string, boolean> = {};
-				const bals: Record<string, number> = {};
+			const resp = unwrapExtensionPayload(await ctx.callSync('get_active_tokens', {}));
+			const tokens = resp?.ActiveTokens || [];
+			const canisters: Record<string, TokenInfo> = {};
+			const sel: Record<string, boolean> = {};
+			const bals: Record<string, number> = {};
 
-				for (const token of tokens) {
-					const enabled = token.enabled ?? token._prop_enabled ?? 'true';
-					const symbol = token.symbol ?? token._prop_symbol ?? token.name;
-					const ledger = token.ledger_canister_id ?? token.ledger ?? '';
-					const indexer = token.indexer_canister_id ?? token.indexer ?? '';
-					if (enabled === 'true' && symbol) {
-						canisters[symbol] = { ledger, indexer, decimals: token.decimals || 8, symbol, name: token.name };
-						sel[symbol] = true;
-						bals[symbol] = 0;
-					}
+			for (const token of tokens) {
+				const symbol = token.symbol || token.name;
+				const ledger = token.ledger_canister_id ?? token.ledger ?? '';
+				const indexer = token.indexer_canister_id ?? token.indexer ?? '';
+				if (symbol) {
+					canisters[symbol] = {
+						ledger,
+						indexer,
+						decimals: token.decimals || 8,
+						symbol,
+						name: token.name,
+					};
+					sel[symbol] = true;
+					bals[symbol] = 0;
 				}
-
-				ledgerCanisters = canisters;
-				selectedTokens = sel;
-				tokenBalances = bals;
-				const syms = Object.keys(canisters);
-				if (syms.length > 0 && !transferToken) transferToken = syms[0];
-				tokensLoaded = true;
 			}
+
+			ledgerCanisters = canisters;
+			selectedTokens = sel;
+			tokenBalances = bals;
+			const syms = Object.keys(canisters);
+			if (syms.length > 0 && !transferToken) transferToken = syms[0];
+			tokensLoaded = true;
 		} catch (e: any) {
 			console.error('Failed to load tokens:', e);
 		}
@@ -233,10 +235,36 @@
 		}
 	}
 
-	async function loadAllVaultBalances() {
-		for (const token of tokenSymbols) {
-			if (selectedTokens[token]) await loadVaultBalance(token);
+	function displayKeyForTokenName(tokenName: string): string | undefined {
+		return tokenSymbols.find((s) => ledgerCanisters[s]?.name === tokenName);
+	}
+
+	function applyRefreshBalances(perToken: Record<string, any>) {
+		for (const [tokenName, tokenData] of Object.entries(perToken)) {
+			const key = displayKeyForTokenName(tokenName) || tokenName;
+			if (ledgerCanisters[key]) {
+				tokenBalances[key] = (tokenData as any)?.balance || 0;
+			}
 		}
+		tokenBalances = { ...tokenBalances };
+	}
+
+	async function loadVaultPrincipal() {
+		try {
+			if (typeof ctx.backend.get_canister_id === 'function') {
+				vaultPrincipal = (await ctx.backend.get_canister_id()) || vaultPrincipal;
+			}
+		} catch {
+			// keep existing value
+		}
+	}
+
+	async function loadAllVaultBalances() {
+		await Promise.all(
+			tokenSymbols
+				.filter((token) => selectedTokens[token])
+				.map((token) => loadVaultBalance(token)),
+		);
 	}
 
 	// ── Mutations ────────────────────────────────────────────
@@ -272,9 +300,7 @@
 
 	async function refreshAllVaultBalances() {
 		vaultBalanceLoading = true;
-		for (const token of tokenSymbols) {
-			if (selectedTokens[token]) await refreshVaultBalance(token);
-		}
+		await loadAllVaultBalances();
 		vaultBalanceLoading = false;
 		lastRefreshTime = new Date();
 	}
@@ -289,10 +315,10 @@
 				error = 'Failed to sync vault transactions';
 				return;
 			}
+			applyRefreshBalances(refreshData.TransactionSummary.per_token || {});
+			await loadVaultPrincipal();
 			lastRefreshTime = new Date();
-			await loadBalance();
-			await loadAllVaultBalances();
-			await loadTransactions(0);
+			await Promise.all([loadBalance(), loadTransactions(0)]);
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
