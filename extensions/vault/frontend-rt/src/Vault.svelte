@@ -3,7 +3,7 @@
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
-	type TabId = 'balance' | 'transactions' | 'transfer' | 'lookup' | 'admin';
+	type TabId = 'transactions' | 'transfer' | 'lookup' | 'admin';
 
 	interface TokenInfo {
 		ledger: string;
@@ -21,7 +21,7 @@
 	const SETTINGS_KEY = 'vault_settings';
 	const LAST_REFRESH_KEY = 'vault_last_refresh';
 
-	let activeTab = $state<TabId>('balance');
+	let activeTab = $state<TabId>('transactions');
 	let loading = $state(false);
 	let error = $state('');
 	let accessDeniedOp = $state('');
@@ -34,11 +34,8 @@
 	let tokenBalances = $state<Record<string, number>>({});
 	let tokensLoaded = $state(false);
 
-	let balance = $state(0);
-	let balanceObject = $state<any>(null);
 	let allBalances = $state<any[]>([]);
 	let balancePagination = $state<any>(null);
-	let userTokenBalances = $state<Record<string, number>>({});
 
 	let transactions = $state<any[]>([]);
 	let transferPagination = $state<any>(null);
@@ -237,25 +234,9 @@
 				const data = resp.data.objectsListPaginated;
 				balancePagination = data.pagination;
 				allBalances = data.objects.map((s: string) => JSON.parse(s));
-				balanceObject = allBalances.find(
-					(b: any) => b.principal === currentPrincipal || b.id === currentPrincipal || b._id === currentPrincipal,
-				);
-				balance = balanceObject ? balanceObject.amount || 0 : 0;
-
-				// Per-token user balances (may be empty if the user has no balances)
-				const perToken: Record<string, number> = {};
-				for (const b of allBalances) {
-					if (b.principal === currentPrincipal || b.id === currentPrincipal || b._id === currentPrincipal) {
-						if (b.token) {
-							perToken[b.token] = b.amount || 0;
-						}
-					}
-				}
-				userTokenBalances = perToken;
 			} else {
-				balance = 0;
-				balanceObject = null;
-				userTokenBalances = {};
+				allBalances = [];
+				balancePagination = null;
 			}
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
@@ -517,7 +498,6 @@
 	// ── Tabs definition ──────────────────────────────────────
 
 	const tabs: { id: TabId; label: string }[] = [
-		{ id: 'balance', label: 'Balances' },
 		{ id: 'transactions', label: 'Transactions' },
 		{ id: 'transfer', label: 'Transfer' },
 		{ id: 'lookup', label: 'Lookup' },
@@ -702,44 +682,8 @@
 
 	<!-- Tab Content -->
 	<div>
-		<!-- ═══ Balance Tab ═══ -->
-		{#if activeTab === 'balance'}
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6')}>
-				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2')}>Your Balance</h2>
-				<p class={cn('text-sm text-gray-500 dark:text-gray-400 mb-4')}>
-					Personal balance for the logged-in principal. The vault canister balance is shown at the top.
-				</p>
-				<div class={cn('space-y-3')}>
-					{#each tokenSymbols as token}
-						{#if selectedTokens[token]}
-							{@const userBal = userTokenBalances[token] ?? 0}
-							<div class={cn('flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg')}>
-								<span class={cn('text-base font-semibold text-gray-700 dark:text-gray-300')}>{ledgerCanisters[token].symbol}</span>
-								<div class={cn('text-right')}>
-									<div class={cn('text-xl font-bold text-indigo-600 dark:text-indigo-400')}>
-										{formatTokenAmount(userBal, ledgerCanisters[token].decimals)}
-									</div>
-									<div class={cn('text-xs text-gray-500 dark:text-gray-400')}>{userBal.toLocaleString()} units</div>
-								</div>
-							</div>
-						{/if}
-					{/each}
-					{#if !anyTokenSelected}
-						<p class={cn('text-sm text-gray-500 italic')}>Select at least one token to view balances</p>
-					{/if}
-				</div>
-				{#if balanceObject}
-					<div class={cn('mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg')}>
-						<p class={cn('text-sm text-gray-600 dark:text-gray-400')}>
-							<span class={cn('font-medium')}>Principal:</span>
-							<span class={cn('font-mono text-xs ml-1')}>{balanceObject._id || balanceObject.id}</span>
-						</p>
-					</div>
-				{/if}
-			</div>
-
 		<!-- ═══ Transactions Tab ═══ -->
-		{:else if activeTab === 'transactions'}
+		{#if activeTab === 'transactions'}
 			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden')}>
 				<h2 class={cn('text-lg font-semibold p-6 border-b border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100')}>
 					Transaction History
