@@ -7,13 +7,14 @@
 
 	let tab = $state<'accounting' | 'records' | 'visualizations'>('accounting');
 
-	let budgets: any[] = $state([]);
-	let ledgerEntries: any[] = $state([]);
-	let funds: any[] = $state([]);
-	let fiscalPeriods: any[] = $state([]);
-	let loading = $state(true);
-	let error = $state('');
-	let accessDeniedOp = $state('');
+let budgets: any[] = $state([]);
+let ledgerEntries: any[] = $state([]);
+let funds: any[] = $state([]);
+let fiscalPeriods: any[] = $state([]);
+let tokens: any[] = $state([]);
+let loading = $state(true);
+let error = $state('');
+let accessDeniedOp = $state('');
 
 	const categoryColors: Record<string, string> = {
 		cash: '#1E40AF', receivable: '#1D4ED8', equipment: '#2563EB', land: '#3B82F6',
@@ -57,16 +58,18 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const [b, l, f, fp] = await Promise.all([
+			const [b, l, f, fp, t] = await Promise.all([
 				loadPaginated('Budget', 100, 'asc'),
 				loadPaginated('LedgerEntry', 1000, 'desc'),
 				loadPaginated('Fund', 100, 'asc'),
 				loadPaginated('FiscalPeriod', 100, 'desc'),
+				loadPaginated('Token', 100, 'asc'),
 			]);
 			budgets = b;
 			ledgerEntries = l;
 			funds = f;
 			fiscalPeriods = fp;
+			tokens = t;
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
@@ -82,6 +85,28 @@
 	}
 
 	$effect(() => { void loadData(); });
+
+	let tokenDecimalsByCurrency = $derived.by(() => {
+		const map: Record<string, number> = {};
+		for (const t of tokens) {
+			const symbol = (t.symbol || t.name || '').toString().trim();
+			if (!symbol) continue;
+			let decimals = 8;
+			if (t.decimals != null) {
+				const parsed = Number(t.decimals);
+				if (!isNaN(parsed) && parsed >= 0) decimals = parsed;
+			}
+			map[symbol] = decimals;
+			if (t.name && t.name !== symbol) map[t.name] = decimals;
+		}
+		return map;
+	});
+
+	function toHumanAmount(amount: number, currency: string): number {
+		if (amount == null || isNaN(Number(amount))) return 0;
+		const decimals = tokenDecimalsByCurrency[(currency || '').toString().trim()] ?? 8;
+		return Number(amount) / (10 ** decimals);
+	}
 
 	function fmt(n: any): string {
 		if (n == null) return '—';
@@ -107,7 +132,8 @@
 		const equity: Record<string, number> = {};
 		for (const e of ledgerEntries) {
 			const cat = e.category || 'other';
-			const d = e.debit || 0, c = e.credit || 0;
+			const d = toHumanAmount(e.debit || 0, e.currency);
+			const c = toHumanAmount(e.credit || 0, e.currency);
 			switch (e.entry_type) {
 				case 'asset': assets[cat] = (assets[cat] || 0) + d - c; break;
 				case 'liability': liabilities[cat] = (liabilities[cat] || 0) + c - d; break;
@@ -125,8 +151,8 @@
 		const expenses: Record<string, number> = {};
 		for (const e of ledgerEntries) {
 			const cat = e.category || 'other';
-			if (e.entry_type === 'revenue') revenues[cat] = (revenues[cat] || 0) + (e.credit || 0) - (e.debit || 0);
-			else if (e.entry_type === 'expense') expenses[cat] = (expenses[cat] || 0) + (e.debit || 0) - (e.credit || 0);
+			if (e.entry_type === 'revenue') revenues[cat] = (revenues[cat] || 0) + toHumanAmount(e.credit || 0, e.currency) - toHumanAmount(e.debit || 0, e.currency);
+			else if (e.entry_type === 'expense') expenses[cat] = (expenses[cat] || 0) + toHumanAmount(e.debit || 0, e.currency) - toHumanAmount(e.credit || 0, e.currency);
 		}
 		const totalRevenues = Object.values(revenues).reduce((a, b) => a + b, 0);
 		const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
@@ -136,7 +162,7 @@
 	let cashFlow = $derived.by(() => {
 		let operating = 0, investing = 0, financing = 0;
 		for (const e of ledgerEntries.filter(e => e.category === 'cash')) {
-			const amt = (e.debit || 0) - (e.credit || 0);
+			const amt = toHumanAmount((e.debit || 0) - (e.credit || 0), e.currency);
 			const tags = e.tags || '';
 			if (tags.includes('investing') || tags.includes('capital')) investing += amt;
 			else if (tags.includes('financing') || tags.includes('bond')) financing += amt;
@@ -164,7 +190,7 @@
 		for (const e of ledgerEntries) {
 			if (e.fund && e.category === 'cash') {
 				const code = typeof e.fund === 'string' ? e.fund : e.fund.code;
-				if (balances[code]) balances[code].balance += (e.debit || 0) - (e.credit || 0);
+				if (balances[code]) balances[code].balance += toHumanAmount((e.debit || 0) - (e.credit || 0), e.currency);
 			}
 		}
 		return Object.entries(balances).filter(([, v]) => v.balance > 0).map(([k, v]) => ({ symbol: k, ...v }));
@@ -182,7 +208,7 @@
 					color: e.category === 'tax' ? '#3B82F6' : '#10B981',
 				};
 			}
-			contribs[name].contribution += e.credit;
+			contribs[name].contribution += toHumanAmount(e.credit || 0, e.currency);
 		}
 		return Object.values(contribs);
 	});
@@ -193,10 +219,10 @@
 		for (const e of ledgerEntries) {
 			if (e.entry_type === 'revenue' && (e.credit || 0) > 0) {
 				const cat = e.category || 'other';
-				revByCat[cat] = (revByCat[cat] || 0) + e.credit;
+				revByCat[cat] = (revByCat[cat] || 0) + toHumanAmount(e.credit || 0, e.currency);
 			} else if (e.entry_type === 'expense' && (e.debit || 0) > 0) {
 				const cat = e.category || 'other';
-				expByCat[cat] = (expByCat[cat] || 0) + e.debit;
+				expByCat[cat] = (expByCat[cat] || 0) + toHumanAmount(e.debit || 0, e.currency);
 			}
 		}
 		const income = Object.entries(revByCat).map(([cat, amt]) => ({ category: formatCategory(cat), amount: amt }));
