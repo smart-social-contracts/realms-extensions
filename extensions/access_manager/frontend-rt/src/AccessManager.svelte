@@ -96,6 +96,11 @@
 		summary: string;
 		governedBy: string;
 		policy: string;
+		governedPolicy: string;
+		targetDepartment: string;
+		targetPolicy: string;
+		policyReason: string;
+		votersOrg: string;
 		run: () => Promise<void>;
 	} | null = $state(null);
 	let voteConfirmBusy = $state(false);
@@ -111,6 +116,11 @@
 				summary: res.data.summary || '',
 				governedBy: res.data.governed_by || '',
 				policy: res.data.policy || '',
+				governedPolicy: res.data.governed_policy || res.data.policy || '',
+				targetDepartment: res.data.target_department || '',
+				targetPolicy: res.data.target_policy || '',
+				policyReason: res.data.policy_reason || '',
+				votersOrg: res.data.voters_org || res.data.governed_by || '',
 				run: async () => {
 					voteConfirmBusy = true;
 					try {
@@ -204,13 +214,18 @@
 	let assignPrincipal = $state('');
 	let posDraft: { title: string; headcount: string; salary: string } = $state({ title: '', headcount: '1', salary: '0' });
 
+	function proposalCreatedToast(res: any) {
+		const org = res.data?.org_scope || res.data?.voters_org || res.data?.governed_by || 'the governing org';
+		addToast(`Proposal ${res.data.proposal_id} created — members of ${org} must vote (see Voting)`);
+	}
+
 	function handlePositionResult(res: any, successMsg: string): boolean {
 		if (!res?.success) {
 			addToast(res?.error || 'Position action failed', 'error');
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
-			addToast(`Proposal ${res.data.proposal_id} created — department members must vote (see Voting)`);
+			proposalCreatedToast(res);
 		} else {
 			addToast(successMsg);
 		}
@@ -223,7 +238,7 @@
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
-			addToast(`Proposal ${res.data.proposal_id} created — department members must vote (see Voting)`);
+			proposalCreatedToast(res);
 		} else {
 			addToast(successMsg);
 		}
@@ -665,15 +680,27 @@
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
 			<div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
 				<h3 class="text-lg font-semibold text-gray-900 mb-2">Governance vote required</h3>
-				<p class="text-sm text-gray-600 mb-1">
-					This action cannot be applied directly — the policy of
-					<strong>{voteConfirm.governedBy}</strong> ({voteConfirm.policy}) requires a vote.
+				<p class="text-sm text-gray-600 mb-3">
+					This action cannot be applied directly — it needs approval under
+					<strong>{voteConfirm.governedBy}</strong> policy ({voteConfirm.governedPolicy}).
 				</p>
+				<div class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-950 space-y-2">
+					<div class="font-medium text-amber-900">Why this policy applies</div>
+					{#if voteConfirm.policyReason}
+						<p>{voteConfirm.policyReason}</p>
+					{/if}
+					<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+						<dt class="text-amber-800">Target department</dt>
+						<dd>{voteConfirm.targetDepartment || '—'} ({voteConfirm.targetPolicy || '—'})</dd>
+						<dt class="text-amber-800">Deciding org</dt>
+						<dd>{voteConfirm.governedBy} ({voteConfirm.governedPolicy})</dd>
+					</dl>
+				</div>
 				<div class="my-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800">
 					{voteConfirm.summary}
 				</div>
 				<p class="text-sm text-gray-600 mb-4">
-					Create a proposal? Department members will vote on it in <strong>Voting</strong>.
+					Create a proposal? Members of <strong>{voteConfirm.votersOrg}</strong> will vote on it in <strong>Voting</strong>.
 				</p>
 				<div class="flex justify-end gap-3">
 					<button

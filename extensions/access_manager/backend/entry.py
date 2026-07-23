@@ -493,6 +493,59 @@ def _resolve_governing_department(caller: User, dept: Department) -> Department:
     return governing
 
 
+def _format_org_policy(dept: Department) -> str:
+    """Human-readable M/N (+ quorum/veto hints) for an org."""
+    m = int(getattr(dept, "policy_threshold_m", 1) or 1)
+    n = int(getattr(dept, "policy_threshold_n", 1) or 1)
+    q = int(getattr(dept, "policy_quorum_percent", 0) or 0)
+    veto = (getattr(dept, "policy_veto_principals", "") or "").strip()
+    label = f"{m}/{n}"
+    extras = []
+    if q > 0:
+        extras.append(f"quorum {q}%")
+    if veto:
+        extras.append("veto")
+    if extras:
+        label = f"{label} ({', '.join(extras)})"
+    return label
+
+
+def _vote_confirmation_payload(
+    governing: Department,
+    target: Department,
+    summary: str,
+) -> dict:
+    """Fields for the UI confirmation modal before creating an org-scoped proposal."""
+    governed_policy = _format_org_policy(governing)
+    target_policy = _format_org_policy(target)
+    governed_by = governing.name
+    target_name = target.name
+
+    if governed_by == target_name:
+        policy_reason = (
+            f"{target_name}'s own policy ({target_policy}) requires a vote "
+            f"before this change can apply."
+        )
+    else:
+        policy_reason = (
+            f"This action affects {target_name} (local policy {target_policy}), "
+            f"but you are acting via {governed_by}'s org.appoint authority, "
+            f"so {governed_by}'s policy ({governed_policy}) governs instead."
+        )
+
+    return {
+        "requires_confirmation": True,
+        "summary": summary,
+        "governed_by": governed_by,
+        "policy": governed_policy.split(" (")[0],
+        "governed_policy": governed_policy,
+        "target_department": target_name,
+        "target_policy": target_policy,
+        "policy_reason": policy_reason,
+        "voters_org": governed_by,
+    }
+
+
 def _manage_department_member(args_dict: dict, action_kind: str) -> str:
     """Add/remove a department member, policy-gated like position actions."""
     from core.org_member_admin import (
@@ -550,12 +603,7 @@ def _manage_department_member(args_dict: dict, action_kind: str) -> str:
     if not args_dict.get("confirm"):
         return json.dumps({
             "success": True,
-            "data": {
-                "requires_confirmation": True,
-                "summary": summary,
-                "governed_by": governing.name,
-                "policy": f"{governing.policy_threshold_m}/{governing.policy_threshold_n}",
-            },
+            "data": _vote_confirmation_payload(governing, dept, summary),
         })
 
     data = _submit_org_scoped_proposal(
@@ -1603,12 +1651,7 @@ def manage_position(args) -> str:
         if not args_dict.get("confirm"):
             return json.dumps({
                 "success": True,
-                "data": {
-                    "requires_confirmation": True,
-                    "summary": summary,
-                    "governed_by": governing.name,
-                    "policy": f"{governing.policy_threshold_m}/{governing.policy_threshold_n}",
-                },
+                "data": _vote_confirmation_payload(governing, dept, summary),
             })
 
         data = _submit_position_proposal(action, governing, summary)
