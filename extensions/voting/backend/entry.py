@@ -16,7 +16,7 @@ import json
 import traceback
 from typing import Any, Dict, List
 
-from ggg import Proposal, User, Vote, Codex
+from ggg import Notification, Proposal, User, Vote, Codex
 from basilisk import Async, ic
 from basilisk.canisters.management import management_canister
 from ic_python_logging import get_logger
@@ -242,6 +242,65 @@ def _org_scoped_department(proposal: Proposal):
         return Department[dept_name]
     except Exception:
         return None
+
+
+def _format_voting_deadline(deadline_raw: str) -> str:
+    """Best-effort human date from epoch seconds or ISO string."""
+    if not deadline_raw:
+        return "the deadline"
+    text = str(deadline_raw).strip()
+    if text.isdigit():
+        try:
+            from datetime import datetime, timezone
+
+            return datetime.fromtimestamp(int(text), tz=timezone.utc).strftime("%Y-%m-%d")
+        except (ValueError, OSError, OverflowError):
+            pass
+    return text[:10] if len(text) >= 10 else text
+
+
+def _notify_voting_opened(proposal: Proposal) -> None:
+    """Create inbox messages for users who must cast a vote."""
+    title = (proposal.title or "New proposal").strip()
+    deadline_label = _format_voting_deadline(proposal.voting_deadline or "")
+    scope_dept = _org_scoped_department(proposal)
+
+    if scope_dept is not None:
+        from core.membership import department_member_principals
+
+        recipient_ids = department_member_principals(scope_dept, include_head=False)
+        audience_hint = f"members of {scope_dept.name}"
+    else:
+        recipient_ids = [user.id for user in User.instances()]
+        audience_hint = "all members"
+
+    message = (
+        f'Voting is open on "{title}". Cast your vote before {deadline_label}.'
+    )
+    metadata = json.dumps({"proposal_id": proposal.proposal_id})
+
+    notified = 0
+    for principal_id in recipient_ids:
+        user = User[principal_id]
+        if not user:
+            continue
+        Notification(
+            topic="governance",
+            title=f"Vote required: {title}",
+            message=message,
+            user=user,
+            read=False,
+            icon="vote",
+            href="/extensions/voting",
+            color="blue",
+            metadata=metadata,
+        )
+        notified += 1
+
+    logger.info(
+        f"Voting notifications sent for {proposal.proposal_id} "
+        f"to {notified} {audience_hint}"
+    )
 
 
 def _check_org_policy(proposal: Proposal, dept) -> tuple:
@@ -1066,6 +1125,7 @@ def submit_proposal(args: str) -> str:
             proposal.status = "voting"
             proposal.voting_deadline = str(deadline_s)
             logger.info(f"Auto-started voting for {proposal_id}, deadline in {voting_window}s")
+            _notify_voting_opened(proposal)
 
         return json.dumps({"success": True, "data": _proposal_to_dict(proposal)})
     except Exception as e:
@@ -1114,6 +1174,7 @@ def start_voting(args: str) -> str:
         proposal.voting_deadline = str(deadline_s)
 
         logger.info(f"Voting started for {proposal_id}, deadline in {voting_window}s (epoch {deadline_s})")
+        _notify_voting_opened(proposal)
         return json.dumps({"success": True, "data": _proposal_to_dict(proposal)})
     except Exception as e:
         logger.error(f"start_voting error: {e}\n{traceback.format_exc()}")
