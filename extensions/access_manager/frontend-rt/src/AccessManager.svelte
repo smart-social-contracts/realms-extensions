@@ -67,6 +67,15 @@
 		selectedDeptName ? departments.find((d) => d.name === selectedDeptName) ?? null : null,
 	);
 
+	// Fund tab (issue #260)
+	let activeTab: 'overview' | 'fund' = $state('overview');
+	let fundLoading = $state(false);
+	let fundData: any = $state.raw(null);
+	let payrollData: any = $state.raw(null);
+	let payrollBusy = $state(false);
+	let scheduleBusy = $state(false);
+	let schedulePayday = $state(1);
+
 	function selectDepartment(name: string) {
 		selectedDeptName = name;
 		showNewPosition = null;
@@ -76,7 +85,10 @@
 		deptPermFilter = '';
 		deptPendingGrants = new Set();
 		deptPendingRevokes = new Set();
+		fundData = null;
+		payrollData = null;
 		void loadDeptPermissions(name);
+		if (activeTab === 'fund') void loadFund(name);
 	}
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
@@ -639,6 +651,94 @@
 		}));
 	}
 
+	// --- Fund & payroll (issue #260) ---
+	async function loadFund(deptName: string) {
+		fundLoading = true;
+		try {
+			const [ledgerRes, payrollRes] = await Promise.all([
+				callExt('get_fund_ledger', { department: deptName }),
+				callExt('get_payroll_status', { department: deptName }),
+			]);
+			if (ledgerRes?.success) {
+				fundData = ledgerRes.data;
+			} else {
+				fundData = null;
+				addToast(ledgerRes?.error || 'Failed to load fund ledger', 'error');
+			}
+			payrollData = payrollRes?.success ? payrollRes.data : null;
+			if (payrollData?.schedule_payday) schedulePayday = payrollData.schedule_payday;
+		} catch (e: any) {
+			addToast(e?.message || 'Failed to load fund data', 'error');
+		} finally {
+			fundLoading = false;
+		}
+	}
+
+	function openFundTab() {
+		activeTab = 'fund';
+		if (selectedDeptName) void loadFund(selectedDeptName);
+	}
+
+	async function runPayroll(deptName: string) {
+		payrollBusy = true;
+		try {
+			await callGated('run_department_payroll', { department: deptName }, async (res) => {
+				if (!res?.success) {
+					addToast(res?.error || 'Payroll run failed', 'error');
+					return;
+				}
+				if (res.data?.applied === 'proposal') {
+					proposalCreatedToast(res);
+				} else if ((res.data?.scheduled ?? 0) === 0) {
+					addToast(res.data?.message || 'All salaries for this period are already settled');
+				} else {
+					addToast(`Payroll started — ${res.data.scheduled} payment(s) scheduled for ${res.data.period}`);
+				}
+				await loadFund(deptName);
+			});
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		} finally {
+			payrollBusy = false;
+		}
+	}
+
+	async function setPayrollSchedule(deptName: string, enabled: boolean) {
+		scheduleBusy = true;
+		try {
+			const payday = Math.min(Math.max(Math.round(schedulePayday || 1), 1), 28);
+			await callGated('set_payroll_schedule', { department: deptName, enabled, payday }, async (res) => {
+				if (!res?.success) {
+					addToast(res?.error || 'Automatic payroll change failed', 'error');
+					return;
+				}
+				if (res.data?.applied === 'proposal') {
+					proposalCreatedToast(res);
+				} else if (enabled) {
+					addToast(`Automatic payroll enabled — runs monthly on day ${res.data?.payday ?? payday}`);
+				} else {
+					addToast('Automatic payroll disabled');
+				}
+				await loadFund(deptName);
+			});
+		} catch (e: any) {
+			addToast(e?.message || 'Error', 'error');
+		} finally {
+			scheduleBusy = false;
+		}
+	}
+
+	function formatAmount(n: number): string {
+		return (n ?? 0).toLocaleString('en-US');
+	}
+
+	const payrollStatusStyles: Record<string, string> = {
+		completed: 'bg-green-50 text-green-700',
+		pending: 'bg-amber-50 text-amber-700',
+		failed: 'bg-red-50 text-red-700',
+		not_started: 'bg-gray-100 text-gray-600',
+	};
+
 	function shortPrincipal(p: string): string {
 		if (!p || p.length < 12) return p;
 		return p.slice(0, 5) + '...' + p.slice(-5);
@@ -820,6 +920,29 @@
 					</div>
 				</div>
 
+				<!-- Tabs: Overview | Fund (issue #260) -->
+				<div class="px-4 sm:px-6 bg-white border-b border-gray-100 flex gap-4">
+					<button
+						onclick={() => (activeTab = 'overview')}
+						class={cn(
+							'py-2 text-sm font-medium border-b-2 -mb-px',
+							activeTab === 'overview' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+						)}
+					>
+						Overview
+					</button>
+					<button
+						onclick={openFundTab}
+						class={cn(
+							'py-2 text-sm font-medium border-b-2 -mb-px',
+							activeTab === 'fund' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+						)}
+					>
+						Fund
+					</button>
+				</div>
+
+				{#if activeTab === 'overview'}
 				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
 					{#if dept.head}
 						<div class="text-sm">
@@ -1160,6 +1283,223 @@
 						<button onclick={() => deleteDepartment(dept.name)} class="text-sm text-red-600 hover:text-red-800">Delete department</button>
 					{/if}
 				</div>
+				{:else}
+				<!-- Fund tab: inflows, outflows, balance, payroll (issue #260) -->
+				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+					{#if fundLoading}
+						<div class="flex justify-center py-8">
+							<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+						</div>
+					{:else if !fundData?.fund}
+						<p class="text-sm text-gray-500 py-4">
+							No fund linked to this department yet. Set a <strong>Fund code</strong> under
+							Policy &amp; budget in the Overview tab — all department inflows and outflows
+							are then recorded against it.
+						</p>
+					{:else}
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<div class="text-sm text-gray-600">
+								<span class="font-medium text-gray-800">{fundData.fund.name || fundData.fund.code}</span>
+								<span class="ml-2 font-mono text-xs text-gray-400">{fundData.fund.code}</span>
+								{#if fundData.fund.fund_type}
+									<span class="ml-2 px-1.5 py-0.5 text-xs bg-indigo-50 text-indigo-600 rounded-full">{fundData.fund.fund_type}</span>
+								{/if}
+							</div>
+							<button
+								onclick={() => loadFund(dept.name)}
+								class="px-2 py-1 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100"
+							>
+								Refresh
+							</button>
+						</div>
+
+						<!-- Totals -->
+						<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+							<div class="p-3 bg-white border border-gray-200 rounded-lg">
+								<div class="text-xs text-gray-500">Inflows</div>
+								<div class="text-lg font-semibold text-green-700">+{formatAmount(fundData.totals?.inflows)}</div>
+							</div>
+							<div class="p-3 bg-white border border-gray-200 rounded-lg">
+								<div class="text-xs text-gray-500">Outflows</div>
+								<div class="text-lg font-semibold text-red-700">-{formatAmount(fundData.totals?.outflows)}</div>
+							</div>
+							<div class="p-3 bg-white border border-gray-200 rounded-lg">
+								<div class="text-xs text-gray-500">Cash balance</div>
+								<div class={`text-lg font-semibold ${(fundData.totals?.cash_balance ?? 0) >= 0 ? 'text-gray-900' : 'text-red-700'}`}>
+									{formatAmount(fundData.totals?.cash_balance)}
+								</div>
+							</div>
+						</div>
+
+						{#if Object.keys(fundData.inflows_by_category ?? {}).length > 0 || Object.keys(fundData.outflows_by_category ?? {}).length > 0}
+							<div class="flex flex-wrap gap-1 text-xs">
+								{#each Object.entries(fundData.inflows_by_category ?? {}) as [cat, amt] (cat)}
+									<span class="px-2 py-0.5 bg-green-50 text-green-700 rounded-full">{cat} +{formatAmount(amt as number)}</span>
+								{/each}
+								{#each Object.entries(fundData.outflows_by_category ?? {}) as [cat, amt] (cat)}
+									<span class="px-2 py-0.5 bg-red-50 text-red-700 rounded-full">{cat} -{formatAmount(amt as number)}</span>
+								{/each}
+							</div>
+						{/if}
+
+						<!-- Payroll -->
+						{#if payrollData}
+							<div class="pt-2 border-t border-gray-200 space-y-2">
+								<div class="flex flex-wrap items-center justify-between gap-2">
+									<div class="text-sm font-medium text-gray-700">
+										Payroll — {payrollData.period}
+										{#if payrollData.run_active}
+											<span class="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full">
+												<span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+												run in progress
+											</span>
+										{/if}
+									</div>
+									<button
+										onclick={() => runPayroll(dept.name)}
+										disabled={payrollBusy || payrollData.run_active || payrollData.total_seats === 0}
+										class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+									>
+										{#if payrollBusy}
+											<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+										{/if}
+										Run payroll
+									</button>
+								</div>
+								<div class="text-xs text-gray-500">
+									{payrollData.total_seats} salaried seat{payrollData.total_seats === 1 ? '' : 's'}
+									· settled {formatAmount(payrollData.settled_amount)} / {formatAmount(payrollData.total_amount)} {payrollData.currency}
+									{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
+										· policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1} — running payroll requires a vote
+									{/if}
+								</div>
+								<div class="flex flex-wrap gap-1 text-xs">
+									{#each Object.entries(payrollData.counts ?? {}) as [status, count] (status)}
+										{#if (count as number) > 0}
+											<span class={cn('px-2 py-0.5 rounded-full', payrollStatusStyles[status] ?? 'bg-gray-100 text-gray-600')}>
+												{status.replace('_', ' ')}: {count}
+											</span>
+										{/if}
+									{/each}
+								</div>
+								<!-- Automatic payroll (standing schedule) -->
+								<div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg">
+									<div class="text-xs text-gray-600">
+										<span class="font-medium text-gray-700">Automatic payroll</span>
+										{#if payrollData.schedule_active}
+											<span class="ml-2 px-2 py-0.5 bg-green-50 text-green-700 rounded-full">on — monthly on day {payrollData.schedule_payday ?? 1}</span>
+										{:else}
+											<span class="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">off</span>
+										{/if}
+									</div>
+									<div class="flex items-center gap-2">
+										{#if !payrollData.schedule_active}
+											<label class="flex items-center gap-1 text-xs text-gray-500">
+												payday
+												<input
+													type="number"
+													min="1"
+													max="28"
+													bind:value={schedulePayday}
+													class="w-14 px-1.5 py-1 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-gray-400 focus:border-gray-400"
+												/>
+											</label>
+										{/if}
+										<button
+											onclick={() => setPayrollSchedule(dept.name, !payrollData.schedule_active)}
+											disabled={scheduleBusy}
+											class={cn(
+												'inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg disabled:opacity-50',
+												payrollData.schedule_active
+													? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+													: 'bg-gray-900 text-white hover:bg-gray-800'
+											)}
+										>
+											{#if scheduleBusy}
+												<div class={cn('w-3 h-3 border-2 border-t-transparent rounded-full animate-spin', payrollData.schedule_active ? 'border-gray-400' : 'border-white')}></div>
+											{/if}
+											{payrollData.schedule_active ? 'Disable' : 'Enable'}
+										</button>
+									</div>
+								</div>
+								{#if (payrollData.payments ?? []).length > 0}
+									<div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-50">
+										{#each payrollData.payments as p (p.position + p.principal)}
+											<div class="flex items-center justify-between px-3 py-1.5 text-xs">
+												<div class="min-w-0 truncate">
+													<span class="font-medium text-gray-700">{p.position}</span>
+													<span class="ml-2 font-mono text-gray-400">{shortPrincipal(p.principal)}</span>
+												</div>
+												<div class="flex items-center gap-2 shrink-0">
+													<span class="text-gray-600">{formatAmount(p.amount)}</span>
+													<span class={cn('px-1.5 py-0.5 rounded-full', payrollStatusStyles[p.status] ?? 'bg-gray-100 text-gray-600')}>
+														{p.status.replace('_', ' ')}
+													</span>
+												</div>
+											</div>
+										{/each}
+									</div>
+									{#if payrollData.payments_truncated}
+										<p class="text-xs text-gray-400">Showing the first {payrollData.payments.length} of {payrollData.total_seats} seats.</p>
+									{/if}
+								{/if}
+							</div>
+						{/if}
+
+						<!-- Ledger entries -->
+						<div class="pt-2 border-t border-gray-200 space-y-2">
+							<div class="text-sm font-medium text-gray-700">
+								Ledger entries ({fundData.entries_total ?? fundData.entries.length})
+							</div>
+							{#if fundData.entries.length === 0}
+								<p class="text-xs text-gray-400">
+									No ledger entries yet. Inflows (e.g. litigation fines) and outflows
+									(e.g. salaries) appear here once recorded against this fund.
+								</p>
+							{:else}
+								<div class="max-h-72 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+									<table class="w-full text-xs">
+										<thead class="sticky top-0 bg-gray-50 text-gray-500">
+											<tr>
+												<th class="px-3 py-2 text-left font-medium">Date</th>
+												<th class="px-3 py-2 text-left font-medium">Type</th>
+												<th class="px-3 py-2 text-left font-medium">Category</th>
+												<th class="px-3 py-2 text-left font-medium">Description</th>
+												<th class="px-3 py-2 text-right font-medium">Debit</th>
+												<th class="px-3 py-2 text-right font-medium">Credit</th>
+											</tr>
+										</thead>
+										<tbody class="divide-y divide-gray-50">
+											{#each fundData.entries as entry (entry.id)}
+												<tr>
+													<td class="px-3 py-1.5 whitespace-nowrap text-gray-500">{(entry.entry_date || '').slice(0, 10)}</td>
+													<td class="px-3 py-1.5">
+														<span class={cn(
+															'px-1.5 py-0.5 rounded-full',
+															entry.entry_type === 'revenue' ? 'bg-green-50 text-green-700'
+															: entry.entry_type === 'expense' ? 'bg-red-50 text-red-700'
+															: 'bg-gray-100 text-gray-600'
+														)}>
+															{entry.entry_type}
+														</span>
+													</td>
+													<td class="px-3 py-1.5 text-gray-600">{entry.category}</td>
+													<td class="px-3 py-1.5 text-gray-600 max-w-[16rem] truncate" title={entry.description}>{entry.description}</td>
+													<td class="px-3 py-1.5 text-right font-mono text-gray-700">{entry.debit ? formatAmount(entry.debit) : ''}</td>
+													<td class="px-3 py-1.5 text-right font-mono text-gray-700">{entry.credit ? formatAmount(entry.credit) : ''}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+								{#if fundData.truncated}
+									<p class="text-xs text-gray-400">Showing the most recent {fundData.entries.length} of {fundData.entries_total} entries.</p>
+								{/if}
+							{/if}
+						</div>
+					{/if}
+				</div>
+				{/if}
 			</div>
 		{/if}
 

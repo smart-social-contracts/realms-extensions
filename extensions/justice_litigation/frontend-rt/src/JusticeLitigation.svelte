@@ -1,7 +1,7 @@
 <script lang="ts">
 	let { ctx }: { ctx: any } = $props();
 
-	type Tab = 'list' | 'create' | 'stats';
+	type Tab = 'list' | 'create' | 'courts' | 'stats';
 
 	let tab = $state<Tab>('list');
 	let litigations: any[] = $state([]);
@@ -32,6 +32,75 @@
 	let creating = $state(false);
 	let createError = $state('');
 	let createSuccess = $state(false);
+
+	// Courts — every case is filed at a court, so the list is needed by the
+	// create form (court picker / empty-state) and the admin Courts tab.
+	let courts: any[] = $state([]);
+	let courtsLoading = $state(false);
+	let courtsLoaded = $state(false);
+	let courtsError = $state('');
+	let selectedCourtId = $state('');
+	let seedingCourts = $state(false);
+
+	// New-court form (admin Courts tab)
+	let showCourtForm = $state(false);
+	let courtFormName = $state('');
+	let courtFormLevel = $state('first_instance');
+	let courtFormJurisdiction = $state('');
+	let courtFormDescription = $state('');
+	let courtFormParentId = $state('');
+	let courtFormSaving = $state(false);
+	let courtFormError = $state('');
+	let courtFormSuccess = $state(false);
+
+	const COURT_LEVELS = [
+		{ value: 'first_instance', label: 'First instance' },
+		{ value: 'appellate', label: 'Appellate' },
+		{ value: 'supreme', label: 'Supreme' },
+		{ value: 'specialized', label: 'Specialized' },
+	];
+
+	let activeCourts = $derived(courts.filter((c) => c.status === 'active'));
+
+	// Courts ordered as a tree (roots first, children indented) for the
+	// hierarchy view. Courts whose parent lives on another canister (e.g. the
+	// capital's appellate court, seen from a quarter) count as roots.
+	let courtTree = $derived.by(() => {
+		const ids = new Set(courts.map((c) => String(c.id)));
+		const byParent = new Map<string, any[]>();
+		const roots: any[] = [];
+		for (const c of courts) {
+			const pid = c.parent_court_id != null ? String(c.parent_court_id) : '';
+			if (pid && ids.has(pid)) {
+				const list = byParent.get(pid) ?? [];
+				list.push(c);
+				byParent.set(pid, list);
+			} else {
+				roots.push(c);
+			}
+		}
+		const out: { court: any; depth: number }[] = [];
+		const visit = (c: any, depth: number) => {
+			if (depth > 6) return;
+			out.push({ court: c, depth });
+			for (const child of byParent.get(String(c.id)) ?? []) visit(child, depth + 1);
+		};
+		for (const r of roots) visit(r, 0);
+		return out;
+	});
+
+	// Where a court's appeals go: its local parent, or (for a quarter court
+	// whose appellate court lives on the capital) the name recorded in metadata.
+	function appealsTo(court: any): string {
+		if (court.parent_court_name) return court.parent_court_name;
+		try {
+			const meta = JSON.parse(court.metadata || '{}');
+			if (meta.appellate_court) return `${meta.appellate_court} (capital)`;
+		} catch {
+			// metadata is not JSON — nothing to show
+		}
+		return '—';
+	}
 
 	// Defendant autocomplete — realm directory (users + departments) is fetched
 	// once from the host's `directory_list` query and filtered client-side.
@@ -123,6 +192,83 @@
 		return await ctx.callSync(fn, args);
 	}
 
+	async function loadCourts() {
+		courtsLoading = true;
+		courtsError = '';
+		try {
+			const res: any = await callExt('get_courts');
+			const data = res?.data ?? res;
+			if (res?.success === false || data?.success === false) {
+				throw new Error(data?.error || res?.error || 'Failed to load courts');
+			}
+			courts = data?.courts ?? [];
+			const actives = courts.filter((c: any) => c.status === 'active');
+			if (!selectedCourtId || !actives.some((c: any) => String(c.id) === selectedCourtId)) {
+				selectedCourtId = actives[0] ? String(actives[0].id) : '';
+			}
+			courtsLoaded = true;
+		} catch (e: any) {
+			courtsError = e?.message || String(e);
+		} finally {
+			courtsLoading = false;
+		}
+	}
+
+	async function seedDefaultCourts() {
+		seedingCourts = true;
+		courtsError = '';
+		try {
+			const res: any = await callExt('seed_default_courts', {});
+			const data = res?.data ?? res;
+			if (res?.success === false || data?.success === false) {
+				throw new Error(data?.error || res?.error || 'Failed to set up courts');
+			}
+			await loadCourts();
+		} catch (e: any) {
+			courtsError = e?.message || String(e);
+		} finally {
+			seedingCourts = false;
+		}
+	}
+
+	async function createCourt() {
+		if (courtFormName.trim().length < 2) {
+			courtFormError = 'Court name must be at least 2 characters';
+			return;
+		}
+		courtFormSaving = true;
+		courtFormError = '';
+		courtFormSuccess = false;
+		try {
+			const params: Record<string, unknown> = {
+				name: courtFormName.trim(),
+				level: courtFormLevel,
+				jurisdiction: courtFormJurisdiction.trim(),
+				description: courtFormDescription.trim(),
+			};
+			if (courtFormParentId) params.parent_court_id = courtFormParentId;
+			const res: any = await callExt('create_court', params);
+			const data = res?.data ?? res;
+			if (res?.success === false || data?.success === false) {
+				throw new Error(data?.error || res?.error || 'Failed to create court');
+			}
+			courtFormSuccess = true;
+			courtFormName = '';
+			courtFormJurisdiction = '';
+			courtFormDescription = '';
+			courtFormParentId = '';
+			await loadCourts();
+			setTimeout(() => {
+				courtFormSuccess = false;
+				showCourtForm = false;
+			}, 1200);
+		} catch (e: any) {
+			courtFormError = e?.message || String(e);
+		} finally {
+			courtFormSaving = false;
+		}
+	}
+
 	// Decrypt a litigation row's title/description in the browser. Private rows
 	// carry an opaque ciphertext + scope; only principals holding a key (the
 	// submitter and the justice department) can decrypt. Rows we cannot decrypt
@@ -200,6 +346,10 @@
 			createError = 'All fields are required';
 			return;
 		}
+		if (courtsLoaded && activeCourts.length === 0) {
+			createError = 'No courts available. Please create a court first.';
+			return;
+		}
 		if (!ctx.crypto?.encryptForRecipients || !ctx.crypto?.grantScope) {
 			createError = 'Secure sharing is unavailable in this host version.';
 			return;
@@ -224,7 +374,10 @@
 							defendant_kind: 'user',
 							defendant_principal: (e?.principal || defendantPrincipal).trim(),
 						};
-			const created: any = await callExt('create_litigation', defendantParams);
+			const created: any = await callExt('create_litigation', {
+				...defendantParams,
+				...(selectedCourtId ? { court_id: selectedCourtId } : {}),
+			});
 			const cdata = created?.data ?? created;
 			const id = cdata?.id;
 			const scope = cdata?.scope;
@@ -326,6 +479,23 @@
 		}
 	}
 
+	function levelColor(level: string) {
+		switch (level) {
+			case 'supreme':
+				return 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300';
+			case 'appellate':
+				return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
+			case 'specialized':
+				return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300';
+			default:
+				return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+		}
+	}
+
+	function levelLabel(level: string) {
+		return COURT_LEVELS.find((l) => l.value === level)?.label ?? (level || 'unknown');
+	}
+
 	function formatDate(dateString: string) {
 		if (!dateString) return '';
 		return new Date(dateString).toLocaleDateString('en-US', {
@@ -353,6 +523,12 @@
 
 	$effect(() => {
 		if (tab === 'create' && !directoryLoaded) void loadDirectory();
+	});
+
+	$effect(() => {
+		if ((tab === 'create' || tab === 'courts') && !courtsLoaded && !courtsLoading) {
+			void loadCourts();
+		}
 	});
 </script>
 
@@ -411,7 +587,8 @@
 
 	{#if accessDeniedOp}
 		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
+			{@const AccessDenied = ctx.ui.AccessDenied}
+			<AccessDenied operation={accessDeniedOp} />
 		{:else}
 			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
 		{/if}
@@ -490,6 +667,25 @@
 				</svg>
 				Create Litigation
 			</button>
+			{#if userProfile === 'admin'}
+				<button
+					class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium -mb-0.5 border-b-2 transition-colors {tab ===
+					'courts'
+						? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+						: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+					onclick={() => (tab = 'courts')}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"
+						/>
+					</svg>
+					Courts
+				</button>
+			{/if}
 			<button
 				class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium -mb-0.5 border-b-2 transition-colors {tab ===
 				'stats'
@@ -545,6 +741,7 @@
 								<tr>
 									<th class="px-4 py-3 rounded-tl-lg">Case ID</th>
 									<th class="px-4 py-3">Title</th>
+									<th class="px-4 py-3">Court</th>
 									<th class="px-4 py-3">Status</th>
 									<th class="px-4 py-3">Requester</th>
 									{#if userProfile === 'admin'}
@@ -589,6 +786,9 @@
 													</div>
 												{/if}
 											{/if}
+										</td>
+										<td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+											{lit.court_name || '—'}
 										</td>
 										<td class="px-4 py-3">
 											<span
@@ -778,6 +978,69 @@
 								class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50 resize-y"
 							></textarea>
 						</div>
+
+						<!-- Court the case will be filed at -->
+						<div>
+							{#if courtsLoading && !courtsLoaded}
+								<p class="text-xs text-gray-500 dark:text-gray-400 animate-pulse">
+									Loading courts…
+								</p>
+							{:else if activeCourts.length === 0}
+								<div
+									class="p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-800 dark:text-amber-300"
+								>
+									<p class="font-medium mb-1">This realm has no courts yet.</p>
+									{#if userProfile === 'admin'}
+										<p class="mb-3">
+											A case must be filed at a court. Set up a default court now, or
+											manage the hierarchy in the Courts tab.
+										</p>
+										<button
+											class="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors disabled:opacity-50"
+											onclick={seedDefaultCourts}
+											disabled={seedingCourts}
+										>
+											{seedingCourts ? 'Setting up…' : 'Set up default court'}
+										</button>
+									{:else}
+										<p>
+											The judiciary has not been set up yet — please contact a realm
+											administrator before filing a case.
+										</p>
+									{/if}
+									{#if courtsError}
+										<p class="mt-2 text-red-600 dark:text-red-400">{courtsError}</p>
+									{/if}
+								</div>
+							{:else if activeCourts.length === 1}
+								<p class="text-xs text-gray-500 dark:text-gray-400">
+									Filing at:
+									<span class="font-medium text-gray-700 dark:text-gray-300">
+										{activeCourts[0].name}
+									</span>
+									({levelLabel(activeCourts[0].level)})
+								</p>
+							{:else}
+								<label
+									for="jl-court"
+									class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
+									Court
+								</label>
+								<select
+									id="jl-court"
+									bind:value={selectedCourtId}
+									disabled={creating}
+									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+								>
+									{#each activeCourts as c (c.id)}
+										<option value={String(c.id)}>
+											{c.name} — {levelLabel(c.level)}
+										</option>
+									{/each}
+								</select>
+							{/if}
+						</div>
 					</div>
 
 					{#if createError}
@@ -811,7 +1074,8 @@
 							disabled={creating ||
 								!formTitle.trim() ||
 								!formDescription.trim() ||
-								!hasDefendant}
+								!hasDefendant ||
+								(courtsLoaded && activeCourts.length === 0)}
 						>
 							{#if creating}
 								<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -836,6 +1100,263 @@
 						</button>
 					</div>
 				</div>
+
+			<!-- COURTS TAB (admin) -->
+			{:else if tab === 'courts'}
+				<div class="flex items-center justify-between mb-4">
+					<div>
+						<h3 class="text-lg font-semibold text-gray-900 dark:text-white">Courts</h3>
+						<p class="text-sm text-gray-500 dark:text-gray-400">
+							The court hierarchy of this realm. Every litigation is filed at a court.
+						</p>
+					</div>
+					<div class="flex items-center gap-2">
+						<button
+							class="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+							onclick={loadCourts}
+							disabled={courtsLoading}
+						>
+							{courtsLoading ? 'Loading…' : '↻ Refresh'}
+						</button>
+						<button
+							class="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+							onclick={() => (showCourtForm = !showCourtForm)}
+						>
+							{showCourtForm ? 'Close' : '+ New Court'}
+						</button>
+					</div>
+				</div>
+
+				{#if courtsError}
+					<div
+						class="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg text-sm"
+					>
+						<span class="font-medium">Error:</span>
+						{courtsError}
+					</div>
+				{/if}
+
+				{#if showCourtForm}
+					<div
+						class="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5"
+					>
+						<h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+							Create New Court
+						</h4>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<div>
+								<label
+									for="jl-court-name"
+									class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
+									Name
+								</label>
+								<input
+									id="jl-court-name"
+									type="text"
+									bind:value={courtFormName}
+									placeholder="e.g. District Court"
+									disabled={courtFormSaving}
+									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+								/>
+							</div>
+							<div>
+								<label
+									for="jl-court-level"
+									class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
+									Level
+								</label>
+								<select
+									id="jl-court-level"
+									bind:value={courtFormLevel}
+									disabled={courtFormSaving}
+									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+								>
+									{#each COURT_LEVELS as l (l.value)}
+										<option value={l.value}>{l.label}</option>
+									{/each}
+								</select>
+							</div>
+							<div>
+								<label
+									for="jl-court-jurisdiction"
+									class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
+									Jurisdiction
+								</label>
+								<input
+									id="jl-court-jurisdiction"
+									type="text"
+									bind:value={courtFormJurisdiction}
+									placeholder="e.g. General, Commercial…"
+									disabled={courtFormSaving}
+									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+								/>
+							</div>
+							<div>
+								<label
+									for="jl-court-parent"
+									class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
+									Appeals go to (parent court)
+								</label>
+								<select
+									id="jl-court-parent"
+									bind:value={courtFormParentId}
+									disabled={courtFormSaving}
+									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+								>
+									<option value="">— None —</option>
+									{#each courts as c (c.id)}
+										<option value={String(c.id)}>{c.name}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="sm:col-span-2">
+								<label
+									for="jl-court-desc"
+									class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+								>
+									Description
+								</label>
+								<textarea
+									id="jl-court-desc"
+									bind:value={courtFormDescription}
+									rows="2"
+									placeholder="What kinds of cases does this court handle?"
+									disabled={courtFormSaving}
+									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50 resize-y"
+								></textarea>
+							</div>
+						</div>
+
+						{#if courtFormError}
+							<div
+								class="mt-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg text-sm"
+							>
+								<span class="font-medium">Error:</span>
+								{courtFormError}
+							</div>
+						{/if}
+						{#if courtFormSuccess}
+							<div
+								class="mt-4 p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 rounded-lg text-sm"
+							>
+								<span class="font-medium">Success:</span> Court created!
+							</div>
+						{/if}
+
+						<div class="flex justify-end mt-4">
+							<button
+								class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+								onclick={createCourt}
+								disabled={courtFormSaving || courtFormName.trim().length < 2}
+							>
+								{courtFormSaving ? 'Creating…' : 'Create Court'}
+							</button>
+						</div>
+					</div>
+				{/if}
+
+				{#if courtsLoading && !courtsLoaded}
+					<p class="py-8 text-center text-gray-500 dark:text-gray-400 animate-pulse">
+						Loading courts…
+					</p>
+				{:else if courts.length === 0}
+					<div class="text-center py-12">
+						<svg
+							class="w-12 h-12 mx-auto text-gray-400 mb-4"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="1.5"
+								d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"
+							/>
+						</svg>
+						<p class="text-gray-500 dark:text-gray-400 mb-4">
+							This realm has no courts yet, so no litigation can be filed.
+						</p>
+						<button
+							class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+							onclick={seedDefaultCourts}
+							disabled={seedingCourts}
+						>
+							{seedingCourts ? 'Setting up…' : 'Set up default court'}
+						</button>
+					</div>
+				{:else}
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm text-left">
+							<thead
+								class="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-100 dark:bg-gray-700"
+							>
+								<tr>
+									<th class="px-4 py-3 rounded-tl-lg">Court</th>
+									<th class="px-4 py-3">Level</th>
+									<th class="px-4 py-3">Status</th>
+									<th class="px-4 py-3">Jurisdiction</th>
+									<th class="px-4 py-3">Appeals to</th>
+									<th class="px-4 py-3 text-right">Judges</th>
+									<th class="px-4 py-3 text-right rounded-tr-lg">Cases</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each courtTree as row (row.court.id)}
+									<tr
+										class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+									>
+										<td class="px-4 py-3" style="padding-left: {16 + row.depth * 24}px">
+											<div class="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
+												{#if row.depth > 0}
+													<span class="text-gray-400 dark:text-gray-500">└</span>
+												{/if}
+												{row.court.name}
+											</div>
+											{#if row.court.description}
+												<div class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">
+													{row.court.description}
+												</div>
+											{/if}
+										</td>
+										<td class="px-4 py-3">
+											<span
+												class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {levelColor(row.court.level)}"
+											>
+												{levelLabel(row.court.level)}
+											</span>
+										</td>
+										<td class="px-4 py-3">
+											<span
+												class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {row.court.status === 'active'
+													? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
+													: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}"
+											>
+												{row.court.status || 'unknown'}
+											</span>
+										</td>
+										<td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+											{row.court.jurisdiction || '—'}
+										</td>
+										<td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+											{appealsTo(row.court)}
+										</td>
+										<td class="px-4 py-3 text-right text-xs text-gray-600 dark:text-gray-400">
+											{row.court.judge_count ?? 0}
+										</td>
+										<td class="px-4 py-3 text-right text-xs text-gray-600 dark:text-gray-400">
+											{row.court.case_count ?? 0}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
 
 			<!-- STATS TAB -->
 			{:else if tab === 'stats'}

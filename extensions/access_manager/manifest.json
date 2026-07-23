@@ -1,7 +1,7 @@
 {
   "name": "access_manager",
-  "version": "1.7.3",
-  "description": "Manage departments (root, policy, budget, authority) — issue #240",
+  "version": "1.8.0",
+  "description": "Manage departments (root, policy, budget, fund & payroll, authority) — issues #240, #260",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

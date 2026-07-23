@@ -256,6 +256,21 @@ Before encrypting, a client can fetch who receives wrapped DEKs (besides the sub
 | `decide_appeal` | Decide an appeal |
 | `get_statistics` | Get system statistics |
 
+### Court management (v0.4.0+)
+
+| Function | Description |
+|----------|-------------|
+| `initialize` | Post-install hook: ensures at least one active court exists (safety net) |
+| `create_court` | Create a court (realm admins / justice department head only) |
+| `seed_default_courts` | One-click fallback court creation when a realm has none (admin-gated; the UI offers this from the Courts tab and the create form's empty state) |
+
+Courts are normally seeded by the realm's codex at init from its
+`data/justice.json` template (see `seed_justice_template` in the realm
+backend's GGG justice module): quarter-scoped courts are created on every
+quarter, capital-scoped appellate/supreme courts only on the capital. The
+entry points above exist so realms without a codex template are never left
+without a court.
+
 ### Legacy litigation API (vetKeys UI)
 
 These entry points power the **Justice & Litigation** sidebar UI and the private-by-default vetKeys flow:

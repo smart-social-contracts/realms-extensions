@@ -7,6 +7,7 @@ Admin interface for governance departments (GGG ``Department`` entity — issue 
   - Budget (fund link)
   - Authority grants (department-over-department, including cross-quarter targets)
   - Extension access and profile assignment
+  - Fund ledger view and policy-gated on-chain payroll runs (issue #260)
 
 Supersedes the basic role_manager extension.
 """
@@ -1666,6 +1667,313 @@ def manage_position(args) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+# ---------------------------------------------------------------------------
+# Fund & payroll (issue #260)
+# ---------------------------------------------------------------------------
+
+def get_fund_ledger(args) -> str:
+    """Ledger view of a department's fund: inflows, outflows, cash balance."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        _require_operation(caller, Operations.PERMISSION_VIEW)
+
+        dept_name = (args_dict.get("department") or "").strip()
+        if not dept_name:
+            return json.dumps({"success": False, "error": "department is required"})
+
+        dept = Department[dept_name]
+        if not dept:
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+
+        fund = dept.fund
+        if fund is None:
+            return json.dumps({
+                "success": True,
+                "data": {"department": dept_name, "fund": None, "entries": []},
+            })
+
+        limit = max(1, min(int(args_dict.get("limit", 100) or 100), 500))
+
+        entries = []
+        inflows_by_category: Dict[str, int] = {}
+        outflows_by_category: Dict[str, int] = {}
+        total_inflows = 0
+        total_outflows = 0
+        cash_balance = 0
+        for e in fund.ledger_entries:
+            entry_type = e.entry_type or ""
+            category = e.category or "uncategorized"
+            debit = int(e.debit or 0)
+            credit = int(e.credit or 0)
+            if entry_type == "revenue":
+                amount = credit - debit
+                inflows_by_category[category] = inflows_by_category.get(category, 0) + amount
+                total_inflows += amount
+            elif entry_type == "expense":
+                amount = debit - credit
+                outflows_by_category[category] = outflows_by_category.get(category, 0) + amount
+                total_outflows += amount
+            elif entry_type == "asset" and category == "cash":
+                cash_balance += debit - credit
+            entries.append({
+                "id": e.id or "",
+                "transaction_id": e.transaction_id or "",
+                "entry_type": entry_type,
+                "category": category,
+                "debit": debit,
+                "credit": credit,
+                "entry_date": e.entry_date or "",
+                "description": e.description or "",
+                "currency": e.currency or "",
+                "tags": e.tags or "",
+            })
+
+        entries.sort(key=lambda x: (x["entry_date"], x["id"]), reverse=True)
+        truncated = len(entries) > limit
+
+        return json.dumps({
+            "success": True,
+            "data": {
+                "department": dept_name,
+                "fund": {
+                    "code": fund.code,
+                    "name": fund.name or "",
+                    "fund_type": fund.fund_type or "",
+                },
+                "entries": entries[:limit],
+                "entries_total": len(entries),
+                "truncated": truncated,
+                "totals": {
+                    "inflows": total_inflows,
+                    "outflows": total_outflows,
+                    "net": total_inflows - total_outflows,
+                    "cash_balance": cash_balance,
+                },
+                "inflows_by_category": inflows_by_category,
+                "outflows_by_category": outflows_by_category,
+            },
+        })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"get_fund_ledger error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def get_payroll_status(args) -> str:
+    """Payroll picture (seats, settlement counts, run state) for a department."""
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+        _require_operation(caller, Operations.PERMISSION_VIEW)
+
+        dept_name = (args_dict.get("department") or "").strip()
+        if not dept_name:
+            return json.dumps({"success": False, "error": "department is required"})
+
+        from core.payroll import payroll_status
+
+        result = payroll_status(dept_name, args_dict.get("period"))
+        if result.get("error"):
+            return json.dumps({"success": False, "error": result["error"]})
+        return json.dumps({"success": True, "data": result})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"get_payroll_status error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def run_department_payroll(args) -> str:
+    """Start an on-chain payroll run for a department, policy-gated.
+
+    Applies immediately when the *governing* org's policy is 1/1; any other
+    policy turns the request into an org-scoped proposal that must pass that
+    org's M/N/quorum/veto vote first (same model as ``manage_position``).
+    The run itself executes as a chunked background task (core.payroll).
+    """
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+
+        from core.payroll import (
+            build_payroll_proposal_code,
+            current_period,
+            describe_payroll_action,
+            start_department_payroll,
+        )
+        from core.position_admin import policy_is_direct
+
+        dept_name = (args_dict.get("department") or "").strip()
+        if not dept_name:
+            return json.dumps({"success": False, "error": "department is required"})
+
+        dept = Department[dept_name]
+        if not dept:
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+
+        period = (args_dict.get("period") or current_period()).strip()
+
+        is_manager = _can_manage_dept(caller, dept)
+        if not is_manager and not _is_dept_member(caller, dept):
+            return json.dumps({"success": False, "error": "Access denied: not a manager or member of this department"})
+
+        governing = _resolve_governing_department(caller, dept)
+        action = {
+            "action": "run_payroll",
+            "department": dept_name,
+            "period": period,
+            "triggered_by": caller.id,
+        }
+
+        if policy_is_direct(governing):
+            if not is_manager:
+                return json.dumps({"success": False, "error": "Access denied: running payroll requires admin/head rights"})
+            result = start_department_payroll(
+                dept_name, period=period, triggered_by=caller.id
+            )
+            if result.get("error"):
+                return json.dumps({"success": False, "error": result["error"]})
+            logger.info(
+                f"Payroll run for '{dept_name}' ({period}) started by {_get_caller_principal()} (direct)"
+            )
+            return json.dumps({
+                "success": True,
+                "data": {**result, "applied": "direct", "governed_by": governing.name},
+            })
+
+        summary = describe_payroll_action(action)
+
+        # A vote is needed — never create the proposal without explicit
+        # confirmation from the caller (the UI shows a confirmation modal).
+        if not args_dict.get("confirm"):
+            return json.dumps({
+                "success": True,
+                "data": _vote_confirmation_payload(governing, dept, summary),
+            })
+
+        data = _submit_org_scoped_proposal(
+            action,
+            governing,
+            summary,
+            proposal_type="payroll_action",
+            action_field="payroll_action",
+            build_code=build_payroll_proposal_code,
+            target_note=lambda target, gov: (
+                f"Payroll run for department '{target}'"
+                if target == gov
+                else f"Payroll run for department '{target}', decided by '{gov}'"
+            ),
+        )
+        return json.dumps({
+            "success": True,
+            "data": {**data, "applied": "proposal", "summary": summary},
+        })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"run_department_payroll error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def set_payroll_schedule(args) -> str:
+    """Enable/disable automatic monthly payroll for a department.
+
+    Enabling is policy-gated exactly like a manual run (direct for a 1/1
+    governing policy, otherwise an org-scoped proposal): it authorizes a
+    standing monthly payment, not a one-off. Disabling is always direct for
+    managers — switching automation off is the safe direction and must never
+    be blocked behind a vote.
+    """
+    try:
+        args_dict = _parse_args(args)
+        caller = _get_caller_user()
+
+        from core.payroll import (
+            build_schedule_proposal_code,
+            describe_payroll_action,
+            set_payroll_schedule as core_set_schedule,
+        )
+        from core.position_admin import policy_is_direct
+
+        dept_name = (args_dict.get("department") or "").strip()
+        if not dept_name:
+            return json.dumps({"success": False, "error": "department is required"})
+
+        dept = Department[dept_name]
+        if not dept:
+            return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+
+        enabled = bool(args_dict.get("enabled"))
+        payday = int(args_dict.get("payday") or 1)
+
+        is_manager = _can_manage_dept(caller, dept)
+        if not is_manager:
+            return json.dumps({"success": False, "error": "Access denied: changing automatic payroll requires admin/head rights"})
+
+        if not enabled:
+            result = core_set_schedule(dept_name, False, triggered_by=caller.id)
+            if result.get("error"):
+                return json.dumps({"success": False, "error": result["error"]})
+            return json.dumps({"success": True, "data": {**result, "applied": "direct"}})
+
+        governing = _resolve_governing_department(caller, dept)
+        action = {
+            "action": "set_payroll_schedule",
+            "kind": "schedule",
+            "department": dept_name,
+            "enabled": True,
+            "payday": payday,
+            "triggered_by": caller.id,
+        }
+
+        if policy_is_direct(governing):
+            result = core_set_schedule(
+                dept_name, True, payday=payday, triggered_by=caller.id
+            )
+            if result.get("error"):
+                return json.dumps({"success": False, "error": result["error"]})
+            logger.info(
+                f"Automatic payroll for '{dept_name}' enabled by {_get_caller_principal()} (direct)"
+            )
+            return json.dumps({
+                "success": True,
+                "data": {**result, "applied": "direct", "governed_by": governing.name},
+            })
+
+        summary = describe_payroll_action(action)
+
+        if not args_dict.get("confirm"):
+            return json.dumps({
+                "success": True,
+                "data": _vote_confirmation_payload(governing, dept, summary),
+            })
+
+        data = _submit_org_scoped_proposal(
+            action,
+            governing,
+            summary,
+            proposal_type="payroll_action",
+            action_field="payroll_action",
+            build_code=build_schedule_proposal_code,
+            target_note=lambda target, gov: (
+                f"Automatic payroll for department '{target}'"
+                if target == gov
+                else f"Automatic payroll for department '{target}', decided by '{gov}'"
+            ),
+        )
+        return json.dumps({
+            "success": True,
+            "data": {**data, "applied": "proposal", "summary": summary},
+        })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"set_payroll_schedule error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 EXTENSION_FUNCTIONS = {
     # Departments (Department entity)
     "list_departments": list_departments,
@@ -1700,6 +2008,11 @@ EXTENSION_FUNCTIONS = {
     "get_available_profiles": get_available_profiles,
     # Positions (issue #241)
     "manage_position": manage_position,
+    # Fund & payroll (issue #260)
+    "get_fund_ledger": get_fund_ledger,
+    "get_payroll_status": get_payroll_status,
+    "run_department_payroll": run_department_payroll,
+    "set_payroll_schedule": set_payroll_schedule,
 }
 
 

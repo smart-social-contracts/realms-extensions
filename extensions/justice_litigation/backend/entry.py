@@ -266,6 +266,7 @@ def _can_manage_case(case: "Case", caller: str) -> bool:
 
 def _court_to_dict(court: Court) -> Dict[str, Any]:
     """Convert Court entity to dictionary format"""
+    parent = getattr(court, "parent_court", None)
     return {
         "id": court._id,
         "name": court.name,
@@ -278,6 +279,9 @@ def _court_to_dict(court: Court) -> Dict[str, Any]:
         "license_valid": court.license.is_valid() if court.license else False,
         "case_count": len(list(court.cases)) if hasattr(court, 'cases') else 0,
         "judge_count": len(list(court.judges)) if hasattr(court, 'judges') else 0,
+        "parent_court_id": parent._id if parent else None,
+        "parent_court_name": parent.name if parent else None,
+        "metadata": court.metadata or "",
     }
 
 
@@ -422,6 +426,174 @@ def get_courts(args: str) -> str:
         
     except Exception as e:
         logger.error(f"Error in get_courts: {str(e)}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+# ============================================================================
+# Entry Points - Court management
+# ============================================================================
+
+DEFAULT_COURT_NAME = "Default Court"
+DEFAULT_JUSTICE_SYSTEM_NAME = "Default Justice System"
+
+_VALID_COURT_LEVELS = (
+    CourtLevel.FIRST_INSTANCE,
+    CourtLevel.APPELLATE,
+    CourtLevel.SUPREME,
+    CourtLevel.SPECIALIZED,
+)
+
+
+def _can_manage_courts(caller: str) -> bool:
+    """Court administration: realm admins and the justice department head."""
+    return _is_realm_admin(caller) or _is_justice_head(caller)
+
+
+def _ensure_default_court() -> Optional[Court]:
+    """Create a minimal active first-instance court when none exists.
+
+    Safety net for realms whose codex did not seed a court hierarchy (the
+    codex template, when present, always wins because it seeds first during
+    quarter bootstrap). Returns the created Court, or None if any active
+    court already exists.
+    """
+    for court in Court.instances():
+        if court.status == "active":
+            return None
+
+    justice_systems = list(JusticeSystem.instances())
+    if justice_systems:
+        js = justice_systems[0]
+    else:
+        js = JusticeSystem(
+            name=DEFAULT_JUSTICE_SYSTEM_NAME,
+            description="Automatically created so litigations can be filed.",
+            system_type=JusticeSystemType.PUBLIC,
+            status="active",
+            metadata="",
+        )
+
+    court = Court(
+        name=DEFAULT_COURT_NAME,
+        description="Automatically created court of first instance.",
+        jurisdiction="General",
+        level=CourtLevel.FIRST_INSTANCE,
+        status="active",
+        justice_system=js,
+        metadata=json.dumps({"seeded_by": "justice_litigation"}),
+    )
+    logger.info(f"Created default court {court.name!r}")
+    return court
+
+
+def initialize(args: str) -> str:
+    """Post-install hook (called by the host after the extension is installed).
+
+    Ensures at least one active court exists so litigation filing never dead-ends
+    with "No courts available". Idempotent.
+    """
+    logger.info("justice_litigation.initialize called")
+    try:
+        created = _ensure_default_court()
+        return json.dumps({
+            "success": True,
+            "data": {
+                "default_court_created": created.name if created else None,
+                "total_courts": len(list(Court.instances())),
+            },
+        })
+    except Exception as e:
+        logger.error(f"Error in initialize: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def seed_default_courts(args: str) -> str:
+    """Create the fallback court when the realm has none (admin/justice head).
+
+    Exposed so the UI can offer a one-click fix instead of a dead-end error
+    when a realm was provisioned without a court hierarchy.
+    """
+    logger.info("justice_litigation.seed_default_courts called")
+    try:
+        caller = _caller_principal()
+        if not _can_manage_courts(caller):
+            return json.dumps({"success": False, "error": "Only realm admins or the justice department head can seed courts"})
+
+        created = _ensure_default_court()
+        courts = [_court_to_dict(c) for c in Court.instances()]
+        return json.dumps({
+            "success": True,
+            "data": {
+                "created": created.name if created else None,
+                "courts": courts,
+                "total_count": len(courts),
+            },
+        })
+    except Exception as e:
+        logger.error(f"Error in seed_default_courts: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def create_court(args: str) -> str:
+    """Create a new court (admin/justice head only).
+
+    Params: name (required), description, jurisdiction, level (default
+    first_instance), justice_system_id, parent_court_id.
+    """
+    logger.info(f"justice_litigation.create_court called with args: {args}")
+    try:
+        caller = _caller_principal()
+        if not _can_manage_courts(caller):
+            return json.dumps({"success": False, "error": "Only realm admins or the justice department head can create courts"})
+
+        params = json.loads(args) if args else {}
+        name = str(params.get("name") or "").strip()
+        if len(name) < 2:
+            return json.dumps({"success": False, "error": "Court name must be at least 2 characters"})
+
+        level = str(params.get("level") or CourtLevel.FIRST_INSTANCE).strip()
+        if level not in _VALID_COURT_LEVELS:
+            return json.dumps({"success": False, "error": f"Invalid level {level!r}. Valid: {', '.join(_VALID_COURT_LEVELS)}"})
+
+        try:
+            if Court[name] is not None:
+                return json.dumps({"success": False, "error": f"A court named {name!r} already exists"})
+        except Exception:
+            pass
+
+        justice_system = None
+        justice_system_id = params.get("justice_system_id")
+        if justice_system_id:
+            justice_system = JusticeSystem[justice_system_id]
+            if justice_system is None:
+                return json.dumps({"success": False, "error": f"Justice system {justice_system_id} not found"})
+        else:
+            justice_systems = list(JusticeSystem.instances())
+            justice_system = justice_systems[0] if justice_systems else None
+
+        parent_court = None
+        parent_court_id = params.get("parent_court_id")
+        if parent_court_id:
+            parent_court = Court[parent_court_id]
+            if parent_court is None:
+                return json.dumps({"success": False, "error": f"Parent court {parent_court_id} not found"})
+
+        court = Court(
+            name=name,
+            description=str(params.get("description") or ""),
+            jurisdiction=str(params.get("jurisdiction") or ""),
+            level=level,
+            status="active",
+            metadata="",
+        )
+        if justice_system is not None:
+            court.justice_system = justice_system
+        if parent_court is not None:
+            court.parent_court = parent_court
+
+        return json.dumps({"success": True, "data": {"court": _court_to_dict(court)}})
+    except Exception as e:
+        logger.error(f"Error in create_court: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -827,6 +999,71 @@ def get_penalties(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def _record_penalty_revenue(penalty: "Penalty") -> int:
+    """Book an executed fine as fund revenue for the Justice department.
+
+    Departments collecting money must record it against their fund (issue
+    #260) so inflows appear in the access_manager Fund tab and in Financial
+    Reports. Creates a balanced pair: debit cash, credit fine revenue.
+    Restitution is excluded — it compensates the harmed party, it is not
+    realm revenue. Returns the number of ledger entries created.
+    """
+    from ggg import LedgerEntry
+
+    if penalty.penalty_type != PenaltyType.FINE:
+        return 0
+    amount = int(round(penalty.amount or 0))
+    if amount <= 0:
+        return 0
+
+    dept = Department[JUSTICE_DEPARTMENT_NAME]
+    fund = getattr(dept, "fund", None) if dept else None
+    if fund is None:
+        logger.warning(
+            f"Penalty {penalty.id} executed but department "
+            f"'{JUSTICE_DEPARTMENT_NAME}' has no fund — revenue not recorded"
+        )
+        return 0
+
+    transaction_id = f"TXN-PEN-{penalty.id}"
+    if LedgerEntry.find({"transaction_id": transaction_id}):
+        return 0  # already booked (idempotency)
+
+    entry_date = penalty.executed_date or ""
+    description = f"Litigation fine — penalty {penalty.id}"
+    entries = LedgerEntry.create_transaction(transaction_id, [
+        {
+            "entry_type": "asset",
+            "category": "cash",
+            "debit": amount,
+            "credit": 0,
+            "entry_date": entry_date,
+            "description": f"{description} - Cash received",
+            "currency": penalty.currency or "",
+            "fund": fund,
+            "penalty": penalty,
+            "tags": "litigation,fine",
+        },
+        {
+            "entry_type": "revenue",
+            "category": "fine",
+            "debit": 0,
+            "credit": amount,
+            "entry_date": entry_date,
+            "description": f"{description} - Revenue",
+            "currency": penalty.currency or "",
+            "fund": fund,
+            "penalty": penalty,
+            "tags": "litigation,fine",
+        },
+    ])
+    logger.info(
+        f"Recorded fine revenue for penalty {penalty.id} "
+        f"against fund {fund.code} ({amount} {penalty.currency})"
+    )
+    return len(entries)
+
+
 def execute_penalty(args: str) -> str:
     """Execute a penalty"""
     logger.info(f"justice_litigation.execute_penalty called with args: {args}")
@@ -862,6 +1099,12 @@ def execute_penalty(args: str) -> str:
 
         # Execute penalty using GGG function
         updated_penalty = penalty_execute(penalty)
+
+        # Fund accounting: executed fines are Justice department revenue.
+        try:
+            _record_penalty_revenue(updated_penalty)
+        except Exception as acc_err:
+            logger.error(f"Penalty revenue accounting failed for {penalty_id}: {acc_err}")
 
         return json.dumps({
             "success": True,
@@ -1179,6 +1422,8 @@ def _case_to_litigation_row(case: "Case") -> Dict[str, Any]:
         "content_ciphertext": (content.ciphertext or "") if is_private else "",
         "is_private": is_private,
         "status": case.status or "filed",
+        "court_id": str(case.court._id) if case.court else None,
+        "court_name": case.court.name if case.court else "",
         "requested_at": case.filed_date or "",
         "verdict": _verdict_decision(case),
         "actions_taken": [],
@@ -1323,11 +1568,15 @@ def create_litigation(args: str) -> str:
 
         court_id = params.get("court_id")
 
-        # If no court specified, use the first available court.
+        # If no court specified, prefer an active first-instance court (the
+        # seeded default), then any active court, then anything at all.
         if not court_id:
             courts = list(Court.instances())
-            if courts:
-                court_id = courts[0]._id
+            active = [c for c in courts if c.status == "active"]
+            first_instance = [c for c in active if c.level == CourtLevel.FIRST_INSTANCE]
+            preferred = first_instance or active or courts
+            if preferred:
+                court_id = preferred[0]._id
             else:
                 return json.dumps(
                     {"success": False, "error": "No courts available. Please create a court first."}
