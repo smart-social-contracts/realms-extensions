@@ -1,0 +1,20 @@
+{
+  "name": "budget_manager",
+  "version": "1.0.0",
+  "description": "Treasury budget management: epoch-based revenue allocation into funds with Sankey flow visualization (GGG treasury standard, issue #261)",
+  "author": "Smart Social Contracts",
+  "permissions": [],
+  "profiles": [
+    "member",
+    "admin"
+  ],
+  "categories": [
+    "finances"
+  ],
+  "sidebar_label": {
+    "en": "Budget"
+  },
+  "icon": "cash",
+  "doc_url": null,
+  "show_in_sidebar": true
+}
