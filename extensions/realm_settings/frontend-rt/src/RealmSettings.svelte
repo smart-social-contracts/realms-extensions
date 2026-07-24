@@ -43,6 +43,7 @@
 	// change must go through a proposal + vote.
 	let governedConfirm = $state<any>(null);
 	let governedSubmitting = $state(false);
+	let governedRetry = $state<(() => Promise<void>) | null>(null);
 
 	type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'advanced';
 	let activeTab: SettingsTab = $state('general');
@@ -284,6 +285,7 @@
 				addToast(`Proposal ${result.proposal_id} created`);
 			} else if (result?.requires_confirmation) {
 				governedConfirm = result;
+				governedRetry = () => saveRealmSettings(true);
 			} else if (result?.success) {
 				settingsMessage = 'Realm settings saved successfully.';
 				addToast('Realm settings updated');
@@ -312,9 +314,10 @@
 	}
 
 	async function submitGovernedProposal() {
+		if (!governedRetry) return;
 		governedSubmitting = true;
 		try {
-			await saveRealmSettings(true);
+			await governedRetry();
 		} finally {
 			governedSubmitting = false;
 		}
@@ -379,7 +382,7 @@
 		}
 	}
 
-	async function advanceStage() {
+	async function advanceStage(confirmProposal = false) {
 		if (!nextStage) return;
 		lifecycleAdvancing = true;
 		lifecycleError = '';
@@ -387,7 +390,11 @@
 		const raw = await ctx.backend.extension_sync_call(
 			'realm_settings',
 			'set_realm_stage',
-			JSON.stringify({ stage: nextStage, reason: 'Admin advancement via Settings' }),
+			JSON.stringify({
+				stage: nextStage,
+				reason: 'Admin advancement via Settings',
+				...(confirmProposal ? { confirm: true } : {}),
+			}),
 		);
 			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
 			const res = envelope?.response
@@ -395,7 +402,13 @@
 					? JSON.parse(envelope.response)
 					: envelope.response
 				: envelope;
-			if (res?.success) {
+			if (res?.applied === 'proposal') {
+				governedConfirm = null;
+				addToast(`Proposal ${res.proposal_id} created — stage advances after the vote passes`);
+			} else if (res?.requires_confirmation) {
+				governedConfirm = res;
+				governedRetry = () => advanceStage(true);
+			} else if (res?.success) {
 				addToast(`Stage advanced to ${STAGE_LABELS[nextStage]}`);
 				await loadLifecycle();
 			} else if (res?.denied_operation) {
@@ -607,7 +620,7 @@
 			{#if nextStage && currentStage !== 'terminated'}
 				<div class="flex items-center gap-3 pt-2 border-t border-gray-100">
 					<button
-						onclick={advanceStage}
+						onclick={() => advanceStage()}
 						disabled={lifecycleAdvancing}
 						class={cn(
 							'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
@@ -935,7 +948,7 @@
 			<div class="flex justify-end gap-3">
 				<button
 					type="button"
-					onclick={() => (governedConfirm = null)}
+					onclick={() => { governedConfirm = null; governedRetry = null; }}
 					class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
 				>Cancel</button>
 				<button

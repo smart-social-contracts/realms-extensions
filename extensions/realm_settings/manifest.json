@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Realm configuration and branding",
   "author": "Realms Team",
   "categories": [
@@ -21,7 +21,10 @@
     "default": "admin",
     "functions": {
       "health": "public",
-      "set_realm_stage": "admin",
+      "set_realm_stage": {
+        "level": "admin",
+        "governed": true
+      },
       "transfer_root": "admin",
       "set_quarter_policy": {
         "level": "org.set_policy",

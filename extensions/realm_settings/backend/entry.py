@@ -64,7 +64,6 @@ def extension_sync_call(method_name: str, args: dict):
         "health": (health, False),
         "get_realm_stage": (get_realm_stage, False),
         "set_realm_stage": (set_realm_stage, True),
-        "approve_stage_transition": (approve_stage_transition, True),
         "transfer_root": (transfer_root, True),
         "patch_manifest_data": (patch_manifest_data, True),
         "set_quarter_policy": (set_quarter_policy, True),
@@ -160,9 +159,12 @@ def set_realm_stage(args: dict):
       - alpha→beta ``checklist`` mode: readiness checklist must pass (#241).
       - alpha→beta ``auto_milestones`` mode: declared milestones (e.g.
         ``critical_mass``) must be met.
-      - beta→production: proving period elapsed + governance vote satisfied
-        (approvals recorded via ``approve_stage_transition`` checked against
-        the root department's policy).
+      - beta→production: proving period elapsed + root handed over.
+
+    Governance (issue #262): this is a governed action — when the root
+    policy is not 1/1 the dispatch gate turns the call into a root-scoped
+    proposal, and this function runs as its replay after the vote passes
+    (the hard gates above are re-checked at replay time).
     """
     from ggg import Realm
 
@@ -278,7 +280,8 @@ def set_realm_stage(args: dict):
         if new_stage == "beta":
             lifecycle["deposits_locked"] = True
 
-        # Consumed approvals don't carry over to the next transition.
+        # Legacy: bespoke stage approvals were replaced by the generic
+        # governed-action proposal flow (issue #262).
         lifecycle.pop("stage_approvals", None)
 
         realm.manifest_data = json.dumps(manifest)
@@ -307,100 +310,6 @@ def set_realm_stage(args: dict):
         }
     except Exception as e:
         logger.error(f"set_realm_stage error: {e}")
-        return {"success": False, "error": str(e)}
-
-
-def approve_stage_transition(args: dict):
-    """Record the caller's approval for an upcoming stage transition.
-
-    Only members of the root (governance) department may approve — this is
-    the "Congress votes to go live" mechanism (issue #253). Approvals are
-    stored in ``manifest_data.lifecycle.stage_approvals.<stage>`` and are
-    checked against the root department's policy by ``set_realm_stage``.
-
-    Args: {"stage": "production", "approve": true}
-    """
-    from ggg import Realm
-
-    try:
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except Exception:
-                return {"success": False, "error": "args is not valid JSON"}
-
-        realm = Realm.load("1")
-        if not realm:
-            return {"success": False, "error": "Realm not found"}
-
-        stage = (args.get("stage") or "").strip().lower()
-        approve = bool(args.get("approve", True))
-        if stage not in VALID_STAGES:
-            return {
-                "success": False,
-                "error": f"Invalid stage '{stage}'. Valid stages: {VALID_STAGES}",
-            }
-
-        caller = _caller()
-
-        # Only root-org (governance authority) members can vote.
-        from ggg import Department, ROOT_ORG_NAME
-
-        root = next(
-            (
-                d for d in Department.instances()
-                if getattr(d, "is_root", False) or d.name == ROOT_ORG_NAME
-            ),
-            None,
-        )
-        if root is None:
-            return {"success": False, "error": "Root department not found"}
-
-        from core.membership import department_member_principals
-
-        eligible = department_member_principals(root)
-        if caller not in eligible:
-            return {
-                "success": False,
-                "error": (
-                    f"Access denied: {caller} is not a member of the "
-                    f"governance (root) department"
-                ),
-            }
-
-        manifest_raw = getattr(realm, "manifest_data", "{}") or "{}"
-        try:
-            manifest = json.loads(manifest_raw)
-        except (json.JSONDecodeError, TypeError):
-            manifest = {}
-
-        lifecycle = manifest.setdefault("lifecycle", {})
-        approvals_by_stage = lifecycle.setdefault("stage_approvals", {})
-        approvals = approvals_by_stage.setdefault(stage, [])
-
-        if approve and caller not in approvals:
-            approvals.append(caller)
-        elif not approve and caller in approvals:
-            approvals.remove(caller)
-
-        realm.manifest_data = json.dumps(manifest)
-
-        logger.info(
-            f"Stage-transition vote: {caller} "
-            f"{'approved' if approve else 'withdrew approval for'} '{stage}' "
-            f"({len(approvals)} of {len(eligible)} eligible)"
-        )
-
-        return {
-            "success": True,
-            "data": {
-                "stage": stage,
-                "approvals": list(approvals),
-                "eligible": eligible,
-            },
-        }
-    except Exception as e:
-        logger.error(f"approve_stage_transition error: {e}")
         return {"success": False, "error": str(e)}
 
 
