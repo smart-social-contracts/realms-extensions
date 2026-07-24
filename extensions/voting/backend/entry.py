@@ -126,6 +126,7 @@ def _proposal_to_dict(proposal: Proposal, *, summary: bool = False) -> Dict[str,
         except (ValueError, TypeError):
             voting_deadline = None
     proposal_key = proposal.proposal_id or str(getattr(proposal, "_id", "") or "")
+    entity_id = int(getattr(proposal, "_id", 0) or 0)
     metadata = (
         _metadata_for_list(proposal.metadata or "{}")
         if summary
@@ -133,6 +134,7 @@ def _proposal_to_dict(proposal: Proposal, *, summary: bool = False) -> Dict[str,
     )
     return {
         "id": proposal_key,
+        "entity_id": entity_id,
         "title": proposal.title,
         "description": proposal.description,
         "code_url": proposal.code_url,
@@ -1751,11 +1753,33 @@ def demo_approve_and_execute(args: str) -> Async[str]:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def get_voting_settings(args: str) -> str:
+    """Return realm calendar voting-window settings for the Voting UI."""
+    try:
+        from ggg import Realm
+
+        window_s = 604_800
+        realm = Realm[1]
+        if realm and realm.calendar and realm.calendar.voting_window:
+            window_s = max(1, int(realm.calendar.voting_window))
+        return json.dumps({
+            "success": True,
+            "data": {
+                "voting_window_seconds": window_s,
+                "voting_window_days": window_s / 86400.0,
+            },
+        })
+    except Exception as e:
+        logger.error(f"get_voting_settings error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 # ---------------------------------------------------------------------------
 # Extension API registry
 # ---------------------------------------------------------------------------
 
 EXTENSION_FUNCTIONS = {
+    "get_voting_settings": get_voting_settings,
     "get_proposals": get_proposals,
     "get_proposal": get_proposal,
     "submit_proposal": submit_proposal,

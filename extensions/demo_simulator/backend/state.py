@@ -11,9 +11,13 @@ import random
 from .constants import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_INTERVAL_SECONDS,
+    DEFAULT_ROTATION_MODE,
+    ENTITY_STAT_FIELDS,
+    ENTITY_TYPE_KEYS,
     MAX_ENTITIES_TOTAL,
     SCHEDULE_NAME,
     TASK_NAME,
+    default_enabled_types,
 )
 
 
@@ -44,29 +48,51 @@ def get_state():
 
 
 def _default_state_data():
+    counters = {field: 0 for field in ENTITY_STAT_FIELDS.values()}
     return {
         "batch_number": 0,
-        "total_users_created": 0,
-        "total_orgs_created": 0,
-        "total_proposals_created": 0,
-        "total_transfers_created": 0,
-        "total_disputes_created": 0,
-        "total_funds_created": 0,
-        "total_fiscal_periods_created": 0,
-        "total_budgets_created": 0,
-        "total_ledger_entries_created": 0,
+        **counters,
         "seed": 0,
         "batch_size": DEFAULT_BATCH_SIZE,
         "max_entities": MAX_ENTITIES_TOTAL,
+        "rotation_mode": DEFAULT_ROTATION_MODE,
+        "enabled_types": default_enabled_types(),
+        "type_counts": {},
     }
+
+
+def normalize_state_data(data):
+    """Merge persisted state with defaults for newer config fields."""
+    base = _default_state_data()
+    if not isinstance(data, dict):
+        return base
+    merged = {**base, **data}
+    enabled = merged.get("enabled_types")
+    if not isinstance(enabled, dict):
+        enabled = default_enabled_types()
+    else:
+        normalized_enabled = default_enabled_types()
+        for key in ENTITY_TYPE_KEYS:
+            if key in enabled:
+                normalized_enabled[key] = bool(enabled[key])
+        enabled = normalized_enabled
+    merged["enabled_types"] = enabled
+    type_counts = merged.get("type_counts")
+    merged["type_counts"] = type_counts if isinstance(type_counts, dict) else {}
+    mode = merged.get("rotation_mode") or DEFAULT_ROTATION_MODE
+    if mode not in ("round_robin", "random", "all"):
+        mode = DEFAULT_ROTATION_MODE
+    merged["rotation_mode"] = mode
+    return merged
 
 
 def load_state_data(state):
     """Parse state JSON stored in the description field (2048 char limit)."""
     try:
-        return json.loads(state.description) if state.description else {}
+        raw = json.loads(state.description) if state.description else {}
     except (json.JSONDecodeError, TypeError):
-        return {}
+        raw = {}
+    return normalize_state_data(raw)
 
 
 def save_state_data(state, data):

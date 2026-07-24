@@ -18,12 +18,18 @@
 	function parseProposalIdFromUrl(): string | null {
 		if (typeof window === 'undefined') return null;
 		const params = new URLSearchParams(window.location.search);
-		const queryId = params.get('proposal');
+		const queryId = params.get('proposal') ?? params.get('p');
 		if (queryId) return decodeURIComponent(queryId);
 
 		const base = getExtensionBasePath();
 		const rest = window.location.pathname.slice(base.length).replace(/^\//, '');
 		if (!rest) return null;
+		const proposalsMatch = rest.match(/^proposals\/(.+)$/);
+		if (proposalsMatch) return decodeURIComponent(proposalsMatch[1]);
+		// Legacy URL shapes (still accepted when opened directly)
+		if (rest.startsWith('p=')) {
+			return decodeURIComponent(rest.slice('p='.length));
+		}
 		if (rest.startsWith('proposal=')) {
 			return decodeURIComponent(rest.slice('proposal='.length));
 		}
@@ -31,6 +37,37 @@
 			return decodeURIComponent(rest.slice('proposal/'.length));
 		}
 		return null;
+	}
+
+	function resolveProposalId(slug: string): string {
+		if (/^prop_/i.test(slug)) return slug;
+		if (/^\d+$/.test(slug)) {
+			const num = parseInt(slug, 10);
+			const padded = `prop_${String(num).padStart(3, '0')}`;
+			const hit = proposals.find(
+				(p) => p.entity_id === num || p.id === padded || p.id === slug,
+			);
+			if (hit?.id) return hit.id;
+			return padded;
+		}
+		return slug;
+	}
+
+	function proposalLinkSlug(proposal: any): string {
+		const entityId = Number(proposal?.entity_id);
+		if (Number.isFinite(entityId) && entityId > 0) return String(entityId);
+		const match = String(proposal?.id ?? '').match(/^prop_(\d+)$/i);
+		if (match) return String(parseInt(match[1], 10));
+		return String(proposal?.id ?? '');
+	}
+
+	function proposalDisplayId(proposal: any): string {
+		const entityId = Number(proposal?.entity_id);
+		if (Number.isFinite(entityId) && entityId > 0) return `#${entityId}`;
+		const match = String(proposal?.id ?? '').match(/^prop_(\d+)$/i);
+		if (match) return `#${parseInt(match[1], 10)}`;
+		const id = String(proposal?.id ?? '').trim();
+		return id || '—';
 	}
 
 	const initialProposalId =
@@ -43,6 +80,7 @@
 	let listNextFromId = $state(1);
 	let orgFilter = $state('');
 	let statusFilter = $state('');
+	let sortBy = $state('newest');
 	let orgOptions: string[] = $state([]);
 	const STATUS_OPTIONS = [
 		'voting',
@@ -52,6 +90,12 @@
 		'rejected',
 		'failed',
 		'no_quorum',
+	];
+	const SORT_OPTIONS = [
+		{ value: 'newest', label: 'Most recent' },
+		{ value: 'oldest', label: 'Oldest first' },
+		{ value: 'active_first', label: 'Active first' },
+		{ value: 'title', label: 'Title A–Z' },
 	];
 	const LIST_FETCH_SIZE = 30;
 	let error = $state('');
@@ -92,7 +136,8 @@
 	let actionMsg = $state('');
 	let actionError = $state('');
 
-	let votingInProgress = $state('');
+	let votingSettings: { voting_window_seconds: number; voting_window_days: number } | null = $state(null);
+	let linkCopied = $state(false);
 
 	let nowMs = $state(Date.now());
 	let countdownTimer: ReturnType<typeof setInterval> | undefined;
@@ -100,8 +145,48 @@
 	let currentPage = $state(1);
 	const pageSize = 10;
 
+	function isProposalEnded(proposal: any, now = Date.now()): boolean {
+		const status = (proposal?.status || '').toLowerCase();
+		const endedStatuses = ['executed', 'rejected', 'failed', 'no_quorum', 'approved'];
+		if (endedStatuses.includes(status)) return true;
+		if (status === 'voting' && proposal.voting_deadline) {
+			const epoch = parseEpochSeconds(proposal.voting_deadline);
+			if (epoch != null && epoch * 1000 <= now) return true;
+		}
+		return false;
+	}
+
+	function proposalSortKey(proposal: any): number {
+		const created = parseEpochSeconds(proposal?.created_at);
+		if (created != null && created > 0) return created;
+		const entityId = Number(proposal?.entity_id);
+		if (Number.isFinite(entityId) && entityId > 0) return entityId;
+		const id = String(proposal?.id ?? proposal?._id ?? '');
+		const propMatch = id.match(/^prop_(\d+)$/i);
+		if (propMatch) return Number(propMatch[1]);
+		const numeric = parseInt(id, 10);
+		if (Number.isFinite(numeric) && numeric > 0) return numeric;
+		return 0;
+	}
+
 	let sortedProposals = $derived(
-		[...proposals].sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
+		[...proposals].sort((a, b) => {
+			switch (sortBy) {
+				case 'oldest':
+					return proposalSortKey(a) - proposalSortKey(b);
+				case 'active_first': {
+					const aEnded = isProposalEnded(a, nowMs) ? 1 : 0;
+					const bEnded = isProposalEnded(b, nowMs) ? 1 : 0;
+					if (aEnded !== bEnded) return aEnded - bEnded;
+					return proposalSortKey(b) - proposalSortKey(a);
+				}
+				case 'title':
+					return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
+				case 'newest':
+				default:
+					return proposalSortKey(b) - proposalSortKey(a);
+			}
+		}),
 	);
 	let totalPages = $derived(Math.max(1, Math.ceil(sortedProposals.length / pageSize)));
 	let pagedProposals = $derived(
@@ -262,9 +347,43 @@
 		codeChecksum = primary?.checksum ?? '';
 	}
 
-	function buildProposalUrl(proposalId: string): string {
+	function proposalPath(proposal: any | string | null): string {
 		const base = getExtensionBasePath();
-		return `${window.location.origin}${base}/proposal=${encodeURIComponent(proposalId)}`;
+		if (!proposal) return base;
+		const slug =
+			typeof proposal === 'string' ? proposal : proposalLinkSlug(proposal);
+		return `${base}/proposals/${encodeURIComponent(slug)}`;
+	}
+
+	function buildProposalUrl(proposalOrSlug: any): string {
+		const slug =
+			typeof proposalOrSlug === 'string'
+				? proposalOrSlug
+				: proposalLinkSlug(proposalOrSlug);
+		const extPath = `/extensions/voting/proposals/${encodeURIComponent(slug)}`;
+
+		if (typeof window !== 'undefined') {
+			const params = new URLSearchParams(window.location.search);
+			const realmSlug = params.get('slug');
+			const portalUrl = (
+				(globalThis as { __CANISTER_IDS?: { portal_url?: string } }).__CANISTER_IDS
+					?.portal_url || ''
+			).replace(/\/+$/, '');
+			if (params.get('portal') === '1' && realmSlug && portalUrl) {
+				const realmPath = `/r/${encodeURIComponent(realmSlug)}`;
+				const base = portalUrl.endsWith(realmPath)
+					? portalUrl
+					: `${portalUrl}${realmPath}`;
+				return `${base}${extPath}`;
+			}
+
+			const url = new URL(window.location.href);
+			url.pathname = proposalPath(proposalOrSlug);
+			url.search = '';
+			url.hash = '';
+			return url.toString();
+		}
+		return extPath;
 	}
 
 	function buildListUrl(): string {
@@ -272,12 +391,31 @@
 		return `${window.location.origin}${base}`;
 	}
 
-	function syncProposalUrl(proposalId: string | null) {
+	function syncProposalUrl(proposal: any | string | null, opts?: { replace?: boolean }) {
 		if (typeof window === 'undefined') return;
-		const next = proposalId ? buildProposalUrl(proposalId) : buildListUrl();
-		if (window.location.href !== next) {
-			history.replaceState({ view: proposalId ? 'detail' : 'list', proposalId }, '', next);
+		const path = proposalPath(proposal);
+		const current = window.location.pathname.replace(/\/$/, '') || '/';
+		const target = path.replace(/\/$/, '') || '/';
+		if (current === target) return;
+
+		if (ctx.navigate) {
+			void ctx.navigate(path, {
+				replaceState: opts?.replace ?? false,
+				noScroll: true,
+				keepFocus: true,
+			});
+			return;
 		}
+
+		const next = proposal ? buildProposalUrl(proposal) : buildListUrl();
+		history.replaceState(
+			{
+				view: proposal ? 'detail' : 'list',
+				proposalId: typeof proposal === 'string' ? resolveProposalId(proposal) : proposal?.id,
+			},
+			'',
+			next,
+		);
 	}
 
 	function buildProposalFocusUri(proposalId: string): string {
@@ -307,14 +445,16 @@
 		}
 	}
 
-	async function openProposalById(proposalId: string, opts?: { skipUrlSync?: boolean }) {
+	async function openProposalById(proposalSlug: string, opts?: { skipUrlSync?: boolean }) {
+		const proposalId = resolveProposalId(proposalSlug);
 		view = 'detail';
 		detailLoading = true;
 		error = '';
 		try {
 			let proposal: any =
 				proposals.find((p) => p.id === proposalId) ??
-				proposals.find((p) => String(p._id) === proposalId);
+				proposals.find((p) => String(p._id) === proposalId) ??
+				proposals.find((p) => proposalLinkSlug(p) === proposalSlug);
 			if (!proposal) {
 				selectedProposal = null;
 				const res = await callSync('get_proposal', { proposal_id: proposalId });
@@ -325,7 +465,7 @@
 				upsertProposal(proposal);
 				await viewProposal(proposal, opts);
 			} else {
-				error = `Proposal "${proposalId}" not found`;
+				error = `Proposal "${proposalSlug}" not found`;
 				goBackToList({ skipUrlSync: true });
 			}
 		} catch (e: any) {
@@ -365,7 +505,7 @@
 		actionMsg = '';
 		actionError = '';
 		if (!opts?.skipUrlSync && proposal?.id) {
-			syncProposalUrl(proposal.id);
+			syncProposalUrl(proposal, { replace: false });
 		}
 		publishProposalFocus(proposal);
 		await fetchCode(proposal);
@@ -654,7 +794,7 @@
 		const epoch = parseEpochSeconds(deadline);
 		if (epoch == null) return '';
 		const diffMs = epoch * 1000 - now;
-		if (diffMs <= 0) return 'Voting closed';
+		if (diffMs <= 0) return '';
 		const sec = Math.floor(diffMs / 1000);
 		const days = Math.floor(sec / 86400);
 		const hours = Math.floor((sec % 86400) / 3600);
@@ -664,6 +804,96 @@
 		if (hours > 0) return `${hours}h ${mins}m ${secs}s left`;
 		if (mins > 0) return `${mins}m ${secs}s left`;
 		return `${secs}s left`;
+	}
+
+	function formatDuration(seconds: number): string {
+		if (!Number.isFinite(seconds) || seconds <= 0) return 'unknown';
+		if (seconds >= 86400) {
+			const days = seconds / 86400;
+			return Number.isInteger(days) ? `${days} days` : `${days.toFixed(2)} days`;
+		}
+		if (seconds >= 3600) return `${Math.round(seconds / 3600)} hours`;
+		if (seconds >= 60) return `${Math.round(seconds / 60)} minutes`;
+		return `${Math.round(seconds)} seconds`;
+	}
+
+	function parseOrgPolicy(proposal: any): { m: number; n: number } | null {
+		const match = (proposal?.description || '').match(/policy (\d+)\/(\d+)/);
+		if (!match) return null;
+		return { m: parseInt(match[1], 10), n: parseInt(match[2], 10) };
+	}
+
+	function isVotingDeadlinePassed(proposal: any, now = Date.now()): boolean {
+		const status = (proposal?.status || '').toLowerCase();
+		if (status !== 'voting' && status !== 'pending_vote') return false;
+		const epoch = parseEpochSeconds(proposal.voting_deadline);
+		return epoch != null && epoch * 1000 <= now;
+	}
+
+	function isVotingOpen(proposal: any, now = Date.now()): boolean {
+		const status = (proposal?.status || '').toLowerCase();
+		return (status === 'voting' || status === 'pending_vote') && !isVotingDeadlinePassed(proposal, now);
+	}
+
+	function getVotingClosedReason(proposal: any, now = Date.now()): string {
+		const status = (proposal?.status || '').toLowerCase();
+		if (status !== 'voting' && status !== 'pending_vote') {
+			return `Closed — ${statusLabel(proposal.status)}`;
+		}
+		if (!isVotingDeadlinePassed(proposal, now)) return '';
+
+		const tally = voteTally(proposal);
+		const policy = parseOrgPolicy(proposal);
+		const endedAt = formatDateTime(proposal.voting_deadline);
+
+		if (policy && tally.yes < policy.m) {
+			return `Voting period ended ${endedAt} — needs ${policy.m} approvals, ${tally.yes} received. Awaiting finalization.`;
+		}
+		if (policy && tally.yes >= policy.m) {
+			return `Voting period ended ${endedAt} — policy satisfied (${tally.yes}/${policy.m} approvals). Awaiting finalization.`;
+		}
+		return `Voting period ended ${endedAt}. Awaiting finalization.`;
+	}
+
+	function formatVotingStatusLabel(proposal: any, now = Date.now()): string {
+		if (isVotingDeadlinePassed(proposal, now)) {
+			return getVotingClosedReason(proposal, now);
+		}
+		return formatTimeRemaining(proposal.voting_deadline, now);
+	}
+
+	function approvalRequirementLabel(proposal: any): string {
+		const policy = parseOrgPolicy(proposal);
+		if (policy) return `${policy.m}/${policy.n} department approvals`;
+		if (proposal?.required_threshold != null) {
+			return `${(proposal.required_threshold * 100).toFixed(0)}% yes of decisive votes`;
+		}
+		return 'Approval threshold not set';
+	}
+
+	async function loadVotingSettings() {
+		try {
+			const res = await callSync('get_voting_settings');
+			if (res?.success && res.data) {
+				votingSettings = res.data;
+			}
+		} catch {
+			votingSettings = null;
+		}
+	}
+
+	async function copyProposalLink(proposal: any) {
+		if (!proposal || typeof navigator === 'undefined') return;
+		const url = buildProposalUrl(proposal);
+		try {
+			await navigator.clipboard.writeText(url);
+			linkCopied = true;
+			setTimeout(() => {
+				linkCopied = false;
+			}, 2000);
+		} catch {
+			error = 'Could not copy link to clipboard';
+		}
 	}
 
 	function truncatePrincipal(id: string): string {
@@ -684,13 +914,14 @@
 		countdownTimer = setInterval(() => {
 			nowMs = Date.now();
 		}, 1000);
-		const proposalId = parseProposalIdFromUrl();
-		if (proposalId) {
-			void openProposalById(proposalId, { skipUrlSync: true });
+		const proposalSlug = parseProposalIdFromUrl();
+		if (proposalSlug) {
+			void openProposalById(proposalSlug, { skipUrlSync: true });
 		} else {
 			void loadProposals();
 		}
 		void loadOrgOptions();
+		void loadVotingSettings();
 		window.addEventListener('popstate', handlePopState);
 	});
 
@@ -714,6 +945,19 @@
 	<div class="mb-6">
 		<h1 class="text-3xl font-bold text-gray-900 mb-1">Voting</h1>
 		<p class="text-gray-500 text-sm">Create proposals, review code changes, and vote on governance decisions.</p>
+		{#if votingSettings}
+			<p class="text-xs text-gray-400 mt-2">
+				Voting window: {formatDuration(votingSettings.voting_window_seconds)}.
+				Change it in
+				<button
+					type="button"
+					onclick={() => ctx.navigate?.('/extensions/realm_settings')}
+					class="text-indigo-600 hover:text-indigo-800 underline"
+				>
+					Realm Settings → Governance
+				</button>.
+			</p>
+		{/if}
 	</div>
 
 	<!-- Error / Success banners -->
@@ -770,11 +1014,20 @@
 					{/if}
 				</div>
 				<div class="flex flex-wrap gap-4 text-sm text-gray-500">
+					<span>ID: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{proposalDisplayId(selectedProposal)}</code></span>
 					<span>Proposer: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{truncatePrincipal(selectedProposal.proposer)}</code></span>
 					<span>Created: {formatDateTime(selectedProposal.created_at)}</span>
 					{#if selectedProposal.voting_deadline}
 						<span>Deadline: {formatDateTime(selectedProposal.voting_deadline)}</span>
 					{/if}
+					<span class="font-mono text-xs break-all">Link: {buildProposalUrl(selectedProposal)}</span>
+					<button
+						type="button"
+						onclick={() => copyProposalLink(selectedProposal)}
+						class="text-xs text-indigo-600 hover:text-indigo-800 underline"
+					>
+						{linkCopied ? 'Copied!' : 'Copy link'}
+					</button>
 				</div>
 			</div>
 
@@ -790,11 +1043,11 @@
 				<div class="rounded-lg border border-gray-200 bg-white p-5">
 					<div class="flex flex-wrap items-start justify-between gap-3 mb-3">
 						<h3 class="text-base font-semibold text-gray-900">Voting Results</h3>
-						{#if selectedProposal.status === 'voting'}
+						{#if selectedProposal.status === 'voting' || selectedProposal.status === 'pending_vote'}
 							{#if selectedProposal.voting_deadline}
-								<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-									{formatTimeRemaining(selectedProposal.voting_deadline, nowMs)}
+								<span class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium max-w-md {isVotingDeadlinePassed(selectedProposal, nowMs) ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}">
+									<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+									<span>{formatVotingStatusLabel(selectedProposal, nowMs)}</span>
 								</span>
 							{:else}
 								<span class="text-xs text-gray-400">No voting deadline set</span>
@@ -844,13 +1097,13 @@
 									style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
 								></div>
 							</div>
-							{#if selectedProposal.required_threshold}
-								<div class="text-xs text-gray-400 mt-1">Threshold: {(selectedProposal.required_threshold * 100).toFixed(0)}%</div>
+							{#if selectedProposal.required_threshold || parseOrgPolicy(selectedProposal)}
+								<div class="text-xs text-gray-400 mt-1">Requirement: {approvalRequirementLabel(selectedProposal)}</div>
 							{/if}
 						</div>
 					{/if}
 
-					{#if selectedProposal.status === 'voting'}
+					{#if isVotingOpen(selectedProposal, nowMs)}
 						<div class="flex gap-2 pt-2">
 							<button
 								onclick={() => castVote(selectedProposal.id, 'yes')}
@@ -889,6 +1142,10 @@
 								Abstain
 							</button>
 						</div>
+					{:else if selectedProposal.status === 'voting' || selectedProposal.status === 'pending_vote'}
+						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+							{getVotingClosedReason(selectedProposal, nowMs)}
+						</p>
 					{/if}
 				</div>
 			{/if}
@@ -1216,6 +1473,16 @@
 						<option value={status}>{statusLabel(status)}</option>
 					{/each}
 				</select>
+				<select
+					bind:value={sortBy}
+					onchange={() => { currentPage = 1; }}
+					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					aria-label="Sort proposals"
+				>
+					{#each SORT_OPTIONS as opt}
+						<option value={opt.value}>{opt.label}</option>
+					{/each}
+				</select>
 				{#if orgFilter || statusFilter}
 					<button
 						onclick={() => { orgFilter = ''; statusFilter = ''; onFilterChange(); }}
@@ -1246,10 +1513,13 @@
 			{:else}
 			<div class="divide-y divide-gray-100">
 					{#each pagedProposals as proposal}
-						<div class="p-4 hover:bg-gray-50 transition-colors">
+						<div class="p-4 transition-colors {isProposalEnded(proposal, nowMs) ? 'opacity-55 bg-gray-50/80 hover:bg-gray-50/90' : 'hover:bg-gray-50'}">
 							<div class="flex items-start justify-between mb-2">
 								<div class="flex-1 min-w-0">
-									<h3 class="text-sm font-medium text-gray-900 truncate">{proposal.title}</h3>
+									<div class="flex items-center gap-2 min-w-0">
+										<span class="shrink-0 font-mono text-xs text-gray-400">{proposalDisplayId(proposal)}</span>
+										<h3 class="text-sm font-medium text-gray-900 truncate">{proposal.title}</h3>
+									</div>
 									<div class="flex flex-wrap items-center gap-1.5 mt-1">
 										<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(proposal.status)}">
 											{statusLabel(proposal.status)}
@@ -1264,9 +1534,9 @@
 								</div>
 								<button
 									onclick={() => viewProposal(proposal)}
-									class="ml-2 p-1.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100"
+									class="ml-2 shrink-0 px-2.5 py-1 rounded border border-gray-300 text-xs font-medium text-gray-600 hover:bg-gray-100"
 								>
-									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+									View
 								</button>
 							</div>
 							<p class="text-xs text-gray-500 line-clamp-2 mb-2">{proposal.description}</p>
@@ -1274,8 +1544,9 @@
 								<code>{truncatePrincipal(proposal.proposer)}</code>
 								<span>{formatDate(proposal.created_at)}</span>
 							</div>
-							{#if proposal.status === 'voting'}
+							{#if proposal.status === 'voting' || proposal.status === 'pending_vote'}
 								{@const tally = voteTally(proposal)}
+								{@const votingOpen = isVotingOpen(proposal, nowMs)}
 								<div class="pt-2 border-t border-gray-100">
 									<div class="flex justify-between items-center mb-2 gap-2">
 										<div class="flex gap-3 text-xs">
@@ -1284,7 +1555,7 @@
 											<span class="text-gray-500">A:{tally.abstain} ({votePercent(tally.abstain, tally.total)})</span>
 										</div>
 										{#if proposal.voting_deadline}
-											<span class="text-xs text-emerald-600 whitespace-nowrap">{formatTimeRemaining(proposal.voting_deadline, nowMs)}</span>
+											<span class="text-xs whitespace-nowrap max-w-[55%] text-right {votingOpen ? 'text-emerald-600' : 'text-amber-700'}">{formatVotingStatusLabel(proposal, nowMs)}</span>
 										{/if}
 									</div>
 									<div class="w-full bg-gray-200 rounded-full h-1.5 mb-2 overflow-hidden flex">
@@ -1292,11 +1563,13 @@
 										<div class="bg-red-500 h-1.5" style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"></div>
 										<div class="bg-gray-400 h-1.5" style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"></div>
 									</div>
-									<div class="flex gap-1">
-										<button onclick={() => castVote(proposal.id, 'yes')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-green-300 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">Yes</button>
-										<button onclick={() => castVote(proposal.id, 'no')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">No</button>
-										<button onclick={() => castVote(proposal.id, 'abstain')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">Abstain</button>
-									</div>
+									{#if votingOpen}
+										<div class="flex gap-1">
+											<button onclick={() => castVote(proposal.id, 'yes')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-green-300 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">Yes</button>
+											<button onclick={() => castVote(proposal.id, 'no')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">No</button>
+											<button onclick={() => castVote(proposal.id, 'abstain')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">Abstain</button>
+										</div>
+									{/if}
 								</div>
 							{/if}
 						</div>

@@ -71,6 +71,7 @@ def extension_sync_call(method_name: str, args: dict):
         "request_quarter_scale": (request_quarter_scale, True),
         "get_sandbox_config": (get_sandbox_config, False),
         "set_sandbox_config": (set_sandbox_config, True),
+        "get_governance_settings": (get_governance_settings, False),
     }
 
     if method_name not in methods:
@@ -749,3 +750,24 @@ def patch_manifest_data(args: dict):
     except Exception as e:
         logger.error(f"patch_manifest_data error: {e}")
         return {"success": False, "error": str(e)}
+
+
+def get_governance_settings(args: str) -> str:
+    """Return calendar governance settings editable from Realm Settings."""
+    try:
+        from ggg import Realm
+
+        window_s = 604_800
+        realm = Realm[1]
+        if realm and realm.calendar and realm.calendar.voting_window:
+            window_s = max(1, int(realm.calendar.voting_window))
+        return json.dumps({
+            "success": True,
+            "data": {
+                "voting_window_seconds": window_s,
+                "voting_window_days": window_s / 86400.0,
+            },
+        })
+    except Exception as e:
+        logger.error(f"get_governance_settings error: {e}")
+        return json.dumps({"success": False, "error": str(e)})

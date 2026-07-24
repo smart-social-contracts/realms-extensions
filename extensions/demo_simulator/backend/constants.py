@@ -9,6 +9,117 @@ SCHEDULE_NAME = "demo_simulator_schedule"
 DEFAULT_INTERVAL_SECONDS = 30
 DEFAULT_BATCH_SIZE = 5
 MAX_ENTITIES_TOTAL = None  # None = unlimited
+DEFAULT_ROTATION_MODE = "round_robin"  # round_robin | random | all
+ROTATION_MODES = ("round_robin", "random", "all")
+
+# Keys returned in API / UI (messages = in-app notifications).
+ENTITY_TYPE_KEYS = (
+    "users",
+    "organizations",
+    "proposals",
+    "transfers",
+    "disputes",
+    "votes",
+    "lands",
+    "courts",
+    "cases",
+    "funds",
+    "fiscal_periods",
+    "budgets",
+    "ledger_entries",
+    "messages",
+    "departments",
+)
+
+ENTITY_TYPE_LABELS = {
+    "users": "Users",
+    "organizations": "Organizations",
+    "proposals": "Proposals",
+    "transfers": "Transfers",
+    "disputes": "Disputes",
+    "votes": "Votes",
+    "lands": "Land parcels",
+    "courts": "Courts",
+    "cases": "Cases",
+    "funds": "Funds",
+    "fiscal_periods": "Fiscal periods",
+    "budgets": "Budget lines",
+    "ledger_entries": "Ledger entries",
+    "messages": "Messages",
+    "departments": "Departments",
+}
+
+# Counter field on persisted state for each entity type.
+ENTITY_STAT_FIELDS = {
+    "users": "total_users_created",
+    "organizations": "total_orgs_created",
+    "proposals": "total_proposals_created",
+    "transfers": "total_transfers_created",
+    "disputes": "total_disputes_created",
+    "votes": "total_votes_created",
+    "lands": "total_lands_created",
+    "courts": "total_courts_created",
+    "cases": "total_cases_created",
+    "funds": "total_funds_created",
+    "fiscal_periods": "total_fiscal_periods_created",
+    "budgets": "total_budgets_created",
+    "ledger_entries": "total_ledger_entries_created",
+    "messages": "total_notifications_created",
+    "departments": "total_departments_created",
+}
+
+
+def default_enabled_types():
+    """All entity generators enabled by default."""
+    return {key: True for key in ENTITY_TYPE_KEYS}
+
+
+def default_type_count(type_key, batch_size):
+    """Default batch count per type (matches legacy round-robin behaviour)."""
+    bs = max(1, int(batch_size or DEFAULT_BATCH_SIZE))
+    if type_key == "users":
+        return bs
+    if type_key == "organizations":
+        return max(1, bs // 2)
+    if type_key == "proposals":
+        return max(1, bs // 2)
+    if type_key == "transfers":
+        return bs
+    if type_key == "disputes":
+        return max(1, bs // 3)
+    if type_key == "votes":
+        return bs
+    if type_key == "lands":
+        return max(1, bs // 2)
+    if type_key == "courts":
+        return max(1, bs // 3)
+    if type_key == "cases":
+        return max(1, bs // 2)
+    if type_key == "funds":
+        return 5
+    if type_key == "fiscal_periods":
+        return 2
+    if type_key == "budgets":
+        return max(2, bs)
+    if type_key == "ledger_entries":
+        return bs * 2
+    if type_key == "messages":
+        return bs
+    if type_key == "departments":
+        return max(2, bs)
+    return bs
+
+
+def entity_type_catalog():
+    """Metadata for the frontend configuration panel."""
+    return [
+        {
+            "key": key,
+            "label": ENTITY_TYPE_LABELS.get(key, key),
+            "stat_field": ENTITY_STAT_FIELDS[key],
+        }
+        for key in ENTITY_TYPE_KEYS
+    ]
 
 FIRST_NAMES = [
     "Alice", "Bob", "Charlie", "Diana", "Edward", "Fiona", "George", "Helen",
