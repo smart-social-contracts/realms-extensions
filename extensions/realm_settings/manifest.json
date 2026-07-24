@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Realm configuration and branding",
   "author": "Realms Team",
   "categories": [
@@ -25,7 +25,10 @@
         "level": "admin",
         "governed": true
       },
-      "transfer_root": "admin",
+      "transfer_root": {
+        "level": "admin",
+        "governed": true
+      },
       "set_quarter_policy": {
         "level": "org.set_policy",
         "governed": true

@@ -330,6 +330,11 @@ def transfer_root(args: dict):
     Args: {"target_org": "Congress"}
     Irreversible from the creator's side — only the governance org (whose
     members now hold admin) could re-grant anything.
+
+    Governance (issue #262): governed action. Under a non-1/1 root policy
+    the call becomes a root-scoped proposal; the dispatch gate records the
+    initiator in the frozen args, so the replay demotes the person who
+    asked for the handover, not whoever executes the proposal.
     """
     from ggg import Realm
 
@@ -344,15 +349,37 @@ def transfer_root(args: dict):
         if not realm:
             return {"success": False, "error": "Realm not found"}
 
-        caller = _caller()
-        if not _is_realm_admin(caller):
+        from core.governed_action import effective_caller, in_replay
+        from ggg import Department, ROOT_ORG_NAME, User, UserProfile
+
+        # The demotee is the person who asked for the handover: the live
+        # caller on a direct call, the gate-recorded initiator on proposal
+        # replay (issue #262) — never whoever triggered the execution.
+        caller = effective_caller(args)
+        if in_replay():
+            # The vote may outlive the initiator's mandate: abort unless
+            # they still hold the admin profile they are giving up.
+            initiator = User[caller] if caller else None
+            admin_check = UserProfile["admin"]
+            if (
+                initiator is None
+                or admin_check is None
+                or admin_check not in initiator.profiles
+            ):
+                return {
+                    "success": False,
+                    "error": (
+                        f"Initiator '{caller}' is no longer a realm admin; "
+                        f"root transfer aborted"
+                    ),
+                }
+        elif not _is_realm_admin(caller):
             return {
                 "success": False,
                 "error": f"Access denied: {caller} is not a realm admin",
             }
 
         target_name = (args.get("target_org") or "Congress").strip()
-        from ggg import Department, ROOT_ORG_NAME, User, UserProfile
 
         target = Department[target_name]
         if not target:
