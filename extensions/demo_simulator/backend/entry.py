@@ -25,6 +25,7 @@ from .constants import (
 )
 from .generators import (
     backfill_proposal_content,
+    build_demo_citizen_payloads,
     generate_budget_batch,
     generate_case_batch,
     generate_court_batch,
@@ -38,7 +39,6 @@ from .generators import (
     generate_org_batch,
     generate_proposal_batch,
     generate_transfer_batch,
-    generate_user_batch,
     generate_vote_batch,
 )
 from .state import (
@@ -49,13 +49,13 @@ from .state import (
     normalize_state_data,
     random_seed,
     save_state_data,
+    _ensure_async_batch_codex,
 )
 
 logger = get_logger("extensions.demo_simulator")
 
 
 GENERATORS = {
-    "users": generate_user_batch,
     "organizations": generate_org_batch,
     "proposals": generate_proposal_batch,
     "transfers": generate_transfer_batch,
@@ -142,22 +142,45 @@ def _run_generators(state_data, type_keys):
     return results
 
 
-# ── Core batch runner ────────────────────────────────────────────────────────
+def _apply_user_registration_result(state_data, result):
+    if not isinstance(result, dict) or not result.get("success"):
+        return {
+            "error": (result or {}).get("error", "demo user registration failed"),
+            "created": [],
+        }
+    created = result.get("created") or []
+    state_data["total_users_created"] = int(state_data.get("total_users_created", 0)) + len(created)
+    return {"created": created, "target": result.get("target")}
 
-def run_batch(args: str = "{}"):
-    """Execute one batch of demo data generation.
 
-    Called by the TaskSchedule every interval. Respects enabled entity types,
-    rotation mode, and optional per-type count overrides from config.
-    """
+def _register_demo_users_local(state_data, count):
+    from core.demo_registration import authorize_capital_demo_registration, register_demo_citizens_local
+
+    auth = authorize_capital_demo_registration()
+    if not auth.get("ok"):
+        return {"error": auth["error"], "created": []}
+
+    citizens = build_demo_citizen_payloads(state_data, count)
+    return _apply_user_registration_result(state_data, register_demo_citizens_local(citizens))
+
+
+def _register_demo_users_routed(state_data, count):
+    from core.demo_registration import authorize_capital_demo_registration, register_demo_citizens_routed
+
+    auth = authorize_capital_demo_registration()
+    if not auth.get("ok"):
+        return {"error": auth["error"], "created": []}
+
+    citizens = build_demo_citizen_payloads(state_data, count)
+    result = yield from register_demo_citizens_routed(citizens)
+    return _apply_user_registration_result(state_data, result)
+
+
+def _prepare_batch(state_data, params):
     from ggg import TaskSchedule
 
-    params = _parse_args(args)
-    state = get_state()
-    state_data = load_state_data(state)
     max_entities = state_data.get("max_entities", MAX_ENTITIES_TOTAL)
     batch_number = state_data.get("batch_number", 0)
-
     total_created = _total_entities_created(state_data)
 
     if max_entities and total_created >= max_entities:
@@ -165,11 +188,15 @@ def run_batch(args: str = "{}"):
         schedule = TaskSchedule[SCHEDULE_NAME]
         if schedule:
             schedule.disabled = True
-        return json.dumps({"status": "paused", "reason": "max_entities_reached", "total": total_created})
+        return None, json.dumps({
+            "status": "paused",
+            "reason": "max_entities_reached",
+            "total": total_created,
+        })
 
     enabled_keys = _enabled_type_keys(state_data)
     if not enabled_keys:
-        return json.dumps({
+        return None, json.dumps({
             "status": "skipped",
             "reason": "no_enabled_types",
             "batch": batch_number,
@@ -179,12 +206,12 @@ def run_batch(args: str = "{}"):
     if isinstance(override_types, str):
         override_types = [t.strip() for t in override_types.split(",") if t.strip()]
     type_keys = _pick_types_for_batch(state_data, enabled_keys, override_types)
+    return (batch_number, type_keys), None
 
-    results = _run_generators(state_data, type_keys)
 
+def _finalize_batch(state, state_data, batch_number, type_keys, results):
     state_data["batch_number"] = batch_number + 1
     save_state_data(state, state_data)
-
     logger.info(f"Demo simulator batch {batch_number + 1} complete: {results}")
     return json.dumps({
         "status": "ok",
@@ -192,6 +219,88 @@ def run_batch(args: str = "{}"):
         "types": type_keys,
         "created": results,
     })
+
+
+def run_batch_async(args: str = "{}"):
+    """Async batch runner — required when demo users route to peer quarters."""
+    params = _parse_args(args)
+    state = get_state()
+    state_data = load_state_data(state)
+    prepared, early = _prepare_batch(state_data, params)
+    if early:
+        return early
+
+    batch_number, type_keys = prepared
+    results = {}
+    sync_keys = [k for k in type_keys if k != "users"]
+    if sync_keys:
+        results.update(_run_generators(state_data, sync_keys))
+
+    if "users" in type_keys:
+        count = _resolve_type_count(state_data, "users")
+        if count > 0:
+            try:
+                user_result = yield from _register_demo_users_routed(state_data, count)
+                results["users"] = user_result.get("created", [])
+                if user_result.get("target"):
+                    results["users_target"] = user_result.get("target")
+                if user_result.get("error"):
+                    results.setdefault("errors", []).append({"users": user_result["error"]})
+            except Exception as e:
+                logger.error(f"Demo user batch failed: {e}")
+                logger.error(traceback.format_exc())
+                results.setdefault("errors", []).append({"users": str(e)})
+
+    return _finalize_batch(state, state_data, batch_number, type_keys, results)
+
+
+# ── Core batch runner ────────────────────────────────────────────────────────
+
+def run_batch(args: str = "{}"):
+    """Sync batch runner for Run Once (local capital users only)."""
+    params = _parse_args(args)
+    state = get_state()
+    state_data = load_state_data(state)
+    prepared, early = _prepare_batch(state_data, params)
+    if early:
+        return early
+
+    batch_number, type_keys = prepared
+    results = {}
+    sync_keys = [k for k in type_keys if k != "users"]
+    if sync_keys:
+        results.update(_run_generators(state_data, sync_keys))
+
+    if "users" in type_keys:
+        count = _resolve_type_count(state_data, "users")
+        if count > 0:
+            try:
+                from _cdk import ic
+                from core.demo_registration import pick_target_quarter_canister
+
+                self_id = ic.id().to_str()
+                target = pick_target_quarter_canister(self_id)
+                if target != self_id:
+                    return json.dumps({
+                        "status": "error",
+                        "error": (
+                            "Demo users are routed to a peer quarter; start the simulator "
+                            "schedule (async batch) instead of Run Once."
+                        ),
+                    })
+
+                user_result = _register_demo_users_local(state_data, count)
+                if user_result.get("error"):
+                    return json.dumps({"status": "error", "error": user_result["error"]})
+                results["users"] = user_result.get("created", [])
+                if user_result.get("target"):
+                    results["users_target"] = user_result.get("target")
+            except Exception as e:
+                logger.error(f"Demo user batch failed: {e}")
+                logger.error(traceback.format_exc())
+                return json.dumps({"status": "error", "error": str(e)})
+
+    return _finalize_batch(state, state_data, batch_number, type_keys, results)
 
 
 # ── Extension API ────────────────────────────────────────────────────────────
@@ -241,6 +350,9 @@ def initialize(args):
 
     already_existed = TaskSchedule[SCHEDULE_NAME] is not None
     schedule = get_or_create_schedule()
+    codex_upgraded = False
+    if already_existed:
+        codex_upgraded = _ensure_async_batch_codex(schedule)
 
     if not already_existed and is_demo_mode_active():
         schedule.disabled = False
@@ -260,6 +372,7 @@ def initialize(args):
         "success": True,
         "auto_activated": not already_existed and is_demo_mode_active(),
         "running": not schedule.disabled,
+        "codex_upgraded": codex_upgraded,
     })
 
 
@@ -315,6 +428,12 @@ def get_status(args):
         },
         "demo_mode_active": is_demo_mode_active(),
     })
+
+
+def _restart_task_manager():
+    from core.task_manager import TaskManager
+
+    TaskManager().run()
 
 
 def toggle(args):

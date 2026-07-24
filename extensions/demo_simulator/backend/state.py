@@ -9,6 +9,7 @@ import json
 import random
 
 from .constants import (
+    BATCH_STEP_CODE,
     DEFAULT_BATCH_SIZE,
     DEFAULT_INTERVAL_SECONDS,
     DEFAULT_ROTATION_MODE,
@@ -114,6 +115,38 @@ def is_demo_mode_active():
         return False
 
 
+def _ensure_async_batch_codex(schedule):
+    """Upgrade legacy sync schedules so quarter routing can use inter-canister calls."""
+    from ggg import Task
+
+    task = schedule.task if schedule else None
+    if not task:
+        task = Task[TASK_NAME]
+    if not task or not task.steps:
+        return False
+
+    step = task.steps[0]
+    call = getattr(step, "call", None)
+    codex = getattr(call, "codex", None) if call else None
+    if not call or not codex:
+        return False
+
+    code = str(codex.code or "")
+    needs_upgrade = (
+        not bool(getattr(call, "is_async", False))
+        or "run_batch_async" not in code
+        or "async_task" not in code
+    )
+    if not needs_upgrade:
+        return False
+
+    codex.code = BATCH_STEP_CODE
+    call.is_async = True
+    logger = __import__("ic_python_logging").get_logger("extensions.demo_simulator")
+    logger.info("Upgraded demo simulator schedule codex to async batch runner")
+    return True
+
+
 def get_or_create_schedule():
     """Get the demo simulator schedule, creating it if missing.
 
@@ -133,11 +166,11 @@ def get_or_create_schedule():
 
     codex = Codex(
         name="demo_simulator_batch",
-        description="Executes one batch of demo data generation",
-        code="from _runtime_ext_demo_simulator.entry import run_batch\nrun_batch('{}')",
+        description="Executes one batch of demo data generation (async for quarter routing)",
+        code=BATCH_STEP_CODE,
     )
 
-    call = Call(is_async=False, codex=codex)
+    call = Call(is_async=True, codex=codex)
     task = Task(name=TASK_NAME)
     TaskStep(call=call, status="pending", run_next_after=0, task=task)
 

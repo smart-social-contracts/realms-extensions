@@ -35,12 +35,12 @@ from .constants import (
 )
 
 
-def generate_user_batch(state_data, count):
-    """Generate a batch of users + humans + members."""
-    from ggg import Human, Member, User
-    from ggg.system.user_profile import Profiles
+def build_demo_citizen_payloads(state_data, count):
+    """Build register_demo_citizens payloads (no side effects)."""
+    import random
+    import time
 
-    created = []
+    payloads = []
     base_idx = state_data.get("total_users_created", 0)
     seed = state_data.get("seed", 42)
     rng = random.Random(seed + base_idx)
@@ -49,12 +49,7 @@ def generate_user_batch(state_data, count):
         idx = base_idx + i
         first = rng.choice(FIRST_NAMES)
         last = rng.choice(LAST_NAMES)
-
-        user = User(
-            id=f"demo_user_{idx:04d}",
-            profile_picture_url=f"https://api.dicebear.com/7.x/personas/svg?seed={rng.randint(1, 999999)}",
-            user_profile=Profiles.MEMBER["name"],
-        )
+        principal = f"demo_user_{idx:04d}"
 
         city = rng.choice(CITY_COORDINATES)
         lat = city["lat"] + rng.uniform(-0.5, 0.5)
@@ -68,29 +63,30 @@ def generate_user_batch(state_data, count):
         birth_day = max(1, min(28, birth_day_of_year % 30 + 1))
         dob = f"{birth_year:04d}-{birth_month:02d}-{birth_day:02d}"
 
-        Human(
-            name=f"{first} {last}",
-            date_of_birth=dob,
-            user_id=user.id,
-            latitude=lat,
-            longitude=lng,
-        )
+        payloads.append({
+            "principal": principal,
+            "profile": "member",
+            "profile_picture_url": (
+                f"https://api.dicebear.com/7.x/personas/svg?seed={rng.randint(1, 999999)}"
+            ),
+            "human": {
+                "name": f"{first} {last}",
+                "date_of_birth": dob,
+                "latitude": lat,
+                "longitude": lng,
+            },
+            "member": {
+                "id": f"demo_mem_{idx:04d}",
+                "residence_permit": rng.choice(["valid", "expired", "pending"]),
+                "tax_compliance": rng.choice(["compliant", "delinquent", "under_review"]),
+                "identity_verification": rng.choice(["verified", "pending", "rejected"]),
+                "voting_eligibility": rng.choice(["eligible", "ineligible", "suspended"]),
+                "public_benefits_eligibility": rng.choice(["eligible", "ineligible", "conditional"]),
+                "criminal_record": rng.choice(["clean", "minor_offenses", "major_offenses"]),
+            },
+        })
 
-        Member(
-            id=f"demo_mem_{idx:04d}",
-            user=user,
-            residence_permit=rng.choice(["valid", "expired", "pending"]),
-            tax_compliance=rng.choice(["compliant", "delinquent", "under_review"]),
-            identity_verification=rng.choice(["verified", "pending", "rejected"]),
-            voting_eligibility=rng.choice(["eligible", "ineligible", "suspended"]),
-            public_benefits_eligibility=rng.choice(["eligible", "ineligible", "conditional"]),
-            criminal_record=rng.choice(["clean", "minor_offenses", "major_offenses"]),
-        )
-
-        created.append(user.id)
-
-    state_data["total_users_created"] = base_idx + count
-    return created
+    return payloads
 
 
 def generate_org_batch(state_data, count):

@@ -6,6 +6,13 @@ Name banks, city coordinates, and other static data used by the generators.
 
 TASK_NAME = "demo_simulator_task"
 SCHEDULE_NAME = "demo_simulator_schedule"
+# Async codex shim — required for routed demo user registration (inter-canister).
+BATCH_STEP_CODE = (
+    "def async_task():\n"
+    "    from _runtime_ext_demo_simulator.entry import run_batch_async\n"
+    "    res = yield from run_batch_async('{}')\n"
+    "    return res\n"
+)
 DEFAULT_INTERVAL_SECONDS = 30
 DEFAULT_BATCH_SIZE = 5
 MAX_ENTITIES_TOTAL = None  # None = unlimited
