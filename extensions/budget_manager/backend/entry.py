@@ -6,6 +6,7 @@ revenue into department funds.
 
   - Overview: epoch config, adopted allocation rule, schedule state
   - Flow: Sankey read model (revenue mix → pool → funds → spending)
+  - Timeline: interactive epoch axis (pan/zoom, click to select)
   - Allocation: adopt percentage rules, run ad-hoc allocations
   - Settings: epoch length, automatic sweep + allocation schedule
 
@@ -325,6 +326,26 @@ def get_budgets(args) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def get_epoch_timeline(args) -> str:
+    """Interactive timeline read model — epochs with stats and timestamps."""
+    try:
+        _get_caller_user()
+        args_dict = _parse_args(args)
+        from core.treasury_allocation import epoch_timeline
+
+        result = epoch_timeline(
+            center_ts=args_dict.get("center_ts"),
+            before=args_dict.get("before", 20),
+            after=args_dict.get("after", 20),
+        )
+        return json.dumps({"success": True, "data": result})
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    except Exception as e:
+        logger.error(f"get_epoch_timeline error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 # ---------------------------------------------------------------------------
 # Mutating endpoints (policy-gated)
 # ---------------------------------------------------------------------------
@@ -379,6 +400,8 @@ def set_epoch_config(args) -> str:
         action = {"kind": "set_epoch", "epoch_length": epoch_length}
         if args_dict.get("anchor_month") is not None:
             action["anchor_month"] = int(args_dict["anchor_month"])
+        if args_dict.get("epoch_minutes") is not None:
+            action["epoch_minutes"] = int(args_dict["epoch_minutes"])
         return _gated_treasury_action(args_dict, action)
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
@@ -429,6 +452,7 @@ EXTENSION_FUNCTIONS = {
     "get_treasury_overview": get_treasury_overview,
     "get_allocation_status": get_allocation_status,
     "get_allocation_flows": get_allocation_flows,
+    "get_epoch_timeline": get_epoch_timeline,
     "get_budgets": get_budgets,
     "set_allocation_rule": set_allocation_rule,
     "run_allocation": run_allocation,

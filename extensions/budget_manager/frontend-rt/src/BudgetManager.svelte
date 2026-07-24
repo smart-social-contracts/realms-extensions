@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Sankey from './Sankey.svelte';
+	import Timeline from './Timeline.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -73,11 +74,13 @@
 	let flows: any = $state.raw(null);
 	let status: any = $state.raw(null);
 	let budgets: any = $state.raw(null);
+	let timeline: any = $state.raw(null);
+	let timelineLoading = $state(false);
 	let loading = $state(true);
 	let periodLoading = $state(false);
 	let selectedPeriod = $state('');
 
-	type Tab = 'flow' | 'allocation' | 'budgets' | 'settings';
+	type Tab = 'flow' | 'timeline' | 'allocation' | 'budgets' | 'settings';
 	let activeTab: Tab = $state('flow');
 
 	const decimals = $derived(overview?.decimals ?? 8);
@@ -97,6 +100,7 @@
 		}
 		overview = res.data;
 		if (!selectedPeriod) selectedPeriod = res.data.current_period || '';
+		syncSettingsDraft();
 	}
 
 	async function loadPeriod() {
@@ -117,10 +121,21 @@
 		}
 	}
 
+	async function loadTimeline() {
+		timelineLoading = true;
+		try {
+			const res = await callExt('get_epoch_timeline', { before: 24, after: 24 });
+			if (res?.success) timeline = res.data;
+			else addToast(res?.error || 'Failed to load timeline', 'error');
+		} finally {
+			timelineLoading = false;
+		}
+	}
+
 	async function loadAll() {
 		loading = true;
 		try {
-			await loadOverview();
+			await Promise.all([loadOverview(), loadTimeline()]);
 			await loadPeriod();
 			resetRuleDraft();
 		} finally {
@@ -133,6 +148,10 @@
 	function selectPeriod(id: string) {
 		selectedPeriod = id;
 		void loadPeriod();
+	}
+
+	async function onTimelineSelect(id: string) {
+		selectPeriod(id);
 	}
 
 	// --- Allocation rule editor ---
@@ -221,19 +240,39 @@
 	}
 
 	// --- Settings ---
-	// Writable deriveds: track the loaded overview until the user edits them.
-	let epochDraft = $derived(overview?.epoch_length || 'monthly');
-	let anchorDraft = $derived(String(overview?.anchor_month || 1));
-	let autoAllocateDraft = $derived(overview ? !!overview.auto_allocate : true);
+	let testMode = $state(false);
+	ctx.realmInfo?.subscribe?.((info: { testMode?: boolean }) => {
+		testMode = !!info?.testMode;
+	});
+
+	let epochDraft = $state('monthly');
+	let anchorDraft = $state('1');
+	let epochMinutesDraft = $state('60');
+	let autoAllocateDraft = $state(true);
 	let epochBusy = $state(false);
 	let scheduleBusy = $state(false);
+
+	function syncSettingsDraft() {
+		if (!overview) return;
+		epochDraft = overview.epoch_length || 'monthly';
+		anchorDraft = String(overview.anchor_month || 1);
+		epochMinutesDraft = String(overview.epoch_minutes || 60);
+		autoAllocateDraft = !!overview.auto_allocate;
+	}
 
 	async function saveEpoch() {
 		epochBusy = true;
 		try {
+			const params: Record<string, unknown> = {
+				epoch_length: epochDraft,
+				anchor_month: parseInt(anchorDraft) || 1,
+			};
+			if (epochDraft === 'minutes') {
+				params.epoch_minutes = parseInt(epochMinutesDraft) || 0;
+			}
 			await callGated(
 				'set_epoch_config',
-				{ epoch_length: epochDraft, anchor_month: parseInt(anchorDraft) || 1 },
+				params,
 				async (res) => {
 					if (!res?.success) {
 						addToast(res?.error || 'Failed to change epoch', 'error');
@@ -242,7 +281,11 @@
 					if (res.data?.applied === 'proposal') {
 						addToast(`Proposal ${res.data.proposal_id} created — a vote is required`);
 					} else {
-						addToast(`Epoch length set to ${epochDraft}`);
+						const label =
+							epochDraft === 'minutes'
+								? `${epochMinutesDraft} minutes`
+								: epochDraft;
+						addToast(`Epoch length set to ${label}`);
 						await loadAll();
 					}
 				},
@@ -278,6 +321,7 @@
 
 	const tabs: { id: Tab; label: string }[] = [
 		{ id: 'flow', label: 'Flow' },
+		{ id: 'timeline', label: 'Timeline' },
 		{ id: 'allocation', label: 'Allocation' },
 		{ id: 'budgets', label: 'Budgets' },
 		{ id: 'settings', label: 'Settings' },
@@ -361,9 +405,44 @@
 			{/each}
 		</div>
 
-		{#if periodLoading}
+		{#if periodLoading && activeTab !== 'timeline'}
 			<div class="flex items-center justify-center py-12">
 				<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+			</div>
+		{:else if activeTab === 'timeline'}
+			<div class="p-4 bg-white border border-gray-200 rounded-xl">
+				{#if timelineLoading && !timeline}
+					<div class="flex items-center justify-center py-12">
+						<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+					</div>
+				{:else if timeline}
+					<Timeline
+						epochs={timeline.epochs ?? []}
+						nowTs={timeline.now_ts ?? 0}
+						selected={selectedPeriod}
+						format={fmt}
+						onselect={onTimelineSelect}
+					/>
+					{#if selectedPeriod && status}
+						<div class="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-3 text-sm">
+							<div>
+								<div class="text-xs text-gray-500">Selected · {selectedPeriod}</div>
+								<div class="font-medium text-gray-900">{fmt(status.pool)}</div>
+								<div class="text-xs text-gray-400">recognized</div>
+							</div>
+							<div>
+								<div class="text-xs text-gray-500">Allocated</div>
+								<div class="font-medium text-emerald-700">{fmt(status.allocated)}</div>
+							</div>
+							<div>
+								<div class="text-xs text-gray-500">Reserve</div>
+								<div class="font-medium text-amber-700">{fmt(status.unallocated)}</div>
+							</div>
+						</div>
+					{/if}
+				{:else}
+					<div class="py-12 text-center text-sm text-gray-400">No timeline data</div>
+				{/if}
 			</div>
 		{:else if activeTab === 'flow'}
 			<div class="p-4 bg-white border border-gray-200 rounded-xl">
@@ -535,11 +614,29 @@
 						bind:value={epochDraft}
 						class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white mb-3"
 					>
+						<option value="weekly">Weekly</option>
+						<option value="biweekly">Bi-weekly</option>
 						<option value="monthly">Monthly</option>
 						<option value="quarterly">Quarterly</option>
 						<option value="semiannual">Semiannual</option>
 						<option value="annual">Annual</option>
+						{#if testMode || overview?.test_mode}
+							<option value="minutes">Custom (minutes, test mode)</option>
+						{/if}
 					</select>
+					{#if epochDraft === 'minutes'}
+						<label class="block text-xs text-gray-500 mb-1" for="epoch-minutes">
+							Epoch length in minutes
+						</label>
+						<input
+							id="epoch-minutes"
+							type="number"
+							min="1"
+							max="10080"
+							bind:value={epochMinutesDraft}
+							class="w-32 px-2 py-1.5 text-sm border border-gray-300 rounded-lg mb-3"
+						/>
+					{/if}
 					{#if epochDraft === 'annual'}
 						<label class="block text-xs text-gray-500 mb-1" for="anchor-month">
 							Fiscal year starts in month
@@ -564,8 +661,13 @@
 						Apply epoch config
 					</button>
 					<p class="mt-2 text-xs text-gray-400">
-						Epochs stay calendar-aligned; a length change takes effect when the current epoch
-						ends.
+						{#if epochDraft === 'minutes'}
+							Minute-based epochs roll automatically and are only available while test mode is
+							active.
+						{:else}
+							Epochs stay calendar-aligned; a length change takes effect when the current epoch
+							ends.
+						{/if}
 					</p>
 				</div>
 
