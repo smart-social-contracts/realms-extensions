@@ -27,14 +27,8 @@
         "level": "org.set_policy",
         "governed": true
       },
-      "add_department_member": {
-        "level": "org.appoint",
-        "governed": true
-      },
-      "remove_department_member": {
-        "level": "org.expel",
-        "governed": true
-      },
+      "add_department_member": "member",
+      "remove_department_member": "member",
       "grant_authority": {
         "level": "org.grant_authority",
         "governed": true
