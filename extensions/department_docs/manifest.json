@@ -15,5 +15,12 @@
     "admin"
   ],
   "show_in_sidebar": true,
-  "icon": "folder-open"
+  "icon": "folder-open",
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "register_entities": "admin",
+      "delete_document": "admin"
+    }
+  }
 }

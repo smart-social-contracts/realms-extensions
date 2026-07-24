@@ -28,5 +28,12 @@
     "provider_url": "https://app.rarime.com/",
     "logo": "rarime.png",
     "description": "Verified passport identity using zero-knowledge proofs"
+  },
+  "entry_access": {
+    "default": "public",
+    "functions": {
+      "register_entities": "admin",
+      "initialize": "admin"
+    }
   }
 }

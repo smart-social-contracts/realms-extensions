@@ -21,5 +21,8 @@
   },
   "icon": "server",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/system_info",
-  "show_in_sidebar": true
+  "show_in_sidebar": true,
+  "entry_access": {
+    "default": "admin"
+  }
 }

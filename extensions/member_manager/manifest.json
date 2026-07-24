@@ -14,5 +14,8 @@
     "admin"
   ],
   "show_in_sidebar": true,
-  "icon": "user-check"
+  "icon": "user-check",
+  "entry_access": {
+    "default": "admin"
+  }
 }

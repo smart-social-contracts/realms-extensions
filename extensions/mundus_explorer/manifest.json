@@ -21,5 +21,8 @@
   },
   "icon": "world",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/mundus_explorer",
-  "show_in_sidebar": true
+  "show_in_sidebar": true,
+  "entry_access": {
+    "default": "member"
+  }
 }

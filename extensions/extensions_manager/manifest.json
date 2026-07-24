@@ -17,5 +17,34 @@
     "admin"
   ],
   "show_in_sidebar": false,
-  "icon": "puzzle"
+  "icon": "puzzle",
+  "entry_access": {
+    "default": "admin",
+    "functions": {
+      "grant_extension_to_user": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_user": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_extension_to_department": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_department": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_extension_to_profile": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_profile": {
+        "level": "role.revoke",
+        "governed": true
+      }
+    }
+  }
 }

@@ -19,5 +19,11 @@
   ],
   "icon": "bell",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/notifications",
-  "show_in_sidebar": false
+  "show_in_sidebar": false,
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "create_notification": "admin"
+    }
+  }
 }

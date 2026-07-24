@@ -14,5 +14,8 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Migration Console"
+  },
+  "entry_access": {
+    "default": "admin"
   }
 }

@@ -16,5 +16,8 @@
     "admin"
   ],
   "show_in_sidebar": true,
-  "icon": "search"
+  "icon": "search",
+  "entry_access": {
+    "default": "admin"
+  }
 }

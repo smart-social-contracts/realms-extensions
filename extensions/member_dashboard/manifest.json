@@ -18,5 +18,11 @@
   "icon": "layout-dashboard",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/member_dashboard",
   "show_in_sidebar": true,
-  "is_default": true
+  "is_default": true,
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "demo_mark_invoice_paid": "admin"
+    }
+  }
 }

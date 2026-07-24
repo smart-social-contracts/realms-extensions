@@ -1,6 +1,6 @@
 {
   "name": "demo_simulator",
-  "version": "1.1.4",
+  "version": "1.2.1",
   "description": "Continuous demo data simulator — generates realistic activity in batches via TaskSchedule. Auto-activates when TEST_MODE and TEST_MODE_DEMO_DATA are both true.",
   "author": "Realms Team",
   "categories": [
@@ -16,5 +16,8 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Demo Simulator"
+  },
+  "entry_access": {
+    "default": "admin"
   }
 }

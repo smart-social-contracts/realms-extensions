@@ -25,5 +25,30 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Land Registry"
+  },
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "create_land": {
+        "level": "admin",
+        "governed": true
+      },
+      "update_land_ownership": {
+        "level": "admin",
+        "governed": true
+      },
+      "update_land": {
+        "level": "admin",
+        "governed": true
+      },
+      "register_land_nft": {
+        "level": "admin",
+        "governed": true
+      },
+      "update_land_nft_token": {
+        "level": "admin",
+        "governed": true
+      }
+    }
   }
 }

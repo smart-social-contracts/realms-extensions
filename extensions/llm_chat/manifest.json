@@ -11,5 +11,8 @@
   "icon": "brain",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/llm_chat",
   "show_in_sidebar": true,
-  "hideFooter": true
+  "hideFooter": true,
+  "entry_access": {
+    "default": "member"
+  }
 }

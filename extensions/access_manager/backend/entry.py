@@ -51,15 +51,42 @@ def _get_caller_principal() -> str:
     return ic.caller().to_str()
 
 
+def _in_governed_replay() -> bool:
+    """True while an approved governance proposal replays this call with
+    realm authority (issue #262); RBAC checks must not re-apply."""
+    try:
+        from core.governed_action import in_replay
+
+        return in_replay()
+    except Exception:
+        return False
+
+
+class _ReplayAuthority:
+    """Caller stand-in when an approved proposal replays an action and the
+    executing principal (e.g. a timer) is not a registered user."""
+
+    id = "governance-replay"
+    profiles = ()
+    permissions = ()
+
+
+_REPLAY_AUTHORITY = _ReplayAuthority()
+
+
 def _get_caller_user() -> User:
     principal = _get_caller_principal()
     user = User[principal]
     if not user:
+        if _in_governed_replay():
+            return _REPLAY_AUTHORITY
         raise PermissionError(f"User {principal} not found")
     return user
 
 
 def _is_allowed(user: User, operation: str) -> bool:
+    if _in_governed_replay():
+        return True
     for profile in user.profiles:
         allowed = str(profile.allowed_to or "").split(OPERATIONS_SEPARATOR)
         if Operations.ALL in allowed or operation in allowed:

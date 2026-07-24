@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.4.1",
+  "version": "1.6.0",
   "description": "Realm configuration and branding",
   "author": "Realms Team",
   "categories": [
@@ -16,5 +16,21 @@
     "admin"
   ],
   "show_in_sidebar": true,
-  "icon": "settings"
+  "icon": "settings",
+  "entry_access": {
+    "default": "admin",
+    "functions": {
+      "health": "public",
+      "set_realm_stage": "admin",
+      "transfer_root": "admin",
+      "set_quarter_policy": {
+        "level": "org.set_policy",
+        "governed": true
+      },
+      "patch_manifest_data": {
+        "level": "admin",
+        "governed": true
+      }
+    }
+  }
 }

@@ -16,5 +16,25 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Procurement"
+  },
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "register_entities": "admin",
+      "create_rfp": "admin",
+      "update_rfp": "admin",
+      "publish_rfp": "admin",
+      "close_rfp": "admin",
+      "flag_vendor": "admin",
+      "demo_advance_rfp": "admin",
+      "award_rfp": {
+        "level": "admin",
+        "governed": true
+      },
+      "execute_contract": {
+        "level": "admin",
+        "governed": true
+      }
+    }
   }
 }

@@ -19,5 +19,8 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "ERD Explorer"
+  },
+  "entry_access": {
+    "default": "admin"
   }
 }

@@ -40,5 +40,14 @@
   "entity_method_overrides": [],
   "sidebar_label": {
     "en": "Vault"
+  },
+  "entry_access": {
+    "default": "admin",
+    "functions": {
+      "transfer": {
+        "level": "admin",
+        "governed": true
+      }
+    }
   }
 }

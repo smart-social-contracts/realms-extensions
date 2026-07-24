@@ -15,5 +15,8 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Hello World"
+  },
+  "entry_access": {
+    "default": "public"
   }
 }

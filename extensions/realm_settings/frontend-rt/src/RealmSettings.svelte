@@ -34,7 +34,48 @@
 	let realmSettingsTokenCanisterId = $state('');
 	let realmSettingsTokenIndexerId = $state('');
 	let realmSettingsNftCanisterId = $state('');
+	let governanceVotingWindowDays = $state<number | null>(null);
+	let liveVotingWindowSeconds = $state<number | null>(null);
 	let tokenResolving = $state(false);
+
+	// Governed-action confirmation (issue #262): when the root org policy is
+	// not 1/1, update_realm_config returns requires_confirmation and the
+	// change must go through a proposal + vote.
+	let governedConfirm = $state<any>(null);
+	let governedSubmitting = $state(false);
+
+	type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'advanced';
+	let activeTab: SettingsTab = $state('general');
+
+	const settingsTabs: { id: SettingsTab; label: string }[] = [
+		{ id: 'general', label: 'General' },
+		{ id: 'governance', label: 'Governance' },
+		{ id: 'treasury', label: 'Treasury' },
+		{ id: 'infrastructure', label: 'Infrastructure' },
+		{ id: 'advanced', label: 'Advanced' },
+	];
+
+	async function callExt(fn: string, args: Record<string, unknown> = {}) {
+		return await ctx.callSync(fn, args);
+	}
+
+	function formatDuration(seconds: number): string {
+		if (!Number.isFinite(seconds) || seconds <= 0) return 'unknown';
+		if (seconds >= 86400) {
+			const days = seconds / 86400;
+			return Number.isInteger(days) ? `${days} days` : `${days.toFixed(2)} days`;
+		}
+		if (seconds >= 3600) return `${Math.round(seconds / 3600)} hours`;
+		if (seconds >= 60) return `${Math.round(seconds / 60)} minutes`;
+		return `${Math.round(seconds)} seconds`;
+	}
+
+	let governanceDirty = $derived(
+		liveVotingWindowSeconds != null &&
+			governanceVotingWindowDays != null &&
+			Number.isFinite(governanceVotingWindowDays) &&
+			Math.round(governanceVotingWindowDays * 86400) !== liveVotingWindowSeconds,
+	);
 	let tokenResolveMessage = $state('');
 	let tokenResolveError = $state('');
 
@@ -164,6 +205,11 @@
 				);
 				realmSettingsNftCanisterId = nft?.canister_id || '';
 			}
+			const gov = await callExt('get_governance_settings');
+			if (gov?.success && gov.data) {
+				liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
+				governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
+			}
 		} catch (e: any) {
 			settingsError = e?.message || String(e);
 		} finally {
@@ -200,12 +246,13 @@
 		}
 	}
 
-	async function saveRealmSettings() {
+	async function saveRealmSettings(confirmProposal = false) {
 		settingsSaving = true;
 		settingsMessage = '';
 		settingsError = '';
 		try {
 			const config: Record<string, unknown> = {
+				...(confirmProposal ? { confirm: true } : {}),
 				name: realmSettingsName,
 				manifesto: realmSettingsManifesto,
 				welcome_message: realmSettingsWelcome,
@@ -221,12 +268,30 @@
 				nft_canister_id: realmSettingsNftCanisterId.trim(),
 				file_registry_canister_id: realmSettingsFileRegistryId,
 				marketplace_canister_id: realmSettingsMarketplaceId,
+				config_overrides: {
+					governance: {
+						voting_window_days: Number(
+							governanceVotingWindowDays ?? (liveVotingWindowSeconds != null ? liveVotingWindowSeconds / 86400 : 7),
+						),
+					},
+				},
 			};
 			const raw = await ctx.backend.update_realm_config(JSON.stringify(config));
 			const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (result?.success) {
+			if (result?.applied === 'proposal') {
+				governedConfirm = null;
+				settingsMessage = `Proposal ${result.proposal_id} created — the change applies after the vote passes (see the Voting page).`;
+				addToast(`Proposal ${result.proposal_id} created`);
+			} else if (result?.requires_confirmation) {
+				governedConfirm = result;
+			} else if (result?.success) {
 				settingsMessage = 'Realm settings saved successfully.';
 				addToast('Realm settings updated');
+				const gov = await callExt('get_governance_settings');
+				if (gov?.success && gov.data) {
+					liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
+					governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
+				}
 				await ctx.realmInfo?.fetch?.();
 			} else if (result?.denied_operation) {
 				openProposalForSettings(result.denied_operation);
@@ -243,6 +308,15 @@
 			}
 		} finally {
 			settingsSaving = false;
+		}
+	}
+
+	async function submitGovernedProposal() {
+		governedSubmitting = true;
+		try {
+			await saveRealmSettings(true);
+		} finally {
+			governedSubmitting = false;
 		}
 	}
 
@@ -362,6 +436,23 @@
 	});
 </script>
 
+{#snippet saveBar()}
+	<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		{#if settingsMessage}
+			<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{settingsMessage}</div>
+		{/if}
+		{#if settingsError}
+			<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{settingsError}</div>
+		{/if}
+		<button
+			type="button"
+			onclick={() => saveRealmSettings()}
+			disabled={settingsSaving || !infraValid || governanceVotingWindowDays == null}
+			class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
+	</div>
+{/snippet}
+
 {#if toasts.length > 0}
 	<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
 		{#each toasts as toast (toast.id)}
@@ -376,14 +467,37 @@
 {/if}
 
 <div class="w-full px-4 max-w-none">
-	<div class="flex justify-between items-center mb-6">
+	<div class="flex justify-between items-center mb-4">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Settings</h1>
 			<p class="text-gray-600 mt-1">Configure identity, branding, currency, registration, and infrastructure for this realm.</p>
 		</div>
 	</div>
 
-	<!-- Realm Lifecycle Stage -->
+	<div class="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
+		{#each settingsTabs as tab (tab.id)}
+			<button
+				type="button"
+				onclick={() => (activeTab = tab.id)}
+				class={cn(
+					'px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors whitespace-nowrap',
+					activeTab === tab.id
+						? 'border-gray-900 text-gray-900'
+						: 'border-transparent text-gray-500 hover:text-gray-700',
+				)}
+			>
+				{tab.label}
+			</button>
+		{/each}
+	</div>
+
+	{#if settingsLoading && activeTab !== 'advanced'}
+		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<div class="flex items-center justify-center py-10">
+				<div class="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
+			</div>
+		</div>
+	{:else if activeTab === 'general'}
 	<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
 		<h2 class="text-lg font-semibold text-gray-900 mb-1">Realm Lifecycle</h2>
 		<p class="text-sm text-gray-500 mb-5">
@@ -518,19 +632,6 @@
 		{/if}
 	</div>
 
-	<!-- Quarters & Auto-Scaling -->
-	<QuartersPanel {ctx} {addToast} />
-
-	<!-- Extension / codex-hook sandboxing -->
-	<SandboxPanel {ctx} {addToast} />
-
-	{#if settingsLoading}
-		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
-			<div class="flex items-center justify-center py-10">
-				<div class="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
-			</div>
-		</div>
-	{:else}
 		<!-- Identity -->
 		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Identity</h2>
@@ -584,6 +685,75 @@
 			</div>
 		</section>
 
+		<!-- Registration & features -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Registration &amp; features</h2>
+			<p class="text-sm text-gray-500 mb-5">Membership access and optional realm features.</p>
+			<div class="space-y-5">
+				<div class="flex items-center gap-3">
+					<label for="rs-open-reg" class="relative inline-flex items-center cursor-pointer">
+						<input id="rs-open-reg" type="checkbox" bind:checked={realmSettingsOpenRegistration} class="sr-only peer" />
+						<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+					</label>
+					<div>
+						<span class="text-sm font-medium text-gray-700">Open Registration</span>
+						<p class="text-xs text-gray-500">When enabled, anyone can join without an invite code.</p>
+					</div>
+				</div>
+				<div class="flex items-center gap-3">
+					<label for="rs-ai-assistant" class="relative inline-flex items-center cursor-pointer">
+						<input id="rs-ai-assistant" type="checkbox" bind:checked={realmSettingsAiAssistantEnabled} class="sr-only peer" />
+						<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+					</label>
+					<div>
+						<span class="text-sm font-medium text-gray-700">AI Assistant</span>
+						<p class="text-xs text-gray-500">Enable Explain actions and realm-context hooks. Chat UI lives on the mundus Realms Assistant (registry portal).</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		{@render saveBar()}
+	{:else if activeTab === 'governance'}
+		<section id="governance" class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Voting window</h2>
+			<p class="text-sm text-gray-500 mb-5">
+				How long new proposals stay open for voting. Applies to proposals created after you save.
+				Use decimals for short test windows (for example, <code class="bg-gray-100 px-1 rounded">0.0012</code> ≈ 104 seconds).
+			</p>
+			{#if liveVotingWindowSeconds != null}
+				<div class="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+					Effective now:
+					<span class="font-medium">{liveVotingWindowSeconds} seconds ({formatDuration(liveVotingWindowSeconds)})</span>
+				</div>
+			{/if}
+			<div>
+				<label for="rs-voting-window" class="block text-sm font-medium text-gray-700 mb-1">Voting window (days)</label>
+				<input
+					id="rs-voting-window"
+					type="number"
+					min="0.0001"
+					step="any"
+					bind:value={governanceVotingWindowDays}
+					class="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+				/>
+				{#if governanceVotingWindowDays != null && Number.isFinite(governanceVotingWindowDays)}
+					<p class="mt-2 text-xs text-gray-500">
+						{#if governanceDirty}
+							Unsaved preview:
+							<span class="font-medium text-amber-700">
+								{Math.round(governanceVotingWindowDays * 86400)} seconds ({formatDuration(Math.round(governanceVotingWindowDays * 86400))})
+							</span>
+						{:else}
+							Matches the effective window above.
+						{/if}
+					</p>
+				{/if}
+			</div>
+		</section>
+
+		{@render saveBar()}
+	{:else if activeTab === 'treasury'}
 		<!-- Currency -->
 		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency token</h2>
@@ -683,34 +853,8 @@
 			</div>
 		</section>
 
-		<!-- Registration & features -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-1">Registration &amp; features</h2>
-			<p class="text-sm text-gray-500 mb-5">Membership access and optional realm features.</p>
-			<div class="space-y-5">
-				<div class="flex items-center gap-3">
-					<label for="rs-open-reg" class="relative inline-flex items-center cursor-pointer">
-						<input id="rs-open-reg" type="checkbox" bind:checked={realmSettingsOpenRegistration} class="sr-only peer" />
-						<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
-					</label>
-					<div>
-						<span class="text-sm font-medium text-gray-700">Open Registration</span>
-						<p class="text-xs text-gray-500">When enabled, anyone can join without an invite code.</p>
-					</div>
-				</div>
-				<div class="flex items-center gap-3">
-					<label for="rs-ai-assistant" class="relative inline-flex items-center cursor-pointer">
-						<input id="rs-ai-assistant" type="checkbox" bind:checked={realmSettingsAiAssistantEnabled} class="sr-only peer" />
-						<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
-					</label>
-					<div>
-						<span class="text-sm font-medium text-gray-700">AI Assistant</span>
-						<p class="text-xs text-gray-500">Enable Explain actions and realm-context hooks. Chat UI lives on the mundus Realms Assistant (registry portal).</p>
-					</div>
-				</div>
-			</div>
-		</section>
-
+		{@render saveBar()}
+	{:else if activeTab === 'infrastructure'}
 		<!-- Infrastructure -->
 		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Infrastructure</h2>
@@ -752,20 +896,10 @@
 			</div>
 		</section>
 
-		<!-- Save bar -->
-		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
-			{#if settingsMessage}
-				<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{settingsMessage}</div>
-			{/if}
-			{#if settingsError}
-				<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{settingsError}</div>
-			{/if}
-			<button
-				onclick={saveRealmSettings}
-				disabled={settingsSaving || !infraValid}
-				class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-			>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
-		</div>
+		{@render saveBar()}
+	{:else if activeTab === 'advanced'}
+		<QuartersPanel {ctx} {addToast} />
+		<SandboxPanel {ctx} {addToast} />
 	{/if}
 </div>
 
@@ -778,3 +912,39 @@
 	deniedOperation={proposalModalOperation}
 	onclose={() => proposalModalOpen = false}
 />
+
+{#if governedConfirm}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+		<div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6">
+			<div class="flex items-start gap-3 mb-4">
+				<div class="shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+					<svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m0 3.75h.008M4.5 19.5h15a1.5 1.5 0 001.3-2.25l-7.5-13a1.5 1.5 0 00-2.6 0l-7.5 13a1.5 1.5 0 001.3 2.25z"/>
+					</svg>
+				</div>
+				<div>
+					<h3 class="text-lg font-semibold text-gray-900">A vote is required</h3>
+					<p class="text-sm text-gray-600 mt-1">
+						{governedConfirm.summary || 'This change'} is governed by
+						<span class="font-medium">{governedConfirm.governed_by}</span>
+						(policy {governedConfirm.governed_policy || governedConfirm.policy}).
+						It will only apply after the proposal passes on the Voting page.
+					</p>
+				</div>
+			</div>
+			<div class="flex justify-end gap-3">
+				<button
+					type="button"
+					onclick={() => (governedConfirm = null)}
+					class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+				>Cancel</button>
+				<button
+					type="button"
+					onclick={submitGovernedProposal}
+					disabled={governedSubmitting}
+					class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+				>{governedSubmitting ? 'Submitting…' : 'Submit proposal'}</button>
+			</div>
+		</div>
+	</div>
+{/if}

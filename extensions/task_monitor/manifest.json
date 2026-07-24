@@ -16,5 +16,8 @@
   "icon": "activity",
   "sidebar_label": {
     "en": "Task Monitor"
+  },
+  "entry_access": {
+    "default": "admin"
   }
 }

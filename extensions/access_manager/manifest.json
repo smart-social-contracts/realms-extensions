@@ -15,5 +15,83 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Department Management"
+  },
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "create_department": {
+        "level": "org.create",
+        "governed": true
+      },
+      "update_department": {
+        "level": "org.set_policy",
+        "governed": true
+      },
+      "add_department_member": {
+        "level": "org.appoint",
+        "governed": true
+      },
+      "remove_department_member": {
+        "level": "org.expel",
+        "governed": true
+      },
+      "grant_authority": {
+        "level": "org.grant_authority",
+        "governed": true
+      },
+      "revoke_authority": {
+        "level": "org.revoke_authority",
+        "governed": true
+      },
+      "grant_department_permission": {
+        "level": "permission.grant",
+        "governed": true
+      },
+      "revoke_department_permission": {
+        "level": "permission.revoke",
+        "governed": true
+      },
+      "batch_grant_department_permissions": {
+        "level": "permission.grant",
+        "governed": true
+      },
+      "batch_revoke_department_permissions": {
+        "level": "permission.revoke",
+        "governed": true
+      },
+      "grant_extension_to_user": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_user": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_extension_to_department": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_department": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_extension_to_profile": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_profile": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "assign_profile": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_profile": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "ensure_root": "admin"
+    }
   }
 }

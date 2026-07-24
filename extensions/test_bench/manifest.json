@@ -19,5 +19,8 @@
   "show_in_sidebar": false,
   "sidebar_label": {
     "en": "Test Bench"
+  },
+  "entry_access": {
+    "default": "admin"
   }
 }

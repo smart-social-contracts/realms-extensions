@@ -19,5 +19,8 @@
   "icon": "file-code",
   "sidebar_label": {
     "en": "Codices"
+  },
+  "entry_access": {
+    "default": "member"
   }
 }

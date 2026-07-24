@@ -15,5 +15,79 @@
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "User Management"
+  },
+  "entry_access": {
+    "default": "member",
+    "functions": {
+      "assign_profile": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_profile": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_permission": {
+        "level": "permission.grant",
+        "governed": true
+      },
+      "revoke_permission": {
+        "level": "permission.revoke",
+        "governed": true
+      },
+      "batch_grant_permissions": {
+        "level": "permission.grant",
+        "governed": true
+      },
+      "batch_revoke_permissions": {
+        "level": "permission.revoke",
+        "governed": true
+      },
+      "grant_profile_permission": {
+        "level": "permission.grant",
+        "governed": true
+      },
+      "revoke_profile_permission": {
+        "level": "permission.revoke",
+        "governed": true
+      },
+      "batch_grant_profile_permissions": {
+        "level": "permission.grant",
+        "governed": true
+      },
+      "batch_revoke_profile_permissions": {
+        "level": "permission.revoke",
+        "governed": true
+      },
+      "grant_extension_to_user": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_user": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_extension_to_department": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_department": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "grant_extension_to_profile": {
+        "level": "role.assign",
+        "governed": true
+      },
+      "revoke_extension_from_profile": {
+        "level": "role.revoke",
+        "governed": true
+      },
+      "generate_registration_url": "admin",
+      "revoke_registration_code": "admin",
+      "get_registration_codes": "admin",
+      "validate_registration_code": "public",
+      "consume_registration_code": "public"
+    }
   }
 }
