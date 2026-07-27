@@ -42,10 +42,21 @@
     "en": "Vault"
   },
   "entry_access": {
-    "default": "admin",
+    "default": "realm.admin",
     "functions": {
+      "get_active_tokens": "treasury.view",
+      "get_vault_balance": "treasury.view",
+      "get_balance": "treasury.view",
+      "get_transactions": "treasury.view",
+      "get_status": "treasury.view",
+      "lookup_balance": "treasury.view",
+      "list_subaccounts": "treasury.view",
+      "refresh": "treasury.view",
+      "refresh_vault_balance": "treasury.view",
+      "register_subaccount": "treasury.manage",
+      "unregister_subaccount": "treasury.manage",
       "transfer": {
-        "level": "admin",
+        "level": "transfer.create",
         "governed": true
       }
     }

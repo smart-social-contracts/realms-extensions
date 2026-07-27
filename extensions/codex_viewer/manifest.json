@@ -21,6 +21,6 @@
     "en": "Codices"
   },
   "entry_access": {
-    "default": "member"
+    "default": "realm.data_view"
   }
 }

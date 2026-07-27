@@ -27,26 +27,26 @@
     "en": "Land Registry"
   },
   "entry_access": {
-    "default": "member",
+    "default": "realm.data_view",
     "functions": {
       "create_land": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       },
       "update_land_ownership": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       },
       "update_land": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       },
       "register_land_nft": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       },
       "update_land_nft_token": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       }
     }

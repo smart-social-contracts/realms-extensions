@@ -18,6 +18,12 @@
     "en": "Task Monitor"
   },
   "entry_access": {
-    "default": "admin"
+    "default": "task.view",
+    "functions": {
+      "toggle_schedule": "task.schedule",
+      "run_task_now": "task.run",
+      "stop_task": "task.cancel",
+      "delete_task": "task.delete"
+    }
   }
 }

@@ -16,6 +16,12 @@
     "en": "Migration Console"
   },
   "entry_access": {
-    "default": "admin"
+    "default": "realm.admin",
+    "functions": {
+      "get_console_data": "user.view",
+      "list_citizen_invites": "invite.manage",
+      "regenerate_invite": "invite.manage",
+      "import_citizens": "user.add"
+    }
   }
 }

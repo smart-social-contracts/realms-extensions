@@ -18,9 +18,16 @@
     "en": "Voting"
   },
   "entry_access": {
-    "default": "member",
+    "default": "realm.data_view",
     "functions": {
-      "demo_approve_and_execute": "admin"
+      "submit_proposal": "proposal.create",
+      "cast_vote": "proposal.vote",
+      "get_user_vote": "self.data_view",
+      "start_voting": "proposal.manage",
+      "finalize_proposal": "proposal.manage",
+      "approve_proposal": "proposal.manage",
+      "execute_proposal": "proposal.manage",
+      "demo_approve_and_execute": "demo.manage"
     }
   }
 }

@@ -32,8 +32,9 @@
   "entry_access": {
     "default": "public",
     "functions": {
-      "register_entities": "admin",
-      "initialize": "admin"
+      "register_entities": "realm.admin",
+      "initialize": "realm.admin",
+      "set_application_id": "realm.configure"
     }
   }
 }

@@ -18,6 +18,6 @@
     "en": "Demo Simulator"
   },
   "entry_access": {
-    "default": "admin"
+    "default": "demo.manage"
   }
 }

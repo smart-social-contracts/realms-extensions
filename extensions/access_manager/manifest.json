@@ -17,7 +17,7 @@
     "en": "Department Management"
   },
   "entry_access": {
-    "default": "member",
+    "default": "realm.data_view",
     "functions": {
       "create_department": {
         "level": "org.create",
@@ -27,8 +27,12 @@
         "level": "org.set_policy",
         "governed": true
       },
-      "add_department_member": "member",
-      "remove_department_member": "member",
+      "delete_department": "organization.delete",
+      "add_department_member": "org.manage_members",
+      "remove_department_member": "org.manage_members",
+      "manage_position": "org.manage_members",
+      "run_department_payroll": "org.manage_budget",
+      "set_payroll_schedule": "org.manage_budget",
       "grant_authority": {
         "level": "org.grant_authority",
         "governed": true
@@ -85,7 +89,7 @@
         "level": "role.revoke",
         "governed": true
       },
-      "ensure_root": "admin"
+      "ensure_root": "realm.admin"
     }
   }
 }

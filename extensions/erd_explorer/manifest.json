@@ -21,6 +21,6 @@
     "en": "ERD Explorer"
   },
   "entry_access": {
-    "default": "admin"
+    "default": "db.export"
   }
 }

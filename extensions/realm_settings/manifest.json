@@ -18,15 +18,16 @@
   "show_in_sidebar": true,
   "icon": "settings",
   "entry_access": {
-    "default": "admin",
+    "default": "realm.configure",
     "functions": {
       "health": "public",
+      "request_quarter_scale": "quarter.register",
       "set_realm_stage": {
-        "level": "admin",
+        "level": "realm.configure",
         "governed": true
       },
       "transfer_root": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       },
       "set_quarter_policy": {
@@ -34,7 +35,7 @@
         "governed": true
       },
       "patch_manifest_data": {
-        "level": "admin",
+        "level": "realm.configure",
         "governed": true
       }
     }

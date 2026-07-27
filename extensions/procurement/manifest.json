@@ -18,21 +18,29 @@
     "en": "Procurement"
   },
   "entry_access": {
-    "default": "member",
+    "default": "realm.data_view",
     "functions": {
-      "register_entities": "admin",
-      "create_rfp": "admin",
-      "update_rfp": "admin",
-      "publish_rfp": "admin",
-      "close_rfp": "admin",
-      "flag_vendor": "admin",
-      "demo_advance_rfp": "admin",
+      "register_entities": "realm.admin",
+      "create_rfp": "realm.admin",
+      "update_rfp": "realm.admin",
+      "publish_rfp": "realm.admin",
+      "close_rfp": "realm.admin",
+      "flag_vendor": "realm.admin",
+      "demo_advance_rfp": "demo.manage",
+      "async_task": "realm.admin",
+      "create_bid_shell": "bid.submit",
+      "set_bid_payload": "bid.submit",
+      "get_bid_payload": "bid.submit",
+      "get_evaluator_principals": "bid.submit",
+      "submit_scores": "bid.evaluate",
+      "compute_totals": "bid.evaluate",
+      "list_scores": "bid.evaluate",
       "award_rfp": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       },
       "execute_contract": {
-        "level": "admin",
+        "level": "realm.admin",
         "governed": true
       }
     }

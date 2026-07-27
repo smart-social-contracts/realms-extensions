@@ -18,6 +18,12 @@
   "doc_url": null,
   "show_in_sidebar": true,
   "entry_access": {
-    "default": "member"
+    "default": "realm.data_view",
+    "functions": {
+      "set_allocation_rule": "org.manage_budget",
+      "run_allocation": "org.manage_budget",
+      "set_epoch_config": "org.manage_budget",
+      "set_treasury_schedule": "org.manage_budget"
+    }
   }
 }

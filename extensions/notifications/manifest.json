@@ -21,9 +21,12 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/notifications",
   "show_in_sidebar": false,
   "entry_access": {
-    "default": "member",
+    "default": "self.data_view",
     "functions": {
-      "create_notification": "admin"
+      "mark_as_read": "self.data_manage",
+      "delete_notification": "self.data_manage",
+      "list_departments": "realm.data_view",
+      "create_notification": "notification.send"
     }
   }
 }

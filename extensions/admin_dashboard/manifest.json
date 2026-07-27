@@ -18,6 +18,13 @@
   "show_in_sidebar": true,
   "icon": "search",
   "entry_access": {
-    "default": "admin"
+    "default": "realm.admin",
+    "functions": {
+      "get_entity_types": "db.export",
+      "export_data": "db.export",
+      "import_data": "db.manage",
+      "process_bulk_import": "db.manage",
+      "delete_entity": "db.manage"
+    }
   }
 }

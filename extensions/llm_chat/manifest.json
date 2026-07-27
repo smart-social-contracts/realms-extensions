@@ -13,6 +13,6 @@
   "show_in_sidebar": true,
   "hideFooter": true,
   "entry_access": {
-    "default": "member"
+    "default": "realm.data_view"
   }
 }

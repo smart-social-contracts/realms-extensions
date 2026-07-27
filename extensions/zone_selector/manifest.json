@@ -24,8 +24,9 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/zone_selector",
   "show_in_sidebar": true,
   "entry_access": {
-    "default": "member",
+    "default": "self.data_manage",
     "functions": {
+      "get_my_zones": "self.data_view",
       "get_all_zones": "public"
     }
   }

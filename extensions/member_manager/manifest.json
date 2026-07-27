@@ -16,6 +16,9 @@
   "show_in_sidebar": true,
   "icon": "user-check",
   "entry_access": {
-    "default": "admin"
+    "default": "user.view",
+    "functions": {
+      "send_member_notification": "notification.send"
+    }
   }
 }

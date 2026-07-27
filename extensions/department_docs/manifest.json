@@ -17,10 +17,10 @@
   "show_in_sidebar": true,
   "icon": "folder-open",
   "entry_access": {
-    "default": "member",
+    "default": "document.manage",
     "functions": {
-      "register_entities": "admin",
-      "delete_document": "admin"
+      "register_entities": "realm.admin",
+      "delete_document": "realm.admin"
     }
   }
 }

@@ -19,7 +19,7 @@
   "show_in_sidebar": false,
   "icon": "puzzle",
   "entry_access": {
-    "default": "admin",
+    "default": "realm.admin",
     "functions": {
       "grant_extension_to_user": {
         "level": "role.assign",

@@ -20,9 +20,12 @@
   "show_in_sidebar": true,
   "is_default": true,
   "entry_access": {
-    "default": "member",
+    "default": "self.data_view",
     "functions": {
-      "demo_mark_invoice_paid": "admin"
+      "add_payment_account": "self.data_manage",
+      "remove_payment_account": "self.data_manage",
+      "check_invoice_payment": "self.invoice_refresh",
+      "demo_mark_invoice_paid": "demo.manage"
     }
   }
 }

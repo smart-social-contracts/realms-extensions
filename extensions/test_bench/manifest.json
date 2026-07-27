@@ -21,6 +21,6 @@
     "en": "Test Bench"
   },
   "entry_access": {
-    "default": "admin"
+    "default": "realm.admin"
   }
 }

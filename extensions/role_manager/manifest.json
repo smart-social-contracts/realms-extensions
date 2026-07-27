@@ -17,8 +17,10 @@
     "en": "User Management"
   },
   "entry_access": {
-    "default": "member",
+    "default": "realm.data_view",
     "functions": {
+      "propose_role_action": "proposal.create",
+      "propose_role_assignment": "proposal.create",
       "assign_profile": {
         "level": "role.assign",
         "governed": true
@@ -83,9 +85,9 @@
         "level": "role.revoke",
         "governed": true
       },
-      "generate_registration_url": "admin",
-      "revoke_registration_code": "admin",
-      "get_registration_codes": "admin",
+      "generate_registration_url": "invite.manage",
+      "revoke_registration_code": "invite.manage",
+      "get_registration_codes": "invite.manage",
       "validate_registration_code": "public",
       "consume_registration_code": "public"
     }
