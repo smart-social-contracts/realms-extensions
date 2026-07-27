@@ -545,9 +545,13 @@ def _maybe_queue_email(notification, event_type: str = ""):
     """Mark a notification for email delivery if the realm and user allow it.
 
     Only single-user notifications are handled in this first pass; broadcast
-    emails are left for future work.
+    emails are left for future work. If the notification already carries a
+    ``force_email_to`` address (e.g. a test email), that address is preserved.
     """
     try:
+        metadata = _email_status_from_metadata(notification)
+        existing_to = metadata.get("force_email_to", "").strip()
+
         email_config = _realm_email_config()
         if not email_config.get("enabled"):
             return
@@ -557,7 +561,9 @@ def _maybe_queue_email(notification, event_type: str = ""):
             events = {}
 
         resolved_event = _email_event_type(event_type, notification)
-        if not events.get(resolved_event, True):
+        # Event types not in the configured events map default to disabled,
+        # except for explicit admin test emails that already carry a target.
+        if not existing_to and not events.get(resolved_event, False):
             return
 
         audience = getattr(notification, "audience_type", "user") or "user"
@@ -573,13 +579,16 @@ def _maybe_queue_email(notification, event_type: str = ""):
             return
 
         info = _user_email_info(user)
-        if not info.get("email") or not info.get("email_notifications_enabled", True):
+        if not info.get("email_notifications_enabled", True):
             return
 
-        metadata = _email_status_from_metadata(notification)
+        if not existing_to and not info.get("email"):
+            return
+
         metadata["email_status"] = "pending"
         metadata["event_type"] = resolved_event
-        metadata["force_email_to"] = info.get("email")
+        if not existing_to:
+            metadata["force_email_to"] = info.get("email")
         notification.metadata = json.dumps(metadata)
         logger.info(
             f"Queued email for notification {notification._id} "
