@@ -8,7 +8,14 @@
     "mark_as_read",
     "delete_notification",
     "create_notification",
-    "list_departments"
+    "list_departments",
+    "get_user_email",
+    "set_user_email",
+    "get_user_email_preferences",
+    "set_user_email_preferences",
+    "get_pending_email_notifications",
+    "mark_email_sent",
+    "send_test_email"
   ],
   "profiles": [
     "member",
@@ -26,7 +33,14 @@
       "mark_as_read": "self.data_manage",
       "delete_notification": "self.data_manage",
       "list_departments": "realm.data_view",
-      "create_notification": "notification.send"
+      "create_notification": "notification.send",
+      "get_user_email": "self.data_view",
+      "set_user_email": "self.data_manage",
+      "get_user_email_preferences": "self.data_view",
+      "set_user_email_preferences": "self.data_manage",
+      "get_pending_email_notifications": "notification.send",
+      "mark_email_sent": "notification.send",
+      "send_test_email": "realm.admin"
     }
   }
 }

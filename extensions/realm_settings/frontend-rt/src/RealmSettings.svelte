@@ -32,11 +32,26 @@
 	let realmSettingsCurrency = $state('ckBTC');
 	let realmSettingsCurrencyDecimals = $state(8);
 	let realmSettingsTokenCanisterId = $state('');
-	let realmSettingsTokenIndexerId = $state('');
-	let realmSettingsNftCanisterId = $state('');
-	let governanceVotingWindowDays = $state<number | null>(null);
-	let liveVotingWindowSeconds = $state<number | null>(null);
-	let tokenResolving = $state(false);
+let realmSettingsTokenIndexerId = $state('');
+let realmSettingsNftCanisterId = $state('');
+let governanceVotingWindowDays = $state<number | null>(null);
+let liveVotingWindowSeconds = $state<number | null>(null);
+let tokenResolving = $state(false);
+
+// Email notification configuration (issue #266): realm-level, non-sensitive
+// sender identity and event routing. SMTP credentials live in the off-chain
+// worker environment.
+let realmSettingsEmailEnabled = $state(false);
+let realmSettingsEmailFromName = $state('');
+let realmSettingsEmailFromAddress = $state('');
+let realmSettingsEmailReplyTo = $state('');
+let realmSettingsEmailEvents: Record<string, boolean> = $state({
+	proposal_created: true,
+	vote_reminder: true,
+	vote_ended: true,
+	mention: true,
+	task_assigned: true,
+});
 
 	// Governed-action confirmation (issue #262): when the root org policy is
 	// not 1/1, update_realm_config returns requires_confirmation and the
@@ -45,16 +60,17 @@
 	let governedSubmitting = $state(false);
 	let governedRetry = $state<(() => Promise<void>) | null>(null);
 
-	type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'advanced';
-	let activeTab: SettingsTab = $state('general');
+type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'notifications' | 'advanced';
+let activeTab: SettingsTab = $state('general');
 
-	const settingsTabs: { id: SettingsTab; label: string }[] = [
-		{ id: 'general', label: 'General' },
-		{ id: 'governance', label: 'Governance' },
-		{ id: 'treasury', label: 'Treasury' },
-		{ id: 'infrastructure', label: 'Infrastructure' },
-		{ id: 'advanced', label: 'Advanced' },
-	];
+const settingsTabs: { id: SettingsTab; label: string }[] = [
+	{ id: 'general', label: 'General' },
+	{ id: 'governance', label: 'Governance' },
+	{ id: 'treasury', label: 'Treasury' },
+	{ id: 'infrastructure', label: 'Infrastructure' },
+	{ id: 'notifications', label: 'Notifications' },
+	{ id: 'advanced', label: 'Advanced' },
+];
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
 		return await ctx.callSync(fn, args);
@@ -269,6 +285,13 @@
 				nft_canister_id: realmSettingsNftCanisterId.trim(),
 				file_registry_canister_id: realmSettingsFileRegistryId,
 				marketplace_canister_id: realmSettingsMarketplaceId,
+				email_service_config: {
+					enabled: realmSettingsEmailEnabled,
+					from_name: realmSettingsEmailFromName.trim(),
+					from_address: realmSettingsEmailFromAddress.trim(),
+					reply_to: realmSettingsEmailReplyTo.trim(),
+					events: { ...realmSettingsEmailEvents },
+				},
 				config_overrides: {
 					governance: {
 						voting_window_days: Number(
@@ -443,9 +466,83 @@
 		proposalModalOpen = true;
 	}
 
+	async function loadEmailConfig() {
+		try {
+			const raw = await ctx.backend.extension_sync_call(
+				'realm_settings',
+				'get_email_config',
+				'{}',
+			);
+			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			const res = envelope?.response
+				? typeof envelope.response === 'string'
+					? JSON.parse(envelope.response)
+					: envelope.response
+				: envelope;
+			if (res?.success && res?.data) {
+				realmSettingsEmailEnabled = res.data.enabled === true;
+				realmSettingsEmailFromName = res.data.from_name || '';
+				realmSettingsEmailFromAddress = res.data.from_address || '';
+				realmSettingsEmailReplyTo = res.data.reply_to || '';
+				realmSettingsEmailEvents = {
+					proposal_created: true,
+					vote_reminder: true,
+					vote_ended: true,
+					mention: true,
+					task_assigned: true,
+					...(res.data.events || {}),
+				};
+			}
+		} catch (e: any) {
+			console.error('Failed to load email config:', e?.message || String(e));
+		}
+	}
+
+	async function sendTestEmail() {
+		settingsMessage = '';
+		settingsError = '';
+		try {
+			const raw = await ctx.backend.extension_sync_call(
+				'notifications',
+				'send_test_email',
+				JSON.stringify({
+					to: realmSettingsEmailFromAddress,
+					subject: 'Realms email test',
+					body: 'If you received this message, the realm email service is configured correctly.',
+				}),
+			);
+			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			const res = envelope?.response
+				? typeof envelope.response === 'string'
+					? JSON.parse(envelope.response)
+					: envelope.response
+				: envelope;
+			if (res?.success) {
+				settingsMessage = 'Test email queued successfully.';
+				addToast('Test email queued');
+			} else {
+				settingsError = res?.error || 'Failed to queue test email';
+			}
+		} catch (e: any) {
+			settingsError = e?.message || String(e);
+		}
+	}
+
+	function isValidEmail(value: string): boolean {
+		if (!value) return true;
+		return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+	}
+
+	let emailConfigValid = $derived(
+		isValidEmail(realmSettingsEmailFromAddress) &&
+			isValidEmail(realmSettingsEmailReplyTo) &&
+			(!realmSettingsEmailEnabled || realmSettingsEmailFromAddress.trim() !== ''),
+	);
+
 	$effect(() => {
 		loadRealmSettings();
 		loadLifecycle();
+		loadEmailConfig();
 	});
 </script>
 
@@ -460,7 +557,7 @@
 		<button
 			type="button"
 			onclick={() => saveRealmSettings()}
-			disabled={settingsSaving || !infraValid || governanceVotingWindowDays == null}
+			disabled={settingsSaving || !infraValid || !emailConfigValid || governanceVotingWindowDays == null}
 			class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
 	</div>
@@ -905,6 +1002,97 @@
 						<p class="mt-1 text-xs text-red-600">Invalid canister ID format. Expected format: xxxxx-xxxxx-...-cai</p>
 					{/if}
 					<p class="mt-1 text-xs text-gray-500">Marketplace for discovering and purchasing packages.</p>
+				</div>
+			</div>
+		</section>
+
+		{@render saveBar()}
+	{:else if activeTab === 'notifications'}
+		<!-- Email notifications -->
+		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Email notifications</h2>
+			<p class="text-sm text-gray-500 mb-5">
+				Configure the realm's outbound email identity and which events trigger an email.
+				SMTP credentials are managed at the server level — they are not stored in the realm.
+			</p>
+
+			<div class="space-y-5">
+				<div class="flex items-center gap-3">
+					<label for="rs-email-enabled" class="relative inline-flex items-center cursor-pointer">
+						<input id="rs-email-enabled" type="checkbox" bind:checked={realmSettingsEmailEnabled} class="sr-only peer" />
+						<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+					</label>
+					<div>
+						<span class="text-sm font-medium text-gray-700">Enable email notifications</span>
+						<p class="text-xs text-gray-500">When off, no emails are sent regardless of user preferences.</p>
+					</div>
+				</div>
+
+				<div>
+					<label for="rs-email-from-name" class="block text-sm font-medium text-gray-700 mb-1">From name</label>
+					<input id="rs-email-from-name" type="text" bind:value={realmSettingsEmailFromName}
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+				</div>
+
+				<div>
+					<label for="rs-email-from-address" class="block text-sm font-medium text-gray-700 mb-1">From address</label>
+					<input id="rs-email-from-address" type="email" bind:value={realmSettingsEmailFromAddress}
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-blue-500',
+							realmSettingsEmailFromAddress && !isValidEmail(realmSettingsEmailFromAddress)
+								? 'border-red-300 focus:ring-red-300'
+								: 'border-gray-300 focus:ring-blue-500',
+						)} />
+					{#if realmSettingsEmailFromAddress && !isValidEmail(realmSettingsEmailFromAddress)}
+						<p class="mt-1 text-xs text-red-600">Enter a valid email address.</p>
+					{/if}
+				</div>
+
+				<div>
+					<label for="rs-email-reply-to" class="block text-sm font-medium text-gray-700 mb-1">Reply-to address</label>
+					<input id="rs-email-reply-to" type="email" bind:value={realmSettingsEmailReplyTo}
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-blue-500',
+							realmSettingsEmailReplyTo && !isValidEmail(realmSettingsEmailReplyTo)
+								? 'border-red-300 focus:ring-red-300'
+								: 'border-gray-300 focus:ring-blue-500',
+						)} />
+					{#if realmSettingsEmailReplyTo && !isValidEmail(realmSettingsEmailReplyTo)}
+						<p class="mt-1 text-xs text-red-600">Enter a valid email address.</p>
+					{/if}
+				</div>
+
+				<div>
+					<span class="block text-sm font-medium text-gray-700 mb-2">Events that trigger email</span>
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+						{#each Object.entries({
+							proposal_created: 'New proposal created',
+							vote_reminder: 'Vote reminder',
+							vote_ended: 'Vote ended',
+							mention: 'Mention',
+							task_assigned: 'Task assigned',
+						}) as [eventKey, eventLabel] (eventKey)}
+							<label class="flex items-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+								<input
+									type="checkbox"
+									bind:checked={realmSettingsEmailEvents[eventKey]}
+									class="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+								/>
+								<span class="text-sm text-gray-700">{eventLabel}</span>
+							</label>
+						{/each}
+					</div>
+				</div>
+
+				<div class="pt-2 border-t border-gray-100">
+					<button
+						type="button"
+						onclick={sendTestEmail}
+						disabled={!emailConfigValid || realmSettingsEmailFromAddress.trim() === ''}
+						class="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+					>
+						Send test email to {realmSettingsEmailFromAddress || 'from address'}
+					</button>
 				</div>
 			</div>
 		</section>

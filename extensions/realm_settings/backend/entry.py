@@ -71,6 +71,8 @@ def extension_sync_call(method_name: str, args: dict):
         "get_sandbox_config": (get_sandbox_config, False),
         "set_sandbox_config": (set_sandbox_config, True),
         "get_governance_settings": (get_governance_settings, False),
+        "get_email_config": (get_email_config, False),
+        "set_email_config": (set_email_config, True),
     }
 
     if method_name not in methods:
@@ -707,3 +709,131 @@ def get_governance_settings(args: str) -> str:
     except Exception as e:
         logger.error(f"get_governance_settings error: {e}")
         return json.dumps({"success": False, "error": str(e)})
+
+
+_DEFAULT_EMAIL_EVENTS = {
+    "proposal_created": True,
+    "vote_reminder": True,
+    "vote_ended": True,
+    "mention": True,
+    "task_assigned": True,
+}
+
+
+def _get_manifest_email() -> dict:
+    """Return the normalized email config stored in Realm.manifest_data."""
+    from ggg import Realm
+
+    realm = Realm.load("1")
+    if not realm:
+        return {}
+
+    manifest_raw = getattr(realm, "manifest_data", "{}") or "{}"
+    try:
+        manifest = json.loads(manifest_raw)
+    except (json.JSONDecodeError, TypeError):
+        manifest = {}
+
+    if not isinstance(manifest, dict):
+        manifest = {}
+
+    email = manifest.get("email") or {}
+    if not isinstance(email, dict):
+        email = {}
+
+    events = email.get("events") or {}
+    if not isinstance(events, dict):
+        events = {}
+
+    email["events"] = {**_DEFAULT_EMAIL_EVENTS, **events}
+    return email
+
+
+def get_email_config(args=None):
+    """Return the realm's email notification configuration (non-sensitive)."""
+    try:
+        email = _get_manifest_email()
+        return {
+            "success": True,
+            "data": {
+                "enabled": bool(email.get("enabled", False)),
+                "from_name": email.get("from_name", ""),
+                "from_address": email.get("from_address", ""),
+                "reply_to": email.get("reply_to", ""),
+                "events": email.get("events", _DEFAULT_EMAIL_EVENTS),
+                "templates": email.get("templates", {}) or {},
+            },
+        }
+    except Exception as e:
+        logger.error(f"get_email_config error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def set_email_config(args: dict):
+    """Update the realm's email notification configuration.
+
+    Realm-level, non-sensitive settings only (sender identity, reply-to, and
+    event toggles). SMTP credentials are stored in the off-chain worker env.
+
+    Args (JSON): {"enabled": bool, "from_name": str, "from_address": str,
+                  "reply_to": str, "events": {...}}
+    """
+    from ggg import Realm
+
+    try:
+        if not _is_realm_admin(_caller()):
+            return {
+                "success": False,
+                "error": "Access denied: only realm admins can configure email",
+            }
+
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                return {"success": False, "error": "args is not valid JSON"}
+        if not isinstance(args, dict):
+            return {"success": False, "error": "args must be an object"}
+
+        realm = Realm.load("1")
+        if not realm:
+            return {"success": False, "error": "Realm not found"}
+
+        manifest_raw = getattr(realm, "manifest_data", "{}") or "{}"
+        try:
+            manifest = json.loads(manifest_raw)
+        except (json.JSONDecodeError, TypeError):
+            manifest = {}
+        if not isinstance(manifest, dict):
+            manifest = {}
+
+        existing = manifest.get("email") or {}
+        if not isinstance(existing, dict):
+            existing = {}
+
+        events = args.get("events") or {}
+        if not isinstance(events, dict):
+            events = {}
+
+        updated = {
+            "enabled": bool(args.get("enabled", existing.get("enabled", False))),
+            "from_name": str(args.get("from_name", existing.get("from_name", ""))).strip(),
+            "from_address": str(args.get("from_address", existing.get("from_address", ""))).strip(),
+            "reply_to": str(args.get("reply_to", existing.get("reply_to", ""))).strip(),
+            "events": {**_DEFAULT_EMAIL_EVENTS, **existing.get("events", {}), **events},
+            "templates": existing.get("templates", {}) or {},
+        }
+
+        manifest["email"] = updated
+        serialized = json.dumps(manifest)
+        if len(serialized) > 4096:
+            return {
+                "success": False,
+                "error": f"manifest_data would exceed 4096 chars ({len(serialized)})",
+            }
+
+        realm.manifest_data = serialized
+        return {"success": True, "data": updated}
+    except Exception as e:
+        logger.error(f"set_email_config error: {e}")
+        return {"success": False, "error": str(e)}

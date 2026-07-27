@@ -1,4 +1,5 @@
 import json
+import re
 import traceback
 from typing import Any, Dict, List
 
@@ -421,6 +422,11 @@ def create_notification(args: str):
             metadata=args_dict.get("metadata", "{}"),
         )
 
+        # Queue email delivery when the caller provides an event_type and the
+        # realm/user settings allow it (issue #266).
+        event_type = args_dict.get("event_type", "")
+        _maybe_queue_email(new_notification, event_type)
+
         logger.info(
             f"Created notification {new_notification._id} "
             f"(audience={audience_type}, visibility={visibility}, sender={caller})"
@@ -457,3 +463,357 @@ def list_departments(args: str = "{}"):
         error_msg = f"Error listing departments: {e}\n{traceback.format_exc()}"
         logger.error(error_msg)
         return json.dumps({"success": False, "error": error_msg, "departments": []})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Email notification helpers (issue #266)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _realm_email_config() -> Dict[str, Any]:
+    """Return the realm-level email config from Realm.manifest_data."""
+    from ggg import Realm
+
+    try:
+        realm = Realm.load("1")
+        if not realm:
+            return {}
+        manifest_raw = getattr(realm, "manifest_data", "{}") or "{}"
+        manifest = json.loads(manifest_raw)
+        if not isinstance(manifest, dict):
+            manifest = {}
+        email = manifest.get("email") or {}
+        return email if isinstance(email, dict) else {}
+    except Exception as exc:
+        logger.warning(f"Could not read realm email config: {exc}")
+        return {}
+
+
+def _user_email_info(user) -> Dict[str, Any]:
+    """Extract email and notification preferences from a User's private_data."""
+    try:
+        private = getattr(user, "private_data", "") or "{}"
+        data = json.loads(private)
+        if not isinstance(data, dict):
+            data = {}
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+
+    return {
+        "email": (data.get("email") or "").strip(),
+        "email_notifications_enabled": data.get("email_notifications_enabled", True),
+    }
+
+
+def _user_id_from_notification(notification) -> str:
+    """Return the principal of a single-user notification's target."""
+    audience = getattr(notification, "audience_type", "user") or "user"
+    if audience != "user":
+        return ""
+    try:
+        u = notification.user
+        if not u:
+            return ""
+        return getattr(u, "id", None) or getattr(u, "_id", None) or ""
+    except Exception:
+        return ""
+
+
+def _email_status_from_metadata(notification) -> Dict[str, Any]:
+    """Parse email-related metadata on a Notification."""
+    try:
+        metadata = getattr(notification, "metadata", "") or "{}"
+        data = json.loads(metadata)
+        if not isinstance(data, dict):
+            data = {}
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    return data
+
+
+def _email_event_type(event_type: str, notification) -> str:
+    """Resolve the event type for an email, falling back to the topic."""
+    if event_type:
+        return event_type
+    topic = getattr(notification, "topic", "") or ""
+    if topic and topic != "general":
+        return topic
+    return "notification"
+
+
+def _maybe_queue_email(notification, event_type: str = ""):
+    """Mark a notification for email delivery if the realm and user allow it.
+
+    Only single-user notifications are handled in this first pass; broadcast
+    emails are left for future work.
+    """
+    try:
+        email_config = _realm_email_config()
+        if not email_config.get("enabled"):
+            return
+
+        events = email_config.get("events") or {}
+        if not isinstance(events, dict):
+            events = {}
+
+        resolved_event = _email_event_type(event_type, notification)
+        if not events.get(resolved_event, True):
+            return
+
+        audience = getattr(notification, "audience_type", "user") or "user"
+        if audience != "user":
+            return
+
+        user_id = _user_id_from_notification(notification)
+        if not user_id:
+            return
+
+        user = User[user_id]
+        if not user:
+            return
+
+        info = _user_email_info(user)
+        if not info.get("email") or not info.get("email_notifications_enabled", True):
+            return
+
+        metadata = _email_status_from_metadata(notification)
+        metadata["email_status"] = "pending"
+        metadata["event_type"] = resolved_event
+        metadata["force_email_to"] = info.get("email")
+        notification.metadata = json.dumps(metadata)
+        logger.info(
+            f"Queued email for notification {notification._id} "
+            f"(user={user_id}, event={resolved_event})"
+        )
+    except Exception as exc:
+        logger.warning(f"Could not queue email for notification: {exc}")
+
+
+def get_user_email(args: str = "{}"):
+    """Return the calling user's email address from private_data."""
+    try:
+        caller = _caller_principal()
+        if not caller:
+            return json.dumps({"success": False, "error": "No caller identity"})
+
+        user = User[caller]
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
+
+        info = _user_email_info(user)
+        return json.dumps({"success": True, "data": {"email": info.get("email", "")}})
+    except Exception as e:
+        error_msg = f"Error reading user email: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
+
+
+def set_user_email(args: str):
+    """Store the calling user's email address in private_data."""
+    try:
+        args_dict = json.loads(args) if args else {}
+        email = str(args_dict.get("email", "")).strip().lower()
+        if email and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+            return json.dumps({"success": False, "error": "Invalid email address"})
+
+        caller = _caller_principal()
+        if not caller:
+            return json.dumps({"success": False, "error": "No caller identity"})
+
+        user = User[caller]
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
+
+        try:
+            private = json.loads(getattr(user, "private_data", "") or "{}")
+            if not isinstance(private, dict):
+                private = {}
+        except (json.JSONDecodeError, TypeError):
+            private = {}
+
+        private["email"] = email
+        user.private_data = json.dumps(private)
+
+        return json.dumps({"success": True, "data": {"email": email}})
+    except Exception as e:
+        error_msg = f"Error setting user email: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
+
+
+def get_user_email_preferences(args: str = "{}"):
+    """Return the calling user's email notification preferences."""
+    try:
+        caller = _caller_principal()
+        if not caller:
+            return json.dumps({"success": False, "error": "No caller identity"})
+
+        user = User[caller]
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
+
+        info = _user_email_info(user)
+        return json.dumps({
+            "success": True,
+            "data": {"email_notifications_enabled": info.get("email_notifications_enabled", True)},
+        })
+    except Exception as e:
+        error_msg = f"Error reading email preferences: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
+
+
+def set_user_email_preferences(args: str):
+    """Store the calling user's email notification preferences."""
+    try:
+        args_dict = json.loads(args) if args else {}
+        enabled = bool(args_dict.get("email_notifications_enabled", True))
+
+        caller = _caller_principal()
+        if not caller:
+            return json.dumps({"success": False, "error": "No caller identity"})
+
+        user = User[caller]
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
+
+        try:
+            private = json.loads(getattr(user, "private_data", "") or "{}")
+            if not isinstance(private, dict):
+                private = {}
+        except (json.JSONDecodeError, TypeError):
+            private = {}
+
+        private["email_notifications_enabled"] = enabled
+        user.private_data = json.dumps(private)
+
+        return json.dumps({"success": True, "data": {"email_notifications_enabled": enabled}})
+    except Exception as e:
+        error_msg = f"Error setting email preferences: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
+
+
+def get_pending_email_notifications(args: str = "{}"):
+    """Return notifications queued for email delivery.
+
+    Called by the off-chain email worker. Returns only the fields needed to
+    compose and send an email, plus the notification id for marking sent.
+    """
+    try:
+        notifications = Notification.instances()
+        pending = []
+        for n in notifications:
+            try:
+                metadata = _email_status_from_metadata(n)
+                if metadata.get("email_status") != "pending":
+                    continue
+
+                user_id = _user_id_from_notification(n)
+                to_address = metadata.get("force_email_to", "")
+                if not to_address and user_id:
+                    user = User[user_id]
+                    if user:
+                        to_address = _user_email_info(user).get("email", "")
+
+                if not to_address:
+                    continue
+
+                pending.append({
+                    "id": n._id,
+                    "topic": getattr(n, "topic", "") or "",
+                    "title": getattr(n, "title", "") or "",
+                    "message": getattr(n, "message", "") or "",
+                    "href": getattr(n, "href", "") or "",
+                    "to_address": to_address,
+                    "event_type": metadata.get("event_type", "notification"),
+                    "user_id": user_id,
+                })
+            except Exception as exc:
+                logger.warning(f"Error reading pending email notification: {exc}")
+
+        pending.sort(key=lambda x: x.get("id", ""))
+        return json.dumps({"success": True, "data": {"notifications": pending}})
+    except Exception as e:
+        error_msg = f"Error listing pending emails: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
+
+
+def mark_email_sent(args: str):
+    """Mark a notification's email as sent (or failed) after the worker tries."""
+    try:
+        args_dict = json.loads(args) if args else {}
+        notification_id = args_dict.get("id")
+        if not notification_id:
+            return json.dumps({"success": False, "error": "id is required"})
+
+        success = bool(args_dict.get("success", False))
+        error = args_dict.get("error", "")
+
+        notification = Notification.load(str(notification_id))
+        if not notification:
+            return json.dumps({"success": False, "error": f"Notification {notification_id} not found"})
+
+        metadata = _email_status_from_metadata(notification)
+        metadata["email_status"] = "sent" if success else "failed"
+        if error:
+            metadata["email_error"] = str(error)
+        notification.metadata = json.dumps(metadata)
+
+        return json.dumps({"success": True, "id": notification_id, "email_status": metadata["email_status"]})
+    except Exception as e:
+        error_msg = f"Error marking email sent: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
+
+
+def send_test_email(args: str):
+    """Queue a test email notification for the realm admin.
+
+    Args (JSON): {"to": str, "subject": str, "body": str}
+    """
+    try:
+        args_dict = json.loads(args) if args else {}
+        to_address = str(args_dict.get("to", "")).strip().lower()
+        subject = str(args_dict.get("subject", "Realms email test")).strip()
+        body = str(args_dict.get("body", "This is a test email from Realms.")).strip()
+
+        if not to_address:
+            return json.dumps({"success": False, "error": "to address is required"})
+        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", to_address):
+            return json.dumps({"success": False, "error": "Invalid to address"})
+
+        caller = _caller_principal()
+        if not caller:
+            return json.dumps({"success": False, "error": "No caller identity"})
+
+        user = User[caller]
+        if not user:
+            return json.dumps({"success": False, "error": "User not found"})
+
+        new_notification = Notification(
+            topic="email_test",
+            title=subject,
+            message=body,
+            sender=caller,
+            visibility="private",
+            audience_type="user",
+            user=user,
+            read=False,
+            read_by="",
+            icon="mail",
+            href="/notifications",
+            color="blue",
+            metadata=json.dumps({
+                "email_status": "pending",
+                "event_type": "email_test",
+                "force_email_to": to_address,
+            }),
+        )
+
+        return json.dumps({"success": True, "id": new_notification._id})
+    except Exception as e:
+        error_msg = f"Error sending test email: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return json.dumps({"success": False, "error": error_msg})
