@@ -751,8 +751,12 @@ def _get_manifest_email() -> dict:
 
 def get_email_config(args=None):
     """Return the realm's email notification configuration (non-sensitive)."""
+    from ggg import Realm
+
     try:
         email = _get_manifest_email()
+        realm = Realm.load("1")
+        logo_url = getattr(realm, "logo_url", "") or "" if realm else ""
         return {
             "success": True,
             "data": {
@@ -760,6 +764,7 @@ def get_email_config(args=None):
                 "from_name": email.get("from_name", ""),
                 "from_address": email.get("from_address", ""),
                 "reply_to": email.get("reply_to", ""),
+                "logo_url": logo_url,
                 "events": email.get("events", _DEFAULT_EMAIL_EVENTS),
                 "templates": email.get("templates", {}) or {},
             },
