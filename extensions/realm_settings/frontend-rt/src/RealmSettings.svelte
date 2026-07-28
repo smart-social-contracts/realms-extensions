@@ -2,6 +2,7 @@
 	import ProposalModal from './ProposalModal.svelte';
 	import QuartersPanel from './QuartersPanel.svelte';
 	import SandboxPanel from './SandboxPanel.svelte';
+	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -1100,6 +1101,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		{@render saveBar()}
 	{:else if activeTab === 'advanced'}
 		<QuartersPanel {ctx} {addToast} />
+		<TrustPolicyPanel {ctx} {addToast} />
 		<SandboxPanel {ctx} {addToast} />
 	{/if}
 </div>

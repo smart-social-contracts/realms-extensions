@@ -44,6 +44,17 @@ def _can_configure_realm(principal: str) -> bool:
         return False
 
 
+def _can_configure_trust_policy(principal: str) -> bool:
+    """True when the caller holds ``realm.configure.trust_policy``."""
+    try:
+        from core.access import _check_access
+        from ggg.system.user_profile import Operations
+
+        return _check_access(principal, Operations.REALM_CONFIGURE_TRUST_POLICY)
+    except Exception:
+        return False
+
+
 def _now_seconds() -> int:
     try:
         from _cdk import ic
@@ -73,6 +84,8 @@ def extension_sync_call(method_name: str, args: dict):
         "get_governance_settings": (get_governance_settings, False),
         "get_email_config": (get_email_config, False),
         "set_email_config": (set_email_config, True),
+        "get_trust_policy": (get_trust_policy, False),
+        "set_trust_policy": (set_trust_policy, True),
     }
 
     if method_name not in methods:
@@ -628,6 +641,125 @@ def set_sandbox_config(args: dict):
         return apply_sandbox_config_change(patch, confirm=confirm)
     except Exception as e:
         logger.error(f"set_sandbox_config error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_trust_policy(args=None):
+    """Return the marketplace trust policy (issue #267).
+
+    Readable by anyone who can configure the realm; only changeable with
+    ``realm.configure.trust_policy``, which the response reports so the UI can
+    show the control read-only rather than hiding it.
+    """
+    try:
+        from ggg import Realm
+        from ggg.system.user_profile import Operations
+
+        caller = _caller()
+        if not _can_configure_realm(caller):
+            return {
+                "success": False,
+                "error": f"Access denied: you lack permission '{Operations.REALM_CONFIGURE}'",
+                "denied_operation": Operations.REALM_CONFIGURE,
+            }
+
+        realms = list(Realm.instances())
+        if not realms:
+            return {"success": False, "error": "No realm found"}
+        realm = realms[0]
+
+        marketplace = (getattr(realm, "marketplace_canister_id", "") or "").strip()
+        configured = (getattr(realm, "trusted_approvers", "") or "").strip()
+        approvers = [p.strip() for p in configured.split(",") if p.strip()]
+
+        return {
+            "success": True,
+            "data": {
+                "require_marketplace_approval": bool(
+                    getattr(realm, "require_marketplace_approval", True)
+                ),
+                "trusted_approvers": approvers,
+                # What enforcement actually uses when the list is empty.
+                "effective_approvers": approvers or ([marketplace] if marketplace else []),
+                "marketplace_canister_id": marketplace,
+                "caller_can_change": _can_configure_trust_policy(caller),
+            },
+        }
+    except Exception as e:
+        logger.error(f"get_trust_policy error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def set_trust_policy(args: dict):
+    """Change the marketplace trust policy. Requires
+    ``realm.configure.trust_policy`` and, where root policy demands it, a
+    governance vote.
+
+    Args: {"require_marketplace_approval": bool,
+           "trusted_approvers": [principal, ...] | "a,b",
+           "confirm": bool}
+    """
+    try:
+        from core.governed_action import build_backend_replay_code
+        from core.governed_action import gate as governed_gate
+        from core.realm_config_admin import apply_realm_config
+        from ggg.system.user_profile import Operations
+
+        caller = _caller()
+        if not _can_configure_trust_policy(caller):
+            return {
+                "success": False,
+                "error": (
+                    "Access denied: you lack permission "
+                    f"'{Operations.REALM_CONFIGURE_TRUST_POLICY}'"
+                ),
+                "denied_operation": Operations.REALM_CONFIGURE_TRUST_POLICY,
+            }
+
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                return {"success": False, "error": "args is not valid JSON"}
+        if not isinstance(args, dict):
+            return {"success": False, "error": "args must be an object"}
+
+        config = {}
+        if "require_marketplace_approval" in args:
+            config["require_marketplace_approval"] = bool(
+                args["require_marketplace_approval"]
+            )
+        if "trusted_approvers" in args:
+            config["trusted_approvers"] = args["trusted_approvers"]
+        if not config:
+            return {
+                "success": False,
+                "error": "nothing to change: expected require_marketplace_approval "
+                         "and/or trusted_approvers",
+            }
+
+        if config.get("require_marketplace_approval") is False:
+            summary = "Allow installing extensions the marketplace has not approved"
+        elif "require_marketplace_approval" in config:
+            summary = "Require marketplace approval for installed extensions"
+        else:
+            summary = "Update the realm's trusted marketplace approvers"
+
+        verdict = governed_gate(
+            caller=caller,
+            summary=summary,
+            replay_code=build_backend_replay_code(
+                "core.realm_config_admin", "apply_realm_config", json.dumps(config)
+            ),
+            confirm=bool(args.get("confirm", False)),
+            metadata_extra={"realm_config": config},
+        )
+        if verdict is not None:
+            return verdict
+
+        return apply_realm_config(config)
+    except Exception as e:
+        logger.error(f"set_trust_policy error: {e}")
         return {"success": False, "error": str(e)}
 
 

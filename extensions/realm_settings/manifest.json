@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Realm configuration and branding",
   "author": "Realms Team",
   "categories": [
@@ -34,10 +34,14 @@
         "level": "org.set_policy",
         "governed": true
       },
-      "patch_manifest_data": {
-        "level": "realm.configure",
-        "governed": true
-      }
+    "patch_manifest_data": {
+      "level": "realm.configure",
+      "governed": true
+    },
+    "set_trust_policy": {
+      "level": "realm.configure.trust_policy",
+      "governed": true
+    }
     }
   }
 }
