@@ -5,88 +5,62 @@ Governance model: Zero trust, no delegation. Every role assignment must pass
 through a collective governance vote with high quorum and threshold.
 Designed for a future of cognitively-enhanced citizens where full
 participation is trivial rather than burdensome.
+
+Runs sandboxed. Prehooks return a plain ``{"allowed", "reason"}`` verdict
+rather than raising, since exceptions do not cross the sandbox boundary: a
+raised error reads as "the hook broke", which the host refuses, and the
+proposer would never see why.
 """
 
-from ic_python_logging import get_logger
-
-logger = get_logger("codex.role_management_hook")
+from ggg_sdk import hook, realm
 
 
-def _find_approved_role_proposal(user_id, profile_name, action="assign"):
-    """Check if there's an executed governance proposal for this role action."""
-    proposal_type = "role_assignment" if action == "assign" else "role_revocation"
-    try:
-        from ggg import Proposal
-        import json
+def _approved(args, change):
+    """Whether an executed proposal authorizes this role change."""
+    return realm.proposals.find_executed(
+        args.get("user_id", ""), args.get("profile_name", ""), change
+    ) is not None
 
-        for proposal in Proposal.instances():
-            if proposal.status != "executed":
-                continue
-            try:
-                meta = json.loads(proposal.metadata) if proposal.metadata else {}
-            except Exception:
-                continue
-            if meta.get("target_principal") != user_id:
-                continue
-            if (
-                meta.get("proposal_type") == proposal_type
-                and meta.get("profile_name") == profile_name
-            ):
-                return proposal
-            # Legacy revocation encoding: role_assignment + "revoke_<profile>"
-            if (
-                action == "revoke"
-                and meta.get("proposal_type") == "role_assignment"
-                and meta.get("profile_name") == f"revoke_{profile_name}"
-            ):
-                return proposal
-    except Exception as e:
-        logger.warning(f"Error checking for approved proposal: {e}")
+
+@hook
+def role_assign_prehook(args):
+    """Syntropia: every role assignment requires collective approval."""
+    if not _approved(args, "assign"):
+        return {
+            "allowed": False,
+            "reason": (
+                "All role assignments require an approved governance proposal. "
+                "Confirm the prompt to submit one for collective approval."
+            ),
+        }
+    return {"allowed": True}
+
+
+@hook
+def role_revoke_prehook(args):
+    """Syntropia: every role revocation also requires collective approval."""
+    if not _approved(args, "revoke"):
+        return {
+            "allowed": False,
+            "reason": (
+                "All role revocations require an approved governance proposal. "
+                "Confirm the prompt to submit one for collective approval."
+            ),
+        }
+    return {"allowed": True}
+
+
+@hook
+def role_assign_posthook(args):
     return None
 
 
-def role_assign_prehook(user, profile_name, assigner_principal):
-    """Syntropia: every role assignment requires collective approval."""
-    proposal = _find_approved_role_proposal(user.id, profile_name, "assign")
-    if not proposal:
-        raise PermissionError(
-            "All role assignments require an approved governance proposal. "
-            "Confirm the prompt to submit one for collective approval."
-        )
-    logger.info(
-        f"[Syntropia] Role '{profile_name}' assignment approved via collective vote "
-        f"for {user.id}"
-    )
-    return True
+@hook
+def role_revoke_posthook(args):
+    return None
 
 
-def role_revoke_prehook(user, profile_name, revoker_principal):
-    """Syntropia: every role revocation also requires collective approval."""
-    proposal = _find_approved_role_proposal(user.id, profile_name, "revoke")
-    if not proposal:
-        raise PermissionError(
-            "All role revocations require an approved governance proposal. "
-            "Confirm the prompt to submit one for collective approval."
-        )
-    return True
-
-
-def role_assign_posthook(user, profile_name, assigner_principal):
-    """Post-assignment: log with full transparency."""
-    logger.info(
-        f"[Syntropia] Profile '{profile_name}' assigned to {user.id} "
-        f"(collectively approved)"
-    )
-
-
-def role_revoke_posthook(user, profile_name, revoker_principal):
-    """Post-revocation: log with full transparency."""
-    logger.info(
-        f"[Syntropia] Profile '{profile_name}' revoked from {user.id} "
-        f"(collectively approved)"
-    )
-
-
-def get_governance_params(proposal_type, requested_permissions):
+@hook
+def get_governance_params(args):
     """Syntropia: maximum civic standards for all governance actions."""
     return {"quorum": 66, "threshold": 0.75, "notice_hours": 168}

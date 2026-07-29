@@ -14,13 +14,32 @@ To install a codex, create a `Codex` entity named `role_management_hook` with th
 
 ## Hook Functions
 
+These hooks always run in a subinterpreter over the capability bridge — they
+are the gates deciding who may hold `admin` or `treasurer`, so there is no
+in-process mode to fall back to. Each function takes a single `args` dict, is
+wrapped in `@hook` from `ggg_sdk`, and returns plain data. Live reads go
+through `realm.*` (which round-trips to the host via `rpc`); nothing else from
+the realm is reachable.
+
 Each codex can implement any combination of:
 
-- `role_assign_prehook(user, profile_name, assigner_principal)` — Called before assignment. Raise `PermissionError` to reject.
-- `role_assign_posthook(user, profile_name, assigner_principal)` — Called after successful assignment.
-- `role_revoke_prehook(user, profile_name, revoker_principal)` — Called before revocation. Raise `PermissionError` to reject.
-- `role_revoke_posthook(user, profile_name, revoker_principal)` — Called after successful revocation.
-- `get_governance_params(proposal_type, requested_permissions)` — Returns `{"quorum": %, "threshold": 0-1, "notice_hours": int}` for the voting extension.
+- `role_assign_prehook(args)` — Before assignment. Return `{"allowed": bool, "reason": str}`.
+- `role_assign_posthook(args)` — After successful assignment.
+- `role_revoke_prehook(args)` — Before revocation. Return `{"allowed": bool, "reason": str}`.
+- `role_revoke_posthook(args)` — After successful revocation.
+- `get_governance_params(args)` — Returns `{"quorum": %, "threshold": 0-1, "notice_hours": int}` for the voting extension.
+
+The role hooks receive `{"user_id", "profile_name", "actor_principal"}`;
+`get_governance_params` receives `{"proposal_type", "requested_permissions"}`.
+
+Prehooks return a verdict rather than raising: exceptions do not cross the
+sandbox boundary, so a raised `PermissionError` reads to the host as "the hook
+broke". The host refuses the role change either way (a governance gate that
+fails open is not a gate), but only a returned verdict carries a reason the
+caller can act on.
+
+Available reads: `realm.proposals.find_executed(user_id, profile_name, change)`,
+`realm.users.get(id)`, `realm.config()`, `realm.info()`, `realm.now()`.
 
 ## Governance Parameters
 

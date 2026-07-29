@@ -196,18 +196,18 @@ def _get_governance_params(proposal: Proposal) -> dict:
     requested_permissions = metadata.get("requested_permissions", [])
 
     try:
-        from ggg import Codex
+        from core.codex_hooks import call_role_hook
 
-        _HOOK_NAMES = ("role_management_hook", "governance_policy_hook")
-        for codex in Codex.instances():
-            if codex.name in _HOOK_NAMES and codex.code:
-                import ggg as _ggg
-                ns = {"ic": ic, "ggg": _ggg, "__builtins__": __builtins__}
-                exec(compile(codex.code, f"{codex.name}.py", "exec"), ns)
-                if "get_governance_params" in ns:
-                    result = ns["get_governance_params"](proposal_type, requested_permissions)
-                    if isinstance(result, dict):
-                        return {**defaults, **result}
+        result = call_role_hook(
+            "get_governance_params",
+            {
+                "proposal_type": proposal_type,
+                "requested_permissions": requested_permissions,
+            },
+            fail_closed=False,
+        )
+        if isinstance(result, dict):
+            return {**defaults, **result}
     except Exception as e:
         logger.warning(f"Could not load governance params from codex: {e}")
 
@@ -499,20 +499,18 @@ def _build_download_step_code(entry: dict, proposal_id: str) -> str:
 
 
 def _build_finalize_step_code(proposal_id: str) -> str:
-    """Build code for the final step: refresh entity method overrides
-    and mark the proposal as executed."""
+    """Build code for the final step: mark the proposal as executed.
+
+    This used to also refresh entity method overrides. That mechanism was
+    removed in issue #265; codex code now reaches the realm only through
+    sandboxed hooks, which read the current ``Codex`` row on every call and so
+    need no rebinding after an update.
+    """
     return (
         "import json\n"
         "from ggg import Proposal\n"
         "\n"
         f"_PROPOSAL_ID = {repr(proposal_id)}\n"
-        "\n"
-        "try:\n"
-        "    from main import reload_entity_method_overrides\n"
-        "    reload_entity_method_overrides()\n"
-        "    logger.info('Entity method overrides refreshed')\n"
-        "except Exception as e:\n"
-        "    logger.warning(f'Could not refresh entity method overrides: {e}')\n"
         "\n"
         "proposal = Proposal[_PROPOSAL_ID]\n"
         "if proposal:\n"
@@ -623,12 +621,6 @@ def _do_execute_proposal(proposal_id: str):
             action = "created"
 
         try:
-            from main import reload_entity_method_overrides
-            reload_entity_method_overrides()
-        except Exception:
-            pass
-
-        try:
             from ggg import Transfer, Treasury, User, Budget, Fund, LedgerEntry, Realm
             extra_globals = {
                 "Transfer": Transfer, "Treasury": Treasury, "User": User,
@@ -726,14 +718,6 @@ def _do_execute_proposal(proposal_id: str):
         action = "created"
 
     logger.info(f"Codex '{codex_name}' {action} for proposal {proposal_id}")
-
-    # Refresh entity method overrides that may reference this codex
-    try:
-        from main import reload_entity_method_overrides
-        reload_entity_method_overrides()
-        logger.info(f"Entity method overrides refreshed after codex '{codex_name}' update")
-    except Exception as e:
-        logger.warning(f"Could not refresh entity method overrides: {e}")
 
     # Execute the codex code
     try:
