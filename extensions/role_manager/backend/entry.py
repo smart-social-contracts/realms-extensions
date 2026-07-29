@@ -532,34 +532,22 @@ def revoke_permission(args) -> str:
 
 
 def _build_role_action_code(action: str, target_principal: str, profile_name: str) -> str:
-    """Build the inline proposal code that replays a role action on approval."""
+    """Build sandboxed inline proposal code that replays a role action on approval."""
     if action == "assign":
-        mutate = (
-            f'if "{profile_name}" in current:\n'
-            f'    logger.info("Profile already assigned, skipping")\n'
-            f'else:\n'
-            f'    target.profiles.add(profile)\n'
-            f'    logger.info(f"Governance: assigned \'{profile_name}\' to {{target.id}}")\n'
+        body = (
+            f'realm.members.assign_profile("{target_principal}", "{profile_name}")'
         )
     else:
-        mutate = (
-            f'if "{profile_name}" not in current:\n'
-            f'    logger.info("Profile not assigned, skipping")\n'
-            f'else:\n'
-            f'    target.profiles.remove(profile)\n'
-            f'    logger.info(f"Governance: revoked \'{profile_name}\' from {{target.id}}")\n'
+        body = (
+            f'realm.members.revoke_profile("{target_principal}", "{profile_name}")'
         )
     return (
-        f'from ggg import User, UserProfile\n'
+        f'from ggg_sdk import hook, realm\n'
         f'\n'
-        f'target = User["{target_principal}"]\n'
-        f'profile = UserProfile["{profile_name}"]\n'
-        f'if not target:\n'
-        f'    raise ValueError("User {target_principal} not found")\n'
-        f'if not profile:\n'
-        f'    raise ValueError("Profile {profile_name} not found")\n'
-        f'current = [p.name for p in target.profiles]\n'
-        f'{mutate}'
+        f'@hook\n'
+        f'def main(args):\n'
+        f'    {body}\n'
+        f'    return {{"success": True}}\n'
     )
 
 
@@ -613,14 +601,24 @@ def propose_role_action(args) -> str:
         proposal_id = f"prop_{proposal_num:03d}"
 
         target_nickname = target_user.nickname or target_principal[:8]
+        inline_code = _build_role_action_code(action, target_principal, profile_name)
+        bridge_permission = (
+            "member.assign_profile" if action == "assign" else "member.revoke_profile"
+        )
+        try:
+            from core.proposal_execution import compute_code_checksum
+
+            code_checksum = compute_code_checksum(inline_code)
+        except Exception:
+            code_checksum = ""
 
         metadata = json.dumps({
             "proposal_type": spec["proposal_type"],
             "role_action": action,
-            "requested_permissions": [spec["operation"]],
+            "requested_permissions": [bridge_permission],
             "target_principal": target_principal,
             "profile_name": profile_name,
-            "code_inline": _build_role_action_code(action, target_principal, profile_name),
+            "code_inline": inline_code,
             "codex_name": f"role_{action}_{proposal_id}",
         })
 
@@ -629,7 +627,7 @@ def propose_role_action(args) -> str:
             title=spec["title"].format(profile=profile_name, target=target_nickname),
             description=spec["description"].format(profile=profile_name, principal=target_principal),
             code_url="",
-            code_checksum="",
+            code_checksum=code_checksum,
             proposer=caller,
             status="pending_review",
             voting_deadline="",

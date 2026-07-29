@@ -582,12 +582,18 @@ def _schedule_multi_codex_execution(proposal_id: str, codices_list: List[dict]):
 # ---------------------------------------------------------------------------
 
 def _do_execute_proposal(proposal_id: str):
-    """Internal generator: download codex(es), verify checksum, exec() the code.
+    """Internal generator: verify checksum, run proposal code in the sandbox.
 
     For single-codex proposals this runs as an async generator driven by
     Rust's drive_generator.  For multi-codex proposals (codices array in
     metadata) it delegates to the TaskManager for step-by-step execution.
     """
+    from core.proposal_execution import (
+        execute_proposal_code,
+        normalize_proposal_permissions,
+        verify_code_checksum,
+    )
+
     proposal = _find_proposal(proposal_id)
     if not proposal:
         logger.error(f"Execute: proposal {proposal_id} not found")
@@ -600,12 +606,22 @@ def _do_execute_proposal(proposal_id: str):
     metadata = _load_metadata(proposal)
     code_inline = metadata.get("code_inline")
     codices_list = metadata.get("codices")
+    permissions = normalize_proposal_permissions(
+        metadata.get("requested_permissions", [])
+    )
 
     # --- Inline code path: no download needed ---
     if code_inline:
+        checksum_error = verify_code_checksum(code_inline, proposal.code_checksum or "")
+        if checksum_error:
+            proposal.status = "failed"
+            proposal.metadata = json.dumps({**metadata, "error": checksum_error})
+            logger.error(f"Execute: inline checksum refused for {proposal_id}: {checksum_error}")
+            return
+
         proposal.status = "executing"
         codex_name = metadata.get("codex_name", f"proposal_{proposal_id}_inline")
-        logger.info(f"Executing inline-code proposal {proposal_id}")
+        logger.info(f"Executing inline-code proposal {proposal_id} (sandbox)")
 
         existing_codex = Codex[codex_name]
         if existing_codex:
@@ -621,28 +637,12 @@ def _do_execute_proposal(proposal_id: str):
             action = "created"
 
         try:
-            from ggg import Transfer, Treasury, User, Budget, Fund, LedgerEntry, Realm
-            extra_globals = {
-                "Transfer": Transfer, "Treasury": Treasury, "User": User,
-                "Budget": Budget, "Fund": Fund, "LedgerEntry": LedgerEntry,
-                "Realm": Realm, "Proposal": Proposal, "Vote": Vote,
-            }
-        except ImportError:
-            extra_globals = {}
-        exec_globals = {"ic": ic, "logger": logger, "Codex": Codex, "json": json, **extra_globals}
-
-        try:
-            exec(code_inline, exec_globals)
-            main_fn = exec_globals.get("main")
-            if main_fn and callable(main_fn):
-                result = main_fn()
-                if hasattr(result, '__next__'):
-                    yield from result
+            yield from execute_proposal_code(proposal_id, code_inline, permissions)
             logger.info(f"Inline code executed successfully for proposal {proposal_id}")
         except Exception as e:
             proposal.status = "failed"
             proposal.metadata = json.dumps({**metadata, "error": f"Code execution failed: {e}"})
-            logger.error(f"Execute: inline code exec failed for {proposal_id}: {e}\n{traceback.format_exc()}")
+            logger.error(f"Execute: inline sandbox exec failed for {proposal_id}: {e}\n{traceback.format_exc()}")
             return
 
         proposal.status = "executed"
@@ -687,21 +687,17 @@ def _do_execute_proposal(proposal_id: str):
         logger.error(f"Execute: download failed for {proposal_id}: {e}")
         return
 
-    # Verify checksum if provided
-    if expected_checksum:
-        actual_hash = hashlib.sha256(code_content.encode("utf-8")).hexdigest()
-        actual_checksum = f"sha256:{actual_hash}"
-        if expected_checksum != actual_checksum:
-            proposal.status = "failed"
-            proposal.metadata = json.dumps({
-                **metadata,
-                "error": f"Checksum mismatch: expected {expected_checksum}, got {actual_checksum}"
-            })
-            logger.error(f"Execute: checksum mismatch for {proposal_id}")
-            return
-        logger.info(f"Checksum verified for {proposal_id}: {actual_checksum}")
-    else:
-        logger.warning(f"No checksum provided for {proposal_id}, skipping verification")
+    # Verify checksum (required — fail closed when missing)
+    checksum_error = verify_code_checksum(code_content, expected_checksum or "")
+    if checksum_error:
+        proposal.status = "failed"
+        proposal.metadata = json.dumps({
+            **metadata,
+            "error": checksum_error,
+        })
+        logger.error(f"Execute: checksum refused for {proposal_id}: {checksum_error}")
+        return
+    logger.info(f"Checksum verified for {proposal_id}: {expected_checksum}")
 
     # Create or update the Codex entity
     existing_codex = Codex[codex_name]
@@ -719,31 +715,8 @@ def _do_execute_proposal(proposal_id: str):
 
     logger.info(f"Codex '{codex_name}' {action} for proposal {proposal_id}")
 
-    # Execute the codex code
     try:
-        from ggg import Transfer, Treasury, User, Budget, Fund, LedgerEntry, Realm
-        extra_globals = {
-            "Transfer": Transfer, "Treasury": Treasury, "User": User,
-            "Budget": Budget, "Fund": Fund, "LedgerEntry": LedgerEntry,
-            "Realm": Realm, "Proposal": Proposal, "Vote": Vote,
-        }
-    except ImportError:
-        extra_globals = {}
-    exec_globals = {"ic": ic, "logger": logger, "Codex": Codex, "json": json, **extra_globals}
-
-    try:
-        exec(code_content, exec_globals)
-
-        # If the code defines a main() generator, drive it for async operations
-        main_fn = exec_globals.get("main")
-        if main_fn and callable(main_fn):
-            result = main_fn()
-            if hasattr(result, '__next__'):
-                logger.info(f"Driving async main() for proposal {proposal_id}")
-                yield from result
-            else:
-                logger.info(f"main() returned (sync) for proposal {proposal_id}")
-
+        yield from execute_proposal_code(proposal_id, code_content, permissions)
         logger.info(f"Codex code executed successfully for proposal {proposal_id}")
     except Exception as e:
         proposal.status = "failed"
@@ -753,7 +726,7 @@ def _do_execute_proposal(proposal_id: str):
             "codex_name": codex_name,
             "codex_action": action,
         })
-        logger.error(f"Execute: code exec failed for {proposal_id}: {e}\n{traceback.format_exc()}")
+        logger.error(f"Execute: sandbox exec failed for {proposal_id}: {e}\n{traceback.format_exc()}")
         return
 
     proposal.status = "executed"
@@ -1053,13 +1026,27 @@ def submit_proposal(args: str) -> str:
             display_url = ""
             codex_name = args_dict.get("codex_name", f"proposal_{proposal_id}_inline")
             metadata["codex_name"] = codex_name
+            try:
+                from core.proposal_execution import compute_code_checksum
+
+                inline_checksum = compute_code_checksum(code_inline)
+            except Exception:
+                inline_checksum = args_dict.get("code_checksum", "")
         elif codices:
             metadata["codices"] = codices
             display_url = codices[0]["url"]
+            inline_checksum = args_dict.get("code_checksum", "")
         else:
             display_url = code_url
+            inline_checksum = args_dict.get("code_checksum", "")
             if args_dict.get("codex_name"):
                 metadata["codex_name"] = args_dict["codex_name"]
+
+        raw_permissions = args_dict.get("requested_permissions", [])
+        if raw_permissions:
+            metadata["requested_permissions"] = raw_permissions
+        if args_dict.get("proposal_type"):
+            metadata["proposal_type"] = args_dict["proposal_type"]
 
         # Apply minimum threshold floor from governance policy
         requested_threshold = args_dict.get("required_threshold", 0.6)
@@ -1069,7 +1056,7 @@ def submit_proposal(args: str) -> str:
             title=args_dict["title"],
             description=args_dict["description"],
             code_url=display_url,
-            code_checksum=args_dict.get("code_checksum", ""),
+            code_checksum=inline_checksum,
             proposer=proposer,
             status="pending_review",
             voting_deadline="",
