@@ -1,6 +1,14 @@
 {
   "name": "erd_explorer",
-  "version": "1.0.3",
+  "version": "1.0.4",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "schema.entities",
+    "entity.list",
+    "entity.read:Land",
+    "entity.read:Zone",
+    "entity.read:Codex"
+  ],
   "description": "Interactive Entity Relationship Diagram explorer for visualizing and navigating Realms data structure",
   "author": "Realms Team",
   "permissions": [],

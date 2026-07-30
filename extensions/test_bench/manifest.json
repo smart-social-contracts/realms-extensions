@@ -1,6 +1,10 @@
 {
   "name": "test_bench",
-  "version": "0.1.3",
+  "version": "0.1.4",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "log.write"
+  ],
   "description": "Development testing and debugging tools",
   "author": "Smart Social Contracts Team",
   "permissions": [

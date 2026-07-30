@@ -1,6 +1,7 @@
 {
   "name": "task_monitor",
-  "version": "1.0.5",
+  "version": "1.0.6",
+  "runtime": "in_process",
   "description": "Task monitoring and management dashboard for administrators",
   "author": "Realms Team",
   "categories": [

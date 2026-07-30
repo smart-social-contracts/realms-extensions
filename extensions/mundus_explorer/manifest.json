@@ -1,6 +1,7 @@
 {
   "name": "mundus_explorer",
   "version": "1.0.0",
+  "runtime": "in_process",
   "description": "View other realms connected to the same mundus registry",
   "author": "Smart Social Contracts",
   "permissions": [],

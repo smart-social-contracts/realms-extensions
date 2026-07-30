@@ -281,10 +281,13 @@ These entry points power the **Justice & Litigation** sidebar UI and the private
 | `create_litigation` | Open a case (step 1): returns `scope` and `recipients` |
 | `set_litigation_content` | Attach encrypted title/description (step 2) |
 | `get_justice_audience` | List Justice department principals who receive decryption keys |
-| `execute_verdict` | Execute a verdict via Codex code |
-| `load_demo_litigations` | Seed demo cases for testing |
 
 New integrations that use courts/judges should prefer `file_case` / `issue_verdict` where possible; attach private content via the same `LitigationContent` + vetKeys pattern when confidentiality is required.
+
+`execute_verdict` and `load_demo_litigations` were removed in v0.5.0. The former
+ran caller-supplied Python through the Codex engine and had been returning an
+error for several releases; use `issue_verdict` with a decision and reasoning.
+The latter seeded demo rows, which a realm's codex template now does.
 
 ## Data Model
 
@@ -303,6 +306,30 @@ Extension-specific:
 
 - `LitigationContent` - Opaque vetKeys ciphertext + sharing scope for private case narratives
 
+## Runtime
+
+Sandboxed since v0.5.0 (issue #272). The extension runs in a subinterpreter with
+`sys.path == []` and no host imports; it reaches the realm only through declared
+`justice.*` capabilities on the extension bridge. All authorization, the case
+lifecycle and the encrypted-content storage are host-side in `core.justice`.
+
+The practical consequence for integrators is that **identity is never a
+parameter**. Earlier versions accepted `plaintiff_id`, `judge_id`, `appellant_id`
+and `executor_id` from the request; the host now derives each from
+`ic.caller()` and ignores the supplied value:
+
+| Action | Who it is attributed to |
+|--------|-------------------------|
+| `file_case`, `create_litigation` | the caller, as plaintiff / submitter |
+| `issue_verdict` | the caller, who must be a judge assigned to that case (or a realm admin) |
+| `file_appeal` | the caller, who must be a party to the case |
+| `execute_penalty`, `waive_penalty`, `decide_appeal` | the caller, recorded in the audit trail |
+
+Reads are filtered by visibility rather than returning the whole realm:
+`get_verdicts`, `get_penalties` and `get_appeals` now only return rows on cases
+the caller may see. A penalty is additionally always visible to the person it is
+levied against, since a fine you cannot see is a fine you cannot pay.
+
 **Category:** Public Services  
 **Access:** Members and Admins  
-**Version:** 0.3.6
+**Version:** 0.5.0

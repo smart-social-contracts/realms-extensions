@@ -11,6 +11,17 @@ from ic_python_logging import get_logger
 logger = get_logger("member_dashboard")
 
 
+def _caller_id() -> str:
+    """The authenticated caller.
+
+    Every endpoint here serves the caller their *own* data, so identity is
+    never read from the call args. Accepting a ``user_id`` from the client
+    would let any member read another member's invoices and payment accounts.
+    Cross-member access belongs in member_manager, behind its own operation.
+    """
+    return ic.caller().to_str()
+
+
 def _service_to_dict(service: Service) -> Dict[str, Any]:
     """Convert Service entity to dictionary format"""
     return {
@@ -55,7 +66,7 @@ def get_dashboard_summary(args: str) -> Async[str]:
     try:
         logger.info(f"get_dashboard_summary called with args: {args}")
         params = json.loads(args) if args and args.strip() else {}
-        user_id = params.get("user_id", "") or ic.caller().to_str()
+        user_id = _caller_id()
 
         # Get data from database
         all_services = Service.instances()
@@ -104,7 +115,7 @@ def get_public_services(args: str) -> Async[str]:
     try:
         logger.info(f"get_public_services called with args: {args}")
         params = json.loads(args)
-        user_id = params.get("user_id") or ic.caller().to_str()
+        user_id = _caller_id()
 
         # Get services from database
         all_services = Service.instances()
@@ -137,7 +148,7 @@ def get_citizenship_status(args: str) -> str:
     """
     try:
         params = json.loads(args)
-        user_id = params.get("user_id", "") or ic.caller().to_str()
+        user_id = _caller_id()
         logger.info(f"get_citizenship_status called for user: {user_id}")
 
         # Check invoice payment status
@@ -218,7 +229,7 @@ def get_tax_information(args: str) -> str:
     try:
         logger.info(f"get_tax_information called with args: {args}")
         params = json.loads(args) if args else {}
-        user_id = params.get("user_id") or ic.caller().to_str()
+        user_id = _caller_id()
 
         # Get invoices from database
         all_invoices = Invoice.instances()
@@ -524,18 +535,10 @@ def get_personal_data(args: str) -> str:
         str: JSON string with personal data
     """
     try:
-        args = "{}"
         logger.info(f"get_personal_data called with args: {args}")
-        params = json.loads(args)
-        user_id = params.get("user_id", "anonymous")
+        user_id = _caller_id()
 
-        # Get user from database
-        user = None
-        for u in User.instances():
-            if u.id == user_id:
-                user = u
-                break
-
+        user = User[user_id]
         if not user:
             return json.dumps({"success": False, "error": "User not found"})
 
@@ -613,13 +616,13 @@ def add_payment_account(args: str) -> str:
     try:
         logger.info(f"add_payment_account called with args: {args}")
         params = json.loads(args)
-        user_id = params.get("user_id")
+        user_id = _caller_id()
         address = params.get("address")
         label = params.get("label")
         network = params.get("network")
         currency = params.get("currency")
 
-        if not all([user_id, address, label, network, currency]):
+        if not all([address, label, network, currency]):
             return json.dumps({"success": False, "error": "Missing required fields"})
 
         # Get user
@@ -680,10 +683,7 @@ def list_payment_accounts(args: str) -> str:
     """
     try:
         params = json.loads(args)
-        user_id = params.get("user_id")
-
-        if not user_id:
-            return json.dumps({"success": False, "error": "Missing user_id"})
+        user_id = _caller_id()
 
         # Get user
         user = User[user_id]
@@ -714,10 +714,10 @@ def remove_payment_account(args: str) -> str:
     """
     try:
         params = json.loads(args)
-        user_id = params.get("user_id")
+        user_id = _caller_id()
         account_id = params.get("account_id")
 
-        if not all([user_id, account_id]):
+        if not account_id:
             return json.dumps({"success": False, "error": "Missing required fields"})
 
         # Get user

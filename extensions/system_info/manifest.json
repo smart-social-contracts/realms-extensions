@@ -1,6 +1,11 @@
 {
   "name": "system_info",
-  "version": "1.0.1",
+  "version": "1.0.3",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "system.snapshot",
+    "log.write"
+  ],
   "description": "System information dashboard for realm administrators",
   "author": "Realms Team",
   "permissions": [],

@@ -1,8 +1,9 @@
 {
   "name": "department_docs",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Encrypted documents shared within a department — a worked example of the reusable consent-based sharing layer (dept: scopes)",
   "author": "Smart Social Contracts",
+  "ggg_api_version": 1,
   "categories": [
     "people_access"
   ],
@@ -10,6 +11,47 @@
     "en": "Department Docs"
   },
   "permissions": [],
+  "functions": [
+    "list_departments",
+    "create_document",
+    "set_document_ciphertext",
+    "list_documents",
+    "get_document",
+    "delete_document"
+  ],
+  "capabilities": [
+    "department.list",
+    "dept_doc.list",
+    "dept_doc.get",
+    "dept_doc.create",
+    "dept_doc.set_ciphertext",
+    "dept_doc.delete"
+  ],
+  "entities": {
+    "DepartmentDocument": {
+      "fields": {
+        "department": {
+          "type": "String",
+          "max_length": 256
+        },
+        "title": {
+          "type": "String",
+          "max_length": 512
+        },
+        "ciphertext": {
+          "type": "String"
+        },
+        "scope": {
+          "type": "String",
+          "max_length": 512
+        },
+        "created_by": {
+          "type": "String",
+          "max_length": 128
+        }
+      }
+    }
+  },
   "profiles": [
     "member",
     "admin"
@@ -19,7 +61,6 @@
   "entry_access": {
     "default": "document.manage",
     "functions": {
-      "register_entities": "realm.admin",
       "delete_document": "realm.admin"
     }
   }

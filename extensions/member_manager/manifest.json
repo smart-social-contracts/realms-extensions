@@ -1,6 +1,15 @@
 {
   "name": "member_manager",
-  "version": "1.0.2",
+  "version": "1.0.5",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "member.list",
+    "member.profile",
+    "member.notifications",
+    "notification.create",
+    "crypto.envelope",
+    "log.write"
+  ],
   "description": "Admin view of individual member profiles: identity, status, and notification history",
   "author": "Smart Social Contracts",
   "categories": [

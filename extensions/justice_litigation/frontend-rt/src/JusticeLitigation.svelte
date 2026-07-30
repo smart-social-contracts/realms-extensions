@@ -176,7 +176,8 @@
 	// Verdict modal
 	let showVerdict = $state(false);
 	let verdictCase: any = $state(null);
-	let verdictCode = $state('');
+	let verdictDecision = $state('');
+	let verdictReasoning = $state('');
 	let executingVerdict = $state(false);
 	let verdictError = $state('');
 	let verdictSuccess = $state(false);
@@ -418,7 +419,8 @@
 
 	function openVerdict(litigation: any) {
 		verdictCase = litigation;
-		verdictCode = `transfer("${litigation.defendant_principal || ''}", "${litigation.requester_principal || ''}", 1000, "Compensation for ${litigation.case_title || ''}")`;
+		verdictDecision = '';
+		verdictReasoning = '';
 		verdictError = '';
 		verdictSuccess = false;
 		showVerdict = true;
@@ -427,25 +429,30 @@
 	function closeVerdict() {
 		showVerdict = false;
 		verdictCase = null;
-		verdictCode = '';
+		verdictDecision = '';
+		verdictReasoning = '';
 		verdictError = '';
 		verdictSuccess = false;
 	}
 
 	async function executeVerdict() {
-		if (!verdictCase || !verdictCode.trim()) {
-			verdictError = 'Verdict code is required';
+		if (!verdictCase || !verdictDecision.trim()) {
+			verdictError = 'A decision is required';
 			return;
 		}
 		executingVerdict = true;
 		verdictError = '';
 		verdictSuccess = false;
 		try {
-			await callExt('execute_verdict', {
-				litigation_id: verdictCase.id,
-				verdict_code: verdictCode.trim(),
-				executor_principal: principal,
+			const res: any = await callExt('issue_verdict', {
+				case_id: verdictCase.id,
+				decision: verdictDecision.trim(),
+				reasoning: verdictReasoning.trim(),
 			});
+			// A refusal comes back as a normal response, so it has to be read
+			// rather than caught — the previous version reported success for one.
+			if (res?.success === false)
+				throw new Error(res?.error || 'Failed to issue verdict');
 			verdictSuccess = true;
 			await loadLitigations();
 			setTimeout(closeVerdict, 1500);
@@ -1436,7 +1443,7 @@
 							/>
 						</svg>
 						<h3 class="text-xl font-semibold text-gray-900 dark:text-white">
-							Execute Verdict
+							Issue Verdict
 						</h3>
 					</div>
 
@@ -1468,21 +1475,37 @@
 
 						<div class="mb-4">
 							<label
-								for="jl-verdict-code"
+								for="jl-verdict-decision"
 								class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
 							>
-								Verdict Code (Python/Codex)
+								Decision
+							</label>
+							<input
+								id="jl-verdict-decision"
+								bind:value={verdictDecision}
+								disabled={executingVerdict}
+								placeholder="e.g. for the plaintiff"
+								class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+							/>
+						</div>
+
+						<div class="mb-4">
+							<label
+								for="jl-verdict-reasoning"
+								class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+							>
+								Reasoning
 							</label>
 							<textarea
-								id="jl-verdict-code"
-								bind:value={verdictCode}
+								id="jl-verdict-reasoning"
+								bind:value={verdictReasoning}
 								rows="4"
 								disabled={executingVerdict}
-								placeholder="Enter Python code for the verdict execution…"
-								class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50 resize-y"
+								placeholder="Legal reasoning for the decision…"
+								class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50 resize-y"
 							></textarea>
 							<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-								Example: transfer("from_principal", "to_principal", amount, "memo")
+								Only a judge assigned to this case may issue its verdict.
 							</p>
 						</div>
 
@@ -1499,7 +1522,7 @@
 							<div
 								class="mb-4 p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 rounded-lg text-sm"
 							>
-								<span class="font-medium">Success:</span> Verdict executed!
+								<span class="font-medium">Success:</span> Verdict issued!
 							</div>
 						{/if}
 
@@ -1514,7 +1537,7 @@
 							<button
 								class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
 								onclick={executeVerdict}
-								disabled={executingVerdict || !verdictCode.trim()}
+								disabled={executingVerdict || !verdictDecision.trim()}
 							>
 								{#if executingVerdict}
 									<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">

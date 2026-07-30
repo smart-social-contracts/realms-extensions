@@ -1,6 +1,6 @@
 {
   "name": "hello_world",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Simple hello world extension — runtime extension demo",
   "author": "Realms Team",
   "permissions": [],

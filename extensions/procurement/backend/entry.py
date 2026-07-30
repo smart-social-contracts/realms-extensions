@@ -1,48 +1,23 @@
-"""Procurement extension — RFP lifecycle, bid storage, scoring, vendor reputation.
+"""Procurement extension — RFP tendering with sealed bids.
 
-v1 note: bids use encryption_mode=none (plaintext JSON in BidPayload.ciphertext).
-This is structured storage pending vetKeys — not confidential sealed bidding.
+Runs sandboxed. The lifecycle, the four roles, the seal rules and the scoring
+arithmetic are all host-side in ``core.procurement``, reached through
+``ctx.procurement.*``; what is left here is parsing arguments off the wire and
+shaping the JSON that goes back.
+
+Bids are sealed with vetKeys: the canister stores an opaque blob and a key scope,
+and the host decides who may read the blob. While an RFP is open, that is the
+bidder and nobody else — not the requester, not an admin. This module could not
+change that if it tried, which is the point of the port.
 """
 
 import json
-import traceback
-from typing import Any, Dict, Optional
 
-from ic_python_logging import get_logger
+from ggg_sdk import ctx
 
-from core.crypto_scopes import ScopeAuthContext, scope_kind
-
-from . import entities
-from . import roles
-from . import scoring
-from . import seals
-from . import state_machine
-from . import vendors
-
-logger = get_logger("extensions.procurement")
-
-
-def register_entities() -> None:
-    entities.register_entities()
-
-
-@scope_kind("procurement")
-def _manage_procurement_bid_scope(parts, caller, ctx: ScopeAuthContext) -> bool:
-    """procurement:rfp:<rfp_id>:bid:<bid_id> — bidder, dept head, or admin may grant."""
-    if len(parts) < 5 or not parts[4]:
-        return False
-    bid_id = parts[4]
-    payload = entities.BidPayload[bid_id]
-    if payload and caller == getattr(payload, "created_by", ""):
-        return True
-    if ctx.is_realm_admin(caller):
-        return True
-    return ctx.is_department_head(roles.PROCUREMENT_DEPARTMENT, caller)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# Keys the caller may edit on a draft. Only those actually present in the request
+# are forwarded, because the host reads an absent key as "leave it alone".
+EDITABLE = ("title", "description", "opens_at", "closes_at", "rubric_json")
 
 
 def _parse_args(args) -> dict:
@@ -61,523 +36,222 @@ def _err(message: str) -> str:
     return json.dumps({"success": False, "error": message})
 
 
-def _rfp_to_dict(rfp: entities.Rfp, include_transitions: bool = False) -> dict:
-    out = {
-        "rfp_id": rfp.rfp_id,
-        "title": rfp.title or "",
-        "description": rfp.description or "",
-        "requester_id": rfp.requester_id or "",
-        "status": rfp.status or "draft",
-        "opens_at": int(rfp.opens_at or 0),
-        "closes_at": int(rfp.closes_at or 0),
-        "opened_at": int(rfp.opened_at or 0),
-        "closed_at": int(rfp.closed_at or 0),
-        "revealed_at": int(rfp.revealed_at or 0),
-        "awarded_at": int(rfp.awarded_at or 0),
-        "executed_at": int(rfp.executed_at or 0),
-        "rubric_json": rfp.rubric_json or "[]",
-        "winning_bid_id": rfp.winning_bid_id or "",
-        "metadata_json": rfp.metadata_json or "{}",
-    }
-    if include_transitions:
-        out["transitions"] = [
-            _transition_to_dict(t)
-            for t in sorted(
-                entities.list_rfp_transitions(str(rfp.rfp_id)),
-                key=lambda x: int(getattr(x, "timestamp", 0) or 0),
-            )
-        ]
-    return out
-
-
-def _transition_to_dict(t: entities.RfpTransition) -> dict:
-    return {
-        "transition_id": t.transition_id,
-        "rfp_id": t.rfp_id,
-        "from_status": t.from_status,
-        "to_status": t.to_status,
-        "actor_id": t.actor_id,
-        "timestamp": int(t.timestamp or 0),
-        "note": t.note or "",
-        "metadata_json": t.metadata_json or "{}",
-    }
-
-
-def _bid_to_dict(bid: entities.Bid, include_payload: bool = False, caller: str = "") -> dict:
-    out = {
-        "bid_id": bid.bid_id,
-        "rfp_id": bid.rfp_id,
-        "vendor_id": bid.vendor_id,
-        "submitted_at": int(bid.submitted_at or 0),
-        "seal_status": bid.seal_status or entities.SEAL_SEALED,
-        "total_score": float(bid.total_score or 0),
-        "score_breakdown_json": bid.score_breakdown_json or "",
-    }
-    if include_payload:
-        rfp = entities.find_rfp(str(bid.rfp_id))
-        if rfp and seals.can_read_payload(bid, caller, rfp):
-            payload = entities.BidPayload[str(bid.bid_id)]
-            if payload:
-                out["ciphertext"] = payload.ciphertext or ""
-                out["encryption_mode"] = payload.encryption_mode or entities.ENCRYPTION_NONE
-                out["scope"] = payload.scope or ""
-    return out
-
-
 def _handle(fn):
+    """Turn a host refusal into ``{"success": false, "error": ...}``.
+
+    The frontend has always read that shape, and a refused verb is a normal
+    answer here — an evaluator who is not an approver clicking award is a UI
+    state, not a fault.
+    """
+
     def wrapper(args: str) -> str:
         try:
             return fn(args)
-        except PermissionError as e:
-            return _err(str(e))
         except Exception as e:
-            logger.error(f"{fn.__name__} error: {e}\n{traceback.format_exc()}")
             return _err(str(e))
 
     wrapper.__name__ = fn.__name__
     return wrapper
 
 
+def _text(params: dict, key: str) -> str:
+    return str(params.get(key, "") or "").strip()
+
+
 # ---------------------------------------------------------------------------
-# RPC — health
+# Health and roles
 # ---------------------------------------------------------------------------
 
 
 @_handle
 def health(args: str) -> str:
-    return _ok(
-        {
-            "status": "ok",
-            "extension": "procurement",
-            "encryption_default": entities.ENCRYPTION_VETKEYS,
-            "sealed_bidding": True,
-        }
-    )
+    return _ok({
+        "status": "ok",
+        "extension": "procurement",
+        "encryption_default": "vetkeys",
+        "sealed_bidding": True,
+    })
+
+
+@_handle
+def get_my_roles(args: str) -> str:
+    return _ok(ctx.procurement.roles())
 
 
 # ---------------------------------------------------------------------------
-# RPC — RFP
+# RFP
 # ---------------------------------------------------------------------------
 
 
 @_handle
 def create_rfp(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    roles.require_op(user, roles.PROCUREMENT_RFP_CREATE)
-
-    title = str(params.get("title", "")).strip()
-    if not title:
-        return _err("title is required")
-
-    rubric_json = params.get("rubric_json", "[]")
-    if isinstance(rubric_json, (list, dict)):
-        rubric_json = json.dumps(rubric_json)
-    valid = scoring.validate_rubric(str(rubric_json))
-    if not valid.get("valid"):
-        return _err(valid.get("error", "Invalid rubric"))
-
-    try:
-        opens_at = int(params.get("opens_at", 0))
-        closes_at = int(params.get("closes_at", 0))
-    except (TypeError, ValueError):
-        return _err("opens_at and closes_at must be integers (epoch seconds)")
-
-    if closes_at <= opens_at:
-        return _err("closes_at must be after opens_at")
-
-    rfp_id = entities.next_rfp_id()
-    rfp = entities.Rfp(
-        rfp_id=rfp_id,
-        title=title,
-        description=str(params.get("description", "")),
-        requester_id=str(user.id),
-        status="draft",
-        opens_at=opens_at,
-        closes_at=closes_at,
-        rubric_json=str(rubric_json),
-        winning_bid_id="",
-        metadata_json="{}",
-    )
-
-    state_machine.log_created(rfp_id, str(user.id))
-
-    return _ok({"rfp": _rfp_to_dict(rfp)})
+    return _ok(ctx.procurement.rfp_create(
+        title=_text(params, "title"),
+        description=str(params.get("description", "") or ""),
+        rubric_json=params.get("rubric_json", "[]"),
+        opens_at=params.get("opens_at", 0),
+        closes_at=params.get("closes_at", 0),
+    ))
 
 
 @_handle
 def update_rfp(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    rfp = entities.find_rfp(rfp_id)
-    if not rfp:
-        return _err(f"RFP '{rfp_id}' not found")
-    if (rfp.status or "") != "draft":
-        return _err("Only draft RFPs may be edited")
-    if str(rfp.requester_id) != str(user.id) and not roles.is_realm_admin(str(user.id)):
-        return _err("Only the requester or admin may edit this RFP")
-
-    if "title" in params:
-        title = str(params["title"]).strip()
-        if title:
-            rfp.title = title
-    if "description" in params:
-        rfp.description = str(params["description"])
-    if "opens_at" in params:
-        rfp.opens_at = int(params["opens_at"])
-    if "closes_at" in params:
-        rfp.closes_at = int(params["closes_at"])
-    if "rubric_json" in params:
-        rubric_json = params["rubric_json"]
-        if isinstance(rubric_json, (list, dict)):
-            rubric_json = json.dumps(rubric_json)
-        valid = scoring.validate_rubric(str(rubric_json))
-        if not valid.get("valid"):
-            return _err(valid.get("error", "Invalid rubric"))
-        rfp.rubric_json = str(rubric_json)
-
-    return _ok({"rfp": _rfp_to_dict(rfp)})
+    fields = {key: params[key] for key in EDITABLE if key in params}
+    return _ok(ctx.procurement.rfp_update(_text(params, "rfp_id"), **fields))
 
 
 @_handle
 def publish_rfp(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    roles.require_op(user, roles.PROCUREMENT_RFP_PUBLISH)
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    rfp = entities.find_rfp(rfp_id)
-    if not rfp:
-        return _err(f"RFP '{rfp_id}' not found")
-
-    valid = scoring.validate_rubric(str(rfp.rubric_json or ""))
-    if not valid.get("valid"):
-        return _err(valid.get("error", "Invalid rubric"))
-
-    result = state_machine.transition_rfp(
-        rfp_id,
-        "open",
-        str(user.id),
-        note="RFP published for bidding",
-        user=user,
-    )
-    if not result.get("success"):
-        return json.dumps(result)
-    rfp = entities.find_rfp(rfp_id)
-    return _ok({"rfp": _rfp_to_dict(rfp), "transition": result})
+    return _ok(ctx.procurement.rfp_publish(_text(params, "rfp_id")))
 
 
 @_handle
 def get_rfp(args: str) -> str:
     params = _parse_args(args)
-    roles.get_caller_user()
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    rfp = entities.find_rfp(rfp_id)
-    if not rfp:
-        return _err(f"RFP '{rfp_id}' not found")
-    return _ok({"rfp": _rfp_to_dict(rfp, include_transitions=True)})
+    return _ok(ctx.procurement.rfp_get(_text(params, "rfp_id")))
 
 
 @_handle
 def list_rfps(args: str) -> str:
     params = _parse_args(args)
-    roles.get_caller_user()
-    status_filter = str(params.get("status", "")).strip()
-    rfps = []
-    for rfp in entities.Rfp.instances():
-        if status_filter and (rfp.status or "") != status_filter:
-            continue
-        rfps.append(_rfp_to_dict(rfp))
-    rfps.sort(key=lambda r: r.get("rfp_id", ""))
-    return _ok({"rfps": rfps, "count": len(rfps)})
+    return _ok(ctx.procurement.rfp_list(status=_text(params, "status")))
 
 
 @_handle
 def close_rfp(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not roles.is_realm_admin(str(user.id)) and str(params.get("force", "")).lower() != "true":
-        return _err("Admin required to close RFP manually")
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    result = state_machine.close_and_evaluate(rfp_id, str(user.id))
-    if not result.get("success"):
-        return json.dumps(result)
-    rfp = entities.find_rfp(rfp_id)
-    return _ok({"rfp": _rfp_to_dict(rfp), "transition": result})
+    return _ok(ctx.procurement.rfp_close(_text(params, "rfp_id")))
 
 
 @_handle
 def get_rfp_transitions(args: str) -> str:
     params = _parse_args(args)
-    roles.get_caller_user()
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    transitions = [
-        _transition_to_dict(t)
-        for t in sorted(
-            entities.list_rfp_transitions(rfp_id),
-            key=lambda x: int(getattr(x, "timestamp", 0) or 0),
-        )
-    ]
-    return _ok({"rfp_id": rfp_id, "transitions": transitions})
+    return _ok(ctx.procurement.transitions(_text(params, "rfp_id")))
+
+
+@_handle
+def demo_advance_rfp(args: str) -> str:
+    """Test-mode only: advance to the next lifecycle stage (demo / QA)."""
+    params = _parse_args(args)
+    return _ok(ctx.procurement.demo_advance(_text(params, "rfp_id")))
 
 
 # ---------------------------------------------------------------------------
-# RPC — Bidding
+# Bidding
 # ---------------------------------------------------------------------------
 
 
 @_handle
 def create_bid_shell(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    roles.require_op(user, roles.PROCUREMENT_BID_SUBMIT)
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    result = seals.create_bid_shell(rfp_id, str(user.id))
-    return json.dumps(result)
-
-
-@_handle
-def get_evaluator_principals(args: str) -> str:
-    roles.get_caller_user()
-    principals = roles.list_evaluator_principals()
-    return _ok({"principals": principals, "count": len(principals)})
+    return _ok(ctx.procurement.bid_create(_text(params, "rfp_id")))
 
 
 @_handle
 def set_bid_payload(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    bid_id = str(params.get("bid_id", "")).strip()
-    ciphertext = params.get("ciphertext", "")
-    encryption_mode = str(params.get("encryption_mode", "")).strip()
-    result = seals.set_bid_payload(
-        bid_id, str(user.id), str(ciphertext), encryption_mode=encryption_mode
-    )
-    return json.dumps(result)
+    return _ok(ctx.procurement.bid_set_payload(
+        _text(params, "bid_id"),
+        str(params.get("ciphertext", "") or ""),
+        encryption_mode=_text(params, "encryption_mode"),
+    ))
 
 
 @_handle
 def list_bids(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    caller = str(user.id)
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    rfp = entities.find_rfp(rfp_id)
-    if not rfp:
-        return _err(f"RFP '{rfp_id}' not found")
-
-    include_payload = bool(params.get("include_payload", False))
-    if include_payload and not (
-        roles.is_evaluator(user) or roles.is_approver(user) or roles.is_realm_admin(caller)
-    ):
-        include_payload = False
-
-    bids = [
-        _bid_to_dict(b, include_payload=include_payload, caller=caller)
-        for b in entities.bids_for_rfp(rfp_id)
-    ]
-    return _ok({"rfp_id": rfp_id, "bids": bids})
+    return _ok(ctx.procurement.bid_list(
+        _text(params, "rfp_id"),
+        include_payload=bool(params.get("include_payload", False)),
+    ))
 
 
 @_handle
 def get_bid_payload(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    caller = str(user.id)
-    bid_id = str(params.get("bid_id", "")).strip()
-    bid = entities.Bid[bid_id]
-    if not bid:
-        return _err(f"Bid '{bid_id}' not found")
-    rfp = entities.find_rfp(str(bid.rfp_id))
-    if not rfp:
-        return _err("Parent RFP not found")
-    if not seals.can_read_payload(bid, caller, rfp):
-        return _err("Not allowed to read bid payload")
-    payload = entities.BidPayload[bid_id]
-    if not payload:
-        return _err("Payload not found")
-    return _ok(
-        {
-            "bid_id": bid_id,
-            "ciphertext": payload.ciphertext or "",
-            "encryption_mode": payload.encryption_mode or entities.ENCRYPTION_NONE,
-            "scope": payload.scope or "",
-            "seal_status": bid.seal_status or "",
-        }
-    )
+    return _ok(ctx.procurement.bid_payload(_text(params, "bid_id")))
+
+
+@_handle
+def get_evaluator_principals(args: str) -> str:
+    return _ok(ctx.procurement.evaluators())
 
 
 # ---------------------------------------------------------------------------
-# RPC — Scoring
+# Scoring
 # ---------------------------------------------------------------------------
 
 
 @_handle
 def submit_scores(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not roles.is_evaluator(user):
-        return _err("Evaluator role required")
-    bid_id = str(params.get("bid_id", "")).strip()
-    scores = params.get("scores", {})
-    result = scoring.submit_scores(bid_id, str(user.id), scores)
-    return json.dumps(result)
+    return _ok(ctx.procurement.scores_submit(
+        _text(params, "bid_id"), params.get("scores", {})
+    ))
 
 
 @_handle
 def compute_totals(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not (roles.is_evaluator(user) or roles.is_realm_admin(str(user.id))):
-        return _err("Evaluator or admin required")
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    result = scoring.compute_totals(rfp_id)
-    return json.dumps(result)
+    return _ok(ctx.procurement.totals_compute(_text(params, "rfp_id")))
 
 
 @_handle
 def list_scores(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not (roles.is_evaluator(user) or roles.is_approver(user) or roles.is_realm_admin(str(user.id))):
-        return _err("Not allowed")
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    rows = []
-    for row in entities.scores_for_rfp(rfp_id):
-        rows.append(
-            {
-                "score_id": row.score_id,
-                "bid_id": row.bid_id,
-                "evaluator_id": row.evaluator_id,
-                "criterion_id": row.criterion_id,
-                "score": float(row.score or 0),
-                "scored_at": int(row.scored_at or 0),
-            }
-        )
-    return _ok({"rfp_id": rfp_id, "scores": rows})
+    return _ok(ctx.procurement.score_list(_text(params, "rfp_id")))
 
 
 # ---------------------------------------------------------------------------
-# RPC — Award & execution
+# Award and execution
 # ---------------------------------------------------------------------------
 
 
 @_handle
 def award_rfp(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not roles.is_approver(user):
-        return _err("Approver role required")
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    winning_bid_id = str(params.get("winning_bid_id", "")).strip()
-    if not winning_bid_id:
-        return _err("winning_bid_id is required")
-
-    rfp = entities.find_rfp(rfp_id)
-    if not rfp:
-        return _err(f"RFP '{rfp_id}' not found")
-    bid = entities.Bid[winning_bid_id]
-    if not bid or str(bid.rfp_id) != rfp_id:
-        return _err("winning_bid_id does not belong to this RFP")
-
-    rfp.winning_bid_id = winning_bid_id
-    result = state_machine.transition_rfp(
-        rfp_id,
-        "award",
-        str(user.id),
-        note=f"Awarded to bid {winning_bid_id}",
-        user=user,
-        metadata={"winning_bid_id": winning_bid_id},
-    )
-    if not result.get("success"):
-        return json.dumps(result)
-    rfp = entities.find_rfp(rfp_id)
-    return _ok({"rfp": _rfp_to_dict(rfp), "transition": result})
+    return _ok(ctx.procurement.award(
+        _text(params, "rfp_id"), _text(params, "winning_bid_id")
+    ))
 
 
 @_handle
 def execute_contract(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    roles.require_op(user, roles.PROCUREMENT_EXECUTE)
-    if not roles.is_approver(user):
-        return _err("Approver role required")
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    note = str(params.get("note", "Contract execution stub (vault integration pending)"))
+    return _ok(ctx.procurement.execute(
+        _text(params, "rfp_id"), note=str(params.get("note", "") or "")
+    ))
 
-    result = state_machine.transition_rfp(
-        rfp_id,
-        "contract_execution",
-        str(user.id),
-        note=note,
-        user=user,
-    )
-    if not result.get("success"):
-        return json.dumps(result)
-    rfp = entities.find_rfp(rfp_id)
-    return _ok({"rfp": _rfp_to_dict(rfp), "transition": result})
+
+# ---------------------------------------------------------------------------
+# Vendor reputation
+# ---------------------------------------------------------------------------
 
 
 @_handle
 def flag_vendor(args: str) -> str:
     params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not roles.is_realm_admin(str(user.id)):
-        return _err("Admin required")
-    vendor_id = str(params.get("vendor_id", "")).strip()
-    code = str(params.get("code", "")).strip()
-    if not vendor_id or not code:
-        return _err("vendor_id and code are required")
-    result = vendors.flag_vendor(
-        vendor_id,
-        code,
-        str(params.get("note", "")),
-        str(params.get("rfp_id", "")),
-        str(params.get("bid_id", "")),
-        roles.now_epoch(),
-    )
-    return json.dumps(result)
-
-
-# ---------------------------------------------------------------------------
-# RPC — Vendor queries
-# ---------------------------------------------------------------------------
+    return _ok(ctx.procurement.vendor_flag(
+        _text(params, "vendor_id"),
+        _text(params, "code"),
+        note=str(params.get("note", "") or ""),
+        rfp_id=_text(params, "rfp_id"),
+        bid_id=_text(params, "bid_id"),
+    ))
 
 
 @_handle
 def get_vendor_record(args: str) -> str:
     params = _parse_args(args)
-    roles.get_caller_user()
-    vendor_id = str(params.get("vendor_id", "")).strip()
-    record = entities.VendorRecord[vendor_id]
-    if not record:
-        return _ok({"vendor": None})
-    return _ok({"vendor": vendors.vendor_to_dict(record)})
+    return _ok(ctx.procurement.vendor_get(_text(params, "vendor_id")))
 
 
 @_handle
 def list_vendor_records(args: str) -> str:
-    params = _parse_args(args)
-    user = roles.get_caller_user()
-    if not roles.is_realm_admin(str(user.id)):
-        return _err("Admin required")
-    records = [vendors.vendor_to_dict(v) for v in entities.VendorRecord.instances()]
-    return _ok({"vendors": records, "count": len(records)})
-
-
-@_handle
-def demo_advance_rfp(args: str) -> str:
-    """Test-mode only: advance the request to the next lifecycle stage (demo / QA)."""
-    params = _parse_args(args)
-    user = roles.get_caller_user()
-    rfp_id = str(params.get("rfp_id", "")).strip()
-    if not rfp_id:
-        return _err("rfp_id is required")
-    result = state_machine.demo_advance_rfp(rfp_id, str(user.id), user=user)
-    if not result.get("success"):
-        return json.dumps(result)
-    rfp = entities.find_rfp(rfp_id)
-    return _ok({"rfp": _rfp_to_dict(rfp), "transition": result})
+    return _ok(ctx.procurement.vendor_list())
 
 
 # ---------------------------------------------------------------------------
@@ -585,20 +259,7 @@ def demo_advance_rfp(args: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+@_handle
 def async_task(args: str = "{}") -> str:
     """Close RFPs whose bidding window has ended."""
-    now = roles.now_epoch()
-    processed = 0
-    errors = []
-    for rfp in entities.Rfp.instances():
-        if (rfp.status or "") != "open":
-            continue
-        if not rfp.closes_at or now < int(rfp.closes_at):
-            continue
-        result = state_machine.close_and_evaluate(str(rfp.rfp_id), roles.SYSTEM_ACTOR)
-        if result.get("success"):
-            processed += 1
-        else:
-            errors.append({"rfp_id": rfp.rfp_id, "error": result.get("error")})
-    return json.dumps({"success": True, "processed": processed, "errors": errors})
-
+    return _ok(ctx.procurement.sweep())

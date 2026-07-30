@@ -294,7 +294,7 @@
 		busy = true;
 		actionError = '';
 		try {
-			const res: any = await callSync('close_rfp', { rfp_id: selected.rfp_id, force: 'true' });
+			const res: any = await callSync('close_rfp', { rfp_id: selected.rfp_id });
 			if (!res?.success) throw new Error(res?.error || 'Close failed');
 			actionMsg = 'Bidding closed — bids marked for evaluation';
 			await loadDetail(selected.rfp_id);

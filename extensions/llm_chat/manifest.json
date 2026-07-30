@@ -1,6 +1,13 @@
 {
   "name": "llm_chat",
-  "version": "1.0.21",
+  "version": "1.0.22",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "caller.get",
+    "time.now",
+    "log.write",
+    "schema.entities"
+  ],
   "description": "AI-powered assistant for governance and legal questions",
   "author": "Smart Social Contracts Team",
   "permissions": [],

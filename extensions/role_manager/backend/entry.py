@@ -532,22 +532,34 @@ def revoke_permission(args) -> str:
 
 
 def _build_role_action_code(action: str, target_principal: str, profile_name: str) -> str:
-    """Build sandboxed inline proposal code that replays a role action on approval."""
+    """Build the inline proposal code that replays a role action on approval."""
     if action == "assign":
-        body = (
-            f'realm.members.assign_profile("{target_principal}", "{profile_name}")'
+        mutate = (
+            f'if "{profile_name}" in current:\n'
+            f'    logger.info("Profile already assigned, skipping")\n'
+            f'else:\n'
+            f'    target.profiles.add(profile)\n'
+            f'    logger.info(f"Governance: assigned \'{profile_name}\' to {{target.id}}")\n'
         )
     else:
-        body = (
-            f'realm.members.revoke_profile("{target_principal}", "{profile_name}")'
+        mutate = (
+            f'if "{profile_name}" not in current:\n'
+            f'    logger.info("Profile not assigned, skipping")\n'
+            f'else:\n'
+            f'    target.profiles.remove(profile)\n'
+            f'    logger.info(f"Governance: revoked \'{profile_name}\' from {{target.id}}")\n'
         )
     return (
-        f'from ggg_sdk import hook, realm\n'
+        f'from ggg import User, UserProfile\n'
         f'\n'
-        f'@hook\n'
-        f'def main(args):\n'
-        f'    {body}\n'
-        f'    return {{"success": True}}\n'
+        f'target = User["{target_principal}"]\n'
+        f'profile = UserProfile["{profile_name}"]\n'
+        f'if not target:\n'
+        f'    raise ValueError("User {target_principal} not found")\n'
+        f'if not profile:\n'
+        f'    raise ValueError("Profile {profile_name} not found")\n'
+        f'current = [p.name for p in target.profiles]\n'
+        f'{mutate}'
     )
 
 
@@ -601,24 +613,14 @@ def propose_role_action(args) -> str:
         proposal_id = f"prop_{proposal_num:03d}"
 
         target_nickname = target_user.nickname or target_principal[:8]
-        inline_code = _build_role_action_code(action, target_principal, profile_name)
-        bridge_permission = (
-            "member.assign_profile" if action == "assign" else "member.revoke_profile"
-        )
-        try:
-            from core.proposal_execution import compute_code_checksum
-
-            code_checksum = compute_code_checksum(inline_code)
-        except Exception:
-            code_checksum = ""
 
         metadata = json.dumps({
             "proposal_type": spec["proposal_type"],
             "role_action": action,
-            "requested_permissions": [bridge_permission],
+            "requested_permissions": [spec["operation"]],
             "target_principal": target_principal,
             "profile_name": profile_name,
-            "code_inline": inline_code,
+            "code_inline": _build_role_action_code(action, target_principal, profile_name),
             "codex_name": f"role_{action}_{proposal_id}",
         })
 
@@ -627,7 +629,7 @@ def propose_role_action(args) -> str:
             title=spec["title"].format(profile=profile_name, target=target_nickname),
             description=spec["description"].format(profile=profile_name, principal=target_principal),
             code_url="",
-            code_checksum=code_checksum,
+            code_checksum="",
             proposer=caller,
             status="pending_review",
             voting_deadline="",
@@ -1267,7 +1269,9 @@ def consume_registration_code(args) -> str:
             if not plaintext:
                 return json.dumps({"success": False, "error": "code or code_hash is required"})
             code_hash = hashlib.sha256(plaintext.encode()).hexdigest()
-        return json.dumps(_consume(code_hash, args_dict.get("principal", "")))
+        # The redeemer is whoever is calling. Taking it from args lets a
+        # caller burn their code against someone else's principal.
+        return json.dumps(_consume(code_hash, ic.caller().to_str()))
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 

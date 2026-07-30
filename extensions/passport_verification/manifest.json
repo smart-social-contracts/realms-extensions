@@ -1,6 +1,7 @@
 {
   "name": "passport_verification",
-  "version": "1.0.4",
+  "version": "1.0.6",
+  "runtime": "in_process",
   "description": "Rarimo ZK Passport verification extension for secure identity verification",
   "author": "Realms Team",
   "permissions": [],
@@ -30,11 +31,18 @@
     "description": "Verified passport identity using zero-knowledge proofs"
   },
   "entry_access": {
-    "default": "public",
+    "default": "realm.admin",
     "functions": {
       "register_entities": "realm.admin",
       "initialize": "realm.admin",
-      "set_application_id": "realm.configure"
+      "set_application_id": "realm.configure",
+      "get_session_id": "self.data_view",
+      "get_event_id": "self.data_view",
+      "get_current_application_id": "self.data_view",
+      "get_verification_link": "identity.submit",
+      "check_verification_status": "identity.submit",
+      "get_identity_status": "self.data_view",
+      "create_passport_identity": "identity.submit"
     }
   }
 }

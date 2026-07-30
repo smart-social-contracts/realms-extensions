@@ -1,219 +1,115 @@
 """
 Managed Services Extension — backend entry point.
 
-Provides configuration, transaction history, and billing integration
-for realm administrators to manage upgrades and credits.
+Configuration, credit transaction history, and billing integration for realm
+administrators.
+
+Runs sandboxed. ``get_transactions`` reaches the registry canister through the
+async capability bridge (issue #279): ``ctx.services.query`` cannot return a
+value on the pass that asks for one, so the host performs the outcall and runs
+this function again with the result in hand. The body therefore executes more
+than once and must not write — the writes live in ``set_config``, which is an
+ordinary synchronous call.
 """
 
 import json
-import traceback
 
-from basilisk import ic
-from ic_python_logging import get_logger
-from core.extensions import create_extension_entity_class
-from ic_python_db import String
-
-from _cdk import (
-    Async, CallResult, Principal, Record, Service, Variant, Vec,
-    float64, nat64, service_query, text,
-)
-
-logger = get_logger("extensions.managed_services")
+from ggg_sdk import ctx, ServiceCallError
 
 DEFAULT_BILLING_SERVICE_URL = "https://billing.realmsgos.dev"
 UPGRADE_COST_CREDITS = 5
 
-# ---------------------------------------------------------------------------
-# Extension-scoped config entity
-# ---------------------------------------------------------------------------
+CONFIG_TYPE = "ManagedServicesConfig"
+BILLING_URL_KEY = "billing_service_url"
 
-ExtEntity = create_extension_entity_class("managed_services")
-
-
-class ManagedServicesConfig(ExtEntity):
-    __alias__ = "key"
-    key = String()
-    value = String()
-
-
-def _get_cfg(key, default=""):
-    cfg = ManagedServicesConfig[key]
-    if cfg and cfg.value:
-        return cfg.value
-    return default
-
-
-def _set_cfg(key, value):
-    cfg = ManagedServicesConfig[key]
-    if cfg:
-        cfg.value = value
-    else:
-        ManagedServicesConfig(key=key, value=value)
-
-
-# ---------------------------------------------------------------------------
-# Registry inter-canister service definition
-# ---------------------------------------------------------------------------
-
-class CreditTransactionRecord(Record):
-    id: text
-    principal_id: text
-    amount: nat64
-    transaction_type: text
-    description: text
-    stripe_session_id: text
-    timestamp: float64
-
-
-class TransactionHistoryResult(Variant, total=False):
-    Ok: Vec[CreditTransactionRecord]
-    Err: text
-
-
-class RegistryTransactionService(Service):
-    @service_query
-    def get_transactions(self, principal_id: text, limit: nat64) -> TransactionHistoryResult: ...
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _ok(data):
     return json.dumps({"success": True, "data": data})
 
 
 def _err(msg):
-    return json.dumps({"success": False, "error": msg})
+    return json.dumps({"success": False, "error": str(msg)})
 
 
-def _get_registry_canister_id():
-    try:
-        from api.registry import get_registry_info
-        info = get_registry_info()
-        registries = info.get("registries", [])
-        if registries:
-            return registries[0].get("principal_id", "")
-    except Exception:
-        pass
-    return ""
+def _config_row(key):
+    for row in ctx.own.list(CONFIG_TYPE, where={"key": key}, limit=1):
+        return row
+    return None
 
 
-def _unwrap_call_result(result):
-    """Unwrap CallResult[Variant{Ok, Err}] — handles double nesting."""
-    def _get(obj, key):
-        if isinstance(obj, dict) and key in obj:
-            return obj[key]
-        return getattr(obj, key, None)
-
-    err = _get(result, "Err")
-    if err is not None:
-        return {"error": str(err)}
-    val = _get(result, "Ok")
-    if val is None:
-        val = result
-
-    inner_err = _get(val, "Err")
-    if inner_err is not None:
-        return {"error": str(inner_err)}
-    inner_ok = _get(val, "Ok")
-    if inner_ok is not None:
-        return inner_ok
-
-    return val
+def _get_cfg(key, default=""):
+    row = _config_row(key)
+    if row and row.get("value"):
+        return row["value"]
+    return default
 
 
-# ---------------------------------------------------------------------------
-# Public extension functions
-# ---------------------------------------------------------------------------
+def _set_cfg(key, value):
+    row = _config_row(key)
+    if row:
+        ctx.own.update(CONFIG_TYPE, row["id"], {"value": value})
+    else:
+        ctx.own.create(CONFIG_TYPE, {"key": key, "value": value})
+
 
 def get_config(args: str) -> str:
-    """Return billing and realm configuration needed by the frontend."""
+    """Billing and realm configuration the frontend needs."""
     try:
-        billing_url = _get_cfg("billing_service_url", DEFAULT_BILLING_SERVICE_URL)
-        realm_canister_id = str(ic.id())
-        registry_canister_id = _get_registry_canister_id()
-
-        current_version = ""
-        try:
-            from api.status import get_status
-            status = get_status()
-            current_version = status.get("version", "")
-        except Exception:
-            pass
-
+        info = ctx.realm_info()
         return _ok({
-            "billing_service_url": billing_url,
-            "realm_canister_id": realm_canister_id,
-            "registry_canister_id": registry_canister_id,
-            "current_version": current_version,
+            "billing_service_url": _get_cfg(
+                BILLING_URL_KEY, DEFAULT_BILLING_SERVICE_URL
+            ),
+            "realm_canister_id": info.get("canister_id", ""),
+            "registry_canister_id": info.get("registry_canister_id", ""),
+            "current_version": info.get("version", ""),
             "upgrade_cost_credits": UPGRADE_COST_CREDITS,
         })
     except Exception as e:
-        logger.error(f"get_config error: {e}\n{traceback.format_exc()}")
-        return _err(str(e))
+        return _err(e)
 
 
 def get_transactions(args: str) -> str:
-    """Fetch credit transaction history from the registry (async inter-canister call)."""
+    """Credit transaction history from the registry.
+
+    Declared in the manifest's ``async_functions``. The host resolves which
+    registry to ask and which principal to ask about; this function chooses only
+    how many rows it wants.
+    """
     try:
         params = json.loads(args) if args else {}
     except Exception:
         params = {}
-    limit = int(params.get("limit", 20))
-
-    registry_id = _get_registry_canister_id()
-    if not registry_id:
-        return _err("No registry canister configured")
-
-    realm_canister_id = str(ic.id())
+    try:
+        limit = int(params.get("limit", 20))
+    except (TypeError, ValueError):
+        limit = 20
 
     try:
-        registry = RegistryTransactionService(Principal.from_str(registry_id))
-        result: CallResult = yield registry.get_transactions(realm_canister_id, limit)
-
-        inner = _unwrap_call_result(result)
-        if isinstance(inner, dict) and "error" in inner:
-            return _err(inner["error"])
-
-        transactions = []
-        items = inner if isinstance(inner, list) else []
-        for t in items:
-            if isinstance(t, dict):
-                transactions.append(t)
-            else:
-                transactions.append({
-                    "id": str(getattr(t, "id", "")),
-                    "principal_id": str(getattr(t, "principal_id", "")),
-                    "amount": int(getattr(t, "amount", 0)),
-                    "transaction_type": str(getattr(t, "transaction_type", "")),
-                    "description": str(getattr(t, "description", "")),
-                    "stripe_session_id": str(getattr(t, "stripe_session_id", "")),
-                    "timestamp": float(getattr(t, "timestamp", 0)),
-                })
-
-        return _ok({"transactions": transactions, "count": len(transactions)})
-
+        result = ctx.services.query("registry.get_transactions", limit=limit)
+        return _ok({
+            "transactions": result.get("transactions", []),
+            "count": result.get("count", 0),
+        })
+    except ServiceCallError as e:
+        return _err(e)
     except Exception as e:
-        logger.error(f"get_transactions error: {e}\n{traceback.format_exc()}")
-        return _err(str(e))
+        return _err(e)
 
 
 def set_config(args: str) -> str:
-    """Update extension configuration (admin-only by manifest profile restriction)."""
+    """Update extension configuration. Synchronous, so it may write."""
     try:
         params = json.loads(args) if args else {}
     except Exception:
         return _err("Invalid JSON arguments")
 
-    updated = {}
-    if "billing_service_url" in params:
-        url = str(params["billing_service_url"]).strip()
-        if url:
-            _set_cfg("billing_service_url", url)
-            updated["billing_service_url"] = url
-
-    if not updated:
+    url = str(params.get(BILLING_URL_KEY, "")).strip()
+    if not url:
         return _err("No valid configuration keys provided")
 
-    return _ok({"updated": updated})
+    try:
+        _set_cfg(BILLING_URL_KEY, url)
+    except Exception as e:
+        return _err(e)
+    return _ok({"updated": {BILLING_URL_KEY: url}})

@@ -21,6 +21,13 @@
 		sandbox_compatible: boolean;
 	}
 
+	interface ExtMeta {
+		id: string;
+		resolved_mode: string;
+		reason: string;
+		locked: boolean;
+	}
+
 	let loading = $state(true);
 	let saving = $state(false);
 	let error = $state('');
@@ -31,9 +38,8 @@
 	let defaultMode = $state<'sandbox' | 'in_process'>('sandbox');
 	let hookDefaultMode = $state<'sandbox' | 'in_process'>('sandbox');
 	let budget = $state(10_000_000);
-	let fallbackInProcess = $state(true);
 
-	let resolvedModes: Record<string, string> = $state({});
+	let extensionMeta: ExtMeta[] = $state([]);
 	let extensionOverrides: Record<string, string> = $state({});
 	let hooks: HookMeta[] = $state([]);
 	let hookOverrides: Record<string, string> = $state({});
@@ -61,12 +67,11 @@
 		enabled = !!cfg.enabled;
 		defaultMode = cfg.default_mode === 'in_process' ? 'in_process' : 'sandbox';
 		budget = typeof cfg.budget === 'number' ? cfg.budget : 10_000_000;
-		fallbackInProcess = cfg.fallback_in_process !== false;
 		extensionOverrides = { ...(cfg.extensions || {}) };
 		const ch = cfg.codex_hooks || {};
 		hookDefaultMode = ch.default_mode === 'in_process' ? 'in_process' : 'sandbox';
 		hookOverrides = { ...(ch.hooks || {}) };
-		resolvedModes = { ...(data?.resolved_modes || {}) };
+		extensionMeta = Array.isArray(data?.extensions) ? data.extensions : [];
 		hooks = Array.isArray(data?.hooks) ? data.hooks : [];
 	}
 
@@ -98,7 +103,6 @@
 			enabled,
 			default_mode: defaultMode,
 			budget: Number(budget) || 0,
-			fallback_in_process: fallbackInProcess,
 			extensions: { ...extensionOverrides },
 			codex_hooks: {
 				default_mode: hookDefaultMode,
@@ -178,13 +182,15 @@
 	}
 
 	const extensionRows = $derived(
-		Object.keys(resolvedModes)
-			.sort((a, b) => a.localeCompare(b))
-			.map((id) => ({
-				id,
-				resolved: resolvedModes[id],
-				override: extensionOverrides[id] || '',
-				system: String(resolvedModes[id]).includes('(system)'),
+		[...extensionMeta]
+			.sort((a, b) => a.id.localeCompare(b.id))
+			.map((meta) => ({
+				id: meta.id,
+				resolved: meta.reason ? `${meta.resolved_mode} (${meta.reason})` : meta.resolved_mode,
+				override: extensionOverrides[meta.id] || '',
+				// Core/system extensions and those declaring "runtime": "in_process"
+				// cannot be sandboxed, so they get no override control.
+				locked: !!meta.locked,
 			})),
 	);
 
@@ -349,44 +355,13 @@
 					/>
 					<p class="text-xs text-gray-500 mt-1">0 = unmetered. Applied per sandboxed spawn.</p>
 				</div>
-				<div class="flex items-center justify-between gap-4 p-3 rounded-lg border border-gray-200">
-					<div>
-						<div class="text-sm font-medium text-gray-900">Fallback to in-process</div>
-						<p class="text-xs text-gray-500 mt-0.5">
-							If a sandboxed call fails, run it privileged instead. Safer for rollout; weaker for security.
-						</p>
-					</div>
-					<button
-						type="button"
-						role="switch"
-						aria-checked={fallbackInProcess}
-						aria-label="Fallback to in-process"
-						disabled={!canConfigure || saving}
-						onclick={() => (fallbackInProcess = !fallbackInProcess)}
-						class="inline-flex items-center gap-2 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-					>
-						<span
-							class={cn(
-								'text-xs font-semibold uppercase tracking-wide w-8 text-right',
-								fallbackInProcess ? 'text-green-700' : 'text-gray-400',
-							)}
-						>
-							{fallbackInProcess ? 'On' : 'Off'}
-						</span>
-						<span
-							class={cn(
-								'relative inline-flex h-6 w-11 rounded-full transition-colors',
-								fallbackInProcess ? 'bg-green-600' : 'bg-gray-300',
-							)}
-						>
-							<span
-								class={cn(
-									'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
-									fallbackInProcess && 'translate-x-5',
-								)}
-							></span>
-						</span>
-					</button>
+				<div class="p-3 rounded-lg border border-gray-200 bg-gray-50">
+					<div class="text-sm font-medium text-gray-900">No in-process fallback</div>
+					<p class="text-xs text-gray-500 mt-0.5">
+						A sandboxed call that cannot spawn fails — it is never retried with host
+						access. Extensions needing host modules declare it in their manifest and
+						are listed below as in-process.
+					</p>
 				</div>
 			</div>
 
@@ -394,7 +369,9 @@
 			<div>
 				<h3 class="text-sm font-semibold text-gray-900 mb-2">Installed extensions</h3>
 				<p class="text-xs text-gray-500 mb-3">
-					Per-extension override. System extensions are always in-process.
+					Per-extension override. System extensions and those declaring
+					<code class="text-[11px]">"runtime": "in_process"</code> are always in-process
+					and cannot be sandboxed.
 				</p>
 				{#if extensionRows.length === 0}
 					<p class="text-sm text-gray-400">No extensions installed.</p>
@@ -409,7 +386,7 @@
 								<select
 									value={row.override}
 									onchange={(e) => setExtensionMode(row.id, (e.currentTarget as HTMLSelectElement).value)}
-									disabled={!canConfigure || saving || row.system || !enabled}
+									disabled={!canConfigure || saving || row.locked || !enabled}
 									class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white disabled:opacity-50 sm:w-44"
 								>
 									<option value="">Default ({defaultMode})</option>

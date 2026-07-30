@@ -1,6 +1,13 @@
 {
   "name": "extensions_manager",
-  "version": "1.1.0",
+  "version": "1.1.1",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "extension_access.list",
+    "extension_access.grant",
+    "extension_access.revoke",
+    "log.write"
+  ],
   "deprecated": true,
   "description": "DEPRECATED — extension access control moved to role_manager; package operations live in package_manager",
   "author": "Realms Team",

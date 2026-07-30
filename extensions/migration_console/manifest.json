@@ -1,8 +1,17 @@
 {
   "name": "migration_console",
-  "version": "0.3.5",
-  "description": "Codex-driven migration console for realm creators and civil servants — readiness checklist, org chart, staff invites, and citizen bulk import (issue #241)",
+  "version": "0.3.8",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "console.overview",
+    "console.regenerate_invite",
+    "console.import_citizens",
+    "console.list_citizen_invites",
+    "log.write"
+  ],
+  "description": "Deprecated — bulk citizen import and migration checklist moved to import_export (issue #14). Kept for backward compatibility only.",
   "author": "Smart Social Contracts",
+  "deprecated": true,
   "permissions": [],
   "profiles": [
     "admin"
@@ -11,7 +20,7 @@
     "realm_management"
   ],
   "icon": "clipboard-check",
-  "show_in_sidebar": true,
+  "show_in_sidebar": false,
   "sidebar_label": {
     "en": "Migration Console"
   },

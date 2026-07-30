@@ -1,14 +1,39 @@
 {
   "name": "managed_services",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Realm version management, self-upgrade, and credit purchasing for administrators",
   "author": "Realms Team",
+  "ggg_api_version": 1,
   "permissions": [],
   "functions": [
     "get_config",
     "get_transactions",
     "set_config"
   ],
+  "async_functions": [
+    "get_transactions"
+  ],
+  "capabilities": [
+    "realm.info",
+    "ext_entity.list",
+    "ext_entity.create",
+    "ext_entity.update",
+    "service.call:registry.get_transactions"
+  ],
+  "entities": {
+    "ManagedServicesConfig": {
+      "alias": "key",
+      "fields": {
+        "key": {
+          "type": "String",
+          "max_length": 256
+        },
+        "value": {
+          "type": "String"
+        }
+      }
+    }
+  },
   "profiles": [
     "admin",
     "operator"

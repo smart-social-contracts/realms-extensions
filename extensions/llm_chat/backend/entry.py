@@ -1,65 +1,53 @@
+"""Realm context provider for the AI assistant, sandboxed.
+
+Supplies the LLM with realm state. That makes the boundary here worth being
+explicit about: whatever this returns can end up in a prompt sent to a remote
+service, so it exposes only what the *calling* member is already entitled to
+see, obtained through the bridge under declared capabilities rather than read
+directly out of the host.
+"""
+
 import json
 
-from basilisk import Opt, Principal, Record, Vec, blob, ic, nat64, text
+from ggg_sdk import ctx
 
 
-class LLMChatResponse(Record):
-    response: text
+def get_config(args: str = "") -> str:
+    """Report that the assistant extension is available."""
+    return json.dumps({"response": "AI assistance extension is ready"})
 
 
-# Container for relevant realm data to be sent to the LLM.
-# This provides context about the current state of the realm.
-class RealmData(Record):
-    json: text
-    principal_id: text
-    timestamp: nat64
+def get_realm_data(args: str = "") -> str:
+    """Collect realm context for the LLM to reason over.
 
+    Returns ``{"json", "principal_id", "timestamp"}``, where ``json`` is a
+    nested JSON document of realm state scoped to the caller.
 
-def get_config() -> LLMChatResponse:
-    """Get configuration for the AI assistance extension.
-
-    Returns:
-        LLMChatResponse: A simple acknowledgment
+        dfx canister call realm_backend extension_sync_call \\
+          '("llm_chat", "get_realm_data", "{}")' --output=json \\
+          | jq -r '.response' | jq -r '.json' | jq .
     """
-    return LLMChatResponse(response="AI assistance extension is ready")
-
-
-def get_realm_data(args) -> RealmData:
-    """Collect relevant data from the realm for the LLM to use.
-
-        This function aggregates various pieces of information from the realm
-        that might be useful context for the LLM when answering user queries.
-        The remote LLM service can call this endpoint to fetch the current state
-        of the realm to provide more contextually aware responses.
-
-        Returns:
-            RealmData: A record containing structured data from the realm
-
-        Parse output of this command to get the realm data:
-        '''
-    dfx canister call realm_backend extension_sync_call '(
-      record {
-        extension_name = "llm_chat";
-        function_name = "get_realm_data";
-        args = "none";
-      }
-    )' --output=json | jq -r '.response' | python3 -c "
-    import sys, json, ast
-    response = ast.literal_eval(sys.stdin.read())
-    print(json.dumps(json.loads(response['json']), indent=2))
-    "
-        '''
-    """
-    principal_id = str(ic.caller())
-    current_time = ic.time()
+    caller = ctx.caller()
+    timestamp = ctx.now()
 
     try:
-        combined_data = {}
-        return RealmData(
-            json=json.dumps(combined_data),
-            principal_id=principal_id,
-            timestamp=current_time,
-        )
+        combined = {
+            "caller": {
+                "id": caller.get("id"),
+                "name": caller.get("name"),
+                "registered": caller.get("registered"),
+            },
+            "schema": ctx.entities.erd(),
+        }
+        return json.dumps({
+            "json": json.dumps(combined),
+            "principal_id": caller.get("id", ""),
+            "timestamp": timestamp,
+        })
     except Exception as e:
-        ic.print(f"Error collecting realm data: {str(e)}")
-        return RealmData(json="{}", principal_id=principal_id, timestamp=current_time)
+        ctx.log(f"Error collecting realm data: {e}")
+        return json.dumps({
+            "json": "{}",
+            "principal_id": caller.get("id", ""),
+            "timestamp": timestamp,
+        })

@@ -1,6 +1,18 @@
 {
   "name": "land_registry",
-  "version": "1.3.3",
+  "version": "1.3.5",
+  "ggg_api_version": 1,
+  "capabilities": [
+    "land.list",
+    "land.get",
+    "land.map",
+    "land.create",
+    "land.update",
+    "land.set_owner",
+    "land.prepare_nft",
+    "land.set_nft_token",
+    "log.write"
+  ],
   "description": "Property registration and land ownership management",
   "permissions": [],
   "entry_points": [

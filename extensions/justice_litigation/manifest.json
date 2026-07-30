@@ -1,10 +1,12 @@
 {
   "name": "justice_litigation",
-  "version": "0.4.1",
+  "version": "0.5.0",
+  "ggg_api_version": 1,
   "description": "Private-by-default litigations (end-to-end encrypted, shared only with the submitter and the justice department) plus courts, judges, verdicts, penalties, and appeals",
   "permissions": [],
   "entry_points": [
     "initialize",
+    "get_my_roles",
     "get_justice_systems",
     "get_courts",
     "create_court",
@@ -26,9 +28,7 @@
     "get_litigations",
     "create_litigation",
     "set_litigation_content",
-    "get_justice_audience",
-    "execute_verdict",
-    "load_demo_litigations"
+    "get_justice_audience"
   ],
   "profiles": [
     "admin",
@@ -43,14 +43,49 @@
   "icon": "gavel",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/justice_litigation",
   "show_in_sidebar": true,
+  "capabilities": [
+    "justice.roles",
+    "justice.audience",
+    "justice.justice_systems",
+    "justice.courts",
+    "justice.judges",
+    "justice.cases",
+    "justice.case",
+    "justice.litigations",
+    "justice.verdicts",
+    "justice.penalties",
+    "justice.appeals",
+    "justice.statistics",
+    "justice.initialize",
+    "justice.seed_courts",
+    "justice.create_court",
+    "justice.file_case",
+    "justice.assign_judge",
+    "justice.create_litigation",
+    "justice.set_litigation_content",
+    "justice.issue_verdict",
+    "justice.execute_penalty",
+    "justice.waive_penalty",
+    "justice.file_appeal",
+    "justice.decide_appeal"
+  ],
+  "entities": {
+    "LitigationContent": {
+      "alias": "case_id",
+      "fields": {
+        "case_id": { "type": "String", "max_length": 64 },
+        "ciphertext": { "type": "String" },
+        "scope": { "type": "String", "max_length": 512 },
+        "created_by": { "type": "String", "max_length": 128 }
+      }
+    }
+  },
   "entry_access": {
     "default": "dispute.view",
     "functions": {
-      "register_entities": "realm.admin",
       "initialize": "realm.admin",
       "create_court": "realm.admin",
       "seed_default_courts": "realm.admin",
-      "load_demo_litigations": "demo.manage",
       "file_case": "dispute.create",
       "file_appeal": "dispute.create",
       "create_litigation": "dispute.create",
@@ -60,8 +95,7 @@
       "issue_verdict": "resolution.issue",
       "execute_penalty": "fine.apply",
       "waive_penalty": "fine.apply",
-      "decide_appeal": "appeal.allow",
-      "execute_verdict": "resolution.finalize"
+      "decide_appeal": "appeal.allow"
     }
   }
 }
