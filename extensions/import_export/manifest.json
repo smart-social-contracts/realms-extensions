@@ -1,0 +1,31 @@
+{
+  "name": "import_export",
+  "version": "1.0.2",
+  "description": "Bulk import and export — entity JSON/CSV, citizen census, and programmatic data loading",
+  "author": "Smart Social Contracts",
+  "permissions": [],
+  "profiles": [
+    "admin"
+  ],
+  "categories": [
+    "realm_management"
+  ],
+  "icon": "arrow-down-up",
+  "show_in_sidebar": true,
+  "sidebar_label": {
+    "en": "Import & Export"
+  },
+  "entry_access": {
+    "default": "realm.admin",
+    "functions": {
+      "get_entity_types": "db.export",
+      "export_data": "db.export",
+      "import_data": "db.manage",
+      "get_import_type_graph": "db.export",
+      "plan_import_batches": "db.manage",
+      "import_status": "user.view",
+      "import_citizens": "user.add",
+      "list_citizen_invites": "invite.manage"
+    }
+  }
+}

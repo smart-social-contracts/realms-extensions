@@ -3,22 +3,10 @@
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
-	type TabId = 'browse' | 'export' | 'import';
-
 	interface EntityType {
 		value: string;
 		label: string;
 		className: string;
-	}
-
-	interface ImportPreview {
-		valid: boolean;
-		totalEntities: number;
-		totalCodexes: number;
-		typeCounts: Record<string, number>;
-		entities: any[];
-		codexes: any[];
-		error?: string;
 	}
 
 	interface Toast {
@@ -40,7 +28,6 @@
 
 	let entityTypes: EntityType[] = $state([]);
 	let selectedType = $state('');
-	let activeTab: TabId = $state('browse');
 	let loading = $state(true);
 	let error = $state('');
 	let accessDeniedOp = $state('');
@@ -59,20 +46,6 @@
 	// Delete
 	let deletingId: string | null = $state(null);
 	let confirmDeleteItem: any | null = $state(null);
-
-	// Export
-	let exporting = $state(false);
-	let exportResult: any | null = $state(null);
-
-	// Import
-	let importMode: 'file' | 'editor' = $state('file');
-	let importText = $state('');
-	let importFileName = $state('');
-	let importPreview: ImportPreview | null = $state(null);
-	let importing = $state(false);
-	let importResult: any | null = $state(null);
-	let fileInput: HTMLInputElement | undefined = $state();
-	let dragOver = $state(false);
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const id = ++toastCounter;
@@ -222,166 +195,9 @@
 		}
 	}
 
-	// ── Export ──
-
-	async function exportEntities(all = false) {
-		exporting = true;
-		exportResult = null;
-		try {
-			const exportArgs = all
-				? { include_codexes: true }
-				: { entity_types: [selectedType], include_codexes: true };
-			const result = await callExt('export_data', exportArgs);
-			if (result?.success && result?.data) {
-				const exportData = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
-				exportResult = exportData;
-				const msg = all
-					? `Exported ${exportData.total_entities ?? '?'} entities, ${exportData.total_codexes ?? 0} codexes`
-					: `Exported ${exportData.total_entities ?? '?'} entities`;
-				addToast(msg);
-			} else {
-				addToast(result?.error || 'Export failed', 'error');
-			}
-		} catch (e: any) {
-			addToast(`Export error: ${e?.message}`, 'error');
-		} finally {
-			exporting = false;
-		}
-	}
-
-	function downloadExport(all = false) {
-		if (!exportResult) return;
-		const json = JSON.stringify(exportResult, null, 2);
-		const blob = new Blob([json], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-		a.download = all ? `export_all_${ts}.json` : `export_${selectedType}_${ts}.json`;
-		a.click();
-		URL.revokeObjectURL(url);
-		addToast('Download started');
-	}
-
-	function copyExport() {
-		if (!exportResult) return;
-		navigator.clipboard.writeText(JSON.stringify(exportResult, null, 2));
-		addToast('Copied to clipboard');
-	}
-
-	// ── Import ──
-
-	function handleFileSelect(event: Event) {
-		const input = event.target as HTMLInputElement;
-		const file = input.files?.[0];
-		if (file) readFile(file);
-	}
-
-	function handleDrop(event: DragEvent) {
-		event.preventDefault();
-		dragOver = false;
-		const file = event.dataTransfer?.files?.[0];
-		if (file) readFile(file);
-	}
-
-	function readFile(file: File) {
-		importFileName = file.name;
-		const reader = new FileReader();
-		reader.onload = (e) => {
-			importText = (e.target?.result as string) || '';
-			parseImportPreview();
-		};
-		reader.readAsText(file);
-	}
-
-	function parseImportPreview() {
-		importPreview = null;
-		importResult = null;
-		if (!importText.trim()) return;
-
-		try {
-			const parsed = JSON.parse(importText);
-			let entities: any[] = [];
-			let codexes: any[] = [];
-
-			if (Array.isArray(parsed)) {
-				entities = parsed;
-			} else if (parsed.entities) {
-				entities = parsed.entities || [];
-				codexes = parsed.codexes || [];
-			} else {
-				entities = [parsed];
-			}
-
-			const typeCounts: Record<string, number> = {};
-			for (const ent of entities) {
-				const t = ent._type || 'unknown';
-				typeCounts[t] = (typeCounts[t] || 0) + 1;
-			}
-
-			importPreview = {
-				totalEntities: entities.length,
-				totalCodexes: codexes.length,
-				typeCounts,
-				valid: true,
-				entities,
-				codexes,
-			};
-		} catch (e: any) {
-			importPreview = { valid: false, error: e.message, totalEntities: 0, totalCodexes: 0, typeCounts: {}, entities: [], codexes: [] };
-		}
-	}
-
-	async function executeImport() {
-		if (!importPreview || !importPreview.valid) return;
-		importing = true;
-		importResult = null;
-
-		try {
-			const allRecords = [...importPreview.entities];
-			for (const codex of importPreview.codexes) {
-				allRecords.push({ ...codex, _type: 'Codex' });
-			}
-
-			const result = await callExt('import_data', {
-				format: 'json',
-				data: JSON.stringify(allRecords),
-			});
-
-			importResult = result;
-			if (result?.success) {
-				const d = result.data || {};
-				addToast(`Imported ${d.successful || 0} of ${d.total_records || 0} records`);
-			} else {
-				addToast(result?.error || 'Import failed', 'error');
-			}
-		} catch (e: any) {
-			importResult = { success: false, error: e.message };
-			addToast(`Import error: ${e?.message}`, 'error');
-		} finally {
-			importing = false;
-		}
-	}
-
-	function clearImport() {
-		importText = '';
-		importFileName = '';
-		importPreview = null;
-		importResult = null;
-		if (fileInput) fileInput.value = '';
-	}
-
 	$effect(() => {
 		loadEntityTypes();
 	});
-
-	const TABS: { id: TabId; label: string }[] = [
-		{ id: 'browse', label: 'Browse' },
-		{ id: 'export', label: 'Export' },
-		{ id: 'import', label: 'Import' },
-	];
-
-	let exportJson = $derived(exportResult ? JSON.stringify(exportResult, null, 2) : '');
 </script>
 
 <!-- Toast notifications -->
@@ -429,7 +245,7 @@
 	<div class="flex justify-between items-center mb-6">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Data Explorer</h1>
-			<p class="text-gray-600 mt-1">Browse, export, and import entities</p>
+			<p class="text-gray-600 mt-1">Browse and inspect entities</p>
 		</div>
 		<button
 			onclick={() => loadEntityTypes()}
@@ -479,26 +295,7 @@
 		</div>
 	</div>
 
-	<!-- Tab navigation -->
-	<div class="mb-4 border-b border-gray-200">
-		<nav class="flex gap-1" aria-label="Tabs">
-			{#each TABS as tab}
-				<button
-					onclick={() => activeTab = tab.id}
-					class={cn(
-						'px-5 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors',
-						activeTab === tab.id
-							? 'border-blue-600 text-blue-600 bg-blue-50'
-							: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-					)}
-				>{tab.label}</button>
-			{/each}
-		</nav>
-	</div>
-
-	<!-- ==================== BROWSE TAB ==================== -->
-	{#if activeTab === 'browse'}
-		<div class="mb-4 flex items-center gap-4">
+	<div class="mb-4 flex items-center gap-4">
 			<button
 				onclick={loadData}
 				disabled={objLoading}
@@ -620,214 +417,4 @@
 				{/if}
 			{/if}
 		</div>
-
-	<!-- ==================== EXPORT TAB ==================== -->
-	{:else if activeTab === 'export'}
-		<div class="bg-white shadow-sm rounded-lg p-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-4">Export Entities</h2>
-			<p class="text-gray-600 text-sm mb-6">
-				Export entities as a JSON file. You can export a single entity type or all types at once.
-			</p>
-
-			<div class="flex gap-3 mb-6">
-				<button
-					onclick={() => exportEntities(false)}
-					disabled={exporting}
-					class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-				>{exporting ? 'Exporting…' : `Export ${selectedType}`}</button>
-				<button
-					onclick={() => exportEntities(true)}
-					disabled={exporting}
-					class="px-5 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-				>{exporting ? 'Exporting…' : 'Export All Types'}</button>
-			</div>
-
-			{#if exporting}
-				<div class="flex items-center gap-3 text-gray-600">
-					<div class="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-					Exporting…
-				</div>
-			{/if}
-
-			{#if exportResult}
-				<div class="border border-gray-200 rounded-lg overflow-hidden">
-					<div class="bg-gray-50 px-4 py-3 flex items-center justify-between border-b border-gray-200 flex-wrap gap-2">
-						<div class="text-sm text-gray-700">
-							<strong>{exportResult.total_entities ?? '?'}</strong> entities
-							{#if (exportResult.total_codexes ?? 0) > 0}
-								, <strong>{exportResult.total_codexes}</strong> codexes
-							{/if}
-						</div>
-						<div class="flex gap-2">
-							<button
-								onclick={() => downloadExport(false)}
-								class="px-4 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium transition-colors"
-							>Download JSON</button>
-							<button
-								onclick={copyExport}
-								class="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 font-medium transition-colors"
-							>Copy to Clipboard</button>
-						</div>
-					</div>
-					<div class="max-h-96 overflow-auto">
-						<pre class="p-4 text-xs text-gray-800 font-mono whitespace-pre-wrap break-all">{exportJson}</pre>
-					</div>
-				</div>
-			{/if}
-		</div>
-
-	<!-- ==================== IMPORT TAB ==================== -->
-	{:else if activeTab === 'import'}
-		<div class="bg-white shadow-sm rounded-lg p-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-4">Import Entities</h2>
-			<p class="text-gray-600 text-sm mb-6">
-				Import entities from a JSON file or paste JSON directly. Existing entities with the same type and ID will be updated (upsert).
-			</p>
-
-			<!-- Import mode toggle -->
-			<div class="flex gap-2 mb-4">
-				<button
-					onclick={() => { importMode = 'file'; clearImport(); }}
-					class={cn(
-						'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-						importMode === 'file'
-							? 'bg-blue-100 text-blue-700 border border-blue-300'
-							: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-					)}
-				>Upload File</button>
-				<button
-					onclick={() => { importMode = 'editor'; clearImport(); }}
-					class={cn(
-						'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-						importMode === 'editor'
-							? 'bg-blue-100 text-blue-700 border border-blue-300'
-							: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-					)}
-				>JSON Editor</button>
-			</div>
-
-			{#if importMode === 'file'}
-				<!-- File upload / drag-and-drop -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					ondrop={handleDrop}
-					ondragover={(e: DragEvent) => { e.preventDefault(); dragOver = true; }}
-					ondragleave={() => dragOver = false}
-					onclick={() => fileInput?.click()}
-					onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && fileInput?.click()}
-					role="button"
-					tabindex="0"
-					class={cn(
-						'border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer',
-						dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
-					)}
-				>
-					<input
-						bind:this={fileInput}
-						type="file"
-						accept=".json"
-						onchange={handleFileSelect}
-						class="hidden"
-					/>
-					{#if importFileName}
-						<p class="text-blue-600 font-medium">{importFileName}</p>
-						<p class="text-sm text-gray-500 mt-1">Click or drop to replace</p>
-					{:else}
-						<svg class="mx-auto h-10 w-10 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-						</svg>
-						<p class="text-gray-600 font-medium">Drop a JSON file here or click to browse</p>
-						<p class="text-sm text-gray-400 mt-1">Accepts .json files</p>
-					{/if}
-				</div>
-			{:else}
-				<!-- JSON text editor -->
-				<div class="relative">
-					<textarea
-						bind:value={importText}
-						oninput={parseImportPreview}
-						placeholder={'Paste JSON here, e.g.\n[\n  {"_type": "User", "_id": "1", "name": "Alice"},\n  {"_type": "User", "_id": "2", "name": "Bob"}\n]'}
-						class="w-full h-64 p-4 border border-gray-300 rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-						spellcheck="false"
-					></textarea>
-					{#if importText}
-						<button
-							onclick={clearImport}
-							class="absolute top-2 right-2 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded"
-						>Clear</button>
-					{/if}
-				</div>
-			{/if}
-
-			<!-- Import preview -->
-			{#if importPreview}
-				<div class={cn('mt-4 border rounded-lg overflow-hidden', importPreview.valid ? 'border-green-200' : 'border-red-200')}>
-					{#if importPreview.valid}
-						<div class="bg-green-50 px-4 py-3 border-b border-green-200">
-							<p class="text-sm font-medium text-green-800">
-								Ready to import: {importPreview.totalEntities} entities
-								{#if importPreview.totalCodexes > 0}, {importPreview.totalCodexes} codexes{/if}
-							</p>
-						</div>
-						<div class="px-4 py-3">
-							<div class="flex flex-wrap gap-2">
-								{#each Object.entries(importPreview.typeCounts) as [type, count]}
-									<span class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded-full">
-										{getIcon(type)} {type}: {count}
-									</span>
-								{/each}
-							</div>
-							<div class="mt-4 flex gap-3">
-								<button
-									onclick={executeImport}
-									disabled={importing}
-									class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-								>{importing ? 'Importing…' : 'Confirm Import'}</button>
-								<button
-									onclick={clearImport}
-									disabled={importing}
-									class="px-5 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium disabled:opacity-50 transition-colors"
-								>Cancel</button>
-							</div>
-						</div>
-					{:else}
-						<div class="bg-red-50 px-4 py-3">
-							<p class="text-sm font-medium text-red-800">Invalid JSON</p>
-							<p class="text-sm text-red-600 mt-1">{importPreview.error}</p>
-						</div>
-					{/if}
-				</div>
-			{/if}
-
-			<!-- Import result -->
-			{#if importResult}
-				<div class={cn('mt-4 border rounded-lg overflow-hidden', importResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50')}>
-					<div class="px-4 py-3">
-						{#if importResult.success}
-							<p class="text-sm font-medium text-green-800">Import complete</p>
-							{#if importResult.data}
-								<div class="mt-2 text-sm text-green-700">
-									<p>Total records: {importResult.data.total_records || 0}</p>
-									<p>Successful: {importResult.data.successful || 0}</p>
-									{#if (importResult.data.failed ?? 0) > 0}
-										<p class="text-red-600">Failed: {importResult.data.failed}</p>
-										{#if importResult.data.errors?.length}
-											<ul class="mt-1 list-disc list-inside text-red-600">
-												{#each importResult.data.errors as err}
-													<li>{err}</li>
-												{/each}
-											</ul>
-										{/if}
-									{/if}
-								</div>
-							{/if}
-						{:else}
-							<p class="text-sm font-medium text-red-800">Import failed</p>
-							<p class="text-sm text-red-600 mt-1">{importResult.error}</p>
-						{/if}
-					</div>
-				</div>
-			{/if}
-		</div>
-	{/if}
 </div>

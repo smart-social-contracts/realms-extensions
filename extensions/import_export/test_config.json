@@ -1,0 +1,10 @@
+{
+  "$schema": "../_shared/testing/config/test_config.schema.json",
+  "extension_id": "import_export",
+  "test_type": "full",
+  "realm_config": { "random": true },
+  "test_canisters": { "enabled": false },
+  "backend_tests": { "enabled": false },
+  "e2e_tests": { "enabled": false },
+  "linting": { "enabled": true, "black": true, "isort": true, "flake8": true }
+}

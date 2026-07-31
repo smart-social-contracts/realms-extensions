@@ -1,7 +1,7 @@
 {
   "name": "admin_dashboard",
-  "version": "1.2.2",
-  "description": "Browse, export, and import entities",
+  "version": "1.3.0",
+  "description": "Browse, inspect, and delete entities",
   "author": "Realms Team",
   "categories": [
     "realm_management"
@@ -21,9 +21,6 @@
     "default": "realm.admin",
     "functions": {
       "get_entity_types": "db.export",
-      "export_data": "db.export",
-      "import_data": "db.manage",
-      "process_bulk_import": "db.manage",
       "delete_entity": "db.manage"
     }
   }
