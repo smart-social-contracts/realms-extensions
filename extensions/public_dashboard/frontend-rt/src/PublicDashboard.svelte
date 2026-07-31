@@ -1028,9 +1028,9 @@
 								/>
 								<span
 									class="text-xs text-gray-600 text-center truncate w-full mt-1"
-									title={user.name || user.id}
+									title={user.name || user.id || ''}
 								>
-									{user.name || user.id.substring(0, 8)}
+									{user.name || (user.id ? user.id.substring(0, 8) : '—')}
 								</span>
 							</div>
 						{/each}
