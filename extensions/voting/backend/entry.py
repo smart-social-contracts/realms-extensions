@@ -246,6 +246,27 @@ def _org_scoped_department(proposal: Proposal):
         return None
 
 
+def _civil_from_epoch(seconds: int) -> str:
+    """UTC calendar date for epoch *seconds*, computed arithmetically.
+
+    The canister stdlib ``time`` module has neither ``strftime`` nor
+    ``gmtime``, so the date is derived from the day count directly
+    (Howard Hinnant's civil-from-days algorithm).
+    """
+    z = seconds // 86400 + 719468
+    era = z // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    year = yoe + era * 400
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    day = doy - (153 * mp + 2) // 5 + 1
+    month = mp + 3 if mp < 10 else mp - 9
+    if month <= 2:
+        year += 1
+    return "%04d-%02d-%02d" % (year, month, day)
+
+
 def _format_voting_deadline(deadline_raw: str) -> str:
     """Best-effort human date from epoch seconds or ISO string."""
     if not deadline_raw:
@@ -253,39 +274,32 @@ def _format_voting_deadline(deadline_raw: str) -> str:
     text = str(deadline_raw).strip()
     if text.isdigit():
         try:
-            from datetime import datetime, timezone
-
-            return datetime.fromtimestamp(int(text), tz=timezone.utc).strftime("%Y-%m-%d")
-        except (ValueError, OSError, OverflowError):
+            return _civil_from_epoch(int(text))
+        except (ValueError, OverflowError):
             pass
     return text[:10] if len(text) >= 10 else text
 
 
+# Per-user inbox fan-out costs O(audience) entity writes inside a single
+# update call — at realm scale (10k+ members) start_voting exceeded the 40B
+# per-message instruction limit (found at the 10k calibration rung). Cap the
+# synchronous fan-out; the proposal stays discoverable via the voting UI for
+# members beyond the cap.
+NOTIFY_FANOUT_LIMIT = 1000
+
+
 def _notify_voting_opened(proposal: Proposal) -> None:
-    """Create inbox messages for users who must cast a vote."""
+    """Create inbox messages for users who must cast a vote (capped fan-out)."""
     title = (proposal.title or "New proposal").strip()
     deadline_label = _format_voting_deadline(proposal.voting_deadline or "")
     scope_dept = _org_scoped_department(proposal)
-
-    if scope_dept is not None:
-        from core.membership import department_member_principals
-
-        recipient_ids = department_member_principals(scope_dept, include_head=False)
-        audience_hint = f"members of {scope_dept.name}"
-    else:
-        recipient_ids = [user.id for user in User.instances()]
-        audience_hint = "all members"
 
     message = (
         f'Voting is open on "{title}". Cast your vote before {deadline_label}.'
     )
     metadata = json.dumps({"proposal_id": proposal.proposal_id})
 
-    notified = 0
-    for principal_id in recipient_ids:
-        user = User[principal_id]
-        if not user:
-            continue
+    def _notify(user) -> None:
         Notification(
             topic="governance",
             title=f"Vote required: {title}",
@@ -297,11 +311,33 @@ def _notify_voting_opened(proposal: Proposal) -> None:
             color="blue",
             metadata=metadata,
         )
-        notified += 1
+
+    notified = 0
+    capped = False
+    if scope_dept is not None:
+        from core.membership import department_member_principals
+
+        recipient_ids = department_member_principals(scope_dept, include_head=False)
+        audience_hint = f"members of {scope_dept.name}"
+        capped = len(recipient_ids) > NOTIFY_FANOUT_LIMIT
+        for principal_id in recipient_ids[:NOTIFY_FANOUT_LIMIT]:
+            user = User[principal_id]
+            if not user:
+                continue
+            _notify(user)
+            notified += 1
+    else:
+        audience_hint = "all members"
+        # Single bounded pass over the first page of users — no full
+        # User.instances() materialization and no per-principal re-lookup.
+        capped = User.count() > NOTIFY_FANOUT_LIMIT
+        for user in User.load_some(1, NOTIFY_FANOUT_LIMIT):
+            _notify(user)
+            notified += 1
 
     logger.info(
         f"Voting notifications sent for {proposal.proposal_id} "
-        f"to {notified} {audience_hint}"
+        f"to {notified} {audience_hint}" + (" (fan-out capped)" if capped else "")
     )
 
 
@@ -354,7 +390,10 @@ def _check_threshold_and_quorum(proposal: Proposal) -> bool:
     governance = _get_governance_params(proposal)
     quorum_percent = governance.get("quorum", 20)
 
-    active_members = len(list(User.instances()))
+    # O(1) counter read — User.instances() loads every entity (O(max_id)),
+    # which at realm scale blows the per-message instruction limit on every
+    # vote tally check.
+    active_members = User.count()
     if active_members <= 0:
         return False
 
