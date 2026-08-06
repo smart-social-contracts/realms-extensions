@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+@source "./**/*.{html,js,svelte,ts}";
+@source "../../../../packages/extension-ui/src/lib/**/*.{html,js,svelte,ts}";
