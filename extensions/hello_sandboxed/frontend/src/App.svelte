@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { createExtensionClient, BRIDGE_PROTOCOL_VERSION, type HostState } from '@realms/extension-bridge';
-	import { PageHeader, Card, Button } from '@realms/extension-ui';
+	import { createExtensionClient, BRIDGE_PROTOCOL_VERSION, type HostState } from '@realmsgos/extension-bridge';
+	import { PageHeader, Card, Button } from '@realmsgos/extension-ui';
 
 	let bridgeReady = $state(false);
 	let bridgeError = $state('');
@@ -130,7 +130,7 @@
 <div class="mx-auto max-w-3xl space-y-6 px-4 pb-8">
 	<PageHeader
 		title="Hello (Sandboxed)"
-		subtitle="This extension runs inside a sandboxed iframe (opaque origin, allow-scripts only). All host interaction goes through the @realms/extension-bridge postMessage protocol."
+		subtitle="This extension runs inside a sandboxed iframe (opaque origin, allow-scripts only). All host interaction goes through the @realmsgos/extension-bridge postMessage protocol."
 	/>
 
 	<Card title="Bridge status">

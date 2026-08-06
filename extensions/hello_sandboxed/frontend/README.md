@@ -9,7 +9,7 @@ npm install
 npm run build   # emits dist/index.html with relative ./assets/ paths
 ```
 
-Ensure `@realms/extension-bridge` and `@realms/extension-ui` are built in the monorepo (`packages/extension-bridge`, `packages/extension-ui`) before installing.
+Ensure `@realmsgos/extension-bridge` and `@realmsgos/extension-ui` are built in the monorepo (`packages/extension-bridge`, `packages/extension-ui`) before installing.
 
 ## Local development (mock host)
 

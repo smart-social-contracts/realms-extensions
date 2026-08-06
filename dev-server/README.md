@@ -32,7 +32,7 @@ The mock host enforces manifest `capabilities` and `entry_access.functions`, ret
 npm install
 ```
 
-Requires `@realms/extension-bridge` (linked via `file:../../packages/extension-bridge`). Build it first if needed:
+Requires `@realmsgos/extension-bridge` (linked via `file:../../packages/extension-bridge`). Build it first if needed:
 
 ```bash
 cd ../../packages/extension-bridge && npm run build

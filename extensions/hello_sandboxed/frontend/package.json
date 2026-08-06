@@ -9,8 +9,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@realms/extension-bridge": "file:../../../../packages/extension-bridge",
-    "@realms/extension-ui": "file:../../../../packages/extension-ui"
+    "@realmsgos/extension-bridge": "file:../../../../packages/extension-bridge",
+    "@realmsgos/extension-ui": "file:../../../../packages/extension-ui"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

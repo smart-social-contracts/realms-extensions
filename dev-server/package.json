@@ -7,7 +7,7 @@
     "realms-ext-dev": "./bin/dev.js"
   },
   "dependencies": {
-    "@realms/extension-bridge": "file:../../packages/extension-bridge",
+    "@realmsgos/extension-bridge": "file:../../packages/extension-bridge",
     "@dfinity/agent": "^3.4.3",
     "@dfinity/candid": "^3.4.3",
     "@dfinity/principal": "^3.4.3",

@@ -4,7 +4,7 @@
  * Embeds the extension in a sandboxed iframe and runs createBridgeServer
  * with manifest-driven capabilities and entry_access enforcement.
  */
-import { createBridgeServer, type HostState } from '@realms/extension-bridge';
+import { createBridgeServer, type HostState } from '@realmsgos/extension-bridge';
 
 declare const __EXT_ID__: string;
 declare const __EXT_IFRAME_URL__: string;
