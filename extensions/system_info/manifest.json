@@ -2,7 +2,10 @@
   "name": "system_info",
   "version": "1.0.3",
   "ggg_api_version": 1,
+  "runtime": "sandboxed",
+  "sdk_version": "1",
   "capabilities": [
+    "call_extension",
     "system.snapshot",
     "log.write"
   ],
@@ -28,6 +31,12 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/system_info",
   "show_in_sidebar": true,
   "entry_access": {
-    "default": "realm.monitor"
+    "default": "realm.monitor",
+    "functions": {
+      "get_system_info": "developer",
+      "get_db_stats": "developer",
+      "get_canister_stats": "developer",
+      "get_token_balances": "developer"
+    }
   }
 }
