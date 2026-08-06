@@ -1,0 +1,31 @@
+{
+  "name": "hello_sandboxed",
+  "version": "1.0.0",
+  "description": "Reference sandboxed extension — bridge protocol demo",
+  "author": "Realms Team",
+  "runtime": "sandboxed",
+  "sdk_version": "1",
+  "capabilities": [
+    "call_extension",
+    "navigate",
+    "notify"
+  ],
+  "permissions": [],
+  "profiles": [
+    "member",
+    "admin"
+  ],
+  "categories": [
+    "other"
+  ],
+  "icon": "wand",
+  "show_in_sidebar": true,
+  "sidebar_label": {
+    "en": "Hello (Sandboxed)"
+  },
+  "entry_access": {
+    "functions": {
+      "greet": "member"
+    }
+  }
+}

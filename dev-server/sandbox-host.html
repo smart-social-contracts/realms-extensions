@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sandboxed Extension Dev</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="flex min-h-screen flex-col">
+    <nav class="shrink-0 border-b border-gray-200 bg-white px-4 py-2.5">
+      <div class="mx-auto flex max-w-6xl items-center justify-between">
+        <div>
+          <span class="text-sm font-semibold text-gray-900">Realms extension dev</span>
+          <span class="ml-2 text-xs text-gray-400" id="dev-label">sandboxed</span>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-gray-500">
+          <label class="flex items-center gap-1.5">
+            <span>Theme</span>
+            <select id="theme-select" class="rounded border border-gray-300 px-2 py-1 text-xs">
+              <option value="light">light</option>
+              <option value="dark">dark</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </nav>
+
+    <div class="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 lg:flex-row">
+      <aside class="w-full shrink-0 space-y-4 lg:w-72">
+        <section class="rounded-lg border border-gray-200 bg-white p-3">
+          <h2 class="text-sm font-semibold text-gray-900">Bridge log</h2>
+          <ul id="bridge-log" class="mt-2 max-h-48 space-y-1 overflow-y-auto font-mono text-xs text-gray-600"></ul>
+        </section>
+        <section class="rounded-lg border border-gray-200 bg-white p-3">
+          <h2 class="text-sm font-semibold text-gray-900">Navigate log</h2>
+          <ul id="navigate-log" class="mt-2 max-h-32 space-y-1 overflow-y-auto font-mono text-xs text-gray-600"></ul>
+        </section>
+      </aside>
+
+      <main class="min-w-0 flex-1">
+        <div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <iframe
+            id="ext-iframe"
+            title="Sandboxed extension"
+            sandbox="allow-scripts"
+            class="block w-full border-0"
+            style="height: 400px;"
+          ></iframe>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast-root" class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+
+  <div id="modal-backdrop" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/40 p-4">
+    <div class="w-full max-w-md rounded-lg bg-white p-5 shadow-xl" role="dialog" aria-modal="true">
+      <h3 id="modal-title" class="text-lg font-semibold text-gray-900"></h3>
+      <p id="modal-body" class="mt-2 text-sm text-gray-600"></p>
+      <div id="modal-actions" class="mt-4 flex justify-end gap-2"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/__sandbox_dev_entry.ts"></script>
+</body>
+</html>
