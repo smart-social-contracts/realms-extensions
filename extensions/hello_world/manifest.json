@@ -3,6 +3,11 @@
   "version": "0.1.2",
   "description": "Simple hello world extension — runtime extension demo",
   "author": "Realms Team",
+  "runtime": "sandboxed",
+  "sdk_version": "1",
+  "capabilities": [
+    "call_extension"
+  ],
   "permissions": [],
   "profiles": [
     "member",
@@ -17,6 +22,8 @@
     "en": "Hello World"
   },
   "entry_access": {
-    "default": "public"
+    "functions": {
+      "greet": "member"
+    }
   }
 }
