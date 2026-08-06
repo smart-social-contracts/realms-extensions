@@ -90,12 +90,32 @@ if (isSandboxed) {
 	});
 
 	const iframeUrl = `http://localhost:${EXT_PORT}/`;
+	const sandboxManifest = {
+		runtime: manifest.runtime,
+		sdk_version: manifest.sdk_version,
+		capabilities: manifest.capabilities ?? [],
+		entry_access: manifest.entry_access,
+	};
 
 	const hostServer = await createServer({
 		configFile: false,
 		root: devServerRoot,
 		plugins: [
 			tailwindcss(),
+			{
+				name: 'sandbox-dev-entry-define',
+				enforce: 'post',
+				transform(code, id) {
+					if (!id.endsWith('sandbox-dev-entry.ts')) return;
+					return {
+						code: code
+							.replaceAll('__EXT_ID__', JSON.stringify(extId))
+							.replaceAll('__EXT_IFRAME_URL__', JSON.stringify(iframeUrl))
+							.replaceAll('__MANIFEST__', JSON.stringify(sandboxManifest)),
+						map: null,
+					};
+				},
+			},
 			{
 				name: 'sandbox-host-index',
 				configureServer(server) {
@@ -111,16 +131,6 @@ if (isSandboxed) {
 				},
 			},
 		],
-		define: {
-			__EXT_ID__: JSON.stringify(extId),
-			__EXT_IFRAME_URL__: JSON.stringify(iframeUrl),
-			__MANIFEST__: JSON.stringify({
-				runtime: manifest.runtime,
-				sdk_version: manifest.sdk_version,
-				capabilities: manifest.capabilities ?? [],
-				entry_access: manifest.entry_access,
-			}),
-		},
 		resolve: {
 			alias: {
 				'/__sandbox_dev_entry.ts': resolve(devServerRoot, 'sandbox-dev-entry.ts'),
