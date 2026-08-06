@@ -33,10 +33,10 @@
   "entry_access": {
     "default": "realm.monitor",
     "functions": {
-      "get_system_info": "developer",
-      "get_db_stats": "developer",
-      "get_canister_stats": "developer",
-      "get_token_balances": "developer"
+      "get_system_info": "realm.monitor",
+      "get_db_stats": "realm.monitor",
+      "get_canister_stats": "realm.monitor",
+      "get_token_balances": "realm.monitor"
     }
   }
 }

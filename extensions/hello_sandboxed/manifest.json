@@ -1,7 +1,7 @@
 {
   "name": "hello_sandboxed",
   "version": "1.0.0",
-  "description": "Reference sandboxed extension — bridge protocol demo",
+  "description": "Reference sandboxed extension \u2014 bridge protocol demo",
   "author": "Realms Team",
   "runtime": "sandboxed",
   "sdk_version": "1",
@@ -26,7 +26,7 @@
   },
   "entry_access": {
     "functions": {
-      "greet": "member"
+      "greet": "realm.data_view"
     }
   }
 }
