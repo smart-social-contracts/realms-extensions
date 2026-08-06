@@ -114,7 +114,7 @@ else
     BACKEND_ID=$(dfx canister id marketplace_backend --network "$NETWORK" 2>/dev/null || echo "unknown")
     if [ "$NETWORK" == "ic" ]; then
         echo "📍 Frontend URL: https://${FRONTEND_ID}.icp0.io/"
-        echo "📍 Backend Candid: https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=${BACKEND_ID}"
+        echo "📍 Backend Candid: https://rxs6w-5qaaa-aaaah-avp2a-cai.icp0.io/?id=${BACKEND_ID}"
     else
         echo "📍 Frontend ID: ${FRONTEND_ID}"
         echo "📍 Backend ID: ${BACKEND_ID}"
