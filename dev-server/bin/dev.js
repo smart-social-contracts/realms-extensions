@@ -94,7 +94,23 @@ if (isSandboxed) {
 	const hostServer = await createServer({
 		configFile: false,
 		root: devServerRoot,
-		plugins: [tailwindcss()],
+		plugins: [
+			tailwindcss(),
+			{
+				name: 'sandbox-host-index',
+				configureServer(server) {
+					server.middlewares.use((req, res, next) => {
+						if (req.url === '/' || req.url === '/index.html') {
+							const html = readFileSync(resolve(devServerRoot, 'sandbox-host.html'), 'utf-8');
+							res.setHeader('Content-Type', 'text/html');
+							res.end(html);
+							return;
+						}
+						next();
+					});
+				},
+			},
+		],
 		define: {
 			__EXT_ID__: JSON.stringify(extId),
 			__EXT_IFRAME_URL__: JSON.stringify(iframeUrl),
@@ -115,17 +131,6 @@ if (isSandboxed) {
 			strictPort: true,
 			open: false,
 		},
-	});
-
-	// Serve sandbox-host.html as the index page
-	hostServer.middlewares.use((req, res, next) => {
-		if (req.url === '/' || req.url === '/index.html') {
-			const html = readFileSync(resolve(devServerRoot, 'sandbox-host.html'), 'utf-8');
-			res.setHeader('Content-Type', 'text/html');
-			res.end(html);
-			return;
-		}
-		next();
 	});
 
 	await extServer.listen();
