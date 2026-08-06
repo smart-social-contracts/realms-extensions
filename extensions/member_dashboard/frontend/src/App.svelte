@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createExtensionClient, type ExtensionClient } from '@realmsgos/extension-bridge';
-	import { PageHeader, Card, Button, EmptyState } from '@realmsgos/extension-ui';
+	import { PageHeader, Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
 	import {
 		bridgeErrorFields,
 		cn,
@@ -386,14 +386,13 @@
 		{:else if accessDeniedOp}
 			<Card>
 				{#snippet children()}
-					<EmptyState
-						title="Access denied"
+					<AccessDenied
 						message="You need additional permissions to view this page ({accessDeniedOp})."
 					>
-						{#snippet actions()}
+						{#snippet children()}
 							<Button tone="secondary" size="sm" onclick={() => void loadDashboard()}>Retry</Button>
 						{/snippet}
-					</EmptyState>
+					</AccessDenied>
 				{/snippet}
 			</Card>
 		{:else if error}

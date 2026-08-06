@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createExtensionClient, type HostState } from '@realmsgos/extension-bridge';
-	import { PageHeader, Card, Button } from '@realmsgos/extension-ui';
+	import { PageHeader, Card, Button, AccessDenied } from '@realmsgos/extension-ui';
 
 	let bridgeReady = $state(false);
 	let bridgeError = $state('');
@@ -145,12 +145,11 @@
 				{/if}
 
 				{#if accessDenied}
-					<div
-						class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3.5 dark:border-amber-800 dark:bg-amber-900/20"
-					>
-						<p class="text-sm text-amber-800 dark:text-amber-300">
-							You need additional permissions to perform this action.
-						</p>
+					<div class="mt-4">
+						<AccessDenied
+							operation="greet"
+							message="You need additional permissions to perform this action."
+						/>
 					</div>
 				{:else if error}
 					<div
