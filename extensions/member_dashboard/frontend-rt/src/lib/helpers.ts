@@ -1,0 +1,148 @@
+export function cn(...classes: (string | undefined | null | false)[]): string {
+	return classes.filter(Boolean).join(' ');
+}
+
+export function bridgeErrorFields(err: unknown): { code: string; message: string } {
+	if (err instanceof Error) {
+		const code = (err as Error & { code?: string }).code ?? 'failed';
+		return { code, message: err.message };
+	}
+	return { code: 'failed', message: String(err) };
+}
+
+export type ExtEnvelope<T = unknown> = { success: boolean; data?: T; error?: string };
+
+export function getGreeting(): string {
+	const hour = new Date().getHours();
+	if (hour < 12) return 'Good morning';
+	if (hour < 18) return 'Good afternoon';
+	return 'Good evening';
+}
+
+export function mdToHtml(text: string): string {
+	if (!text) return '';
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+		.replace(/\*(.+?)\*/g, '<em>$1</em>')
+		.replace(
+			/\[([^\]]+)\]\(([^)]+)\)/g,
+			'<a href="$2" class="text-blue-600 underline hover:text-blue-800" target="_blank" rel="noopener">$1</a>',
+		)
+		.replace(/`([^`]+)`/g, '<code class="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-xs">$1</code>')
+		.replace(/^\s*[-*]\s+(.+)$/gm, '<li class="ml-4">$1</li>')
+		.replace(/(<li.*<\/li>\n?)+/g, (m) => '<ul class="list-disc ml-2 space-y-1">' + m + '</ul>')
+		.replace(/\n{2,}/g, '</p><p class="mt-2">')
+		.replace(/\n/g, '<br>')
+		.replace(/^/, '<p>')
+		.replace(/$/, '</p>');
+}
+
+export function formatRelativeTime(timestampMs: number): string {
+	if (!timestampMs) return '';
+	const diffMs = Date.now() - timestampMs;
+	if (diffMs < 0) return 'just now';
+	const s = Math.floor(diffMs / 1000);
+	if (s < 60) return 'just now';
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.floor(h / 24);
+	if (d < 30) return `${d}d ago`;
+	const mo = Math.floor(d / 30);
+	if (mo < 12) return `${mo}mo ago`;
+	return `${Math.floor(mo / 12)}y ago`;
+}
+
+export function formatFullDate(timestampMs: number): string {
+	if (!timestampMs) return '';
+	const d = new Date(timestampMs);
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function formatInvoicePaidDate(paidOn: string | null | undefined): string {
+	if (!paidOn) return '—';
+	if (paidOn.startsWith('1970-01-01')) return '—';
+	try {
+		const d = new Date(paidOn);
+		if (Number.isNaN(d.getTime()) || d.getTime() <= 0) return '—';
+		return formatFullDate(d.getTime());
+	} catch {
+		return '—';
+	}
+}
+
+export function getStatusColor(status: string): string {
+	switch (status?.toLowerCase()) {
+		case 'paid':
+			return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400';
+		case 'pending':
+			return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400';
+		case 'overdue':
+			return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400';
+		case 'processing':
+			return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400';
+		default:
+			return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400';
+	}
+}
+
+export function getPaymentCliCommand(info: Record<string, unknown> | null): string {
+	if (!info) return '';
+	if (info.amount_raw != null) {
+		const token = String(info.currency || 'token').toLowerCase();
+		return `dfx canister call ${token}_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}" }; amount = ${info.amount_raw} })' --network ic`;
+	}
+	return `dfx canister call token_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}"; subaccount = opt blob "${info.subaccount}" }; amount = ${info.amount_raw || 0} })' --network ic`;
+}
+
+export function entries(obj: unknown): [string, unknown][] {
+	if (!obj || typeof obj !== 'object') return [];
+	return Object.entries(obj).filter(([k]) => !k.startsWith('_'));
+}
+
+export async function clipboardCopy(text: string): Promise<boolean> {
+	try {
+		if (navigator.clipboard?.writeText) {
+			await navigator.clipboard.writeText(text);
+			return true;
+		}
+		const ta = document.createElement('textarea');
+		ta.value = text;
+		ta.style.position = 'fixed';
+		ta.style.left = '-9999px';
+		document.body.appendChild(ta);
+		ta.select();
+		document.execCommand('copy');
+		document.body.removeChild(ta);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export const networks = [
+	{ value: 'ICP', label: 'Internet Computer (ICP)' },
+	{ value: 'Bitcoin', label: 'Bitcoin' },
+	{ value: 'Ethereum', label: 'Ethereum' },
+	{ value: 'SEPA', label: 'SEPA Bank Transfer' },
+];
+
+export const currenciesByNetwork: Record<string, Array<{ value: string; label: string }>> = {
+	ICP: [
+		{ value: 'ICP', label: 'ICP' },
+		{ value: 'ckBTC', label: 'ckBTC' },
+		{ value: 'ckETH', label: 'ckETH' },
+	],
+	Bitcoin: [{ value: 'BTC', label: 'Bitcoin (BTC)' }],
+	Ethereum: [
+		{ value: 'ETH', label: 'Ethereum (ETH)' },
+		{ value: 'USDC', label: 'USDC' },
+		{ value: 'USDT', label: 'USDT' },
+	],
+	SEPA: [{ value: 'EUR', label: 'Euro (EUR)' }],
+};

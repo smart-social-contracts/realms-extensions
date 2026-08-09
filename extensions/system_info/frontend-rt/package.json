@@ -1,15 +1,24 @@
 {
   "name": "system_info-frontend-rt",
-  "version": "0.1.0",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "dev": "vite",
+    "build": "vite build && node ../../_shared/frontend-rt/postbuild-stub.mjs",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@realmsgos/extension-bridge": "^0.2.0",
+    "@realmsgos/extension-ui": "^0.2.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tailwindcss/vite": "^4.0.0",
     "svelte": "^5.19.0",
-    "typescript": "^5.4.0",
+    "svelte-check": "^4.1.1",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.3",
     "vite": "^6.0.0"
   }
 }

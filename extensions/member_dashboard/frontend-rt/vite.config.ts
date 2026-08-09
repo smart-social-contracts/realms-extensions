@@ -1,25 +1,12 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { resolve } from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-	plugins: [svelte({ emitCss: false })],
+	plugins: [svelte(), tailwindcss()],
+	base: './',
 	build: {
-		lib: {
-			entry: resolve(__dirname, 'src/index.ts'),
-			name: 'MemberDashboardExt',
-			formats: ['es'],
-			fileName: () => 'index.js',
-		},
-		rollupOptions: {
-			output: {
-				inlineDynamicImports: true,
-			},
-		},
-		cssCodeSplit: false,
-		minify: 'esbuild',
-		sourcemap: false,
-		target: 'es2020',
+		outDir: 'dist',
 		emptyOutDir: true,
 	},
 });
