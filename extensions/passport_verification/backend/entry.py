@@ -99,9 +99,11 @@ def get_event_id(args: str) -> str:
     return app_id
 
 
-def get_verification_link(args: str):
+@update
+def get_verification_link(args: str) -> Async[str]:
     """Get the verification link -- bypasses Rarimo API in test mode."""
     from core.runtime_flags import skip_passport_zkproof
+
     if skip_passport_zkproof():
         session_id = get_session_id(args)
         logger.info(f"🧪 TEST MODE: Returning mock verification link for {session_id}")
@@ -116,12 +118,7 @@ def get_verification_link(args: str):
                 }
             }
         })
-    return _get_verification_link_async(args)
 
-
-@update
-def _get_verification_link_async(args: str) -> Async[str]:
-    """Async implementation that calls Rarimo API."""
     session_id = get_session_id(args)
     logger.info(f"🔗 Getting verification link for session: {session_id}")
 
@@ -186,9 +183,11 @@ def _get_verification_link_async(args: str) -> Async[str]:
     )
 
 
-def check_verification_status(args: str):
+@update
+def check_verification_status(args: str) -> Async[str]:
     """Check verification status -- bypasses Rarimo API in test mode."""
     from core.runtime_flags import skip_passport_zkproof
+
     if skip_passport_zkproof():
         session_id = get_session_id(args)
         logger.info(f"🧪 TEST MODE: Skipping Rarimo API, returning verified for {session_id}")
@@ -199,12 +198,7 @@ def check_verification_status(args: str):
                 "attributes": {"status": "verified", "test_mode": True}
             }
         })
-    return _check_verification_status_async(args)
 
-
-@update
-def _check_verification_status_async(args: str) -> Async[str]:
-    """Async implementation that calls Rarimo API."""
     session_id = get_session_id(args)
     logger.info(f"🔍 Checking verification status for session: {session_id}")
     logger.info("📤 Sending HTTP GET request to check status")
