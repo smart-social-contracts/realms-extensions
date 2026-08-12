@@ -702,6 +702,52 @@ def list_payment_accounts(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def get_notifications(args: str) -> str:
+    """Notifications visible to the caller (same semantics as notifications ext)."""
+    try:
+        from core.notification_bridge import v_list
+
+        caller = _caller_id()
+        result = v_list(caller=caller)
+        return json.dumps({"success": True, "data": result.get("notifications", [])})
+    except Exception as e:
+        logger.error(
+            f"Error in get_notifications: {str(e)}\n{traceback.format_exc()}"
+        )
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def mark_as_read(args: str) -> str:
+    """Mark a notification read or unread for the caller."""
+    try:
+        from core.notification_bridge import v_mark_read
+
+        params = json.loads(args) if args and args.strip() else {}
+        notification_id = params.get("id")
+        read = bool(params.get("read", True))
+        result = v_mark_read(caller=_caller_id(), id=notification_id, read=read)
+        return json.dumps({"success": True, "data": result})
+    except Exception as e:
+        logger.error(f"Error in mark_as_read: {str(e)}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def delete_notification(args: str) -> str:
+    """Delete a notification (recipient, sender, or admin only)."""
+    try:
+        from core.notification_bridge import v_delete
+
+        params = json.loads(args) if args and args.strip() else {}
+        notification_id = params.get("id")
+        result = v_delete(caller=_caller_id(), id=notification_id)
+        return json.dumps({"success": True, "data": result})
+    except Exception as e:
+        logger.error(
+            f"Error in delete_notification: {str(e)}\n{traceback.format_exc()}"
+        )
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def remove_payment_account(args: str) -> str:
     """
     Remove a payment account (soft delete).

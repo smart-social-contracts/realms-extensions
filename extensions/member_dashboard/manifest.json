@@ -1,6 +1,6 @@
 {
   "name": "member_dashboard",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Personal dashboard for members to manage their government services and documents",
   "author": "Smart Social Contracts",
   "system": true,
@@ -38,7 +38,10 @@
       "get_invoice_deposit_address": "self.data_view",
       "get_personal_data": "self.data_view",
       "list_payment_accounts": "self.data_view",
+      "get_notifications": "self.data_view",
       "add_payment_account": "self.data_manage",
+      "mark_as_read": "self.data_manage",
+      "delete_notification": "self.data_manage",
       "remove_payment_account": "self.data_manage",
       "check_invoice_payment": "self.invoice_refresh",
       "demo_mark_invoice_paid": "demo.manage"

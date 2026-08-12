@@ -27,6 +27,9 @@
 		sender?: string;
 		timestamp_ms?: number;
 		read?: boolean;
+		icon?: string;
+		href?: string;
+		color?: string;
 	};
 
 	let bridgeReady = $state(false);
@@ -128,11 +131,26 @@
 	}
 
 	async function loadNotifications() {
+		if (!ctx || !principal) return;
 		notificationsLoading = true;
-		notificationsUnavailable = true;
-		notifications = [];
-		notificationsLoading = false;
-		queueMicrotask(reportHeight);
+		notificationsUnavailable = false;
+		try {
+			const result = await callExt<NotificationItem[]>('get_notifications', {
+				user_id: principal,
+			});
+			if (result.success && Array.isArray(result.data)) {
+				notifications = result.data;
+			} else {
+				notifications = [];
+				notificationsUnavailable = true;
+			}
+		} catch {
+			notifications = [];
+			notificationsUnavailable = true;
+		} finally {
+			notificationsLoading = false;
+			queueMicrotask(reportHeight);
+		}
 	}
 
 	async function loadInvoices() {
@@ -198,16 +216,29 @@
 	async function toggleRead(notif: NotificationItem) {
 		try {
 			const newRead = !notif.read;
-			notifications = notifications.map((n) =>
-				n.id === notif.id ? { ...n, read: newRead } : n,
-			);
+			const result = await callExt<{ id: string; read: boolean }>('mark_as_read', {
+				id: notif.id,
+				read: newRead,
+			});
+			if (result.success) {
+				notifications = notifications.map((n) =>
+					n.id === notif.id ? { ...n, read: newRead } : n,
+				);
+			}
 		} catch {
-			/* cross-extension notifications unavailable in sandbox */
+			/* mark-as-read failed */
 		}
 	}
 
 	async function deleteNotification(notif: NotificationItem) {
-		notifications = notifications.filter((n) => n.id !== notif.id);
+		try {
+			const result = await callExt('delete_notification', { id: notif.id });
+			if (result.success) {
+				notifications = notifications.filter((n) => n.id !== notif.id);
+			}
+		} catch {
+			/* delete failed */
+		}
 	}
 
 	function toggleExpand(notif: NotificationItem) {
@@ -466,7 +497,7 @@
 						{#snippet children()}
 							<EmptyState
 								title="Notifications unavailable"
-								message="Cross-extension calls to the notifications extension are not supported in the sandboxed runtime. In-app notifications require a bridge API (call_other_extension or host notification feed)."
+								message="Could not load notifications. Try refreshing the page."
 							/>
 						{/snippet}
 					</Card>
