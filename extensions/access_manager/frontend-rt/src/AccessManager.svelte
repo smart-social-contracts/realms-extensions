@@ -93,7 +93,13 @@
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const id = ++toastCounter;
-		toasts = [...toasts, { id, text: message, type }];
+		// Friendly message for expired session (delegation) errors
+		const friendly = message.includes('Invalid delegation expiry') ||
+			message.includes('delegation has expired') ||
+			message.includes('Specified sender delegation has expired')
+			? 'Your session expired. Please refresh the page to continue.'
+			: message;
+		toasts = [...toasts, { id, text: friendly, type }];
 		setTimeout(() => { toasts = toasts.filter(t => t.id !== id); }, 4000);
 	}
 
