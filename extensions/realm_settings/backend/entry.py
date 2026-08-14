@@ -849,6 +849,7 @@ _DEFAULT_EMAIL_EVENTS = {
     "vote_ended": True,
     "mention": True,
     "task_assigned": True,
+    "email_verification": True,
 }
 
 
@@ -889,13 +890,16 @@ def get_email_config(args=None):
         email = _get_manifest_email()
         realm = Realm.load("1")
         logo_url = getattr(realm, "logo_url", "") or "" if realm else ""
+        from_name = (getattr(realm, "name", "") or "").strip() if realm else ""
+        if not from_name:
+            from_name = "Realms GOS"
         return {
             "success": True,
             "data": {
                 "enabled": bool(email.get("enabled", False)),
-                "from_name": email.get("from_name", ""),
-                "from_address": email.get("from_address", ""),
-                "reply_to": email.get("reply_to", ""),
+                "from_name": from_name,
+                "from_address": "",
+                "reply_to": "",
                 "logo_url": logo_url,
                 "events": email.get("events", _DEFAULT_EMAIL_EVENTS),
                 "templates": email.get("templates", {}) or {},
@@ -909,11 +913,11 @@ def get_email_config(args=None):
 def set_email_config(args: dict):
     """Update the realm's email notification configuration.
 
-    Realm-level, non-sensitive settings only (sender identity, reply-to, and
-    event toggles). SMTP credentials are stored in the off-chain worker env.
+    Realm-level, non-sensitive settings only (event toggles and templates).
+    Sender identity is derived from the realm name; SMTP credentials are
+    stored in the off-chain worker env.
 
-    Args (JSON): {"enabled": bool, "from_name": str, "from_address": str,
-                  "reply_to": str, "events": {...}}
+    Args (JSON): {"enabled": bool, "events": {...}}
     """
     from ggg import Realm
 
@@ -954,12 +958,11 @@ def set_email_config(args: dict):
 
         updated = {
             "enabled": bool(args.get("enabled", existing.get("enabled", False))),
-            "from_name": str(args.get("from_name", existing.get("from_name", ""))).strip(),
-            "from_address": str(args.get("from_address", existing.get("from_address", ""))).strip(),
-            "reply_to": str(args.get("reply_to", existing.get("reply_to", ""))).strip(),
             "events": {**_DEFAULT_EMAIL_EVENTS, **existing.get("events", {}), **events},
             "templates": existing.get("templates", {}) or {},
         }
+        if "templates" in args and isinstance(args.get("templates"), dict):
+            updated["templates"] = args["templates"]
 
         manifest["email"] = updated
         serialized = json.dumps(manifest)

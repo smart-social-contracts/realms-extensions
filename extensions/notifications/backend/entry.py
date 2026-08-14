@@ -135,7 +135,10 @@ def get_user_email(args: str = "{}"):
     """Return the calling user's email address."""
     try:
         settings = ctx.notifications.email_settings()
-        return _ok({"email": settings.get("email", "")})
+        return _ok({
+            "email": settings.get("email", ""),
+            "email_verified": bool(settings.get("email_verified", False)),
+        })
     except Exception as e:
         return _err(e)
 
@@ -167,6 +170,26 @@ def set_user_email_preferences(args: str):
     try:
         enabled = bool(_args(args).get("email_notifications_enabled", True))
         result = ctx.notifications.set_email_preferences(enabled)
+        return _ok(result)
+    except Exception as e:
+        return _err(e)
+
+
+def request_email_verification(args: str):
+    """Queue a verification code email to the caller's address."""
+    try:
+        result = ctx.notifications.request_email_verification(
+            _args(args).get("email", "")
+        )
+        return _ok(result)
+    except Exception as e:
+        return _err(e)
+
+
+def verify_email_code(args: str):
+    """Confirm ownership of the stored address with the emailed code."""
+    try:
+        result = ctx.notifications.verify_email_code(_args(args).get("code", ""))
         return _ok(result)
     except Exception as e:
         return _err(e)
