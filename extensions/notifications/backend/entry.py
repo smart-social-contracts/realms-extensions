@@ -198,7 +198,7 @@ def verify_email_code(args: str):
 def get_pending_email_notifications(args: str = "{}"):
     """Return notifications queued for email delivery, for the worker."""
     try:
-        return _ok({"notifications": ctx.notifications.pending_emails()})
+        return _ok(ctx.notifications.pending_emails())
     except Exception as e:
         return _err(e)
 

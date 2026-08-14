@@ -39,19 +39,13 @@ let governanceVotingWindowDays = $state<number | null>(null);
 let liveVotingWindowSeconds = $state<number | null>(null);
 let tokenResolving = $state(false);
 
-// Email notification configuration (issue #266): realm-level event routing.
-// Sender identity (from name, address, logo) is derived from realm settings
-// and platform defaults. SMTP credentials live in the off-chain worker environment.
+// Email notification configuration (issue #266): realm-level on/off toggle.
+// Sender identity is derived from realm settings; SMTP credentials stay on the server.
 let realmSettingsEmailEnabled = $state(false);
+let savedEmailEnabled = $state(false);
 let adminEmail = $state('');
-let realmSettingsEmailEvents: Record<string, boolean> = $state({
-	proposal_created: true,
-	vote_reminder: true,
-	vote_ended: true,
-	mention: true,
-	task_assigned: true,
-	email_verification: true,
-});
+let testFlagsEnabled = $state(false);
+let emailDirty = $derived(realmSettingsEmailEnabled !== savedEmailEnabled);
 
 	// Governed-action confirmation (issue #262): when the root org policy is
 	// not 1/1, update_realm_config returns requires_confirmation and the
@@ -221,6 +215,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
 				);
 				realmSettingsNftCanisterId = nft?.canister_id || '';
+				testFlagsEnabled = s.test_mode === true || ctx.realmInfo?.testMode === true;
 			}
 			const gov = await callExt('get_governance_settings');
 			if (gov?.success && gov.data) {
@@ -287,7 +282,6 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				marketplace_canister_id: realmSettingsMarketplaceId,
 				email_service_config: {
 					enabled: realmSettingsEmailEnabled,
-					events: { ...realmSettingsEmailEvents },
 				},
 				config_overrides: {
 					governance: {
@@ -309,6 +303,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 			} else if (result?.success) {
 				settingsMessage = 'Realm settings saved successfully.';
 				addToast('Realm settings updated');
+				savedEmailEnabled = realmSettingsEmailEnabled;
 				const gov = await callExt('get_governance_settings');
 				if (gov?.success && gov.data) {
 					liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
@@ -482,15 +477,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 			const res = parseExtensionEnvelope(raw);
 			if (res?.success && res?.data) {
 				realmSettingsEmailEnabled = res.data.enabled === true;
-				realmSettingsEmailEvents = {
-					proposal_created: true,
-					vote_reminder: true,
-					vote_ended: true,
-					mention: true,
-					task_assigned: true,
-					email_verification: true,
-					...(res.data.events || {}),
-				};
+				savedEmailEnabled = res.data.enabled === true;
 			}
 
 			const userEmailRaw = await ctx.backend.extension_sync_call(
@@ -550,7 +537,9 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		<button
 			type="button"
 			onclick={() => saveRealmSettings()}
-			disabled={settingsSaving || !infraValid || governanceVotingWindowDays == null}
+			disabled={activeTab === 'notifications'
+				? settingsSaving || !emailDirty
+				: settingsSaving || !infraValid || governanceVotingWindowDays == null}
 			class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
 	</div>
@@ -1005,8 +994,8 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Email notifications</h2>
 			<p class="text-sm text-gray-500 mb-5">
-				Choose which events trigger email for this realm. Outbound mail is sent as the realm name from the platform sender address.
-				SMTP and Resend credentials stay on the server — they are not stored in the realm. The realm logo appears in the email header.
+				When enabled, every notification emails members who have a verified address.
+				Mail is sent using the realm name as the sender; SMTP credentials stay on the server and are not stored in the realm.
 			</p>
 
 			<div class="space-y-5">
@@ -1021,46 +1010,21 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 					</div>
 				</div>
 
-				<p class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-					Sent as {realmSettingsName || 'this realm'} using the platform sender. The realm logo appears in the email header.
-				</p>
-
-				<div>
-					<span class="block text-sm font-medium text-gray-700 mb-2">Events that trigger email</span>
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-						{#each Object.entries({
-							proposal_created: 'New proposal created',
-							vote_reminder: 'Vote reminder',
-							vote_ended: 'Vote ended',
-							mention: 'Mention',
-							task_assigned: 'Task assigned',
-							email_verification: 'Email verification',
-						}) as [eventKey, eventLabel] (eventKey)}
-							<label class="flex items-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-								<input
-									type="checkbox"
-									bind:checked={realmSettingsEmailEvents[eventKey]}
-									class="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-								/>
-								<span class="text-sm text-gray-700">{eventLabel}</span>
-							</label>
-						{/each}
+				{#if testFlagsEnabled}
+					<div class="pt-2 border-t border-gray-100">
+						<button
+							type="button"
+							onclick={sendTestEmail}
+							disabled={!adminEmail.trim()}
+							class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+						>
+							Send test email to {adminEmail || 'my address'}
+						</button>
+						{#if !adminEmail.trim()}
+							<p class="mt-2 text-xs text-gray-500">Add your email in user Settings to send a test message.</p>
+						{/if}
 					</div>
-				</div>
-
-				<div class="pt-2 border-t border-gray-100">
-					<button
-						type="button"
-						onclick={sendTestEmail}
-						disabled={!adminEmail.trim()}
-						class="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
-					>
-						Send test email to {adminEmail || 'my address'}
-					</button>
-					{#if !adminEmail.trim()}
-						<p class="mt-2 text-xs text-gray-500">Add your email in user Settings to send a test message.</p>
-					{/if}
-				</div>
+				{/if}
 			</div>
 		</section>
 

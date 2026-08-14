@@ -882,6 +882,25 @@ def _get_manifest_email() -> dict:
     return email
 
 
+def _public_logo_url(realm) -> str:
+    """Absolute HTTPS logo URL so mail clients can load the image.
+
+    The navbar uses ``realm.logo_url`` or ``/custom/logo.png`` on the
+    frontend canister. Email cannot use a relative path.
+    """
+    stored = ""
+    frontend_id = ""
+    if realm:
+        stored = str(getattr(realm, "logo_url", "") or "").strip()
+        frontend_id = str(getattr(realm, "frontend_canister_id", "") or "").strip()
+    if stored.startswith("http://") or stored.startswith("https://"):
+        return stored
+    path = stored if stored.startswith("/") else "/custom/logo.png"
+    if frontend_id:
+        return f"https://{frontend_id}.raw.icp0.io{path}"
+    return stored
+
+
 def get_email_config(args=None):
     """Return the realm's email notification configuration (non-sensitive)."""
     from ggg import Realm
@@ -889,7 +908,7 @@ def get_email_config(args=None):
     try:
         email = _get_manifest_email()
         realm = Realm.load("1")
-        logo_url = getattr(realm, "logo_url", "") or "" if realm else ""
+        logo_url = _public_logo_url(realm)
         from_name = (getattr(realm, "name", "") or "").strip() if realm else ""
         if not from_name:
             from_name = "Realms GOS"
