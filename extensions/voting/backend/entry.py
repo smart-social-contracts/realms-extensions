@@ -14,7 +14,7 @@ avoiding IC instruction limits.
 import hashlib
 import json
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ggg import Notification, Proposal, User, Vote, Codex
 from basilisk import Async, ic
@@ -278,6 +278,33 @@ def _format_voting_deadline(deadline_raw: str) -> str:
         except (ValueError, OverflowError):
             pass
     return text[:10] if len(text) >= 10 else text
+
+
+def _parse_voting_deadline(deadline_str: str):
+    """Parse ``voting_deadline`` to epoch seconds, or None if unset/invalid."""
+    raw = str(deadline_str or "")
+    if not raw or raw in ("None", ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _voting_has_closed(proposal: Proposal, *, now_s: Optional[int] = None) -> bool:
+    """True when the proposal has a deadline that has passed."""
+    deadline_s = _parse_voting_deadline(proposal.voting_deadline or "")
+    if deadline_s is None:
+        return False
+    if now_s is None:
+        now_s = ic.time() // 1_000_000_000
+    return now_s >= deadline_s
+
+
+SWEEP_TASK_NAME = "voting_expired_ballot_sweep"
+SWEEP_INTERVAL_S = 300
+SWEEP_SCAN_LIMIT = 200
+SWEEP_SETTLE_LIMIT = 50
 
 
 # Per-user inbox fan-out costs O(audience) entity writes inside a single
@@ -1193,16 +1220,109 @@ def start_voting(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def _settle_open_proposal(proposal: Proposal) -> tuple:
+    """Apply finalize decision logic to an open proposal.
+
+    Returns ``(outcome_status, outcome_reason)``.
+    """
+    proposal_id = proposal.proposal_id
+    scope_dept = _org_scoped_department(proposal)
+    if scope_dept is not None:
+        approved, vetoed, reason = _check_org_policy(proposal, scope_dept)
+        if vetoed:
+            proposal.status = "rejected"
+        elif approved:
+            proposal.status = "accepted"
+            _schedule_execution(proposal_id)
+        elif "quorum" in reason.lower():
+            proposal.status = "no_quorum"
+        else:
+            proposal.status = "failed"
+        return proposal.status, reason
+
+    if not _check_threshold(proposal):
+        proposal.status = "failed"
+        return proposal.status, "required threshold not met"
+    if not _check_threshold_and_quorum(proposal):
+        proposal.status = "no_quorum"
+        return proposal.status, "participation quorum not met"
+    proposal.status = "accepted"
+    _schedule_execution(proposal_id)
+    return proposal.status, "threshold and quorum met"
+
+
+def _collect_open_proposals(*, limit: int) -> List[Proposal]:
+    """Return up to *limit* proposals still in ``voting`` / ``pending_vote``."""
+    collected: List[Proposal] = []
+    seen: set = set()
+
+    for status in ("voting", "pending_vote"):
+        from_id = 1
+        while len(collected) < limit:
+            try:
+                batch, next_cursor = Proposal.find_by(
+                    "status",
+                    status,
+                    from_id=from_id,
+                    count=min(limit - len(collected), 50),
+                )
+            except Exception:
+                batch, next_cursor = [], None
+            if not batch:
+                break
+            for proposal in batch:
+                pid = proposal.proposal_id
+                if not pid or pid in seen:
+                    continue
+                if proposal.status not in ("voting", "pending_vote"):
+                    continue
+                seen.add(pid)
+                collected.append(proposal)
+                if len(collected) >= limit:
+                    break
+            if next_cursor is None:
+                break
+            from_id = next_cursor
+
+    if collected:
+        return collected
+
+    # Proposals written before ``status`` was indexed (Proposal v2) are absent
+    # from the index until the backfill timer chain reaches them, so an empty
+    # indexed result does not prove there are no open ballots. Fall back to a
+    # bounded scan rather than leaving pre-index ballots unsettled forever.
+    max_id = Proposal.max_id()
+    from_id = 1
+    while len(collected) < limit and from_id <= max_id:
+        try:
+            batch = Proposal.load_some(from_id=from_id, count=50)
+        except Exception:
+            batch = []
+        if not batch:
+            break
+        for proposal in batch:
+            entity_id = int(getattr(proposal, "_id", 0) or 0)
+            from_id = entity_id + 1 if entity_id else from_id + 1
+            if proposal.status not in ("voting", "pending_vote"):
+                continue
+            pid = proposal.proposal_id
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            collected.append(proposal)
+            if len(collected) >= limit:
+                break
+        if len(batch) < 50:
+            break
+    return collected
+
+
 def finalize_proposal(args: str) -> str:
     """Tally a proposal whose voting deadline has passed.
 
-    Voting has no background timer sweeping expired ballots; anyone may call
-    this after the deadline to settle the outcome deterministically:
-
-      - org-scoped ballots: the department policy decides (veto → rejected,
-        satisfied → accepted + execution, quorum unmet → no_quorum,
-        otherwise → failed);
-      - realm-wide ballots: required threshold + governance quorum.
+    Anyone may call this after the deadline to settle the outcome
+    deterministically. Expired ballots are also settled by
+    ``sweep_expired_proposals`` on a recurring timer.
 
     ``force: true`` skips the deadline check — allowed only when the realm
     runs in test mode (so E2E suites don't have to wait out real windows).
@@ -1240,13 +1360,7 @@ def finalize_proposal(args: str) -> str:
                 })
 
         now_s = ic.time() // 1_000_000_000
-        deadline_str = str(proposal.voting_deadline or "")
-        deadline_s = None
-        if deadline_str and deadline_str not in ("None", ""):
-            try:
-                deadline_s = float(deadline_str)
-            except (TypeError, ValueError):
-                deadline_s = None
+        deadline_s = _parse_voting_deadline(proposal.voting_deadline or "")
 
         if not force:
             if deadline_s is None:
@@ -1263,39 +1377,16 @@ def finalize_proposal(args: str) -> str:
             # Make the stored deadline consistent with the forced outcome.
             proposal.voting_deadline = str(now_s)
 
-        scope_dept = _org_scoped_department(proposal)
-        if scope_dept is not None:
-            approved, vetoed, reason = _check_org_policy(proposal, scope_dept)
-            if vetoed:
-                proposal.status = "rejected"
-            elif approved:
-                proposal.status = "accepted"
-                _schedule_execution(proposal_id)
-            elif "quorum" in reason.lower():
-                proposal.status = "no_quorum"
-            else:
-                proposal.status = "failed"
-            outcome_reason = reason
-        else:
-            if not _check_threshold(proposal):
-                proposal.status = "failed"
-                outcome_reason = "required threshold not met"
-            elif not _check_threshold_and_quorum(proposal):
-                proposal.status = "no_quorum"
-                outcome_reason = "participation quorum not met"
-            else:
-                proposal.status = "accepted"
-                outcome_reason = "threshold and quorum met"
-                _schedule_execution(proposal_id)
+        outcome_status, outcome_reason = _settle_open_proposal(proposal)
 
         logger.info(
             f"Proposal {proposal_id} finalized{' (forced)' if force else ''}: "
-            f"{proposal.status} — {outcome_reason}"
+            f"{outcome_status} — {outcome_reason}"
         )
         return json.dumps({
             "success": True,
             "data": {
-                "outcome": proposal.status,
+                "outcome": outcome_status,
                 "reason": outcome_reason,
                 "forced": force,
                 "proposal": _proposal_to_dict(proposal),
@@ -1303,6 +1394,75 @@ def finalize_proposal(args: str) -> str:
         })
     except Exception as e:
         logger.error(f"finalize_proposal error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def sweep_expired_proposals(args: str) -> str:
+    """Settle open ballots whose voting deadline has passed.
+
+    Scans up to ``SWEEP_SCAN_LIMIT`` open proposals per call and settles at
+    most ``SWEEP_SETTLE_LIMIT`` expired ones so a large backlog cannot exhaust
+    the per-message instruction budget.
+    """
+    try:
+        args_dict = _parse_args(args)
+        scan_limit = min(
+            max(1, int(args_dict.get("scan_limit", SWEEP_SCAN_LIMIT))),
+            SWEEP_SCAN_LIMIT,
+        )
+        settle_limit = min(
+            max(1, int(args_dict.get("settle_limit", SWEEP_SETTLE_LIMIT))),
+            SWEEP_SETTLE_LIMIT,
+        )
+        now_s = ic.time() // 1_000_000_000
+
+        settled = []
+        skipped = []
+        errors = []
+        settled_count = 0
+
+        for proposal in _collect_open_proposals(limit=scan_limit):
+            try:
+                if not _voting_has_closed(proposal, now_s=now_s):
+                    skipped.append(proposal.proposal_id)
+                    continue
+                if settled_count >= settle_limit:
+                    break
+                outcome_status, outcome_reason = _settle_open_proposal(proposal)
+                settled_count += 1
+                settled.append({
+                    "proposal_id": proposal.proposal_id,
+                    "outcome": outcome_status,
+                    "reason": outcome_reason,
+                })
+                logger.info(
+                    f"Sweep settled {proposal.proposal_id}: "
+                    f"{outcome_status} — {outcome_reason}"
+                )
+            except Exception as exc:
+                logger.error(
+                    f"sweep_expired_proposals: failed on "
+                    f"{getattr(proposal, 'proposal_id', '?')}: {exc}\n"
+                    f"{traceback.format_exc()}"
+                )
+                errors.append({
+                    "proposal_id": getattr(proposal, "proposal_id", None),
+                    "error": str(exc),
+                })
+
+        return json.dumps({
+            "success": True,
+            "data": {
+                "settled": settled,
+                "skipped": skipped,
+                "errors": errors,
+                "settled_count": settled_count,
+                "scan_limit": scan_limit,
+                "settle_limit": settle_limit,
+            },
+        })
+    except Exception as e:
+        logger.error(f"sweep_expired_proposals error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -1344,6 +1504,12 @@ def cast_vote(args: str) -> str:
             return json.dumps({
                 "success": False,
                 "error": f"Proposal is not open for voting. Status: {proposal.status}"
+            })
+
+        if _voting_has_closed(proposal):
+            return json.dumps({
+                "success": False,
+                "error": "Voting has closed; the voting deadline has passed",
             })
 
         if not voter:
@@ -1763,6 +1929,41 @@ def demo_approve_and_execute(args: str) -> Async[str]:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def _sweep_step_code() -> str:
+    """Codex shim for the recurring expired-ballot sweep (TaskManager)."""
+    return (
+        "import json\n"
+        "\n"
+        "def async_task():\n"
+        "    from core.extensions import call_extension_function\n"
+        "    return call_extension_function(\n"
+        "        'voting', 'sweep_expired_proposals', '{}'\n"
+        "    )\n"
+    )
+
+
+def initialize(args: str) -> str:
+    """Seed the recurring sweep that finalizes expired ballots."""
+    try:
+        from core.quarter_bootstrap import seed_recurring_codex_task
+
+        seed_recurring_codex_task(
+            SWEEP_TASK_NAME,
+            _sweep_step_code(),
+            SWEEP_INTERVAL_S,
+        )
+        logger.info(
+            f"Voting sweep task seeded ({SWEEP_TASK_NAME}, every {SWEEP_INTERVAL_S}s)"
+        )
+        return json.dumps({"success": True, "data": {"task": SWEEP_TASK_NAME}})
+    except ImportError:
+        logger.info("Voting sweep task not seeded (TaskManager unavailable)")
+        return json.dumps({"success": True, "data": {"task": None, "skipped": True}})
+    except Exception as e:
+        logger.error(f"Voting initialize error: {e}\n{traceback.format_exc()}")
+        return json.dumps({"success": False, "error": str(e)})
+
+
 def get_voting_settings(args: str) -> str:
     """Return realm calendar voting-window settings for the Voting UI."""
     try:
@@ -1789,12 +1990,15 @@ def get_voting_settings(args: str) -> str:
 # ---------------------------------------------------------------------------
 
 EXTENSION_FUNCTIONS = {
+    "initialize": initialize,
     "get_voting_settings": get_voting_settings,
     "get_proposals": get_proposals,
     "get_proposal": get_proposal,
     "submit_proposal": submit_proposal,
     "start_voting": start_voting,
     "cast_vote": cast_vote,
+    "finalize_proposal": finalize_proposal,
+    "sweep_expired_proposals": sweep_expired_proposals,
     "approve_proposal": approve_proposal,
     "execute_proposal": execute_proposal,
     "fetch_proposal_code": fetch_proposal_code,
