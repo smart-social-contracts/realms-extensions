@@ -310,23 +310,6 @@
 
 	let showOverlay = $state(false);
 
-	function fullBleed(node: HTMLElement) {
-		function adjust() {
-			node.style.marginLeft = '';
-			node.style.marginRight = '';
-			node.style.width = '';
-			const rect = node.getBoundingClientRect();
-			const left = rect.left;
-			const right = window.innerWidth - rect.right;
-			node.style.marginLeft = `-${left}px`;
-			node.style.marginRight = `-${right}px`;
-			node.style.width = `100vw`;
-		}
-		adjust();
-		window.addEventListener('resize', adjust);
-		return { destroy() { window.removeEventListener('resize', adjust); } };
-	}
-
 	onMount(async () => {
 		await loadData();
 		await tick();
@@ -368,10 +351,9 @@
 			<span class="ml-3 text-gray-500">Loading dashboard...</span>
 		</div>
 	{:else}
-		<!-- Hero: full-viewport background image with content inside -->
+		<!-- Hero: pane-bleed background image with content inside -->
 		{#if realmData}
 			<div
-				use:fullBleed
 				class="hero-screen"
 				style="background-image: url('/custom/background.png');"
 			>
@@ -413,6 +395,7 @@
 				50% { transform: translateY(8px); }
 			}
 			.hero-screen {
+				width: 100%;
 				height: 100vh;
 				min-height: 520px;
 				background: center / cover no-repeat;
