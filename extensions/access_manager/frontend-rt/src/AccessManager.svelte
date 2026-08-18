@@ -12,6 +12,9 @@
 	// Departments
 	let departments: any[] = $state([]);
 	let deptLoading = $state(false);
+	let departmentsBlockedMessage: string | null = $state(null);
+	let authoritiesBlockedMessage: string | null = $state(null);
+	let deptPermissionsBlocked: Record<string, string | null> = $state({});
 	let showNewDept = $state(false);
 	let newDeptName = $state('');
 	let newDeptDesc = $state('');
@@ -107,6 +110,15 @@
 		return await ctx.callSync(fn, args);
 	}
 
+	function isAccessPermissionError(res: { error_code?: string } | undefined | null): boolean {
+		const code = res?.error_code;
+		return code === 'permission_denied' || code === 'unauthenticated';
+	}
+
+	function permissionDeniedMessage(resource: string): string {
+		return `You don't have permission to view ${resource}.`;
+	}
+
 	// Confirmation modal shown before any action that creates a governance
 	// proposal. The backend returns requires_confirmation instead of creating
 	// the proposal; on confirm we re-issue the call with confirm: true.
@@ -160,9 +172,24 @@
 	// --- Departments ---
 	async function loadDepartments() {
 		deptLoading = true;
+		departmentsBlockedMessage = null;
+		authoritiesBlockedMessage = null;
 		try {
 			const res = await callExt('list_departments');
-			departments = res?.data?.departments ?? [];
+			if (!res?.success) {
+				const err = res?.error || '';
+				departments = [];
+				selectedDeptName = '';
+				authorities = [];
+				if (isAccessPermissionError(res)) {
+					departmentsBlockedMessage = permissionDeniedMessage('departments');
+				} else {
+					addToast(err || 'Failed to load departments', 'error');
+				}
+				return;
+			}
+
+			departments = res.data?.departments ?? [];
 			for (const d of departments) {
 				policyDraft[d.name] = {
 					m: String(d.policy?.threshold_m ?? 1),
@@ -173,8 +200,19 @@
 				};
 			}
 			policyDraft = { ...policyDraft };
+
 			const authRes = await callExt('list_authorities');
-			authorities = authRes?.data?.authorities ?? [];
+			if (!authRes?.success) {
+				const err = authRes?.error || '';
+				authorities = [];
+				if (isAccessPermissionError(authRes)) {
+					authoritiesBlockedMessage = permissionDeniedMessage('authority grants');
+				} else {
+					addToast(err || 'Failed to load authorities', 'error');
+				}
+			} else {
+				authorities = authRes.data?.authorities ?? [];
+			}
 
 			// Keep selection when reloading; otherwise pick the first department.
 			if (departments.length === 0) {
@@ -551,6 +589,14 @@
 			const res = await callExt('get_department_permissions', { department: deptName });
 			if (res?.success) {
 				deptPermissions = { ...deptPermissions, [deptName]: (res.data?.permissions ?? []).map((p: any) => p.name) };
+				deptPermissionsBlocked = { ...deptPermissionsBlocked, [deptName]: null };
+			} else {
+				const err = res?.error || '';
+				if (isAccessPermissionError(res)) {
+					deptPermissionsBlocked = { ...deptPermissionsBlocked, [deptName]: permissionDeniedMessage('department permissions') };
+				} else {
+					addToast(err || 'Failed to load permissions', 'error');
+				}
 			}
 		} catch (e: any) {
 			addToast(e?.message || 'Failed to load permissions', 'error');
@@ -846,7 +892,14 @@
 	{/if}
 
 	<div class="space-y-4">
+		{#if departmentsBlockedMessage}
+			<div class="p-4 border border-amber-200 bg-amber-50 rounded-xl text-sm text-amber-900">
+				{departmentsBlockedMessage}
+			</div>
+		{/if}
+
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+			{#if !departmentsBlockedMessage}
 			<div class="flex-1 min-w-0">
 				<label for="org-select" class="block text-xs font-medium text-gray-500 mb-1">
 					Department
@@ -874,6 +927,7 @@
 			<button onclick={() => showNewDept = !showNewDept} class="shrink-0 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800">
 				{showNewDept ? 'Cancel' : '+ New Department'}
 			</button>
+			{/if}
 		</div>
 
 		{#if showNewDept}
@@ -900,6 +954,8 @@
 					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 				</svg>
 			</div>
+		{:else if departmentsBlockedMessage}
+			<!-- Permission message shown above; skip empty-state placeholder -->
 		{:else if departments.length === 0}
 			<p class="text-center text-gray-500 py-8">No departments yet. Root is created on realm init.</p>
 		{:else if selectedDept}
@@ -1145,7 +1201,11 @@
 							{/if}
 						</div>
 
-						{#if (deptPermissions[dept.name] ?? []).length > 0}
+						{#if deptPermissionsBlocked[dept.name]}
+							<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+								{deptPermissionsBlocked[dept.name]}
+							</p>
+						{:else if (deptPermissions[dept.name] ?? []).length > 0}
 							<div class="flex flex-wrap gap-1 mb-2">
 								{#each deptPermissions[dept.name] ?? [] as perm (perm)}
 									<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
@@ -1161,12 +1221,15 @@
 							bind:value={deptPermFilter}
 							placeholder="Filter permissions (name, category, description)..."
 							class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm mb-2"
+							disabled={deptPermissionsBlocked[dept.name] !== null && deptPermissionsBlocked[dept.name] !== undefined}
 						/>
 
 						<!-- Browsable catalog: every permission, grouped by category, so
 						     admins can discover what exists instead of guessing names.
 						     Filtering auto-expands the matching categories. -->
-						{#if allOperations.length === 0}
+						{#if deptPermissionsBlocked[dept.name]}
+							<!-- blocked message shown above -->
+						{:else if allOperations.length === 0}
 							<p class="text-xs text-gray-400">Permission catalog unavailable — the role_manager extension is not installed or you lack permission.view.</p>
 						{:else}
 							{@const groups = groupedOps(deptPermFilter)}
@@ -1510,6 +1573,7 @@
 		{/if}
 
 		<!-- Authority grants -->
+		{#if !departmentsBlockedMessage}
 		<div class="mt-8 pt-6 border-t border-gray-200 space-y-3">
 			<h2 class="text-lg font-semibold text-gray-800">Authority (department over department)</h2>
 			<p class="text-sm text-gray-500">Grant permissions from root (or another department) over a local or remote-quarter department.</p>
@@ -1520,7 +1584,11 @@
 				<input bind:value={authPerms} placeholder="Permissions (comma-separated)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<button onclick={grantAuthorityFromRoot} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant from root</button>
 			</div>
-			{#if authorities.length === 0}
+			{#if authoritiesBlockedMessage}
+				<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+					{authoritiesBlockedMessage}
+				</p>
+			{:else if authorities.length === 0}
 				<p class="text-sm text-gray-400">No authority grants yet.</p>
 			{:else}
 				<div class="space-y-2">
@@ -1538,5 +1606,6 @@
 				</div>
 			{/if}
 		</div>
+		{/if}
 	</div>
 </div>

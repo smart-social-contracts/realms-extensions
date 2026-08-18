@@ -31,6 +31,14 @@ from ggg import (
 from ggg.system.user_profile import Operations, Profiles, OPERATIONS_SEPARATOR
 from basilisk import ic
 from ic_python_logging import get_logger
+from core.extension_errors import (
+    PermissionDenied,
+    Unauthenticated,
+    not_found_payload,
+    payload_from_permission_error,
+    permission_denied_payload,
+    validation_payload,
+)
 
 logger = get_logger("extensions.access_manager")
 
@@ -80,7 +88,7 @@ def _get_caller_user() -> User:
     if not user:
         if _in_governed_replay():
             return _REPLAY_AUTHORITY
-        raise PermissionError(f"User {principal} not found")
+        raise Unauthenticated(f"User {principal} not found")
     return user
 
 
@@ -102,8 +110,9 @@ def _is_allowed(user: User, operation: str) -> bool:
 
 def _require_operation(user: User, operation: str):
     if not _is_allowed(user, operation):
-        raise PermissionError(
-            f"Access denied: user {user.id} lacks permission '{operation}'"
+        raise PermissionDenied(
+            f"Access denied: user {user.id} lacks permission '{operation}'",
+            operation=operation,
         )
 
 
@@ -328,7 +337,7 @@ def list_departments(args) -> str:
 
         return json.dumps({"success": True, "data": {"departments": depts, "total": len(depts)}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"list_departments error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -407,7 +416,7 @@ def create_department(args) -> str:
         logger.info(f"Department '{name}' created by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"name": name, "message": f"Department '{name}' created"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"create_department error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -472,7 +481,7 @@ def update_department(args) -> str:
         logger.info(f"Department '{name}' updated by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"name": name, "message": f"Department '{name}' updated"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"update_department error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -500,7 +509,7 @@ def delete_department(args) -> str:
         logger.info(f"Department '{name}' deleted by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Department '{name}' deleted"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"delete_department error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -587,19 +596,33 @@ def _manage_department_member(args_dict: dict, action_kind: str) -> str:
     dept_name = (args_dict.get("department") or "").strip()
     user_principal = (args_dict.get("user_principal") or "").strip()
     if not dept_name or not user_principal:
-        return json.dumps({"success": False, "error": "department and user_principal are required"})
+        return json.dumps(validation_payload("department and user_principal are required"))
 
     dept = Department[dept_name]
     if not dept:
-        return json.dumps({"success": False, "error": f"Department '{dept_name}' not found"})
+        return json.dumps(
+            not_found_payload(f"Department '{dept_name}' not found", entity="department")
+        )
 
     user = User[user_principal]
     if not user:
-        return json.dumps({"success": False, "error": f"User '{user_principal}' not found"})
+        return json.dumps(
+            not_found_payload(
+                (
+                    f"No realm member with principal '{user_principal}'."
+                    " They must join the realm first."
+                ),
+                entity="user",
+            )
+        )
 
     is_manager = _can_manage_dept(caller, dept)
     if not is_manager and not _is_dept_member(caller, dept):
-        return json.dumps({"success": False, "error": "Access denied: not a manager or member of this department"})
+        return json.dumps(
+            permission_denied_payload(
+                "Access denied: not a manager or member of this department"
+            )
+        )
 
     action = {
         "action": action_kind,
@@ -659,7 +682,7 @@ def add_department_member(args) -> str:
         args_dict = _parse_args(args)
         return _manage_department_member(args_dict, "add")
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"add_department_member error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -671,7 +694,7 @@ def remove_department_member(args) -> str:
         args_dict = _parse_args(args)
         return _manage_department_member(args_dict, "remove")
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"remove_department_member error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -702,7 +725,7 @@ def list_authorities(args) -> str:
 
         return json.dumps({"success": True, "data": {"authorities": rows, "total": len(rows)}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"list_authorities error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -767,7 +790,7 @@ def grant_authority(args) -> str:
         logger.info(f"Authority {auth.id} granted by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": _serialize_authority(auth)})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"grant_authority error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -797,7 +820,7 @@ def revoke_authority(args) -> str:
         auth.delete()
         return json.dumps({"success": True, "data": {"message": f"Authority '{auth_id}' revoked"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"revoke_authority error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -814,7 +837,7 @@ def ensure_root(args) -> str:
         grant_root_authority_over_local_orgs()
         return json.dumps({"success": True, "data": _serialize_org(root)})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"ensure_root error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -852,7 +875,7 @@ def get_department_permissions(args) -> str:
             "data": {"department": dept_name, "permissions": permissions},
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"get_department_permissions error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -886,7 +909,7 @@ def grant_department_permission(args) -> str:
         logger.info(f"Permission '{permission_name}' granted to department '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Permission '{permission_name}' granted to department '{dept_name}'"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"grant_department_permission error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -921,7 +944,7 @@ def revoke_department_permission(args) -> str:
         logger.info(f"Permission '{permission_name}' revoked from department '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Permission '{permission_name}' revoked from department '{dept_name}'"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"revoke_department_permission error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -964,7 +987,7 @@ def batch_grant_department_permissions(args) -> str:
         logger.info(f"Batch grant to department '{dept_name}': {granted} granted, {skipped} skipped by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"department": dept_name, "granted": granted, "skipped": skipped}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"batch_grant_department_permissions error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1003,7 +1026,7 @@ def batch_revoke_department_permissions(args) -> str:
         logger.info(f"Batch revoke from department '{dept_name}': {revoked} revoked, {skipped} skipped by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"department": dept_name, "revoked": revoked, "skipped": skipped}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"batch_revoke_department_permissions error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1066,7 +1089,7 @@ def list_extensions(args) -> str:
 
         return json.dumps({"success": True, "data": {"extensions": extensions, "total": len(extensions)}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"list_extensions error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1096,7 +1119,7 @@ def grant_extension_to_user(args) -> str:
         logger.info(f"Extension '{ext_name}' granted to user {user_principal} by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' granted to user"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"grant_extension_to_user error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1126,7 +1149,7 @@ def revoke_extension_from_user(args) -> str:
         logger.info(f"Extension '{ext_name}' revoked from user {user_principal} by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' revoked from user"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"revoke_extension_from_user error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1156,7 +1179,7 @@ def grant_extension_to_department(args) -> str:
         logger.info(f"Extension '{ext_name}' granted to department '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' granted to department '{dept_name}'"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"grant_extension_to_department error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1186,7 +1209,7 @@ def revoke_extension_from_department(args) -> str:
         logger.info(f"Extension '{ext_name}' revoked from department '{dept_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' revoked from department '{dept_name}'"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"revoke_extension_from_department error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1216,7 +1239,7 @@ def grant_extension_to_profile(args) -> str:
         logger.info(f"Extension '{ext_name}' granted to profile '{profile_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' granted to profile '{profile_name}'"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"grant_extension_to_profile error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1246,7 +1269,7 @@ def revoke_extension_from_profile(args) -> str:
         logger.info(f"Extension '{ext_name}' revoked from profile '{profile_name}' by {_get_caller_principal()}")
         return json.dumps({"success": True, "data": {"message": f"Extension '{ext_name}' revoked from profile '{profile_name}'"}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"revoke_extension_from_profile error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1291,7 +1314,7 @@ def list_users(args) -> str:
 
         return json.dumps({"success": True, "data": {"users": users, "total": len(users)}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"list_users error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1357,7 +1380,7 @@ def get_user_access_summary(args) -> str:
             },
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"get_user_access_summary error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1408,7 +1431,9 @@ def assign_profile(args) -> str:
         try:
             User.role_assign_prehook(target_user, profile_name, caller_principal)
         except PermissionError as e:
-            return json.dumps({"success": False, "error": str(e), "governance_blocked": True})
+            payload = payload_from_permission_error(e)
+            payload["governance_blocked"] = True
+            return json.dumps(payload)
 
         target_user.profiles.add(profile)
         logger.info(f"Profile '{profile_name}' assigned to {target_principal} by {caller_principal}")
@@ -1427,7 +1452,7 @@ def assign_profile(args) -> str:
             },
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"assign_profile error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1470,7 +1495,7 @@ def revoke_profile(args) -> str:
             },
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"revoke_profile error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1492,7 +1517,7 @@ def get_available_profiles(args) -> str:
 
         return json.dumps({"success": True, "data": {"profiles": profiles}})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"get_available_profiles error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1688,7 +1713,7 @@ def manage_position(args) -> str:
             "data": {**data, "applied": "proposal", "summary": summary},
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"manage_position error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1782,7 +1807,7 @@ def get_fund_ledger(args) -> str:
             },
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"get_fund_ledger error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1806,7 +1831,7 @@ def get_payroll_status(args) -> str:
             return json.dumps({"success": False, "error": result["error"]})
         return json.dumps({"success": True, "data": result})
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"get_payroll_status error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1898,7 +1923,7 @@ def run_department_payroll(args) -> str:
             "data": {**data, "applied": "proposal", "summary": summary},
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"run_department_payroll error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
@@ -1995,7 +2020,7 @@ def set_payroll_schedule(args) -> str:
             "data": {**data, "applied": "proposal", "summary": summary},
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps(payload_from_permission_error(e))
     except Exception as e:
         logger.error(f"set_payroll_schedule error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
