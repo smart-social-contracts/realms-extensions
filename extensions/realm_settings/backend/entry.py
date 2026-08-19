@@ -926,7 +926,7 @@ def get_email_config(args=None):
         return {
             "success": True,
             "data": {
-                "enabled": bool(email.get("enabled", False)),
+                "enabled": bool(email.get("enabled", True)),
                 "from_name": from_name,
                 "from_address": "",
                 "reply_to": "",
@@ -988,7 +988,7 @@ def set_email_config(args: dict):
             events = {}
 
         updated = {
-            "enabled": bool(args.get("enabled", existing.get("enabled", False))),
+            "enabled": bool(args.get("enabled", existing.get("enabled", True))),
             "events": {**_DEFAULT_EMAIL_EVENTS, **existing.get("events", {}), **events},
             "templates": existing.get("templates", {}) or {},
         }

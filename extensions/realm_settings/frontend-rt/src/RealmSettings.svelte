@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import ProposalModal from './ProposalModal.svelte';
 	import QuartersPanel from './QuartersPanel.svelte';
 	import SandboxPanel from './SandboxPanel.svelte';
@@ -30,7 +31,7 @@
 	let realmSettingsAiAssistantEnabled = $state(true);
 	let realmSettingsFileRegistryId = $state('');
 	let realmSettingsMarketplaceId = $state('');
-	let realmSettingsCurrency = $state('ckBTC');
+	let realmSettingsCurrency = $state('');
 	let realmSettingsCurrencyDecimals = $state(8);
 	let realmSettingsTokenCanisterId = $state('');
 let realmSettingsTokenIndexerId = $state('');
@@ -41,8 +42,8 @@ let tokenResolving = $state(false);
 
 // Email notification configuration (issue #266): realm-level on/off toggle.
 // Sender identity is derived from realm settings; SMTP credentials stay on the server.
-let realmSettingsEmailEnabled = $state(false);
-let savedEmailEnabled = $state(false);
+let realmSettingsEmailEnabled = $state(true);
+let savedEmailEnabled = $state(true);
 let adminEmail = $state('');
 let testFlagsEnabled = $state(false);
 let emailDirty = $derived(realmSettingsEmailEnabled !== savedEmailEnabled);
@@ -161,10 +162,6 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		if (realmSettingsBackgroundUrl) lines.push(`realm.background_image_url = ${JSON.stringify(realmSettingsBackgroundUrl)}`);
 		lines.push(`realm.open_registration = ${realmSettingsOpenRegistration ? 'True' : 'False'}`);
 		lines.push(`realm.ai_assistant_enabled = ${realmSettingsAiAssistantEnabled ? 'True' : 'False'}`);
-		if (realmSettingsCurrency) {
-			lines.push(`realm.accounting_currency = ${JSON.stringify(realmSettingsCurrency.trim())}`);
-		}
-		lines.push(`realm.accounting_currency_decimals = ${Number(realmSettingsCurrencyDecimals) || 0}`);
 		if (realmSettingsTokenCanisterId.trim()) {
 			lines.push(`realm.token_canister_id = ${JSON.stringify(realmSettingsTokenCanisterId.trim())}`);
 		}
@@ -201,7 +198,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				realmSettingsAiAssistantEnabled = s.ai_assistant_enabled !== false;
 				realmSettingsFileRegistryId = s.file_registry_canister_id || '';
 				realmSettingsMarketplaceId = s.marketplace_canister_id || '';
-				realmSettingsCurrency = s.accounting_currency || 'ckBTC';
+				realmSettingsCurrency = s.accounting_currency || '';
 				realmSettingsCurrencyDecimals = Number(s.accounting_currency_decimals ?? 8);
 				realmSettingsTokenIndexerId = s.token_indexer_canister_id || '';
 				const token = (s.canisters || []).find(
@@ -222,6 +219,9 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
 				governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
 			}
+			if (realmSettingsTokenCanisterId && isValidCanisterId(realmSettingsTokenCanisterId)) {
+				await resolveTokenLedger({ silent: true });
+			}
 		} catch (e: any) {
 			settingsError = e?.message || String(e);
 		} finally {
@@ -229,9 +229,12 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		}
 	}
 
-	async function resolveTokenLedger() {
+	async function resolveTokenLedger(opts?: { silent?: boolean }) {
+		const silent = opts?.silent ?? false;
 		tokenResolveError = '';
-		tokenResolveMessage = '';
+		if (!silent) {
+			tokenResolveMessage = '';
+		}
 		const ledger = realmSettingsTokenCanisterId.trim();
 		if (!ledger || !isValidCanisterId(ledger)) {
 			tokenResolveError = 'Enter a valid treasury ledger canister ID first';
@@ -247,7 +250,9 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				if (result.indexer_canister_id) {
 					realmSettingsTokenIndexerId = result.indexer_canister_id;
 				}
-				tokenResolveMessage = `Resolved ${result.symbol} (${result.decimals} decimals) from ledger`;
+				if (!silent) {
+					tokenResolveMessage = `Resolved ${result.symbol} (${result.decimals} decimals) from ledger`;
+				}
 			} else {
 				tokenResolveError = result?.error || 'Could not resolve token metadata';
 			}
@@ -272,8 +277,6 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				background_image_url: realmSettingsBackgroundUrl,
 				open_registration: realmSettingsOpenRegistration,
 				ai_assistant_enabled: realmSettingsAiAssistantEnabled,
-				accounting_currency: realmSettingsCurrency.trim(),
-				accounting_currency_decimals: Number(realmSettingsCurrencyDecimals),
 				token_canister_id: realmSettingsTokenCanisterId.trim(),
 				token_indexer_canister_id:
 					realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim(),
@@ -314,6 +317,9 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				openProposalForSettings(result.denied_operation);
 			} else {
 				settingsError = result?.error || 'Failed to save settings';
+				if (result?.error_code === 'ledger_unresolvable') {
+					tokenResolveError = result.error || settingsError;
+				}
 			}
 		} catch (e: any) {
 			const msg = e?.message || String(e);
@@ -476,8 +482,8 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 			);
 			const res = parseExtensionEnvelope(raw);
 			if (res?.success && res?.data) {
-				realmSettingsEmailEnabled = res.data.enabled === true;
-				savedEmailEnabled = res.data.enabled === true;
+				realmSettingsEmailEnabled = res.data.enabled !== false;
+				savedEmailEnabled = res.data.enabled !== false;
 			}
 
 			const userEmailRaw = await ctx.backend.extension_sync_call(
@@ -562,7 +568,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 	<div class="flex justify-between items-center mb-4">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Settings</h1>
-			<p class="text-gray-600 mt-1">Configure identity, branding, currency, registration, and infrastructure for this realm.</p>
+			<p class="text-gray-600 mt-1">{extensionDescription}</p>
 		</div>
 	</div>
 
