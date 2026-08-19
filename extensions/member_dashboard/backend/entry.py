@@ -350,7 +350,7 @@ def check_invoice_payment(args: str) -> Async[str]:
     Check if an invoice has been paid by querying its subaccount balance.
     If sufficient funds are found, marks the invoice as Paid.
 
-    This is an async function that queries the ckBTC ledger.
+    Queries the realm treasury token's ledger via the invoice's registered Token.
 
     Args:
         args: JSON string with {"invoice_id": "..."}
@@ -383,46 +383,50 @@ def check_invoice_payment(args: str) -> Async[str]:
                 }
             )
 
-        # Import vault utilities for ledger queries
-        from extension_packages.vault.vault_lib.entities import Canisters
-        from extension_packages.vault.vault_lib.candid_types import ICRCLedger, Account
-        from basilisk import Principal
-
-        # Get ledger canister
-        ledger_canister = Canisters["ckBTC ledger"]
-        if not ledger_canister:
+        invoice_currency = (invoice.currency or "").strip()
+        if not invoice_currency:
             return json.dumps(
-                {"success": False, "error": "ckBTC ledger not configured"}
+                {
+                    "success": False,
+                    "error_code": "no_treasury_token",
+                    "error": (
+                        "No treasury currency — set the treasury ledger canister "
+                        "in Realm Settings so the token symbol can be resolved"
+                    ),
+                }
             )
 
-        # Query the invoice's subaccount balance
-        vault_principal = ic.id()
-        subaccount_bytes = invoice.get_subaccount()
+        from ggg import Token
 
-        ledger = ICRCLedger(Principal.from_str(ledger_canister.principal))
-        result = yield ledger.icrc1_balance_of(
-            Account(owner=vault_principal, subaccount=list(subaccount_bytes))
+        token = Token[invoice_currency]
+        if not token:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"No registered Token for '{invoice_currency}'",
+                }
+            )
+
+        from ic_basilisk_toolkit.wallet import Wallet
+
+        wallet = Wallet()
+        subaccount = invoice.get_subaccount()
+        balance = yield wallet.balance_of(token.name, subaccount=subaccount)
+
+        decimals = (
+            int(token.decimals) if token.decimals else invoice._get_token_decimals()
         )
-
-        # Unwrap the CallResult
-        if hasattr(result, "Ok"):
-            balance = result.Ok
-        else:
-            balance = result
-
-        # Convert invoice amount to satoshis (1 ckBTC = 100,000,000 satoshis)
-        amount_satoshis = int(invoice.amount * 100_000_000)
+        amount_raw = invoice.get_amount_raw(decimals)
 
         logger.info(
-            f"Invoice {invoice_id}: balance={balance}, required={amount_satoshis}"
+            f"Invoice {invoice_id}: balance={balance}, required={amount_raw}"
         )
 
-        if balance >= amount_satoshis:
-            # Payment received. Route through the Invoice domain method so
-            # core emits the active realm codex's accounting event.
+        if balance >= amount_raw:
+            human_balance = balance / (10 ** decimals)
             invoice.mark_paid(
-                payment_currency=invoice.currency,
-                payment_amount=balance / 100_000_000,
+                payment_currency=invoice_currency,
+                payment_amount=human_balance,
                 payment_amount_raw=balance,
             )
 
@@ -434,8 +438,9 @@ def check_invoice_payment(args: str) -> Async[str]:
                     "data": {
                         "paid": True,
                         "invoice_id": invoice_id,
-                        "balance_satoshis": balance,
-                        "amount_required_satoshis": amount_satoshis,
+                        "balance_raw": balance,
+                        "amount_required_raw": amount_raw,
+                        "currency": invoice_currency,
                         "paid_at": invoice.paid_at,
                     },
                 }
@@ -447,9 +452,10 @@ def check_invoice_payment(args: str) -> Async[str]:
                     "data": {
                         "paid": False,
                         "invoice_id": invoice_id,
-                        "balance_satoshis": balance,
-                        "amount_required_satoshis": amount_satoshis,
-                        "shortfall_satoshis": amount_satoshis - balance,
+                        "balance_raw": balance,
+                        "amount_required_raw": amount_raw,
+                        "currency": invoice_currency,
+                        "shortfall_raw": amount_raw - balance,
                     },
                 }
             )

@@ -46,5 +46,8 @@
       "check_invoice_payment": "self.invoice_refresh",
       "demo_mark_invoice_paid": "demo.manage"
     }
-  }
+  },
+  "screenshots": [
+    "screenshots/01-overview.png"
+  ]
 }
