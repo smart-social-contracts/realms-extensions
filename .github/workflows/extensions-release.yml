@@ -17,6 +17,18 @@ on:
         required: false
         default: true
         type: boolean
+      capture_screenshots:
+        description: 'Capture marketplace screenshots for changed extensions'
+        required: false
+        default: true
+        type: boolean
+      playwright_base_url:
+        description: 'Realm frontend URL for screenshot capture (defaults to DOMINION_FRONTEND_URL)'
+        required: false
+        type: string
+
+env:
+  DOMINION_FRONTEND_URL: https://gzya5-jyaaa-aaaac-qai5a-cai.icp0.io
 
 jobs:
   release:
@@ -132,6 +144,64 @@ jobs:
         echo "changed_count=${CHANGED_COUNT}" >> $GITHUB_OUTPUT
         echo "unchanged_count=${UNCHANGED_COUNT}" >> $GITHUB_OUTPUT
         
+    # Runs before packaging so the manifest inside each release zip already
+    # declares the screenshots. Capture targets the currently deployed realm
+    # frontend, so images reflect that build, not the code being tagged.
+    - name: Capture marketplace screenshots
+      if: ${{ github.event.inputs.capture_screenshots != 'false' }}
+      continue-on-error: true
+      env:
+        PLAYWRIGHT_BASE_URL: ${{ github.event.inputs.playwright_base_url || vars.DOMINION_FRONTEND_URL || env.DOMINION_FRONTEND_URL }}
+      run: |
+        set +e
+        CHANGED_EXTS=""
+
+        while IFS='|' read -r ext old_ver new_ver status; do
+          if [[ "$ext" == \#* ]]; then continue; fi
+          if [ "$status" = "changed" ]; then
+            CHANGED_EXTS="$CHANGED_EXTS $ext"
+          fi
+        done < version_changes.txt
+
+        if [ -z "$(echo "$CHANGED_EXTS" | xargs)" ]; then
+          echo "No changed extensions — skipping screenshot capture"
+          echo "### Marketplace screenshots" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Skipped — no extensions changed in this release." >> $GITHUB_STEP_SUMMARY
+          exit 0
+        fi
+
+        echo "Changed extensions for screenshot capture:$CHANGED_EXTS"
+
+        cd extensions/_shared/testing/e2e
+        npm install
+        npx playwright install chromium --with-deps
+
+        cd "$GITHUB_WORKSPACE"
+        node extensions/_shared/testing/e2e/scripts/capture-screenshots.mjs $CHANGED_EXTS
+        CAPTURE_EXIT=$?
+
+        for ext in $CHANGED_EXTS; do
+          if [ -d "$ext/screenshots" ]; then
+            git add "$ext/screenshots/"
+          fi
+          if [ -f "$ext/manifest.json" ]; then
+            git add "$ext/manifest.json"
+          fi
+        done
+
+        echo "### Marketplace screenshots" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "$CAPTURE_EXIT" -ne 0 ]; then
+          echo "::warning::Screenshot capture failed (exit $CAPTURE_EXIT) — release will continue"
+          echo "Screenshot capture **failed** (exit code $CAPTURE_EXIT). Release will continue; check the step log for per-extension errors." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "Screenshot capture succeeded for changed extensions." >> $GITHUB_STEP_SUMMARY
+        fi
+
+        exit 0
+
     - name: Clone realms framework
       run: |
         git clone https://github.com/smart-social-contracts/realms.git .realms
@@ -170,6 +240,19 @@ jobs:
           echo "has_changes=false" >> $GITHUB_OUTPUT
         else
           echo "✅ $CHANGED_COUNT extension(s) changed. Creating commit..."
+
+          # Stage screenshot assets and manifest screenshots arrays for changed extensions.
+          while IFS='|' read -r ext old_ver new_ver status; do
+            if [[ "$ext" == \#* ]]; then continue; fi
+            if [ "$status" = "changed" ]; then
+              if [ -d "$ext/screenshots" ]; then
+                git add "$ext/screenshots/"
+              fi
+              if [ -f "$ext/manifest.json" ]; then
+                git add "$ext/manifest.json"
+              fi
+            fi
+          done < version_changes.txt
           
           COMMIT_MSG="release: Bump $CHANGED_COUNT extension(s) to ${{ github.event.inputs.release_type }} version
           
