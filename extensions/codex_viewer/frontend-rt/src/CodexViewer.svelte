@@ -258,10 +258,7 @@
 			.replace(/\\n/g, '\n')
 			.replace(/\\t/g, '\t')
 			.replace(/\\"/g, '"')
-			.replace(/\\\\/g, '\\')
-			.replace(/^"""\s*\n?/, '')
-			.replace(/\n?"""$/, '')
-			.trim();
+			.replace(/\\\\/g, '\\');
 	}
 
 	function isSelected(codex: Codex): boolean {
