@@ -882,6 +882,16 @@ def _get_manifest_email() -> dict:
     return email
 
 
+def _public_base_url(realm) -> str:
+    """Absolute HTTPS base URL for realm email links."""
+    frontend_id = ""
+    if realm:
+        frontend_id = str(getattr(realm, "frontend_canister_id", "") or "").strip()
+    if frontend_id:
+        return f"https://{frontend_id}.icp0.io"
+    return ""
+
+
 def _public_logo_url(realm) -> str:
     """Absolute HTTPS logo URL so mail clients can load the image.
 
@@ -909,6 +919,7 @@ def get_email_config(args=None):
         email = _get_manifest_email()
         realm = Realm.load("1")
         logo_url = _public_logo_url(realm)
+        base_url = _public_base_url(realm)
         from_name = (getattr(realm, "name", "") or "").strip() if realm else ""
         if not from_name:
             from_name = "Realms GOS"
@@ -920,6 +931,7 @@ def get_email_config(args=None):
                 "from_address": "",
                 "reply_to": "",
                 "logo_url": logo_url,
+                "base_url": base_url,
                 "events": email.get("events", _DEFAULT_EMAIL_EVENTS),
                 "templates": email.get("templates", {}) or {},
             },
