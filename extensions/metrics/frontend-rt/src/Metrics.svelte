@@ -13,6 +13,7 @@ let ledgerEntries: any[] = $state([]);
 let funds: any[] = $state([]);
 let fiscalPeriods: any[] = $state([]);
 let tokens: any[] = $state([]);
+let realms: any[] = $state([]);
 let loading = $state(true);
 let error = $state('');
 let accessDeniedOp = $state('');
@@ -59,18 +60,20 @@ let accessDeniedOp = $state('');
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const [b, l, f, fp, t] = await Promise.all([
+			const [b, l, f, fp, t, r] = await Promise.all([
 				loadPaginated('Budget', 100, 'asc'),
 				loadPaginated('LedgerEntry', 1000, 'desc'),
 				loadPaginated('Fund', 100, 'asc'),
 				loadPaginated('FiscalPeriod', 100, 'desc'),
 				loadPaginated('Token', 100, 'asc'),
+				loadPaginated('Realm', 10, 'asc'),
 			]);
 			budgets = b;
 			ledgerEntries = l;
 			funds = f;
 			fiscalPeriods = fp;
 			tokens = t;
+			realms = r;
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
@@ -86,6 +89,35 @@ let accessDeniedOp = $state('');
 	}
 
 	$effect(() => { void loadData(); });
+
+	// The realm is the source of truth; an empty value there means no treasury
+	// ledger has resolved yet, so nothing is shown rather than a guessed symbol.
+	// The enabled token is consulted only when the realm itself is unreadable.
+	let accountingSymbol = $derived.by(() => {
+		if (realms.length > 0) {
+			return (realms[0]?.accounting_currency || '').toString().trim();
+		}
+		const enabled = tokens.find(
+			(t) => t.enabled === true || t.enabled === 'true' || t._prop_enabled === 'true'
+		);
+		return enabled ? (enabled.symbol || enabled.name || '').toString().trim() : '';
+	});
+
+	let ledgerCurrencies = $derived.by(() => {
+		const found: string[] = [];
+		for (const e of ledgerEntries) {
+			const c = (e.currency || '').toString().trim();
+			if (c && !found.includes(c)) found.push(c);
+		}
+		return found.sort();
+	});
+
+	let ledgerCurrencyMixed = $derived.by(() => {
+		const currencies = ledgerCurrencies;
+		if (currencies.length > 1) return true;
+		if (currencies.length === 1 && accountingSymbol && currencies[0] !== accountingSymbol) return true;
+		return false;
+	});
 
 	let tokenDecimalsByCurrency = $derived.by(() => {
 		const map: Record<string, number> = {};
@@ -390,7 +422,21 @@ let accessDeniedOp = $state('');
 				<p class="text-gray-500 dark:text-gray-400 text-sm mt-2">Financial data will appear here once transactions are recorded.</p>
 			</div>
 		{:else}
+			{#snippet statementCurrencyNote()}
+				{#if ledgerCurrencyMixed}
+					<span class="text-xs text-amber-700 dark:text-amber-400/90 font-normal">
+						Entries span {ledgerCurrencies.join(', ')}
+					</span>
+				{:else if accountingSymbol}
+					<span class="text-sm font-normal text-gray-500 dark:text-gray-400">({accountingSymbol})</span>
+				{/if}
+			{/snippet}
+
 			<!-- Summary Cards -->
+			<div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+				<span class="text-xs text-gray-500 dark:text-gray-400">Summary</span>
+				{@render statementCurrencyNote()}
+			</div>
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 				<div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm">
 					<div class="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">Total Assets</div>
@@ -415,7 +461,10 @@ let accessDeniedOp = $state('');
 			<!-- Balance Sheet -->
 			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
 				<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-					<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📋 Balance Sheet</h3>
+					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📋 Balance Sheet</h3>
+						{@render statementCurrencyNote()}
+					</div>
 				</div>
 				<div class="p-6">
 					<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -477,7 +526,10 @@ let accessDeniedOp = $state('');
 			<!-- Income Statement -->
 			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
 				<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-					<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📈 Income Statement</h3>
+					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📈 Income Statement</h3>
+						{@render statementCurrencyNote()}
+					</div>
 				</div>
 				<div class="p-6">
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -532,7 +584,10 @@ let accessDeniedOp = $state('');
 			<!-- Cash Flow Statement -->
 			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
 				<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-					<h3 class="text-lg font-semibold text-gray-800 dark:text-white">💰 Cash Flow Statement</h3>
+					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">💰 Cash Flow Statement</h3>
+						{@render statementCurrencyNote()}
+					</div>
 				</div>
 				<div class="p-6 space-y-4">
 					{#each [
@@ -585,16 +640,25 @@ let accessDeniedOp = $state('');
 			{#if budgets.length > 0}
 				<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
 					<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📊 Budget Performance</h3>
+						<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+							<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📊 Budget Performance</h3>
+							{@render statementCurrencyNote()}
+						</div>
 					</div>
 					<div class="p-6 overflow-x-auto">
 						<table class="w-full text-sm">
 							<thead>
 								<tr class="border-b border-gray-200 dark:border-gray-600">
 									<th class="text-left py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Category</th>
-									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Planned</th>
-									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Actual</th>
-									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Variance</th>
+									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
+										Planned{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
+									</th>
+									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
+										Actual{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
+									</th>
+									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
+										Variance{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
+									</th>
 									<th class="text-center py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Status</th>
 								</tr>
 							</thead>
