@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy, tick } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -21,7 +22,6 @@
 	let paintCells: string[] = $state([]);
 	let paintableCount = $state(0);
 	let paintResolution = $state(8);
-	let drawLandType = $state('unassigned');
 	let drawLandName = $state('');
 
 	let mapContainer: HTMLDivElement | undefined = $state();
@@ -38,7 +38,6 @@
 	let submitting = $state(false);
 
 	const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
-	const SOURCE_ZONES = 'land-zones';
 	const SOURCE_LANDS = 'land-parcels';
 	const SOURCE_POINTS = 'land-points';
 	const SOURCE_HIGHLIGHT = 'land-highlight';
@@ -46,13 +45,6 @@
 	const SOURCE_DRAFT_POINTS = 'draft-points';
 	const SOURCE_PREVIEW = 'draw-preview';
 
-	const landTypes = [
-		{ value: 'unassigned', label: 'Unassigned' },
-		{ value: 'residential', label: 'Residential' },
-		{ value: 'agricultural', label: 'Agricultural' },
-		{ value: 'industrial', label: 'Industrial' },
-		{ value: 'commercial', label: 'Commercial' },
-	];
 	const landStatuses = [
 		{ value: 'active', label: 'Active' },
 		{ value: 'disputed', label: 'Disputed' },
@@ -67,8 +59,7 @@
 		commercial: '#3b82f6',
 		unassigned: '#e5e7eb',
 	};
-	const ZONE_COLOR = '#f59e0b';
-	const INFLUENCE_RINGS = 2;
+	const DRAFT_PREVIEW_COLOR = '#2563eb';
 	const HEX_ZOOM_THRESHOLD = 10;
 
 	let selectedLand = $derived(lands.find((l) => l.id === selectedLandId) ?? null);
@@ -209,7 +200,7 @@
 	}
 
 	function occupiedH3Cells(): Set<string> {
-		const out = new Set<string>();
+		const out = new SvelteSet<string>();
 		for (const land of lands) {
 			for (const idx of resolveAllH3Indexes(land)) out.add(idx);
 		}
@@ -264,7 +255,7 @@
 
 	function refreshPreviewLayer() {
 		if (!map || !mapReady || !h3) return;
-		const color = landColor(drawLandType);
+		const color = DRAFT_PREVIEW_COLOR;
 		const features = paintCells.map((cell) => {
 			const boundary = h3.cellToBoundary(cell, true);
 			return {
@@ -274,70 +265,6 @@
 			};
 		});
 		map.getSource(SOURCE_PREVIEW)?.setData({ type: 'FeatureCollection', features });
-	}
-
-	function buildZoneGeoJson() {
-		const features: any[] = [];
-		if (!h3) return { type: 'FeatureCollection', features };
-
-		const parentZones = new Map<string, { landCount: number; landTypes: Record<string, number> }>();
-		for (const land of lands) {
-			const meta = parseMetadata(land.metadata);
-			const parentZone = meta?.parent_zone ? String(meta.parent_zone) : resolveH3Index(land);
-			if (!parentZone) continue;
-			if (!parentZones.has(parentZone)) parentZones.set(parentZone, { landCount: 0, landTypes: {} });
-			const zd = parentZones.get(parentZone)!;
-			zd.landCount++;
-			zd.landTypes[land.land_type] = (zd.landTypes[land.land_type] || 0) + 1;
-		}
-
-		const hexData: Record<string, any> = {};
-		parentZones.forEach((zoneInfo, centerHex) => {
-			let disk: string[];
-			try {
-				disk = h3.gridDisk(centerHex, INFLUENCE_RINGS);
-			} catch {
-				disk = [centerHex];
-			}
-			for (const hexIdx of disk) {
-				let dist: number;
-				try {
-					dist = h3.gridDistance(centerHex, hexIdx);
-				} catch {
-					dist = hexIdx === centerHex ? 0 : 1;
-				}
-				if (!hexData[hexIdx]) hexData[hexIdx] = { minDistance: dist, landCount: 0, landTypes: {} };
-				else hexData[hexIdx].minDistance = Math.min(hexData[hexIdx].minDistance, dist);
-				if (dist === 0) {
-					hexData[hexIdx].landCount += zoneInfo.landCount;
-					hexData[hexIdx].landTypes = zoneInfo.landTypes;
-				}
-			}
-		});
-
-		for (const [hexIdx, data] of Object.entries(hexData)) {
-			try {
-				const boundary = h3.cellToBoundary(hexIdx, true);
-				const distOp = 1 - (data.minDistance / (INFLUENCE_RINGS + 1)) * 0.7;
-				features.push({
-					type: 'Feature',
-					properties: {
-						h3_index: hexIdx,
-						color: ZONE_COLOR,
-						fillOpacity: (data.minDistance === 0 ? 0.5 : 0.25) * distOp,
-						lineOpacity: data.minDistance === 0 ? 0.8 : 0.4,
-						lineWidth: data.minDistance === 0 ? 2 : 1,
-						dashed: data.minDistance > 0 ? 1 : 0,
-						isCenter: data.minDistance === 0 ? 1 : 0,
-						landCount: data.landCount,
-					},
-					geometry: { type: 'Polygon', coordinates: [boundary] },
-				});
-			} catch {
-				/* skip */
-			}
-		}
-		return { type: 'FeatureCollection', features };
 	}
 
 	function buildLandGeoJson() {
@@ -468,7 +395,6 @@
 
 	function renderMapData() {
 		if (!map || !mapReady || !h3) return;
-		map.getSource(SOURCE_ZONES)?.setData(buildZoneGeoJson());
 		map.getSource(SOURCE_LANDS)?.setData(buildLandGeoJson());
 		map.getSource(SOURCE_POINTS)?.setData(buildPointGeoJson());
 		map.getSource(SOURCE_HIGHLIGHT)?.setData(buildHighlightGeoJson());
@@ -531,10 +457,6 @@
 
 	function addMapLayers() {
 		if (!map) return;
-
-		map.addSource(SOURCE_ZONES, { type: 'geojson', data: buildZoneGeoJson() });
-		map.addLayer({ id: 'zones-fill', type: 'fill', source: SOURCE_ZONES, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] } });
-		map.addLayer({ id: 'zones-line', type: 'line', source: SOURCE_ZONES, paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'lineWidth'], 'line-opacity': ['get', 'lineOpacity'] } });
 
 		map.addSource(SOURCE_LANDS, { type: 'geojson', data: buildLandGeoJson() });
 		map.addLayer({ id: 'lands-fill', type: 'fill', source: SOURCE_LANDS, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] } });
@@ -708,7 +630,6 @@
 		try {
 			const res = await callExt('create_land', {
 				h3_indexes: newCells,
-				land_type: drawLandType,
 				name: drawLandName.trim() || undefined,
 			});
 			if (res?.success) {
@@ -808,7 +729,6 @@
 		success = '';
 		try {
 			const data: any = { land_id: landUpdate.land_id };
-			if (landUpdate.land_type) data.land_type = landUpdate.land_type;
 			if (landUpdate.status) data.status = landUpdate.status;
 			const res = await callExt('update_land', data);
 			if (res?.success) {
@@ -856,13 +776,6 @@
 	}
 
 	$effect(() => {
-		if (mapReady && paintCells.length >= 0 && drawMode) {
-			drawLandType;
-			refreshPreviewLayer();
-		}
-	});
-
-	$effect(() => {
 		if (mapReady) {
 			lands;
 			selectedLandId;
@@ -898,7 +811,8 @@
 	{#if accessDeniedOp}
 		<div class="denied-shell">
 			{#if ctx.ui?.AccessDenied}
-				<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
+				{@const AccessDenied = ctx.ui.AccessDenied}
+				<AccessDenied operation={accessDeniedOp} />
 			{:else}
 				<p class="muted">You need additional permissions to view this page.</p>
 			{/if}
@@ -937,11 +851,7 @@
 
 			{#if drawMode}
 				<div class="draw-panel">
-					<label>Type
-						<select bind:value={drawLandType}>
-							{#each landTypes as t}<option value={t.value}>{t.label}</option>{/each}
-						</select>
-					</label>
+					<p class="muted">Parcel type is inherited from the covering zone (Zones extension).</p>
 					<label>Name (optional)
 						<input type="text" bind:value={drawLandName} placeholder="Parcel name" />
 					</label>
@@ -961,7 +871,7 @@
 				{:else if lands.length === 0}
 					<p class="muted center">No parcels yet. Use “Draw parcel” on the map.</p>
 				{:else}
-					{#each lands as land}
+					{#each lands as land (land.id)}
 						<button
 							type="button"
 							class="parcel-row"
@@ -1004,11 +914,12 @@
 
 					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); updateLandProps(); }}>
 						<h4>Properties</h4>
-						<select bind:value={landUpdate.land_type}>
-							{#each landTypes as t}<option value={t.value}>{t.label}</option>{/each}
-						</select>
+						<p class="readonly-field">
+							<span class="readonly-label">Type</span>
+							<span>{selectedLand.land_type || 'unassigned'}</span>
+						</p>
 						<select bind:value={landUpdate.status}>
-							{#each landStatuses as s}<option value={s.value}>{s.label}</option>{/each}
+							{#each landStatuses as s (s.value)}<option value={s.value}>{s.label}</option>{/each}
 						</select>
 						<button type="submit" class="primary-btn amber" disabled={submitting}>Update land</button>
 					</form>
@@ -1022,7 +933,12 @@
 			{/if}
 		</aside>
 
-		<div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={onResizeStart}></div>
+		<button
+			type="button"
+			class="resize-handle"
+			aria-label="Resize sidebar"
+			onmousedown={onResizeStart}
+		></button>
 
 		<div class="map-column">
 			<div bind:this={mapContainer} class="land-map" class:drawing={isDrawing}></div>
@@ -1035,7 +951,7 @@
 			</div>
 			<div class="map-overlay map-overlay-bottom">
 				<div class="legend">
-					{#each Object.entries(LAND_COLORS) as [type, color]}
+					{#each Object.entries(LAND_COLORS) as [type, color] (type)}
 						<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{type}</span>
 					{/each}
 				</div>
@@ -1081,6 +997,8 @@
 	.resize-handle {
 		flex: none;
 		width: 6px;
+		padding: 0;
+		border: none;
 		cursor: col-resize;
 		background: linear-gradient(to right, transparent, #e5e5e5, transparent);
 	}
@@ -1162,7 +1080,6 @@
 	}
 
 	.draw-panel input,
-	.draw-panel select,
 	.mini-form input,
 	.mini-form select {
 		padding: 0.45rem 0.6rem;
@@ -1246,6 +1163,23 @@
 		margin-top: 0.85rem;
 		padding-top: 0.85rem;
 		border-top: 1px solid #f0f0f0;
+	}
+
+	.readonly-field {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid #e5e5e5;
+		border-radius: 0.45rem;
+		font-size: 0.85rem;
+		background: #f9fafb;
+	}
+
+	.readonly-label {
+		color: #525252;
+		font-size: 0.75rem;
 	}
 
 	.legend {
