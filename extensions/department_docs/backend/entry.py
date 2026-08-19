@@ -16,7 +16,7 @@ reply.
 API:
   - list_departments        : departments the caller can view, with members
   - create_document         : create an (empty) doc; returns id + scope
-  - set_document_ciphertext : attach the encrypted blob after client encryption
+  - update_document         : update title and/or encrypted blob
   - list_documents          : documents in departments the caller can view
   - get_document            : a single document incl. ciphertext (for decryption)
   - delete_document         : remove a document (manager only)
@@ -62,7 +62,7 @@ def create_document(args) -> str:
     """Create an empty document for a department; return its id and scope.
 
     Two-step by design: the scope embeds the new id, so the client encrypts and
-    calls ``set_document_ciphertext`` once it knows the scope.
+    calls ``update_document`` once it knows the scope.
     """
     a = _parse_args(args)
     department = (a.get("department") or "").strip()
@@ -78,15 +78,21 @@ def create_document(args) -> str:
         return _err(e)
 
 
-def set_document_ciphertext(args) -> str:
-    """Attach (or replace) the encrypted blob for a document."""
+def update_document(args) -> str:
+    """Update a document's plaintext title and/or encrypted blob."""
     a = _parse_args(args)
     doc_id = a.get("id")
     if doc_id is None:
         return _err("id is required")
 
+    kwargs = {}
+    if "title" in a:
+        kwargs["title"] = a["title"]
+    if "ciphertext" in a:
+        kwargs["ciphertext"] = a.get("ciphertext") or ""
+
     try:
-        return _ok(ctx.dept_docs.set_ciphertext(doc_id, a.get("ciphertext") or ""))
+        return _ok(ctx.dept_docs.update(doc_id, **kwargs))
     except Exception as e:
         return _err(e)
 
@@ -138,7 +144,7 @@ def delete_document(args) -> str:
 EXTENSION_FUNCTIONS = {
     "list_departments": list_departments,
     "create_document": create_document,
-    "set_document_ciphertext": set_document_ciphertext,
+    "update_document": update_document,
     "list_documents": list_documents,
     "get_document": get_document,
     "delete_document": delete_document,
