@@ -24,6 +24,22 @@
 		can_manage: boolean;
 	}
 
+	interface ReshareJob {
+		id: string;
+		department: string;
+		new_member_principal: string;
+		status: string;
+		created_at: string;
+	}
+
+	type DocReshareStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'failed';
+
+	interface DocReshareProgress {
+		doc: DocMeta;
+		status: DocReshareStatus;
+		error?: string;
+	}
+
 	const principalStore = ctx.principal;
 	let me = $state('');
 	principalStore?.subscribe?.((v: string) => (me = v || ''));
@@ -55,6 +71,17 @@
 	let saving = $state(false);
 	let saveError = $state('');
 
+	let reshareJobs = $state<ReshareJob[]>([]);
+	let reshareDialogOpen = $state(false);
+	let reshareDialogMode = $state<'job' | 'manual'>('job');
+	let reshareTargetJobs = $state<ReshareJob[]>([]);
+	let reshareTargetDept = $state('');
+	let reshareDocProgress = $state<DocReshareProgress[]>([]);
+	let reshareRunning = $state(false);
+	let reshareCancelled = $state(false);
+	let reshareCompletedDocIds = $state<Set<string>>(new Set());
+	let reshareDismissLoading = $state(false);
+
 	const visibleDocs = $derived(
 		selectedDept ? documents.filter((d) => d.department === selectedDept) : documents,
 	);
@@ -71,6 +98,62 @@
 
 	const currentDept = $derived(departments.find((d) => d.name === selectedDept) || null);
 	const canManageSelected = $derived(!!currentDept?.can_manage);
+	const hasAnyManageDept = $derived(departments.some((d) => d.can_manage));
+
+	const pendingReshareJobs = $derived(reshareJobs.filter((j) => j.status === 'pending'));
+
+	const relevantPendingJobs = $derived.by(() => {
+		const managed = new Set(departments.filter((d) => d.can_manage).map((d) => d.name));
+		return pendingReshareJobs.filter((j) => managed.has(j.department));
+	});
+
+	const selectedDeptPendingJobs = $derived(
+		relevantPendingJobs.filter((j) => j.department === selectedDept),
+	);
+
+	const bannerPendingJobs = $derived.by(() => {
+		if (!hasAnyManageDept) return [];
+		if (canManageSelected) return selectedDeptPendingJobs;
+		return relevantPendingJobs;
+	});
+
+	const showReshareBanner = $derived(bannerPendingJobs.length > 0);
+
+	const reshareDialogDept = $derived(
+		departments.find((d) => d.name === reshareTargetDept) || null,
+	);
+
+	const reshareNewMembers = $derived.by(() => {
+		if (reshareDialogMode === 'manual') return [];
+		const seen = new Set<string>();
+		const out: string[] = [];
+		for (const job of reshareTargetJobs) {
+			const p = job.new_member_principal;
+			if (p && !seen.has(p)) {
+				seen.add(p);
+				out.push(p);
+			}
+		}
+		return out;
+	});
+
+	const reshareProgressCounts = $derived.by(() => {
+		const total = reshareDocProgress.length;
+		const done = reshareDocProgress.filter(
+			(p) => p.status === 'done' || p.status === 'skipped',
+		).length;
+		const failed = reshareDocProgress.filter((p) => p.status === 'failed').length;
+		const inProgress = reshareDocProgress.some((p) => p.status === 'in_progress');
+		return { total, done, failed, inProgress };
+	});
+
+	const reshareAllFinished = $derived(
+		reshareDocProgress.length > 0 &&
+			reshareDocProgress.every(
+				(p) =>
+					p.status === 'done' || p.status === 'skipped' || p.status === 'failed',
+			),
+	);
 
 	function deptDocCount(name: string): number {
 		return documents.filter((d) => d.department === name).length;
@@ -341,10 +424,230 @@
 			const lres: any = await ctx.callSync('list_documents');
 			if (!lres?.success) throw new Error(lres?.error || 'Failed to load documents');
 			documents = lres.data?.documents ?? [];
+
+			await loadReshareJobs();
 		} catch (e: any) {
 			error = String(e?.message ?? e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadReshareJobs() {
+		if (!departments.some((d) => d.can_manage)) {
+			reshareJobs = [];
+			return;
+		}
+		try {
+			const res: any = await ctx.callSync('reshare_list', {});
+			if (res?.success) {
+				reshareJobs = res.data?.jobs ?? [];
+			}
+		} catch {
+			/* degrade silently */
+		}
+	}
+
+	function initReshareDocProgress(dept: string) {
+		const docs = documents.filter((d) => d.department === dept);
+		reshareDocProgress = docs.map((doc) => ({
+			doc,
+			status: reshareCompletedDocIds.has(doc.id) ? ('done' as const) : ('pending' as const),
+		}));
+	}
+
+	function openReshareDialog(opts: { jobs?: ReshareJob[]; manual?: boolean; dept?: string }) {
+		const dept = opts.dept ?? selectedDept;
+		if (!dept) return;
+		const deptInfo = departments.find((d) => d.name === dept);
+		if (!deptInfo?.can_manage) return;
+
+		reshareTargetDept = dept;
+		reshareDialogMode = opts.manual ? 'manual' : 'job';
+		reshareTargetJobs = opts.jobs ?? [];
+		reshareCancelled = false;
+		reshareRunning = false;
+		reshareCompletedDocIds = new Set();
+		initReshareDocProgress(dept);
+		reshareDialogOpen = true;
+	}
+
+	function openReshareBannerDialog() {
+		openReshareDialog({ jobs: bannerPendingJobs, dept: selectedDept });
+	}
+
+	function openManualReshareDialog() {
+		openReshareDialog({ manual: true, dept: selectedDept });
+	}
+
+	function closeReshareDialog() {
+		if (reshareRunning) return;
+		reshareDialogOpen = false;
+		reshareTargetJobs = [];
+		reshareDocProgress = [];
+		reshareCompletedDocIds = new Set();
+		reshareCancelled = false;
+	}
+
+	function cancelResharing() {
+		reshareCancelled = true;
+	}
+
+	function restartResharing() {
+		reshareCompletedDocIds = new Set();
+		reshareCancelled = false;
+		initReshareDocProgress(reshareTargetDept);
+	}
+
+	async function dismissReshareJobs() {
+		if (!reshareTargetJobs.length || reshareDismissLoading || reshareRunning) return;
+		reshareDismissLoading = true;
+		try {
+			for (const job of reshareTargetJobs) {
+				const res: any = await ctx.callSync('reshare_dismiss', { id: job.id });
+				if (!res?.success) throw new Error(res?.error || 'Failed to dismiss re-share job');
+			}
+			await loadReshareJobs();
+			closeReshareDialog();
+			ctx.notify?.('success', 'Re-share request dismissed.');
+		} catch (e: any) {
+			ctx.notify?.('error', String(e?.message ?? e));
+		} finally {
+			reshareDismissLoading = false;
+		}
+	}
+
+	function buildReshareRecipients(): string[] {
+		const members = reshareDialogDept?.members ?? [];
+		const extra = reshareDialogMode === 'job' ? reshareNewMembers : [];
+		return Array.from(new Set([...members, ...extra, me].filter(Boolean)));
+	}
+
+	function updateDocProgress(docId: string, patch: Partial<DocReshareProgress>) {
+		reshareDocProgress = reshareDocProgress.map((p) =>
+			p.doc.id === docId ? { ...p, ...patch } : p,
+		);
+	}
+
+	async function reshareSingleDocument(
+		progress: DocReshareProgress,
+		recipients: string[],
+	): Promise<void> {
+		const { doc } = progress;
+		updateDocProgress(doc.id, { status: 'in_progress', error: undefined });
+
+		try {
+			const res: any = await ctx.callSync('get_document', { id: doc.id });
+			if (!res?.success) throw new Error(res?.error || 'Failed to load document');
+
+			const ciphertext = res.data?.ciphertext || '';
+			if (!ciphertext) {
+				updateDocProgress(doc.id, { status: 'skipped' });
+				reshareCompletedDocIds = new Set([...reshareCompletedDocIds, doc.id]);
+				return;
+			}
+
+			const plaintext = await ctx.crypto.decryptScope(doc.scope, ciphertext);
+			if (!plaintext) {
+				updateDocProgress(doc.id, {
+					status: 'failed',
+					error: 'You do not have a decryption key for this document.',
+				});
+				return;
+			}
+
+			const { ciphertext: newCiphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(
+				recipients,
+				plaintext,
+			);
+
+			const updateRes: any = await ctx.callSync('update_document', {
+				id: doc.id,
+				ciphertext: newCiphertext,
+			});
+			if (!updateRes?.success) throw new Error(updateRes?.error || 'Failed to update document');
+
+			await ctx.crypto.grantScope(doc.scope, wrappedDeks);
+
+			updateDocProgress(doc.id, { status: 'done' });
+			reshareCompletedDocIds = new Set([...reshareCompletedDocIds, doc.id]);
+		} catch (e: any) {
+			updateDocProgress(doc.id, { status: 'failed', error: String(e?.message ?? e) });
+		}
+	}
+
+	async function startResharing() {
+		if (reshareRunning || !reshareTargetDept) return;
+		reshareRunning = true;
+		reshareCancelled = false;
+
+		const recipients = buildReshareRecipients();
+
+		try {
+			for (const progress of reshareDocProgress) {
+				if (reshareCancelled) break;
+				if (
+					progress.status === 'done' ||
+					progress.status === 'skipped' ||
+					reshareCompletedDocIds.has(progress.doc.id)
+				) {
+					continue;
+				}
+				await reshareSingleDocument(progress, recipients);
+			}
+
+			const allProcessed = reshareDocProgress.every(
+				(p) =>
+					p.status === 'done' ||
+					p.status === 'skipped' ||
+					p.status === 'failed' ||
+					reshareCompletedDocIds.has(p.doc.id),
+			);
+
+			if (!reshareCancelled && allProcessed) {
+				if (reshareDialogMode === 'job' && reshareTargetJobs.length) {
+					for (const job of reshareTargetJobs) {
+						const res: any = await ctx.callSync('reshare_complete', { id: job.id });
+						if (!res?.success) throw new Error(res?.error || 'Failed to complete re-share job');
+					}
+				}
+				await loadReshareJobs();
+				await loadAll();
+				reshareDialogOpen = false;
+				reshareTargetJobs = [];
+				reshareDocProgress = [];
+				reshareCompletedDocIds = new Set();
+				ctx.notify?.(
+					'success',
+					reshareDialogMode === 'manual'
+						? 'Department documents re-shared with all members.'
+						: 'Documents re-shared with new member(s).',
+				);
+			}
+		} catch (e: any) {
+			ctx.notify?.('error', String(e?.message ?? e));
+		} finally {
+			reshareRunning = false;
+		}
+	}
+
+	function resumeResharing() {
+		reshareCancelled = false;
+		startResharing();
+	}
+
+	function reshareStatusLabel(status: DocReshareStatus): string {
+		switch (status) {
+			case 'pending':
+				return 'Pending';
+			case 'in_progress':
+				return 'In progress';
+			case 'done':
+				return 'Done';
+			case 'skipped':
+				return 'Skipped (empty)';
+			case 'failed':
+				return 'Failed';
 		}
 	}
 
@@ -597,6 +900,7 @@
 
 	loadDirectory();
 	loadAll();
+	loadReshareJobs();
 </script>
 
 <svelte:window onclick={() => (openMenuKey = null)} onkeydown={handleMenuKeydown} />
@@ -662,8 +966,34 @@
 				>
 					You manage this department
 				</span>
+				<button
+					type="button"
+					class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+					onclick={openManualReshareDialog}
+				>
+					Re-share department docs
+				</button>
 			{/if}
 		</div>
+		{#if showReshareBanner}
+			<div
+				class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20"
+				role="alert"
+			>
+				<p class="text-sm text-amber-800 dark:text-amber-200">
+					{bannerPendingJobs.length} new department member{bannerPendingJobs.length === 1
+						? ''
+						: 's'} need access to encrypted documents.
+				</p>
+				<button
+					type="button"
+					class="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600"
+					onclick={openReshareBannerDialog}
+				>
+					Review re-share
+				</button>
+			</div>
+		{/if}
 		{#if currentDept?.description}
 			<p class="text-xs text-gray-500 dark:text-gray-400">{currentDept.description}</p>
 		{/if}
@@ -962,6 +1292,181 @@
 							</svg>
 							<p class="text-sm">Select a document to view, or create a new one.</p>
 						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if reshareDialogOpen}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			role="presentation"
+			onclick={(e) => {
+				if (e.target === e.currentTarget && !reshareRunning) closeReshareDialog();
+			}}
+		>
+			<div
+				class="flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="reshare-dialog-title"
+			>
+				<div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+					<h2 id="reshare-dialog-title" class="text-lg font-semibold text-gray-900 dark:text-white">
+						{reshareDialogMode === 'manual'
+							? `Re-share documents in ${reshareTargetDept}`
+							: 'Re-share documents with new member(s)'}
+					</h2>
+					{#if reshareDialogMode === 'job' && reshareNewMembers.length}
+						<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+							New member{reshareNewMembers.length === 1 ? '' : 's'}:
+							{#each reshareNewMembers as principal, i (principal)}
+								<span class="font-mono">{truncatePrincipal(principal)}</span>{#if i < reshareNewMembers.length - 1},
+								{/if}
+							{/each}
+						</p>
+					{:else if reshareDialogMode === 'manual'}
+						<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+							Re-encrypt all documents for current department members.
+						</p>
+					{/if}
+				</div>
+
+				<div class="flex-1 overflow-y-auto px-4 py-3">
+					{#if reshareDocProgress.length === 0}
+						<p class="text-sm text-gray-500 dark:text-gray-400">
+							This department has no documents to re-share.
+						</p>
+					{:else}
+						{#if reshareRunning || reshareAllFinished || reshareCancelled}
+							<div class="mb-4">
+								<div class="mb-1 flex justify-between text-xs text-gray-500 dark:text-gray-400">
+									<span>Progress</span>
+									<span>
+										{reshareProgressCounts.done} / {reshareProgressCounts.total} documents
+										{#if reshareProgressCounts.failed}
+											<span class="text-red-600 dark:text-red-400">
+												({reshareProgressCounts.failed} failed)
+											</span>
+										{/if}
+									</span>
+								</div>
+								<div
+									class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+									role="progressbar"
+									aria-valuenow={reshareProgressCounts.done}
+									aria-valuemin={0}
+									aria-valuemax={reshareProgressCounts.total}
+								>
+									<div
+										class="h-full rounded-full bg-blue-600 transition-all dark:bg-blue-500"
+										style="width: {reshareProgressCounts.total
+											? (reshareProgressCounts.done / reshareProgressCounts.total) * 100
+											: 0}%"
+									></div>
+								</div>
+							</div>
+						{/if}
+
+						<ul class="space-y-2">
+							{#each reshareDocProgress as item (item.doc.id)}
+								<li
+									class="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700"
+								>
+									<div class="flex items-start justify-between gap-2">
+										<div class="min-w-0 flex-1">
+											<div class="truncate text-sm font-medium text-gray-900 dark:text-white">
+												{item.doc.title}
+											</div>
+											<div class="truncate font-mono text-xs text-gray-400 dark:text-gray-500">
+												{item.doc.id}
+											</div>
+										</div>
+										<span
+											class={cn(
+												'shrink-0 text-xs font-medium',
+												item.status === 'done' || item.status === 'skipped'
+													? 'text-green-600 dark:text-green-400'
+													: item.status === 'failed'
+														? 'text-red-600 dark:text-red-400'
+														: item.status === 'in_progress'
+															? 'text-blue-600 dark:text-blue-400'
+															: 'text-gray-500 dark:text-gray-400',
+											)}
+										>
+											{reshareStatusLabel(item.status)}
+										</span>
+									</div>
+									{#if item.error}
+										<p class="mt-1 text-xs text-red-600 dark:text-red-400">{item.error}</p>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+
+				<div
+					class="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700"
+				>
+					{#if reshareRunning}
+						<button
+							type="button"
+							class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
+							onclick={cancelResharing}
+						>
+							Cancel
+						</button>
+					{:else if reshareCancelled && !reshareAllFinished}
+						<button
+							type="button"
+							class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
+							onclick={restartResharing}
+						>
+							Restart
+						</button>
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+							onclick={resumeResharing}
+						>
+							Resume
+						</button>
+					{:else if !reshareAllFinished}
+						{#if reshareDialogMode === 'job' && reshareTargetJobs.length}
+							<button
+								type="button"
+								class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
+								disabled={reshareDismissLoading}
+								onclick={dismissReshareJobs}
+							>
+								{reshareDismissLoading ? 'Dismissing…' : 'Dismiss'}
+							</button>
+						{/if}
+						<button
+							type="button"
+							class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
+							onclick={closeReshareDialog}
+						>
+							Close
+						</button>
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+							disabled={reshareDocProgress.length === 0}
+							onclick={startResharing}
+						>
+							Start re-sharing
+						</button>
+					{:else}
+						<button
+							type="button"
+							class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
+							onclick={closeReshareDialog}
+						>
+							Close
+						</button>
 					{/if}
 				</div>
 			</div>

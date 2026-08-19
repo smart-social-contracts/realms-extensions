@@ -1,6 +1,6 @@
 {
   "name": "department_docs",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Write and share private documents with everyone in your department; only people in that department can read what you publish.",
   "author": "Smart Social Contracts",
   "ggg_api_version": 1,
@@ -17,7 +17,10 @@
     "update_document",
     "list_documents",
     "get_document",
-    "delete_document"
+    "delete_document",
+    "reshare_list",
+    "reshare_dismiss",
+    "reshare_complete"
   ],
   "capabilities": [
     "department.list",
@@ -25,7 +28,10 @@
     "dept_doc.get",
     "dept_doc.create",
     "dept_doc.update",
-    "dept_doc.delete"
+    "dept_doc.delete",
+    "dept_doc.reshare_list",
+    "dept_doc.reshare_dismiss",
+    "dept_doc.reshare_complete"
   ],
   "entities": {
     "DepartmentDocument": {
@@ -48,6 +54,26 @@
         "created_by": {
           "type": "String",
           "max_length": 128
+        }
+      }
+    },
+    "ReshareJob": {
+      "fields": {
+        "department": {
+          "type": "String",
+          "max_length": 256
+        },
+        "new_member_principal": {
+          "type": "String",
+          "max_length": 128
+        },
+        "status": {
+          "type": "String",
+          "max_length": 32
+        },
+        "created_at": {
+          "type": "String",
+          "max_length": 64
         }
       }
     }

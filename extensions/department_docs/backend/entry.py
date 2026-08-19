@@ -141,6 +141,38 @@ def delete_document(args) -> str:
         return _err(e)
 
 
+def reshare_list(args=None) -> str:
+    a = _parse_args(args)
+    try:
+        return _ok(ctx.dept_docs.reshare_list((a.get("department") or "").strip()))
+    except Exception as e:
+        return _err(e)
+
+
+def reshare_dismiss(args) -> str:
+    a = _parse_args(args)
+    job_id = a.get("id")
+    if job_id is None:
+        return _err("id is required")
+
+    try:
+        return _ok(ctx.dept_docs.reshare_dismiss(job_id))
+    except Exception as e:
+        return _err(e)
+
+
+def reshare_complete(args) -> str:
+    a = _parse_args(args)
+    job_id = a.get("id")
+    if job_id is None:
+        return _err("id is required")
+
+    try:
+        return _ok(ctx.dept_docs.reshare_complete(job_id))
+    except Exception as e:
+        return _err(e)
+
+
 EXTENSION_FUNCTIONS = {
     "list_departments": list_departments,
     "create_document": create_document,
@@ -148,6 +180,9 @@ EXTENSION_FUNCTIONS = {
     "list_documents": list_documents,
     "get_document": get_document,
     "delete_document": delete_document,
+    "reshare_list": reshare_list,
+    "reshare_dismiss": reshare_dismiss,
+    "reshare_complete": reshare_complete,
 }
 
 
