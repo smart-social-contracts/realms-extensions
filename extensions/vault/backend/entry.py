@@ -440,7 +440,15 @@ def transfer(args: str):
         wallet = _get_wallet()
         if not token:
             tokens = _target_token_names(wallet)
-            token = tokens[0] if tokens else "ckBTC"
+            if not tokens:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "No treasury token is configured for this realm",
+                        "error_code": "no_treasury_token",
+                    }
+                )
+            token = tokens[0]
 
         to_subaccount = bytes.fromhex(to_sub) if to_sub else None
         from_subaccount = bytes.fromhex(from_sub) if from_sub else None
