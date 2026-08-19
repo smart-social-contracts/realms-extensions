@@ -1,13 +1,11 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
-	interface Toast { id: number; type: 'success' | 'error'; text: string; }
-
 	let loading = $state(false);
-	let toasts: Toast[] = $state([]);
-	let toastCounter = $state(0);
 
 	// Departments
 	let departments: any[] = $state([]);
@@ -24,6 +22,8 @@
 	let newThresholdN = $state('1');
 	let selectedDeptName = $state('');
 	let addMemberPrincipal = $state('');
+	let addingMember = $state(false);
+	let copiedMemberPrincipal: string | null = $state(null);
 	// Member principal autocomplete — realm directory from host `directory_list`.
 	let directory: any[] = $state([]);
 	let directoryLoaded = $state(false);
@@ -42,6 +42,27 @@
 			)
 			.slice(0, 8);
 	});
+	let resolvedMemberPrincipal = $derived.by(() => {
+		const raw = addMemberPrincipal.trim();
+		if (!raw) return null;
+
+		const exact = directory.find(
+			(e) => e.kind === 'user' && (e.principal || '').toLowerCase() === raw.toLowerCase(),
+		);
+		if (exact?.principal) return exact.principal;
+
+		const labelMatches = directory.filter(
+			(e) => e.kind === 'user' && (e.label || '').toLowerCase() === raw.toLowerCase(),
+		);
+		if (labelMatches.length === 1 && labelMatches[0].principal) return labelMatches[0].principal;
+
+		if (isValidIcPrincipal(raw)) return raw.toLowerCase();
+
+		return null;
+	});
+	let memberPrincipalUnresolved = $derived(
+		addMemberPrincipal.trim() !== '' && resolvedMemberPrincipal === null,
+	);
 	let deptPermissions: Record<string, string[]> = $state({});
 	let deptPermLoading: string | null = $state(null);
 	let deptPermFilter = $state('');
@@ -70,8 +91,12 @@
 		selectedDeptName ? departments.find((d) => d.name === selectedDeptName) ?? null : null,
 	);
 
+	type DeptTab = 'overview' | 'members' | 'permissions' | 'authority' | 'fund';
 	// Fund tab (issue #260)
-	let activeTab: 'overview' | 'fund' = $state('overview');
+	let activeTab: DeptTab = $state('overview');
+	let showPermPicker = $state(false);
+	let authFilter = $state('');
+	let expandedAuthRows: Set<string> = $state(new Set());
 	let fundLoading = $state(false);
 	let fundData: any = $state.raw(null);
 	let payrollData: any = $state.raw(null);
@@ -88,22 +113,58 @@
 		deptPermFilter = '';
 		deptPendingGrants = new Set();
 		deptPendingRevokes = new Set();
+		showPermPicker = false;
 		fundData = null;
 		payrollData = null;
 		void loadDeptPermissions(name);
 		if (activeTab === 'fund') void loadFund(name);
 	}
 
-	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		// Friendly message for expired session (delegation) errors
+	function notify(message: string, type: 'success' | 'error' = 'success') {
 		const friendly = message.includes('Invalid delegation expiry') ||
 			message.includes('delegation has expired') ||
 			message.includes('Specified sender delegation has expired')
 			? 'Your session expired. Please refresh the page to continue.'
 			: message;
-		toasts = [...toasts, { id, text: friendly, type }];
-		setTimeout(() => { toasts = toasts.filter(t => t.id !== id); }, 4000);
+		if (type === 'error' && typeof ctx.openModal === 'function') {
+			void ctx.openModal({
+				title: 'Something went wrong',
+				body: friendly,
+				actions: [{ id: 'close', label: 'Close', tone: 'secondary' }],
+			}).catch(() => {});
+			return;
+		}
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(type === 'error' ? 'error' : 'success', friendly);
+			return;
+		}
+		console.warn('[access_manager]', type, friendly);
+	}
+
+	async function confirmModal(opts: {
+		title: string;
+		body: string;
+		confirmLabel?: string;
+		danger?: boolean;
+	}): Promise<boolean> {
+		if (typeof ctx.openModal !== 'function') return true;
+		try {
+			const { actionId } = await ctx.openModal({
+				title: opts.title,
+				body: opts.body,
+				actions: [
+					{ id: 'cancel', label: 'Cancel', tone: 'secondary' },
+					{
+						id: 'confirm',
+						label: opts.confirmLabel || 'Confirm',
+						tone: opts.danger ? 'danger' : 'primary',
+					},
+				],
+			});
+			return actionId === 'confirm';
+		} catch {
+			return false;
+		}
 	}
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
@@ -119,22 +180,6 @@
 		return `You don't have permission to view ${resource}.`;
 	}
 
-	// Confirmation modal shown before any action that creates a governance
-	// proposal. The backend returns requires_confirmation instead of creating
-	// the proposal; on confirm we re-issue the call with confirm: true.
-	let voteConfirm: {
-		summary: string;
-		governedBy: string;
-		policy: string;
-		governedPolicy: string;
-		targetDepartment: string;
-		targetPolicy: string;
-		policyReason: string;
-		votersOrg: string;
-		run: () => Promise<void>;
-	} | null = $state(null);
-	let voteConfirmBusy = $state(false);
-
 	async function callGated(
 		fn: string,
 		params: Record<string, unknown>,
@@ -142,28 +187,36 @@
 	) {
 		const res = await callExt(fn, params);
 		if (res?.success && res.data?.requires_confirmation) {
-			voteConfirm = {
-				summary: res.data.summary || '',
-				governedBy: res.data.governed_by || '',
-				policy: res.data.policy || '',
-				governedPolicy: res.data.governed_policy || res.data.policy || '',
-				targetDepartment: res.data.target_department || '',
-				targetPolicy: res.data.target_policy || '',
-				policyReason: res.data.policy_reason || '',
-				votersOrg: res.data.voters_org || res.data.governed_by || '',
-				run: async () => {
-					voteConfirmBusy = true;
-					try {
-						const confirmed = await callExt(fn, { ...params, confirm: true });
-						await handle(confirmed);
-						voteConfirm = null;
-					} catch (e: any) {
-						addToast(e?.message || 'Error', 'error');
-					} finally {
-						voteConfirmBusy = false;
-					}
-				},
-			};
+			const summary = res.data.summary || '';
+			const governedBy = res.data.governed_by || '';
+			const governedPolicy = res.data.governed_policy || res.data.policy || '';
+			const targetDepartment = res.data.target_department || '';
+			const targetPolicy = res.data.target_policy || '';
+			const policyReason = res.data.policy_reason || '';
+			const votersOrg = res.data.voters_org || res.data.governed_by || '';
+
+			const body = [
+				`This action cannot be applied directly — it needs approval under ${governedBy} policy (${governedPolicy}).`,
+				'',
+				'Why this policy applies:',
+				policyReason || '—',
+				'',
+				`Target department: ${targetDepartment || '—'} (${targetPolicy || '—'})`,
+				`Deciding org: ${governedBy} (${governedPolicy})`,
+				'',
+				summary,
+				'',
+				`Create a proposal? Members of ${votersOrg} will vote on it in Voting.`,
+			].join('\n');
+
+			const ok = await confirmModal({
+				title: 'Governance vote required',
+				body,
+				confirmLabel: 'Create proposal',
+			});
+			if (!ok) return;
+			const confirmed = await callExt(fn, { ...params, confirm: true });
+			await handle(confirmed);
 			return;
 		}
 		await handle(res);
@@ -184,20 +237,14 @@
 				if (isAccessPermissionError(res)) {
 					departmentsBlockedMessage = permissionDeniedMessage('departments');
 				} else {
-					addToast(err || 'Failed to load departments', 'error');
+					notify(err || 'Failed to load departments', 'error');
 				}
 				return;
 			}
 
 			departments = res.data?.departments ?? [];
 			for (const d of departments) {
-				policyDraft[d.name] = {
-					m: String(d.policy?.threshold_m ?? 1),
-					n: String(d.policy?.threshold_n ?? 1),
-					quorum: String(d.policy?.quorum_percent ?? 0),
-					veto: (d.policy?.veto_principals ?? []).join(', '),
-					fund: d.fund?.code ?? '',
-				};
+				policyDraft[d.name] = serverPolicyValues(d);
 			}
 			policyDraft = { ...policyDraft };
 
@@ -208,7 +255,7 @@
 				if (isAccessPermissionError(authRes)) {
 					authoritiesBlockedMessage = permissionDeniedMessage('authority grants');
 				} else {
-					addToast(err || 'Failed to load authorities', 'error');
+					notify(err || 'Failed to load authorities', 'error');
 				}
 			} else {
 				authorities = authRes.data?.authorities ?? [];
@@ -226,7 +273,7 @@
 				if (first) selectDepartment(first.name);
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Failed to load departments', 'error');
+			notify(e?.message || 'Failed to load departments', 'error');
 		} finally {
 			deptLoading = false;
 		}
@@ -244,7 +291,7 @@
 				threshold_n: parseInt(newThresholdN || '1', 10),
 			});
 			if (res?.success) {
-				addToast(`Department "${newDeptName}" created`);
+				notify(`Department "${newDeptName}" created`);
 				const createdName = newDeptName.trim();
 				newDeptName = ''; newDeptDesc = ''; newDeptHead = ''; newDeptFund = '';
 				newThresholdM = '1'; newThresholdN = '1';
@@ -252,10 +299,10 @@
 				await loadDepartments();
 				selectDepartment(createdName);
 			} else {
-				addToast(res?.error || 'Failed to create', 'error');
+				notify(res?.error || 'Failed to create', 'error');
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -272,31 +319,31 @@
 
 	function proposalCreatedToast(res: any) {
 		const org = res.data?.org_scope || res.data?.voters_org || res.data?.governed_by || 'the governing org';
-		addToast(`Proposal ${res.data.proposal_id} created — members of ${org} must vote (see Voting)`);
+		notify(`Proposal ${res.data.proposal_id} created — members of ${org} must vote (see Voting)`);
 	}
 
 	function handlePositionResult(res: any, successMsg: string): boolean {
 		if (!res?.success) {
-			addToast(res?.error || 'Position action failed', 'error');
+			notify(res?.error || 'Position action failed', 'error');
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
 			proposalCreatedToast(res);
 		} else {
-			addToast(successMsg);
+			notify(successMsg);
 		}
 		return true;
 	}
 
 	function handleMemberResult(res: any, successMsg: string): boolean {
 		if (!res?.success) {
-			addToast(res?.error || 'Member action failed', 'error');
+			notify(res?.error || 'Member action failed', 'error');
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
 			proposalCreatedToast(res);
 		} else {
-			addToast(successMsg);
+			notify(successMsg);
 		}
 		return true;
 	}
@@ -320,7 +367,7 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -348,7 +395,7 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -361,7 +408,7 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -377,7 +424,7 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -396,7 +443,7 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -412,9 +459,68 @@
 		assignPrincipal = eligible[0]?.principal ?? '';
 	}
 
+	type PolicyDraft = { m: string; n: string; quorum: string; veto: string; fund: string };
+
+	function serverPolicyValues(dept: any): PolicyDraft {
+		return {
+			m: String(dept.policy?.threshold_m ?? 1),
+			n: String(dept.policy?.threshold_n ?? 1),
+			quorum: String(dept.policy?.quorum_percent ?? 0),
+			veto: (dept.policy?.veto_principals ?? []).join(', '),
+			fund: dept.fund?.code ?? '',
+		};
+	}
+
+	function policyDraftDirty(name: string): boolean {
+		const dept = departments.find((d) => d.name === name);
+		const draft = policyDraft[name];
+		if (!dept || !draft) return false;
+		const server = serverPolicyValues(dept);
+		return (
+			draft.m !== server.m ||
+			draft.n !== server.n ||
+			draft.quorum !== server.quorum ||
+			draft.veto !== server.veto ||
+			draft.fund !== server.fund
+		);
+	}
+
+	function resetPolicyDraft(name: string) {
+		const dept = departments.find((d) => d.name === name);
+		if (!dept || !policyDraft[name]) return;
+		policyDraft[name] = { ...serverPolicyValues(dept) };
+		policyDraft = { ...policyDraft };
+	}
+
+	function validatePolicyDraft(draft: PolicyDraft): { valid: boolean; errors: { m?: string; n?: string; quorum?: string } } {
+		const errors: { m?: string; n?: string; quorum?: string } = {};
+		const mRaw = draft.m.trim();
+		const nRaw = draft.n.trim();
+		const quorumRaw = draft.quorum.trim();
+		const m = parseInt(mRaw, 10);
+		const n = parseInt(nRaw, 10);
+		const quorum = parseInt(quorumRaw, 10);
+
+		if (!/^\d+$/.test(mRaw) || m < 1) errors.m = 'Must be an integer ≥ 1';
+		if (!/^\d+$/.test(nRaw) || n < 1) errors.n = 'Must be an integer ≥ 1';
+		if (!/^\d+$/.test(quorumRaw) || quorum < 0 || quorum > 100) {
+			errors.quorum = 'Must be an integer 0–100';
+		}
+		if (!errors.m && !errors.n && m > n) errors.m = 'M must be ≤ N';
+
+		return { valid: Object.keys(errors).length === 0, errors };
+	}
+
+	function policyValidation(name: string) {
+		const draft = policyDraft[name];
+		if (!draft) return { valid: false, errors: {} as { m?: string; n?: string; quorum?: string } };
+		return validatePolicyDraft(draft);
+	}
+
 	async function savePolicy(name: string) {
 		const draft = policyDraft[name];
 		if (!draft) return;
+		if (!policyValidation(name).valid) return;
 		try {
 			const res = await callExt('update_department', {
 				name,
@@ -425,19 +531,19 @@
 				fund_code: draft.fund.trim(),
 			});
 			if (res?.success) {
-				addToast(`Policy saved for ${name}`);
+				notify(`Policy saved for ${name}`);
 				await loadDepartments();
 			} else {
-				addToast(res?.error || 'Failed to save policy', 'error');
+				notify(res?.error || 'Failed to save policy', 'error');
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
 	async function grantAuthorityFromRoot() {
 		if (!authTarget.trim() && !(authRemoteCanister.trim() && authRemoteOrg.trim())) {
-			addToast('Set a local target or remote quarter + department', 'error');
+			notify('Set a local target or remote quarter + department', 'error');
 			return;
 		}
 		try {
@@ -453,44 +559,60 @@
 			}
 			const res = await callExt('grant_authority', args);
 			if (res?.success) {
-				addToast('Authority granted');
+				notify('Authority granted');
 				authTarget = ''; authRemoteCanister = ''; authRemoteOrg = '';
 				await loadDepartments();
 			} else {
-				addToast(res?.error || 'Failed', 'error');
+				notify(res?.error || 'Failed', 'error');
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
 	async function revokeAuthority(id: string) {
+		const auth = authorities.find((a) => a.id === id);
+		if (!auth) return;
+		const permCount = (auth.permissions ?? []).length;
+		const ok = await confirmModal({
+			title: 'Revoke authority',
+			body: `Revoke authority from ${auth.grantor} → ${authTargetLabel(auth)} (${permCount} permission${permCount === 1 ? '' : 's'})?`,
+			confirmLabel: 'Revoke',
+			danger: true,
+		});
+		if (!ok) return;
 		try {
 			const res = await callExt('revoke_authority', { id });
 			if (res?.success) {
-				addToast('Authority revoked');
+				notify('Authority revoked');
 				await loadDepartments();
 			} else {
-				addToast(res?.error || 'Failed', 'error');
+				notify(res?.error || 'Failed', 'error');
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
 	async function deleteDepartment(name: string) {
-		if (!confirm(`Delete department "${name}"?`)) return;
+		const ok = await confirmModal({
+			title: 'Delete department',
+			body: `Delete department "${name}"? This cannot be undone.`,
+			confirmLabel: 'Delete',
+			danger: true,
+		});
+		if (!ok) return;
 		try {
 			const res = await callExt('delete_department', { name });
 			if (res?.success) {
-				addToast(`Department "${name}" deleted`);
+				notify(`Department "${name}" deleted`);
 				if (selectedDeptName === name) selectedDeptName = '';
 				await loadDepartments();
 			} else {
-				addToast(res?.error || 'Failed', 'error');
+				notify(res?.error || 'Failed', 'error');
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -508,6 +630,26 @@
 			console.warn('[access_manager] directory load failed', e);
 		} finally {
 			directoryLoading = false;
+		}
+	}
+
+	function isValidIcPrincipal(s: string): boolean {
+		const lower = s.toLowerCase();
+		return (
+			/^[a-z2-7]{5}(-[a-z2-7]{5})+-[a-z2-7]{2,5}$/.test(lower) ||
+			/^[a-z2-7]{5}-[a-z2-7]{2,5}$/.test(lower)
+		);
+	}
+
+	function openMemberSuggestionsIfMatches() {
+		void loadDirectory();
+		const q = addMemberPrincipal.trim();
+		if (q && memberSuggestions.length > 0) {
+			showMemberSuggestions = true;
+			memberSuggestionIndex = 0;
+		} else {
+			showMemberSuggestions = false;
+			memberSuggestionIndex = 0;
 		}
 	}
 
@@ -545,6 +687,10 @@
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			memberSuggestionIndex = Math.max(memberSuggestionIndex - 1, 0);
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			const pick = memberSuggestions[memberSuggestionIndex];
+			if (pick) selectMemberSuggestion(pick);
 		} else if (e.key === 'Escape') {
 			showMemberSuggestions = false;
 			memberSuggestionIndex = 0;
@@ -552,11 +698,13 @@
 	}
 
 	async function addMember(deptName: string) {
-		if (!addMemberPrincipal.trim()) return;
+		const principal = resolvedMemberPrincipal;
+		if (!principal || addingMember) return;
+		addingMember = true;
 		try {
 			await callGated('add_department_member', {
 				department: deptName,
-				user_principal: addMemberPrincipal.trim(),
+				user_principal: principal,
 			}, async (res) => {
 				if (handleMemberResult(res, 'Member added')) {
 					addMemberPrincipal = '';
@@ -564,11 +712,49 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
+		} finally {
+			addingMember = false;
 		}
 	}
 
-	async function removeMember(deptName: string, principal: string) {
+	async function copyMemberPrincipal(principal: string) {
+		const markCopied = () => {
+			copiedMemberPrincipal = principal;
+			setTimeout(() => {
+				if (copiedMemberPrincipal === principal) copiedMemberPrincipal = null;
+			}, 1500);
+		};
+		if (typeof ctx.host?.dispatch === 'function') {
+			try {
+				ctx.host.dispatch({ type: 'clipboard.write', text: principal });
+				markCopied();
+				return;
+			} catch {
+				/* fall through to navigator */
+			}
+		}
+		try {
+			await navigator.clipboard.writeText(principal);
+			markCopied();
+		} catch {
+			/* clipboard unavailable */
+		}
+	}
+
+	async function removeMember(
+		deptName: string,
+		principal: string,
+		member?: { nickname?: string; principal: string },
+	) {
+		const memberLabel = (member?.nickname || '').trim() || shortPrincipal(principal);
+		const ok = await confirmModal({
+			title: 'Remove member',
+			body: `Remove ${memberLabel} from ${deptName}?`,
+			confirmLabel: 'Remove',
+			danger: true,
+		});
+		if (!ok) return;
 		try {
 			await callGated('remove_department_member', {
 				department: deptName,
@@ -579,7 +765,7 @@
 				}
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		}
 	}
 
@@ -595,11 +781,11 @@
 				if (isAccessPermissionError(res)) {
 					deptPermissionsBlocked = { ...deptPermissionsBlocked, [deptName]: permissionDeniedMessage('department permissions') };
 				} else {
-					addToast(err || 'Failed to load permissions', 'error');
+					notify(err || 'Failed to load permissions', 'error');
 				}
 			}
 		} catch (e: any) {
-			addToast(e?.message || 'Failed to load permissions', 'error');
+			notify(e?.message || 'Failed to load permissions', 'error');
 		} finally {
 			deptPermLoading = null;
 		}
@@ -632,7 +818,7 @@
 					permission_names: toGrant,
 				});
 				if (!res?.success) {
-					addToast(res?.error || 'Failed to grant', 'error');
+					notify(res?.error || 'Failed to grant', 'error');
 					deptPermApplying = false;
 					return;
 				}
@@ -643,17 +829,17 @@
 					permission_names: toRevoke,
 				});
 				if (!res?.success) {
-					addToast(res?.error || 'Failed to revoke', 'error');
+					notify(res?.error || 'Failed to revoke', 'error');
 					deptPermApplying = false;
 					return;
 				}
 			}
-			addToast(`${toGrant.length} granted, ${toRevoke.length} revoked`);
+			notify(`${toGrant.length} granted, ${toRevoke.length} revoked`);
 			deptPendingGrants = new Set();
 			deptPendingRevokes = new Set();
 			await loadDeptPermissions(deptName);
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		} finally {
 			deptPermApplying = false;
 		}
@@ -686,6 +872,51 @@
 		return current.includes(opName);
 	}
 
+	function discardDeptPermChanges() {
+		deptPendingGrants = new Set();
+		deptPendingRevokes = new Set();
+	}
+
+	function openPermPicker() {
+		showPermPicker = true;
+	}
+
+	function closePermPicker(discard = false) {
+		if (discard) discardDeptPermChanges();
+		deptPermFilter = '';
+		showPermPicker = false;
+	}
+
+	async function applyDeptPermChangesAndClose(deptName: string) {
+		await applyDeptPermChanges(deptName);
+		if (deptPendingGrants.size === 0 && deptPendingRevokes.size === 0) {
+			deptPermFilter = '';
+			showPermPicker = false;
+		}
+	}
+
+	function authTargetLabel(auth: any): string {
+		return auth.target || `${auth.target_org_name}@${shortPrincipal(auth.target_quarter_canister_id)}`;
+	}
+
+	function authorityMatchesFilter(auth: any, filter: string): boolean {
+		const q = filter.trim().toLowerCase();
+		if (!q) return true;
+		const from = (auth.grantor || '').toLowerCase();
+		const to = (auth.target || auth.target_org_name || '').toLowerCase();
+		const remote = (auth.target_quarter_canister_id || '').toLowerCase();
+		const perms = (auth.permissions || []).join(' ').toLowerCase();
+		return from.includes(q) || to.includes(q) || remote.includes(q) || perms.includes(q);
+	}
+
+	function toggleAuthRowExpanded(id: string) {
+		if (expandedAuthRows.has(id)) {
+			expandedAuthRows = new Set([...expandedAuthRows].filter((rowId) => rowId !== id));
+		} else {
+			expandedAuthRows = new Set([...expandedAuthRows, id]);
+		}
+	}
+
 	/** Permission catalog grouped by category, optionally narrowed by a filter. */
 	function groupedOps(filter: string): { category: string; ops: any[] }[] {
 		const q = filter.trim().toLowerCase();
@@ -715,12 +946,12 @@
 				fundData = ledgerRes.data;
 			} else {
 				fundData = null;
-				addToast(ledgerRes?.error || 'Failed to load fund ledger', 'error');
+				notify(ledgerRes?.error || 'Failed to load fund ledger', 'error');
 			}
 			payrollData = payrollRes?.success ? payrollRes.data : null;
 			if (payrollData?.schedule_payday) schedulePayday = payrollData.schedule_payday;
 		} catch (e: any) {
-			addToast(e?.message || 'Failed to load fund data', 'error');
+			notify(e?.message || 'Failed to load fund data', 'error');
 		} finally {
 			fundLoading = false;
 		}
@@ -736,20 +967,20 @@
 		try {
 			await callGated('run_department_payroll', { department: deptName }, async (res) => {
 				if (!res?.success) {
-					addToast(res?.error || 'Payroll run failed', 'error');
+					notify(res?.error || 'Payroll run failed', 'error');
 					return;
 				}
 				if (res.data?.applied === 'proposal') {
 					proposalCreatedToast(res);
 				} else if ((res.data?.scheduled ?? 0) === 0) {
-					addToast(res.data?.message || 'All salaries for this period are already settled');
+					notify(res.data?.message || 'All salaries for this period are already settled');
 				} else {
-					addToast(`Payroll started — ${res.data.scheduled} payment(s) scheduled for ${res.data.period}`);
+					notify(`Payroll started — ${res.data.scheduled} payment(s) scheduled for ${res.data.period}`);
 				}
 				await loadFund(deptName);
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		} finally {
 			payrollBusy = false;
 		}
@@ -761,20 +992,20 @@
 			const payday = Math.min(Math.max(Math.round(schedulePayday || 1), 1), 28);
 			await callGated('set_payroll_schedule', { department: deptName, enabled, payday }, async (res) => {
 				if (!res?.success) {
-					addToast(res?.error || 'Automatic payroll change failed', 'error');
+					notify(res?.error || 'Automatic payroll change failed', 'error');
 					return;
 				}
 				if (res.data?.applied === 'proposal') {
 					proposalCreatedToast(res);
 				} else if (enabled) {
-					addToast(`Automatic payroll enabled — runs monthly on day ${res.data?.payday ?? payday}`);
+					notify(`Automatic payroll enabled — runs monthly on day ${res.data?.payday ?? payday}`);
 				} else {
-					addToast('Automatic payroll disabled');
+					notify('Automatic payroll disabled');
 				}
 				await loadFund(deptName);
 			});
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			notify(e?.message || 'Error', 'error');
 		} finally {
 			scheduleBusy = false;
 		}
@@ -824,72 +1055,8 @@
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-gray-900">Departments</h1>
-		<p class="text-sm text-gray-500 mt-1">Root, policy (M/N), budget, positions, and department-over-department authority</p>
+		<p class="text-sm text-gray-500 mt-1">{extensionDescription}</p>
 	</div>
-
-	<!-- Governance vote confirmation modal -->
-	{#if voteConfirm}
-		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-			<div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-				<h3 class="text-lg font-semibold text-gray-900 mb-2">Governance vote required</h3>
-				<p class="text-sm text-gray-600 mb-3">
-					This action cannot be applied directly — it needs approval under
-					<strong>{voteConfirm.governedBy}</strong> policy ({voteConfirm.governedPolicy}).
-				</p>
-				<div class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-950 space-y-2">
-					<div class="font-medium text-amber-900">Why this policy applies</div>
-					{#if voteConfirm.policyReason}
-						<p>{voteConfirm.policyReason}</p>
-					{/if}
-					<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-						<dt class="text-amber-800">Target department</dt>
-						<dd>{voteConfirm.targetDepartment || '—'} ({voteConfirm.targetPolicy || '—'})</dd>
-						<dt class="text-amber-800">Deciding org</dt>
-						<dd>{voteConfirm.governedBy} ({voteConfirm.governedPolicy})</dd>
-					</dl>
-				</div>
-				<div class="my-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800">
-					{voteConfirm.summary}
-				</div>
-				<p class="text-sm text-gray-600 mb-4">
-					Create a proposal? Members of <strong>{voteConfirm.votersOrg}</strong> will vote on it in <strong>Voting</strong>.
-				</p>
-				<div class="flex justify-end gap-3">
-					<button
-						onclick={() => (voteConfirm = null)}
-						disabled={voteConfirmBusy}
-						class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-					>
-						Cancel
-					</button>
-					<button
-						onclick={() => voteConfirm?.run()}
-						disabled={voteConfirmBusy}
-						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40"
-					>
-						{#if voteConfirmBusy}
-							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-						{/if}
-						Create proposal
-					</button>
-				</div>
-			</div>
-		</div>
-	{/if}
-
-	<!-- Toasts -->
-	{#if toasts.length > 0}
-		<div class="fixed top-4 right-4 z-50 space-y-2">
-			{#each toasts as toast (toast.id)}
-				<div class={cn(
-					'px-4 py-2 rounded-lg shadow-lg text-sm font-medium transition-all',
-					toast.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'
-				)}>
-					{toast.text}
-				</div>
-			{/each}
-		</div>
-	{/if}
 
 	<div class="space-y-4">
 		{#if departmentsBlockedMessage}
@@ -973,31 +1140,51 @@
 							<p class="text-sm text-gray-500 mt-1">{dept.description}</p>
 						{/if}
 					</div>
-					<div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 shrink-0">
-						<span>Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}</span>
-						<span>{dept.member_count} member{dept.member_count === 1 ? '' : 's'}</span>
-						{#if dept.fund}
-							<span>Fund {dept.fund.code}</span>
-						{/if}
-					</div>
 				</div>
 
-				<!-- Tabs: Overview | Fund (issue #260) -->
-				<div class="px-4 sm:px-6 bg-white border-b border-gray-100 flex gap-4">
+				<!-- Tabs -->
+				<div class="px-4 sm:px-6 py-2 bg-gray-100 flex gap-2 overflow-x-auto">
 					<button
 						onclick={() => (activeTab = 'overview')}
 						class={cn(
-							'py-2 text-sm font-medium border-b-2 -mb-px',
-							activeTab === 'overview' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
+							activeTab === 'overview' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
 						)}
 					>
 						Overview
 					</button>
 					<button
+						onclick={() => (activeTab = 'members')}
+						class={cn(
+							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
+							activeTab === 'members' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
+						)}
+					>
+						Members
+					</button>
+					<button
+						onclick={() => (activeTab = 'permissions')}
+						class={cn(
+							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
+							activeTab === 'permissions' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
+						)}
+					>
+						Permissions
+					</button>
+					<button
+						onclick={() => (activeTab = 'authority')}
+						class={cn(
+							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
+							activeTab === 'authority' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
+						)}
+					>
+						Authority
+					</button>
+					<button
 						onclick={openFundTab}
 						class={cn(
-							'py-2 text-sm font-medium border-b-2 -mb-px',
-							activeTab === 'fund' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
+							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
+							activeTab === 'fund' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
 						)}
 					>
 						Fund
@@ -1014,6 +1201,80 @@
 					{/if}
 					{#if dept.extensions?.length > 0}
 						<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
+					{/if}
+
+					<div class="flex flex-wrap gap-1.5">
+						<span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded-full font-medium">
+							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
+						</span>
+						{#if (dept.policy?.quorum_percent ?? 0) > 0}
+							<span class="px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded-full font-medium">
+								Quorum {dept.policy?.quorum_percent}%
+							</span>
+						{/if}
+						{#if dept.fund}
+							<span class="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded-full font-medium">
+								Fund {dept.fund.code}
+							</span>
+						{/if}
+					</div>
+
+					<!-- Policy + budget -->
+					{#if policyDraft[dept.name]}
+						{@const pv = policyValidation(dept.name)}
+						<div class="pt-2 border-t border-gray-200 space-y-2">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<div class="flex items-center gap-2">
+									<div class="text-sm font-medium text-gray-700">Policy & budget</div>
+									{#if policyDraftDirty(dept.name)}
+										<span class="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded-full font-medium">Unsaved changes</span>
+									{/if}
+								</div>
+								{#if policyDraftDirty(dept.name)}
+									<button
+										type="button"
+										onclick={() => resetPolicyDraft(dept.name)}
+										class="px-2 py-1 text-xs border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100"
+									>
+										Reset
+									</button>
+								{/if}
+							</div>
+							<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+								<label class="text-xs text-gray-500">M
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
+									{#if pv.errors.m}
+										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.m}</span>
+									{/if}
+								</label>
+								<label class="text-xs text-gray-500">N
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].n} />
+									{#if pv.errors.n}
+										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.n}</span>
+									{/if}
+								</label>
+								<label class="text-xs text-gray-500">Quorum %
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].quorum} />
+									{#if pv.errors.quorum}
+										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.quorum}</span>
+									{/if}
+								</label>
+								<label class="text-xs text-gray-500 sm:col-span-2 lg:col-span-2">Fund code
+									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].fund} />
+								</label>
+							</div>
+							<label class="block text-xs text-gray-500">Veto principals (comma-separated)
+								<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].veto} />
+							</label>
+							<button
+								type="button"
+								onclick={() => savePolicy(dept.name)}
+								disabled={!policyDraftDirty(dept.name) || !pv.valid}
+								class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+							>
+								Save policy
+							</button>
+						</div>
 					{/if}
 
 					<!-- Positions -->
@@ -1158,201 +1419,249 @@
 							{/if}
 						</div>
 					{/if}
-
-					<!-- Policy + budget -->
-					{#if policyDraft[dept.name]}
-						<div class="pt-2 border-t border-gray-200 space-y-2">
-							<div class="text-sm font-medium text-gray-700">Policy & budget</div>
-							<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
-								<label class="text-xs text-gray-500">M
-									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
-								</label>
-								<label class="text-xs text-gray-500">N
-									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].n} />
-								</label>
-								<label class="text-xs text-gray-500">Quorum %
-									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].quorum} />
-								</label>
-								<label class="text-xs text-gray-500 sm:col-span-2 lg:col-span-2">Fund code
-									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].fund} />
-								</label>
-							</div>
-							<label class="block text-xs text-gray-500">Veto principals (comma-separated)
-								<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].veto} />
-							</label>
-							<button onclick={() => savePolicy(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Save policy</button>
-						</div>
+				</div>
+				{:else if activeTab === 'members'}
+				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+					{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
+						<p class="text-xs text-gray-500">
+							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
+							{(dept.policy?.quorum_percent ?? 0) > 0 ? ` · quorum ${dept.policy?.quorum_percent}%` : ''}
+							— add/remove requires a vote
+						</p>
 					{/if}
-
-					<!-- Permissions -->
-					<div class="pt-2 border-t border-gray-200">
-						<div class="flex items-center justify-between mb-2">
-							<div class="text-sm font-medium text-gray-700">Permissions ({(deptPermissions[dept.name] ?? []).length})</div>
-							{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
-								<div class="flex items-center gap-2">
-									<span class="text-xs text-gray-500">
-										{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
-										{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
-										{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
-									</span>
-									<button onclick={() => { deptPendingGrants = new Set(); deptPendingRevokes = new Set(); }} class="text-xs text-gray-500 hover:text-gray-700">Discard</button>
-									<button onclick={() => applyDeptPermChanges(dept.name)} disabled={deptPermApplying} class="px-2 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">Apply</button>
-								</div>
-							{/if}
-						</div>
-
-						{#if deptPermissionsBlocked[dept.name]}
-							<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
-								{deptPermissionsBlocked[dept.name]}
-							</p>
-						{:else if (deptPermissions[dept.name] ?? []).length > 0}
-							<div class="flex flex-wrap gap-1 mb-2">
-								{#each deptPermissions[dept.name] ?? [] as perm (perm)}
-									<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
-										{perm}
-										<button onclick={() => toggleDeptPerm(perm, dept.name)} class="text-amber-400 hover:text-red-600" title="Revoke">&times;</button>
-									</span>
-								{/each}
-							</div>
-						{/if}
-
-						<input
-							type="text"
-							bind:value={deptPermFilter}
-							placeholder="Filter permissions (name, category, description)..."
-							class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm mb-2"
-							disabled={deptPermissionsBlocked[dept.name] !== null && deptPermissionsBlocked[dept.name] !== undefined}
-						/>
-
-						<!-- Browsable catalog: every permission, grouped by category, so
-						     admins can discover what exists instead of guessing names.
-						     Filtering auto-expands the matching categories. -->
-						{#if deptPermissionsBlocked[dept.name]}
-							<!-- blocked message shown above -->
-						{:else if allOperations.length === 0}
-							<p class="text-xs text-gray-400">Permission catalog unavailable — the role_manager extension is not installed or you lack permission.view.</p>
-						{:else}
-							{@const groups = groupedOps(deptPermFilter)}
-							{@const filtering = deptPermFilter.trim().length > 0}
-							<div class="max-h-72 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
-								{#each groups as group (group.category)}
-									{@const catKey = `${dept.name}/${group.category}`}
-									{@const isOpen = filtering || openPermCats[catKey]}
-									{@const grantedCount = group.ops.filter((op: any) => isDeptPermChecked(op.name, dept.name)).length}
-									<div>
+					{#if dept.members.length === 0}
+						<p class="text-sm text-gray-400">No members</p>
+					{:else}
+						<div class="flex flex-col gap-1">
+							{#each dept.members as m (m.principal)}
+								<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg border border-gray-200">
+									<div class="min-w-0 flex-1">{@render identityLabel(m)}</div>
+									<div class="flex items-center gap-0.5 shrink-0 ml-2">
 										<button
 											type="button"
-											onclick={() => openPermCats = { ...openPermCats, [catKey]: !openPermCats[catKey] }}
-											class="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50"
+											onclick={() => copyMemberPrincipal(m.principal)}
+											class="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
+											aria-label="Copy principal"
+											title="Copy principal"
 										>
-											<span class="font-medium text-gray-700">{group.category}</span>
-											<span class="flex items-center gap-2 text-xs text-gray-400">
-												{#if grantedCount > 0}
-													<span class="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium">{grantedCount} granted</span>
-												{/if}
-												<span>{group.ops.length}</span>
-												<svg class="w-3.5 h-3.5 transition-transform {isOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-											</span>
+											{#if copiedMemberPrincipal === m.principal}
+												<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+													<path d="M3 8l3.5 3.5L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+												</svg>
+											{:else}
+												<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+													<rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3" />
+													<path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+												</svg>
+											{/if}
 										</button>
-										{#if isOpen}
-											{#each group.ops as op (op.name)}
-												{@const checked = isDeptPermChecked(op.name, dept.name)}
-												<label class="flex items-start gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-t border-gray-50">
-													<input
-														type="checkbox"
-														checked={checked}
-														onchange={() => toggleDeptPerm(op.name, dept.name)}
-														class="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
-													/>
-													<span class="min-w-0">
-														<code class="text-xs font-medium text-gray-800">{op.name}</code>
-														{#if op.description}
-															<span class="block text-xs text-gray-400">{op.description}</span>
-														{/if}
-													</span>
-												</label>
-											{/each}
-										{/if}
+										<button
+											type="button"
+											onclick={() => removeMember(dept.name, m.principal, m)}
+											class="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors"
+											aria-label="Remove member"
+											title="Remove member"
+										>
+											<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+												<path d="M3 4.5h10M6 4.5V3.5A1 1 0 0 1 7 2.5h2a1 1 0 0 1 1 1v1M5.5 4.5v8.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+												<path d="M6.5 7.5v4M9.5 7.5v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+											</svg>
+										</button>
 									</div>
-								{/each}
-								{#if groups.length === 0}
-									<div class="px-3 py-2 text-xs text-gray-400">No matching permissions</div>
-								{/if}
-							</div>
-						{/if}
-					</div>
-
-					<!-- Members -->
-					<div class="pt-2 border-t border-gray-200">
-						<div class="text-sm font-medium text-gray-700 mb-2">Members</div>
-						{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
-							<p class="text-xs text-gray-500 mb-2">
-								Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
-								{(dept.policy?.quorum_percent ?? 0) > 0 ? ` · quorum ${dept.policy?.quorum_percent}%` : ''}
-								— add/remove requires a vote
-							</p>
-						{/if}
-						{#if dept.members.length === 0}
-							<p class="text-sm text-gray-400 mb-2">No members</p>
-						{:else}
-							<div class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3 mb-2">
-								{#each dept.members as m (m.principal)}
-									<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg border border-gray-200">
-										<div class="min-w-0 flex-1">{@render identityLabel(m)}</div>
-										<button onclick={() => removeMember(dept.name, m.principal)} class="text-red-500 hover:text-red-700 text-xs shrink-0 ml-2">Remove</button>
-									</div>
-								{/each}
-							</div>
-						{/if}
-
-						<div class="flex gap-2 max-w-2xl">
-							<div class="relative flex-1">
-								<input
-									bind:value={addMemberPrincipal}
-									onkeydown={handleMemberPrincipalKeydown}
-									oninput={() => {
-										showMemberSuggestions = false;
-										memberSuggestionIndex = 0;
-									}}
-									onblur={() => setTimeout(() => (showMemberSuggestions = false), 200)}
-									autocomplete="off"
-									placeholder="Name or principal"
-									aria-describedby="am-member-hint"
-									class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-								/>
-								{#if showMemberSuggestions && memberSuggestions.length > 0}
-									<ul class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
-										{#each memberSuggestions as s, i (s.principal)}
-											<li>
-												<button
-													type="button"
-													onmousedown={() => selectMemberSuggestion(s)}
-													class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors {i === memberSuggestionIndex ? 'bg-indigo-50' : ''}"
-												>
-													<span class="block font-medium text-gray-900 truncate">{s.label}</span>
-													{#if s.principal && s.principal !== s.label}
-														<span class="block font-mono text-xs text-gray-500 truncate">{s.principal}</span>
-													{/if}
-												</button>
-											</li>
-										{/each}
-									</ul>
-								{/if}
-							</div>
-							<button onclick={() => addMember(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 shrink-0">Add</button>
+								</div>
+							{/each}
 						</div>
-						<p id="am-member-hint" class="mt-1 text-xs text-gray-500">
-							Type a name or principal, then press
-							<kbd class="mx-0.5 px-1 py-0.5 rounded border border-gray-300 bg-gray-100 text-[10px] font-mono text-gray-600">Tab</kbd>
-							to open autocomplete.
-						</p>
+					{/if}
+
+					<div class="flex gap-2 max-w-2xl">
+						<div class="relative flex-1">
+							<input
+								bind:value={addMemberPrincipal}
+								onkeydown={handleMemberPrincipalKeydown}
+								oninput={openMemberSuggestionsIfMatches}
+								onblur={() => setTimeout(() => (showMemberSuggestions = false), 200)}
+								autocomplete="off"
+								placeholder="Name or principal"
+								aria-describedby="am-member-hint"
+								class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+							/>
+							{#if showMemberSuggestions && memberSuggestions.length > 0}
+								<ul class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+									{#each memberSuggestions as s, i (s.principal)}
+										<li>
+											<button
+												type="button"
+												onmousedown={() => selectMemberSuggestion(s)}
+												class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors {i === memberSuggestionIndex ? 'bg-indigo-50' : ''}"
+											>
+												<span class="block font-medium text-gray-900 truncate">{s.label}</span>
+												{#if s.principal && s.principal !== s.label}
+													<span class="block font-mono text-xs text-gray-500 truncate">{s.principal}</span>
+												{/if}
+											</button>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+						<button
+							type="button"
+							onclick={() => addMember(dept.name)}
+							disabled={!resolvedMemberPrincipal || addingMember}
+							class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							{addingMember ? 'Adding…' : 'Add'}
+						</button>
 					</div>
+					{#if memberPrincipalUnresolved}
+						<p class="text-xs text-amber-700">
+							Not a known member or valid principal — pick someone from the list or paste a full principal.
+						</p>
+					{/if}
+					<p id="am-member-hint" class="text-xs text-gray-500">
+						Type a name or principal to see matches. Use arrow keys and Enter to pick; Tab also selects the highlighted match.
+					</p>
 
 					{#if !dept.is_root}
-						<button onclick={() => deleteDepartment(dept.name)} class="text-sm text-red-600 hover:text-red-800">Delete department</button>
+						<button
+							type="button"
+							onclick={() => deleteDepartment(dept.name)}
+							class="px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
+						>
+							Delete department
+						</button>
 					{/if}
 				</div>
-				{:else}
+				{:else if activeTab === 'permissions'}
+				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<div class="text-sm font-medium text-gray-700">Permissions ({(deptPermissions[dept.name] ?? []).length})</div>
+						{#if !deptPermissionsBlocked[dept.name]}
+							<button
+								type="button"
+								onclick={openPermPicker}
+								class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800"
+							>
+								Manage permissions
+							</button>
+						{/if}
+					</div>
+
+					{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
+						<div class="flex flex-wrap items-center justify-between gap-2 p-3 bg-white border border-gray-200 rounded-lg">
+							<span class="text-sm text-gray-600">
+								{deptPendingGrants.size + deptPendingRevokes.size} pending change{deptPendingGrants.size + deptPendingRevokes.size === 1 ? '' : 's'}
+								<span class="ml-2 text-xs text-gray-500">
+									{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
+									{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
+									{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
+								</span>
+							</span>
+							<div class="flex items-center gap-2">
+								<button onclick={() => discardDeptPermChanges()} class="text-xs text-gray-500 hover:text-gray-700">Discard</button>
+								<button onclick={() => applyDeptPermChanges(dept.name)} disabled={deptPermApplying} class="px-2 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">Apply</button>
+							</div>
+						</div>
+					{/if}
+
+					{#if deptPermissionsBlocked[dept.name]}
+						<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+							{deptPermissionsBlocked[dept.name]}
+						</p>
+					{:else if (deptPermissions[dept.name] ?? []).length > 0}
+						<div class="flex flex-wrap gap-1">
+							{#each deptPermissions[dept.name] ?? [] as perm (perm)}
+								<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
+									{perm}
+									<button onclick={() => toggleDeptPerm(perm, dept.name)} class="text-amber-400 hover:text-red-600" title="Revoke">&times;</button>
+								</span>
+							{/each}
+						</div>
+					{:else}
+						<p class="text-sm text-gray-400">No permissions granted to this department yet.</p>
+					{/if}
+				</div>
+				{:else if activeTab === 'authority'}
+				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+					<div>
+						<h3 class="text-sm font-semibold text-gray-800">Authority (department over department)</h3>
+						<p class="text-sm text-gray-500 mt-1">Grant permissions from root (or another department) over a local or remote-quarter department.</p>
+					</div>
+					<div class="p-4 border border-gray-200 rounded-xl bg-white space-y-2">
+						<input bind:value={authTarget} placeholder="Local target department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+						<input bind:value={authRemoteCanister} placeholder="Remote quarter canister id (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+						<input bind:value={authRemoteOrg} placeholder="Remote department name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+						<input bind:value={authPerms} placeholder="Permissions (comma-separated)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+						<button onclick={grantAuthorityFromRoot} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant from root</button>
+					</div>
+					{#if authoritiesBlockedMessage}
+						<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+							{authoritiesBlockedMessage}
+						</p>
+					{:else if authorities.length === 0}
+						<p class="text-sm text-gray-400">No authority grants yet.</p>
+					{:else}
+						{@const filteredAuthorities = authorities.filter((auth) => authorityMatchesFilter(auth, authFilter))}
+						<input
+							type="text"
+							bind:value={authFilter}
+							placeholder="Filter by source, target, remote quarter, or permission…"
+							class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+						/>
+						{#if filteredAuthorities.length === 0}
+							<p class="text-sm text-gray-400">No authority grants match your filter.</p>
+						{:else}
+							<div class="overflow-x-auto border border-gray-200 rounded-lg bg-white">
+								<table class="w-full text-sm min-w-[36rem]">
+									<thead class="bg-gray-50 text-gray-500 text-xs">
+										<tr>
+											<th class="px-3 py-2 text-left font-medium">From</th>
+											<th class="px-3 py-2 text-left font-medium">To</th>
+											<th class="px-3 py-2 text-left font-medium">Permissions</th>
+											<th class="px-3 py-2 text-right font-medium">Actions</th>
+										</tr>
+									</thead>
+									<tbody class="divide-y divide-gray-100">
+										{#each filteredAuthorities as auth (auth.id)}
+											{@const perms = auth.permissions ?? []}
+											{@const expanded = expandedAuthRows.has(auth.id)}
+											{@const visiblePerms = expanded ? perms : perms.slice(0, 3)}
+											<tr>
+												<td class="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{auth.grantor}</td>
+												<td class="px-3 py-2 text-gray-700">
+													<div class="font-medium">{authTargetLabel(auth)}</div>
+													{#if auth.target_quarter_canister_id}
+														<div class="text-xs text-gray-400 font-mono">{shortPrincipal(auth.target_quarter_canister_id)}</div>
+													{/if}
+												</td>
+												<td class="px-3 py-2">
+													<div class="flex flex-wrap gap-1">
+														{#each visiblePerms as perm (perm)}
+															<span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">{perm}</span>
+														{/each}
+														{#if perms.length > 3}
+															<button
+																type="button"
+																onclick={() => toggleAuthRowExpanded(auth.id)}
+																class="px-1.5 py-0.5 text-xs text-indigo-600 hover:text-indigo-800"
+															>
+																{expanded ? 'Show less' : `+${perms.length - 3} more`}
+															</button>
+														{/if}
+													</div>
+												</td>
+												<td class="px-3 py-2 text-right whitespace-nowrap">
+													<button onclick={() => revokeAuthority(auth.id)} class="text-red-500 hover:text-red-700 text-xs">Revoke</button>
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+					{/if}
+				</div>
+				{:else if activeTab === 'fund'}
 				<!-- Fund tab: inflows, outflows, balance, payroll (issue #260) -->
 				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
 					{#if fundLoading}
@@ -1569,43 +1878,114 @@
 					{/if}
 				</div>
 				{/if}
-			</div>
-		{/if}
 
-		<!-- Authority grants -->
-		{#if !departmentsBlockedMessage}
-		<div class="mt-8 pt-6 border-t border-gray-200 space-y-3">
-			<h2 class="text-lg font-semibold text-gray-800">Authority (department over department)</h2>
-			<p class="text-sm text-gray-500">Grant permissions from root (or another department) over a local or remote-quarter department.</p>
-			<div class="p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-2">
-				<input bind:value={authTarget} placeholder="Local target department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-				<input bind:value={authRemoteCanister} placeholder="Remote quarter canister id (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-				<input bind:value={authRemoteOrg} placeholder="Remote department name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-				<input bind:value={authPerms} placeholder="Permissions (comma-separated)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-				<button onclick={grantAuthorityFromRoot} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant from root</button>
-			</div>
-			{#if authoritiesBlockedMessage}
-				<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-					{authoritiesBlockedMessage}
-				</p>
-			{:else if authorities.length === 0}
-				<p class="text-sm text-gray-400">No authority grants yet.</p>
-			{:else}
-				<div class="space-y-2">
-					{#each authorities as auth (auth.id)}
-						<div class="flex items-center justify-between text-sm bg-white border border-gray-200 px-3 py-2 rounded-lg">
-							<div>
-								<span class="font-medium">{auth.grantor}</span>
-								<span class="text-gray-400"> → </span>
-								<span class="font-medium">{auth.target || `${auth.target_org_name}@${shortPrincipal(auth.target_quarter_canister_id)}`}</span>
-								<div class="text-xs text-gray-500">{(auth.permissions || []).join(', ')}</div>
+				{#if showPermPicker}
+					<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+						<div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[min(90vh,48rem)] flex flex-col">
+							<div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+								<h3 class="text-lg font-semibold text-gray-900">Manage permissions</h3>
+								<button
+									type="button"
+									onclick={() => closePermPicker(false)}
+									class="text-gray-400 hover:text-gray-600"
+									aria-label="Close"
+								>
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+								</button>
 							</div>
-							<button onclick={() => revokeAuthority(auth.id)} class="text-red-500 hover:text-red-700 text-xs">Revoke</button>
+							<div class="px-5 py-3 border-b border-gray-100">
+								<input
+									type="text"
+									bind:value={deptPermFilter}
+									placeholder="Filter permissions (name, category, description)..."
+									class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+								/>
+							</div>
+							<div class="flex-1 overflow-y-auto px-5 py-3">
+								{#if allOperations.length === 0}
+									<p class="text-sm text-gray-400">Permission catalog unavailable — the role_manager extension is not installed or you lack permission.view.</p>
+								{:else}
+									{@const groups = groupedOps(deptPermFilter)}
+									{@const filtering = deptPermFilter.trim().length > 0}
+									<div class="border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
+										{#each groups as group (group.category)}
+											{@const catKey = `${dept.name}/${group.category}`}
+											{@const isOpen = filtering || openPermCats[catKey]}
+											{@const grantedCount = group.ops.filter((op: any) => isDeptPermChecked(op.name, dept.name)).length}
+											<div>
+												<button
+													type="button"
+													onclick={() => openPermCats = { ...openPermCats, [catKey]: !openPermCats[catKey] }}
+													class="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50"
+												>
+													<span class="font-medium text-gray-700">{group.category}</span>
+													<span class="flex items-center gap-2 text-xs text-gray-400">
+														{#if grantedCount > 0}
+															<span class="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium">{grantedCount} granted</span>
+														{/if}
+														<span>{group.ops.length}</span>
+														<svg class="w-3.5 h-3.5 transition-transform {isOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+													</span>
+												</button>
+												{#if isOpen}
+													{#each group.ops as op (op.name)}
+														{@const checked = isDeptPermChecked(op.name, dept.name)}
+														<label class="flex items-start gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-t border-gray-50">
+															<input
+																type="checkbox"
+																checked={checked}
+																onchange={() => toggleDeptPerm(op.name, dept.name)}
+																class="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+															/>
+															<span class="min-w-0">
+																<code class="text-xs font-medium text-gray-800">{op.name}</code>
+																{#if op.description}
+																	<span class="block text-xs text-gray-400">{op.description}</span>
+																{/if}
+															</span>
+														</label>
+													{/each}
+												{/if}
+											</div>
+										{/each}
+										{#if groups.length === 0}
+											<div class="px-3 py-2 text-xs text-gray-400">No matching permissions</div>
+										{/if}
+									</div>
+								{/if}
+							</div>
+							<div class="px-5 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
+								<span class="text-xs text-gray-500">
+									{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
+										{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
+										{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
+										{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
+									{:else}
+										No pending changes
+									{/if}
+								</span>
+								<div class="flex items-center gap-2">
+									<button
+										type="button"
+										onclick={() => closePermPicker(true)}
+										class="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+									>
+										Cancel
+									</button>
+									<button
+										type="button"
+										onclick={() => applyDeptPermChangesAndClose(dept.name)}
+										disabled={deptPermApplying || (deptPendingGrants.size === 0 && deptPendingRevokes.size === 0)}
+										class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
+									>
+										{deptPermApplying ? 'Applying…' : 'Apply'}
+									</button>
+								</div>
+							</div>
 						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
+					</div>
+				{/if}
+			</div>
 		{/if}
 	</div>
 </div>

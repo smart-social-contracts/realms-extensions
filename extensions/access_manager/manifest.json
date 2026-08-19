@@ -1,8 +1,8 @@
 {
   "name": "access_manager",
-  "version": "1.8.3",
+  "version": "1.8.5",
   "runtime": "in_process",
-  "description": "Manage departments (root, policy, budget, fund & payroll, authority) — issues #240, #260",
+  "description": "Organise your realm into departments: set who leads them, how many approvals a decision needs, which fund pays for them, who works there, and which departments answer to which.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [
