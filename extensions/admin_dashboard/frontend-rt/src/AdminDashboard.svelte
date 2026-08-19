@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
@@ -245,7 +247,7 @@
 	<div class="flex justify-between items-center mb-6">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Data Explorer</h1>
-			<p class="text-gray-600 mt-1">Browse and inspect entities</p>
+			<p class="text-gray-600 mt-1">{extensionDescription}</p>
 		</div>
 		<button
 			onclick={() => loadEntityTypes()}

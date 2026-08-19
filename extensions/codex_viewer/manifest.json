@@ -1,7 +1,7 @@
 {
   "name": "codex_viewer",
   "version": "1.0.6",
-  "description": "View and browse Codex automation scripts",
+  "description": "Browse the automation scripts installed in your realm, read their source, copy code or links, and ask the assistant to explain a script or a selected passage.",
   "author": "Realms Team",
   "categories": [
     "governance"

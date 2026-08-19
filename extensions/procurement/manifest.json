@@ -2,7 +2,7 @@
   "name": "procurement",
   "version": "0.3.0",
   "ggg_api_version": 1,
-  "description": "Structured procurement — RFP lifecycle, vetKeys sealed bids, scoring, vendor reputation.",
+  "description": "Publish calls for offers, collect sealed bids until the closing date, have evaluators score them, award a winner, and keep a record of each supplier.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

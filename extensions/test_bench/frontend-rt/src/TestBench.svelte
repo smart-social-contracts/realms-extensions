@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	let greetName = $state('Tester');
@@ -75,11 +77,14 @@
 </script>
 
 <div class="max-w-2xl mx-auto p-6 space-y-4">
-	<div class="flex items-center gap-3 mb-2">
-		<h2 class="text-2xl font-bold text-gray-900">Test Bench</h2>
-		{#if version}
-			<span class="inline-block rounded-full bg-indigo-100 text-indigo-800 px-2.5 py-0.5 text-xs font-medium">v{version}</span>
-		{/if}
+	<div class="mb-2">
+		<div class="flex items-center gap-3">
+			<h2 class="text-2xl font-bold text-gray-900">Test Bench</h2>
+			{#if version}
+				<span class="inline-block rounded-full bg-indigo-100 text-indigo-800 px-2.5 py-0.5 text-xs font-medium">v{version}</span>
+			{/if}
+		</div>
+		<p class="text-sm text-gray-500 mt-1">{extensionDescription}</p>
 	</div>
 
 	{#if accessDeniedOp}

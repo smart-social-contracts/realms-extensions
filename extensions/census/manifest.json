@@ -2,7 +2,7 @@
   "name": "census",
   "version": "1.1.0",
   "deprecated": true,
-  "description": "DEPRECATED — invitations and user statistics moved to role_manager",
+  "description": "No longer used — invite new members and view member counts in User Management instead.",
   "author": "Realms Team",
   "categories": [
     "administration"

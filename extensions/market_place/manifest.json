@@ -2,7 +2,7 @@
   "name": "market_place",
   "version": "2.1.0",
   "deprecated": true,
-  "description": "DEPRECATED — marketplace browsing moved to package_manager; publishing and developer licenses live in the mundus marketplace",
+  "description": "No longer used — browsing and installing extensions is now in Package Manager.",
   "author": "Smart Social Contracts",
   "permissions": [
     "icp_transfer"

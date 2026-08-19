@@ -1,7 +1,7 @@
 {
   "name": "admin_dashboard",
   "version": "1.3.0",
-  "description": "Browse, inspect, and delete entities",
+  "description": "Look up anything stored in your realm by type, open records to read their details, copy them for reference, and remove items you no longer need when you have permission.",
   "author": "Realms Team",
   "categories": [
     "realm_management"

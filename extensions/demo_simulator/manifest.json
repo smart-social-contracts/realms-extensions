@@ -2,7 +2,7 @@
   "name": "demo_simulator",
   "version": "1.3.1",
   "runtime": "in_process",
-  "description": "Continuous demo data simulator — generates realistic activity in batches via TaskSchedule. Routes demo users through capital/quarter join paths for auto-scaling. Auto-activates when TEST_MODE and TEST_MODE_DEMO_DATA are both true.",
+  "description": "Create sample members, proposals, transfers, and other activity on demand or on a schedule so you can try features without entering everything by hand.",
   "author": "Realms Team",
   "categories": [
     "other"

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy, tick } from 'svelte';
 
 	let { ctx }: { ctx: any } = $props();
@@ -907,6 +908,7 @@
 			<div class="sidebar-head">
 				<div>
 					<h2>Land Registry</h2>
+					<p class="muted">{extensionDescription}</p>
 					<p class="muted">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</p>
 				</div>
 				<button type="button" class="ghost-btn" onclick={() => loadLands(true)} disabled={refreshing}>Refresh</button>

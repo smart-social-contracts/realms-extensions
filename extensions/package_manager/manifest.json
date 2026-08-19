@@ -1,7 +1,7 @@
 {
   "name": "package_manager",
   "version": "0.3.1",
-  "description": "Install, update and uninstall extensions and codex packages from connected file registries, and browse the marketplace",
+  "description": "Install, update, and remove extensions and codex packages, browse what's available from registries, and buy offerings from the marketplace.",
   "author": "Realms Team",
   "categories": [
     "realm_management"

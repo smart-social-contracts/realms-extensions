@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	interface TaskSchedule {
@@ -769,7 +771,10 @@
 	<!-- List View -->
 	{:else}
 		<div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-			<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Task Monitor</h1>
+			<div>
+				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Task Monitor</h1>
+				<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{extensionDescription}</p>
+			</div>
 			<div class="flex items-center gap-2">
 				<div class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
 					<button

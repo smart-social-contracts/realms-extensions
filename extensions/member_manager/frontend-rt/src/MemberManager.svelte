@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	interface MemberSummary {
@@ -206,9 +208,7 @@
 <div class="p-4">
 	<div class="mb-4">
 		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Members</h1>
-		<p class="text-sm text-gray-500 dark:text-gray-400">
-			Administrative view of member profiles, status, and messages.
-		</p>
+		<p class="text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 	</div>
 
 	<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">

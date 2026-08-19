@@ -10,7 +10,7 @@
     "crypto.envelope",
     "log.write"
   ],
-  "description": "Admin view of individual member profiles: identity, status, and notification history",
+  "description": "Look up members, review profiles and standing, read private details shared with you, and send notifications.",
   "author": "Smart Social Contracts",
   "categories": [
     "people_access"

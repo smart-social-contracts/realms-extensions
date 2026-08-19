@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
@@ -727,17 +729,9 @@
 		<div class={cn('mb-5 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4')}>
 			<div>
 				<h1 class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>Package Manager</h1>
-				<p class={cn('text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-2xl')}>
-					Operate this realm's extensions and codex packages. Discover and purchase new offerings in
-					the Marketplace tab. Per-user visibility of installed extensions is managed in
-					<button
-						type="button"
-						onclick={() => ctx.navigate?.('/extensions/role_manager')}
-						class={cn('text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-800')}
-					>
-						Users &rarr; Extension Access
-					</button>
-					.
+				<p class={cn('text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-2xl')}>{extensionDescription}</p>
+				<p class={cn('text-sm text-gray-500 dark:text-gray-500 mt-1 max-w-2xl')}>
+					To choose which people may open an installed extension, go to Users → Extension Access.
 				</p>
 			</div>
 			<button

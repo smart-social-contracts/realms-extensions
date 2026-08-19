@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
 	import { createExtensionClient, type ExtensionClient } from '@realmsgos/extension-bridge';
 	import { PageHeader, Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
@@ -120,7 +121,7 @@
 </script>
 
 <div class="mx-auto max-w-4xl space-y-6 px-4 pb-8">
-	<PageHeader title="System Info" subtitle="Canister diagnostics & health dashboard">
+	<PageHeader title="System Info" subtitle={extensionDescription}>
 		{#snippet actions()}
 			<Button tone="secondary" size="sm" disabled={!bridgeReady || loading} onclick={fetchSystemInfo}>
 				{#if loading}

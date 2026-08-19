@@ -1,7 +1,7 @@
 {
   "name": "hello_sandboxed",
   "version": "1.0.0",
-  "description": "Reference sandboxed extension \u2014 bridge protocol demo",
+  "description": "Example extension showing how a restricted view talks to the rest of the realm: try a greeting, a notification, navigation, and a confirmation dialog.",
   "author": "Realms Team",
   "runtime": "sandboxed",
   "sdk_version": "1",

@@ -8,7 +8,7 @@
     "log.write",
     "schema.entities"
   ],
-  "description": "AI-powered assistant for governance and legal questions",
+  "description": "Ask questions about your realm — its governance, proposals, rules, and more — and get answers from an AI assistant in chat.",
   "author": "Smart Social Contracts Team",
   "permissions": [],
   "profiles": [],

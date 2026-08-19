@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
 	import { createExtensionClient, BRIDGE_PROTOCOL_VERSION, type HostState } from '@realmsgos/extension-bridge';
 	import { PageHeader, Card, Button } from '@realmsgos/extension-ui';
@@ -130,7 +131,7 @@
 <div class="mx-auto max-w-3xl space-y-6 px-4 pb-8">
 	<PageHeader
 		title="Hello (Sandboxed)"
-		subtitle="This extension runs inside a sandboxed iframe (opaque origin, allow-scripts only). All host interaction goes through the @realmsgos/extension-bridge postMessage protocol."
+		subtitle={extensionDescription}
 	/>
 
 	<Card title="Bridge status">

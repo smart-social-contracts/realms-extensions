@@ -9,7 +9,7 @@
     "system.snapshot",
     "log.write"
   ],
-  "description": "System information dashboard for realm administrators",
+  "description": "See health and resource usage for this realm, including compute budget, memory, stored data, installed extensions, and token balances.",
   "author": "Realms Team",
   "permissions": [],
   "functions": [
@@ -38,5 +38,8 @@
       "get_canister_stats": "realm.monitor",
       "get_token_balances": "realm.monitor"
     }
-  }
+  },
+  "screenshots": [
+    "screenshots/01-overview.png"
+  ]
 }

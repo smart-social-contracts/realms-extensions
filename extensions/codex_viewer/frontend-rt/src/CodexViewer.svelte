@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy } from 'svelte';
 	import MonacoPane, { type LineRange, type SelectionInfo } from './MonacoPane.svelte';
 
@@ -335,7 +336,7 @@
 			<div class="sidebar-header">
 				<div>
 					<h1 class="title">Codex Viewer</h1>
-					<p class="subtitle">Browse installed codex packages</p>
+					<p class="subtitle">{extensionDescription}</p>
 				</div>
 				<button class="btn-icon" onclick={loadCodexes} disabled={loading} title="Refresh">
 					<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">

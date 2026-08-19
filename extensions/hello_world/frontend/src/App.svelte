@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
 	import { createExtensionClient, type HostState } from '@realmsgos/extension-bridge';
 	import { PageHeader, Card, Button, AccessDenied } from '@realmsgos/extension-ui';
@@ -93,7 +94,7 @@
 <div class="mx-auto max-w-md space-y-6 px-4 pb-8">
 	<PageHeader
 		title="Hello World"
-		subtitle="Simple hello world extension — sandboxed runtime demo."
+		subtitle={extensionDescription}
 	/>
 
 	{#if bridgeError}

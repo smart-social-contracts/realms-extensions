@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import {
 		planImportBatches,
 		IMPORT_BATCH_SIZE,
@@ -401,7 +402,7 @@
 
 <div class="max-w-5xl mx-auto p-4 sm:p-6">
 	<h1 class="text-2xl font-bold text-gray-900 mb-1">Import & Export</h1>
-	<p class="text-sm text-gray-500 mb-6">Bulk entity JSON/CSV import/export and citizen census onboarding.</p>
+	<p class="text-sm text-gray-500 mb-6">{extensionDescription}</p>
 
 	<div class="flex gap-1 mb-6 border-b border-gray-200">
 		{#each TABS as tab}

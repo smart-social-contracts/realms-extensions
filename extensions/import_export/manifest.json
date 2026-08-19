@@ -1,7 +1,7 @@
 {
   "name": "import_export",
   "version": "1.0.2",
-  "description": "Bulk import and export — entity JSON/CSV, citizen census, and programmatic data loading",
+  "description": "Back up realm data as JSON and restore it in bulk, or upload a citizen list so each person gets a one-time invite link.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

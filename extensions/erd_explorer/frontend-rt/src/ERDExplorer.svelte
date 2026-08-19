@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
 
 	let { ctx }: { ctx: any } = $props();
@@ -187,7 +188,7 @@
 			<h2 class="text-2xl font-bold text-gray-900">ERD Explorer</h2>
 			<button onclick={loadEntitySchema} disabled={loading} class="ml-auto px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-lg text-xs hover:bg-gray-200 transition-colors disabled:opacity-50">Refresh</button>
 		</div>
-		<p class="text-gray-600 text-sm mt-1">Entity-Relationship diagram and data browser</p>
+		<p class="text-gray-600 text-sm mt-1">{extensionDescription}</p>
 	</div>
 
 	{#if accessDeniedOp}

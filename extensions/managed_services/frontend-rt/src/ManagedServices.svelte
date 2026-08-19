@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	let loading = $state(true);
@@ -189,7 +191,7 @@
 			</div>
 			<div>
 				<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Managed Services</h1>
-				<p class="text-sm text-gray-500 dark:text-gray-400">Version management, upgrades & credits</p>
+				<p class="text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 			</div>
 		</div>
 		<button

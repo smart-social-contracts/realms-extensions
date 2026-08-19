@@ -9,7 +9,7 @@
     "console.list_citizen_invites",
     "log.write"
   ],
-  "description": "Deprecated — bulk citizen import and migration checklist moved to import_export (issue #14). Kept for backward compatibility only.",
+  "description": "No longer used — bulk citizen import and realm migration tasks are now handled in Import & Export.",
   "author": "Smart Social Contracts",
   "deprecated": true,
   "permissions": [],

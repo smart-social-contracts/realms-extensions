@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	type Tab = 'list' | 'create' | 'courts' | 'stats';
@@ -563,6 +565,7 @@
 			<h1 class="text-2xl font-bold text-gray-900 dark:text-white">
 				Justice & Litigation
 			</h1>
+			<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{extensionDescription}</p>
 		</div>
 		<button
 			class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"

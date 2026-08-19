@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	type VerificationStep = 'idle' | 'generating' | 'pending' | 'verified' | 'failed' | 'error';
@@ -148,7 +150,7 @@
 		</div>
 		<div>
 			<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Passport Verification</h1>
-			<p class="text-sm text-gray-500 dark:text-gray-400">Zero-knowledge identity verification via RariMe</p>
+			<p class="text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 		</div>
 	</div>
 

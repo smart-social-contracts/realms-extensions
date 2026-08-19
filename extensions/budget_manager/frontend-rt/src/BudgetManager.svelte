@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import Sankey from './Sankey.svelte';
 	import Timeline from './Timeline.svelte';
 
@@ -333,9 +334,7 @@
 	<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
 		<div>
 			<h1 class="text-xl font-semibold text-gray-900">Budget management</h1>
-			<p class="text-sm text-gray-500">
-				Treasury allocation — recognized revenue flows into funds by voted percentages
-			</p>
+			<p class="text-sm text-gray-500">{extensionDescription}</p>
 		</div>
 		<div class="flex items-center gap-2">
 			{#if overview}

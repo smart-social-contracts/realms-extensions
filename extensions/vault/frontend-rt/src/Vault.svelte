@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
@@ -530,8 +532,11 @@
 
 <div class={cn('max-w-4xl mx-auto p-6 space-y-6')}>
 	<!-- Header -->
-	<div class={cn('flex justify-between items-center')}>
-		<h1 class={cn('text-2xl font-bold text-gray-900 dark:text-gray-100')}>Vault</h1>
+	<div class={cn('flex justify-between items-start gap-4')}>
+		<div>
+			<h1 class={cn('text-2xl font-bold text-gray-900 dark:text-gray-100')}>Vault</h1>
+			<p class={cn('text-sm text-gray-500 dark:text-gray-400 mt-1')}>{extensionDescription}</p>
+		</div>
 		<button
 			onclick={refreshVault}
 			disabled={loading || vaultBalanceLoading}

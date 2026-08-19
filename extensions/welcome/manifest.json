@@ -1,7 +1,7 @@
 {
   "name": "welcome",
   "version": "1.0.3",
-  "description": "Welcome page and onboarding for new users",
+  "description": "The first page visitors see when they arrive: your realm's welcome message and a button to join or enter.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

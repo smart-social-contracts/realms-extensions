@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	let data: any = $state(null);
@@ -79,9 +81,7 @@
 <div class="p-6 max-w-4xl mx-auto">
 	<div class="mb-8">
 		<h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Realms Network</h1>
-		<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-			Other realms connected to the same mundus registry
-		</p>
+		<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 	</div>
 
 	{#if loading}

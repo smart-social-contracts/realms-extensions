@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import LifecycleSteps, { type LifecycleStep } from './LifecycleSteps.svelte';
 
 	type View = 'list' | 'create' | 'detail';
@@ -484,10 +485,7 @@
 	<header class="flex flex-wrap items-start justify-between gap-4">
 		<div class="min-w-0 flex-1">
 			<h1 class="text-3xl font-bold text-gray-900 dark:text-white">Procurement</h1>
-			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-				Request For Proposal lifecycle with vetKeys sealed bids. Bids are encrypted on your device —
-				evaluators gain access only after you share following bid close.
-			</p>
+			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 		</div>
 		<div class="flex shrink-0 flex-wrap gap-2">
 			{#if view !== 'list'}

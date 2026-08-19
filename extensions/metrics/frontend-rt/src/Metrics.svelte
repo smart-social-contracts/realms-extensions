@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { exportCsv } from '../../../_shared/frontend/csv-export';
 
 	let { ctx }: { ctx: Record<string, any> } = $props();
@@ -321,6 +322,11 @@ let accessDeniedOp = $state('');
 </script>
 
 <div class="w-full max-w-5xl mx-auto px-4 py-6 font-sans">
+	<div class="mb-6">
+		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Financial Reports</h1>
+		<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{extensionDescription}</p>
+	</div>
+
 	<!-- Tab Navigation -->
 	<div class="mb-6 border-b border-gray-200 dark:border-gray-700">
 		<nav class="flex space-x-8">

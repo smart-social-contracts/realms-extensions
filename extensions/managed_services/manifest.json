@@ -1,7 +1,7 @@
 {
   "name": "managed_services",
   "version": "0.2.0",
-  "description": "Realm version management, self-upgrade, and credit purchasing for administrators",
+  "description": "See your realm's current software version, install updates when available, buy credits, and review spending on upgrades and top-ups.",
   "author": "Realms Team",
   "ggg_api_version": 1,
   "permissions": [],

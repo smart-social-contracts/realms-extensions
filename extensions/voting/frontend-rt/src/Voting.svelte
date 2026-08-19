@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy } from 'svelte';
 	import MonacoDiffPane from './MonacoDiffPane.svelte';
 	import MonacoPane from './MonacoPane.svelte';
@@ -944,7 +945,7 @@
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-3xl font-bold text-gray-900 mb-1">Voting</h1>
-		<p class="text-gray-500 text-sm">Create proposals, review code changes, and vote on governance decisions.</p>
+		<p class="text-gray-500 text-sm">{extensionDescription}</p>
 		{#if votingSettings}
 			<p class="text-xs text-gray-400 mt-2">
 				Voting window: {formatDuration(votingSettings.voting_window_seconds)}.

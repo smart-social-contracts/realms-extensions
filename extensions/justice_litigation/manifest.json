@@ -2,7 +2,7 @@
   "name": "justice_litigation",
   "version": "0.5.0",
   "ggg_api_version": 1,
-  "description": "Private-by-default litigations (end-to-end encrypted, shared only with the submitter and the justice department) plus courts, judges, verdicts, penalties, and appeals",
+  "description": "File a private dispute with the justice department, follow it through your realm's courts, and resolve or appeal cases if you oversee justice.",
   "permissions": [],
   "entry_points": [
     "initialize",

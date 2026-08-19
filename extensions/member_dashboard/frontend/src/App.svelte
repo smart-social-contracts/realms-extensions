@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
 	import { createExtensionClient, type ExtensionClient } from '@realmsgos/extension-bridge';
 	import { PageHeader, Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
@@ -382,7 +383,7 @@
 			{/snippet}
 		</Card>
 	{:else if !isAuthenticated}
-		<PageHeader title="My Dashboard" subtitle="Personal dashboard for members" />
+		<PageHeader title="My Dashboard" subtitle={extensionDescription} />
 		<Card>
 			{#snippet children()}
 				<EmptyState
@@ -396,7 +397,7 @@
 			{/snippet}
 		</Card>
 	{:else}
-		<PageHeader title={getGreeting()} subtitle="My Dashboard">
+		<PageHeader title={getGreeting()} subtitle={extensionDescription}>
 			{#snippet actions()}
 				<Button tone="secondary" size="sm" disabled={loading} onclick={() => void reloadAll()}>
 					Refresh

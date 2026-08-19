@@ -2,7 +2,7 @@
   "name": "mundus_explorer",
   "version": "1.0.0",
   "runtime": "in_process",
-  "description": "View other realms connected to the same mundus registry",
+  "description": "Browse other realms on the network, see how large they are, and visit their sites to explore what they offer.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "functions": [

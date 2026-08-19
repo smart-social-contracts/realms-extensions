@@ -9,7 +9,7 @@
     "entity.read:Zone",
     "entity.read:Codex"
   ],
-  "description": "Interactive Entity Relationship Diagram explorer for visualizing and navigating Realms data structure",
+  "description": "Browse how your realm's records connect: see data types as a diagram, their fields and links, and page through sample records.",
   "author": "Realms Team",
   "permissions": [],
   "entry_points": [

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	interface EntityTypeMeta {
@@ -360,7 +362,10 @@
 
 <div class="max-w-3xl mx-auto p-6">
 	<div class="flex items-center justify-between mb-6">
-		<h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Demo Simulator</h2>
+		<div>
+			<h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Demo Simulator</h2>
+			<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{extensionDescription}</p>
+		</div>
 		{#if status}
 			<span
 				class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full

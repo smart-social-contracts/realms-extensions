@@ -19,7 +19,7 @@
     "notification.send_test_email",
     "log.write"
   ],
-  "description": "Real-time notifications and alerts system",
+  "description": "See alerts about activity in your realm, mark them as read, and set which notifications you receive by email.",
   "permissions": [],
   "entry_points": [
     "get_notifications",

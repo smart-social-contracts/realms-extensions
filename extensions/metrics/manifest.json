@@ -1,7 +1,7 @@
 {
   "name": "metrics",
   "version": "1.1.2",
-  "description": "Financial statements, accounting data, and analytics dashboard for realm performance",
+  "description": "View your realm's finances — balance sheet, income and cash flow statements, budget tracking, charts, and downloadable accounting records.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

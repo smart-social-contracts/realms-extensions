@@ -2,7 +2,7 @@
   "name": "task_monitor",
   "version": "1.0.6",
   "runtime": "in_process",
-  "description": "Task monitoring and management dashboard for administrators",
+  "description": "Watch background jobs across your realm: see what is running, start or stop tasks, set schedules, and read execution logs when something fails.",
   "author": "Realms Team",
   "categories": [
     "realm_management"

@@ -1,7 +1,7 @@
 {
   "name": "realm_settings",
   "version": "1.10.3",
-  "description": "Realm configuration and branding",
+  "description": "Change your realm's name, welcome message, and branding; control who can join; set voting rules, currency, notifications, and lifecycle stage.",
   "author": "Realms Team",
   "categories": [
     "realm_management"

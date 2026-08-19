@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, tick } from 'svelte';
 
 	let { ctx }: { ctx: any } = $props();
@@ -821,6 +822,7 @@
 <!-- ═══════════════════════════════════════════════════ SETTINGS PAGE ══ -->
 <div class="settings-page">
 	<h1 class="settings-title">AI Assistant — Settings</h1>
+	<p class="settings-page-desc">{extensionDescription}</p>
 
 	<!-- Default assistant -->
 	<section class="settings-section">
@@ -1732,8 +1734,15 @@
 	.settings-title {
 		font-size: 1.35rem;
 		font-weight: 700;
-		margin: 0 0 32px;
+		margin: 0 0 8px;
 		color: #111;
+	}
+
+	.settings-page-desc {
+		font-size: 0.9rem;
+		color: #6b7280;
+		margin: 0 0 32px;
+		line-height: 1.45;
 	}
 
 	.settings-section {

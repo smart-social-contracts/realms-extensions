@@ -9,7 +9,7 @@
     "log.write"
   ],
   "deprecated": true,
-  "description": "DEPRECATED — extension access control moved to role_manager; package operations live in package_manager",
+  "description": "No longer used — who can open extensions is now managed in User Management, and installing or updating packages is in Package Manager.",
   "author": "Realms Team",
   "categories": [
     "settings"

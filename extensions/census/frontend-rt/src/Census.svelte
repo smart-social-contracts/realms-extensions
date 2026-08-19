@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import InvitationManager from './InvitationManager.svelte';
 
 	let { ctx }: { ctx: any } = $props();
@@ -44,7 +45,7 @@
 	<div class="flex justify-between items-center mb-6">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Census</h1>
-			<p class="text-gray-600 mt-1">User population and invitation management</p>
+			<p class="text-gray-600 mt-1">{extensionDescription}</p>
 		</div>
 		<button
 			onclick={loadUserCount}

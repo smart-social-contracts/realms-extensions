@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy, tick } from 'svelte';
 
 	let { ctx }: { ctx: any } = $props();
@@ -655,10 +656,7 @@
 		<div class="zone-header">
 			<div class="zone-header-copy">
 				<h2>Zones</h2>
-				<p class="zone-header-desc">
-					Draw the realm's territory, then paint zones inside it by purpose. Land parcels inherit
-					their type from the zone they sit in.
-				</p>
+				<p class="zone-header-desc">{extensionDescription}</p>
 			</div>
 			<div class="zone-header-actions">
 				<button type="button" class="expand-toggle" onclick={toggleExpanded} aria-pressed={expanded}>

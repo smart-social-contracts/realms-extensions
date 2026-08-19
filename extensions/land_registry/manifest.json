@@ -13,7 +13,7 @@
     "land.set_nft_token",
     "log.write"
   ],
-  "description": "Property registration and land ownership management",
+  "description": "Browse parcels on a map, register new land, assign owners, update parcel details, and see who holds each plot in your realm.",
   "permissions": [],
   "entry_points": [
     "get_lands",

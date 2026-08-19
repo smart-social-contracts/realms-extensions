@@ -2,7 +2,7 @@
   "name": "passport_verification",
   "version": "1.0.7",
   "runtime": "in_process",
-  "description": "Rarimo ZK Passport verification extension for secure identity verification",
+  "description": "Prove your identity with your passport without revealing personal details — scan a code on your phone to complete verification.",
   "author": "Realms Team",
   "permissions": [],
   "functions": [

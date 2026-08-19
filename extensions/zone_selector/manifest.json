@@ -11,7 +11,7 @@
     "zone.update",
     "zone.delete"
   ],
-  "description": "Display the zones where the realm is operative on an interactive map",
+  "description": "View your realm's territory on a map, draw areas, and label them as residential, commercial, agricultural, or other zone types.",
   "permissions": [],
   "entry_points": [
     "get_my_zones",

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { description as extensionDescription } from '../../manifest.json';
+
 	let { ctx }: { ctx: any } = $props();
 
 	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
@@ -203,9 +205,7 @@
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-gray-900">Migration Console</h1>
-		<p class="text-sm text-gray-500 mt-1">
-			Readiness, departments, and staff onboarding for the incumbent migration
-		</p>
+		<p class="text-sm text-gray-500 mt-1">{extensionDescription}</p>
 	</div>
 
 	<!-- Toasts -->
