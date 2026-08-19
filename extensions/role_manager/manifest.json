@@ -1,6 +1,6 @@
 {
   "name": "role_manager",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "runtime": "in_process",
   "description": "See everyone in your realm, assign roles, grant or revoke permissions, send registration invites, and choose which extensions each person may use.",
   "author": "Smart Social Contracts",
@@ -46,20 +46,8 @@
         "level": "permission.revoke",
         "governed": true
       },
-      "grant_profile_permission": {
+      "update_profile_operations": {
         "level": "permission.grant",
-        "governed": true
-      },
-      "revoke_profile_permission": {
-        "level": "permission.revoke",
-        "governed": true
-      },
-      "batch_grant_profile_permissions": {
-        "level": "permission.grant",
-        "governed": true
-      },
-      "batch_revoke_profile_permissions": {
-        "level": "permission.revoke",
         "governed": true
       },
       "grant_extension_to_user": {

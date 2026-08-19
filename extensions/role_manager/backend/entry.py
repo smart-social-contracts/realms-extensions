@@ -11,7 +11,7 @@ import traceback
 from typing import Any, Dict
 
 from ggg import Department, Extension, Permission, Proposal, User, UserProfile
-from ggg.system.user_profile import Operations, Profiles, OPERATIONS_SEPARATOR
+from ggg.system.user_profile import Operations, OPERATIONS_CATALOG, OPERATIONS_SEPARATOR
 from ggg.system.registration_code import (
     RegistrationCode,
     consume_registration_code as _consume,
@@ -257,10 +257,12 @@ def get_available_profiles(args) -> str:
         _require_operation(caller, Operations.PERMISSION_VIEW)
 
         profiles = []
-        for profile_def in Profiles.ALL_PROFILES:
+        for profile in sorted(UserProfile.instances(), key=lambda p: p.name):
             profiles.append({
-                "name": profile_def["name"],
-                "allowed_to": profile_def["allowed_to"],
+                "name": profile.name,
+                "allowed_to": [
+                    op for op in str(profile.allowed_to or "").split(OPERATIONS_SEPARATOR) if op
+                ],
             })
 
         return json.dumps({"success": True, "data": {"profiles": profiles}})
@@ -665,101 +667,6 @@ def propose_role_assignment(args) -> str:
     return propose_role_action(args_dict)
 
 
-OPERATIONS_CATALOG = {
-    "all": {"category": "Super", "description": "Grants every operation in the system"},
-
-    "user.add": {"category": "User Management", "description": "Register new users in the realm"},
-    "user.edit": {"category": "User Management", "description": "Edit user profile information"},
-    "user.delete": {"category": "User Management", "description": "Remove a user from the realm"},
-    "user.update_status": {"category": "User Management", "description": "Change a user's active/suspended status"},
-
-    "organization.add": {"category": "Departments", "description": "Create a new department"},
-    "organization.edit": {"category": "Departments", "description": "Edit department details"},
-    "organization.delete": {"category": "Departments", "description": "Delete a department"},
-
-    "transfer.create": {"category": "Finance", "description": "Create token transfers between accounts"},
-    "transfer.delete": {"category": "Finance", "description": "Revert or cancel a pending transfer"},
-    "invoice.refresh": {"category": "Finance", "description": "Recalculate and refresh invoice balances"},
-    "nft.mint": {"category": "Finance", "description": "Mint new NFT tokens (e.g. land parcels)"},
-    "license.issue": {"category": "Finance", "description": "Issue a license to a user or organization"},
-    "license.revoke": {"category": "Finance", "description": "Revoke an issued license"},
-
-    "task.create": {"category": "Tasks", "description": "Create background tasks"},
-    "task.edit": {"category": "Tasks", "description": "Edit task parameters"},
-    "task.delete": {"category": "Tasks", "description": "Delete a task"},
-    "task.run": {"category": "Tasks", "description": "Manually trigger a task to run"},
-    "task.schedule": {"category": "Tasks", "description": "Schedule a task for periodic execution"},
-    "task.cancel": {"category": "Tasks", "description": "Cancel a running or scheduled task"},
-
-    "realm.admin": {"category": "Realm Administration", "description": "Full realm administrative access"},
-    "realm.upgrade": {"category": "Realm Administration", "description": "Upgrade the realm canister to a new version"},
-    "realm.configure": {"category": "Realm Administration", "description": "Change realm configuration settings"},
-    "realm.configure.codex": {"category": "Realm Administration", "description": "Configure the governance codex"},
-    "realm.configure.infrastructure": {"category": "Realm Administration", "description": "Configure infrastructure settings (registries, etc.)"},
-    "realm.register": {"category": "Realm Administration", "description": "Register the realm with the registry"},
-    "quarter.register": {"category": "Realm Administration", "description": "Register a new quarter (sub-realm)"},
-    "quarter.deregister": {"category": "Realm Administration", "description": "Remove a quarter from the realm"},
-    "quarter.configure": {"category": "Realm Administration", "description": "Configure quarter settings"},
-    "quarter.secede": {"category": "Realm Administration", "description": "Allow a quarter to secede from the realm"},
-    "quarter.join_federation": {"category": "Realm Administration", "description": "Join a federation of realms"},
-    "shell.execute": {"category": "Realm Administration", "description": "Execute shell commands on the canister (developer)"},
-
-    "mandate.create": {"category": "Governance", "description": "Create governance mandates"},
-    "mandate.assign_executor": {"category": "Governance", "description": "Assign an executor to a mandate"},
-    "proposal.create": {"category": "Governance", "description": "Submit new governance proposals"},
-    "proposal.vote": {"category": "Governance", "description": "Vote on governance proposals"},
-    "contract.create_under_mandate": {"category": "Governance", "description": "Create contracts under an active mandate"},
-    "scope.authorize": {"category": "Governance", "description": "Authorize governance scopes"},
-    "governance.update": {"category": "Governance", "description": "Update governance rules and parameters"},
-    "permission.view": {"category": "Governance", "description": "View user permissions and access details"},
-    "permission.revoke": {"category": "Governance", "description": "Revoke permissions from users"},
-
-    "role.assign": {"category": "Roles & Permissions", "description": "Assign profiles/roles to users"},
-    "role.revoke": {"category": "Roles & Permissions", "description": "Revoke profiles/roles from users"},
-    "permission.grant": {"category": "Roles & Permissions", "description": "Grant fine-grained permissions to users"},
-
-    "dispute.create": {"category": "Justice", "description": "File a new dispute or complaint"},
-    "dispute.view": {"category": "Justice", "description": "View disputes you are party to"},
-    "dispute.accept": {"category": "Justice", "description": "Accept a dispute for adjudication"},
-    "dispute.reject": {"category": "Justice", "description": "Reject a dispute filing"},
-    "dispute.assign": {"category": "Justice", "description": "Assign a dispute to a judge"},
-    "dispute.view_all": {"category": "Justice", "description": "View all disputes in the realm"},
-    "evidence.evaluate": {"category": "Justice", "description": "Evaluate submitted evidence"},
-    "resolution.draft": {"category": "Justice", "description": "Draft a dispute resolution"},
-    "resolution.issue": {"category": "Justice", "description": "Issue an official resolution"},
-    "resolution.link_contract": {"category": "Justice", "description": "Link a contract to a resolution"},
-    "resolution.modify_terms": {"category": "Justice", "description": "Modify terms of a resolution"},
-    "resolution.finalize": {"category": "Justice", "description": "Finalize and close a resolution"},
-    "appeal.allow": {"category": "Justice", "description": "Allow an appeal to a resolution"},
-
-    "trade.execute": {"category": "Enforcement", "description": "Execute trades as part of enforcement"},
-    "fine.apply": {"category": "Enforcement", "description": "Apply fines to users"},
-    "access.revoke": {"category": "Enforcement", "description": "Revoke a user's access as enforcement"},
-    "contract.terminate": {"category": "Enforcement", "description": "Terminate a contract as enforcement"},
-    "resource.reassign": {"category": "Enforcement", "description": "Reassign resources between users"},
-    "instrument.lock": {"category": "Enforcement", "description": "Lock financial instruments"},
-    "notification.send": {"category": "Enforcement", "description": "Send enforcement notifications"},
-    "resolution.query": {"category": "Enforcement", "description": "Query past resolutions"},
-    "enforcement.escalate": {"category": "Enforcement", "description": "Escalate an enforcement action"},
-    "enforcement.record": {"category": "Enforcement", "description": "Record enforcement actions"},
-
-    "extension.call": {"category": "Extensions", "description": "Call extension functions (generic)"},
-    "extension.sync_call": {"category": "Extensions", "description": "Make synchronous extension calls"},
-    "extension.async_call": {"category": "Extensions", "description": "Make asynchronous extension calls"},
-    "extension.install": {"category": "Extensions", "description": "Install new extensions into the realm"},
-    "extension.uninstall": {"category": "Extensions", "description": "Uninstall extensions from the realm"},
-
-    "codex.install": {"category": "Codex", "description": "Install governance codex packages"},
-    "codex.uninstall": {"category": "Codex", "description": "Uninstall governance codex packages"},
-
-    "self.join": {"category": "Self-service", "description": "Join the realm as a new member"},
-    "self.update_public_profile": {"category": "Self-service", "description": "Update your own public profile"},
-    "self.update_private_data": {"category": "Self-service", "description": "Update your own private data"},
-    "self.change_quarter": {"category": "Self-service", "description": "Move to a different quarter"},
-    "self.invoice_refresh": {"category": "Self-service", "description": "Refresh your own invoices"},
-}
-
-
 def get_all_operations(args) -> str:
     """Return the full catalog of operations with descriptions and categories,
     plus the caller's own effective operations for UI permission gating."""
@@ -966,188 +873,119 @@ def list_profiles_with_permissions(args) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-def grant_profile_permission(args) -> str:
-    """Attach a fine-grained Permission entity to a profile.
+def _profile_allowed_ops(profile: UserProfile) -> set:
+    return {op for op in str(profile.allowed_to or "").split(OPERATIONS_SEPARATOR) if op}
 
-    Enforces that the caller holds the permission they are granting.
+
+def _profile_effective_ops(profile: UserProfile) -> set:
+    """Both stores grant capability: ``allowed_to`` plus attached Permission
+    entities. The realm's ``_check_access`` honours either, so a lockout check
+    that reads only ``allowed_to`` would miss an ``all`` held as a Permission.
+    """
+    ops = _profile_allowed_ops(profile)
+    try:
+        for perm in profile.permissions:
+            if perm.name:
+                ops.add(perm.name)
+    except Exception:
+        pass
+    return ops
+
+
+def _realm_would_have_admin_after(profile: UserProfile, new_effective: set) -> bool:
+    for other in UserProfile.instances():
+        effective = (
+            new_effective
+            if other.name == profile.name
+            else _profile_effective_ops(other)
+        )
+        if Operations.ALL in effective:
+            return True
+    return False
+
+
+def update_profile_operations(args) -> str:
+    """Grant or revoke profile operations across allowed_to and Permission entities.
+
+    Grant half requires permission.grant; revoke half additionally checks
+    permission.revoke in code.
     """
     try:
         args_dict = _parse_args(args)
         caller = _get_caller_user()
-        _require_operation(caller, Operations.PERMISSION_GRANT)
+        caller_principal = _get_caller_principal()
 
         profile_name = args_dict.get("profile_name")
-        permission_name = args_dict.get("permission_name")
-        if not profile_name or not permission_name:
-            return json.dumps({"success": False, "error": "profile_name and permission_name are required"})
+        grant = args_dict.get("grant") or []
+        revoke = args_dict.get("revoke") or []
+        if not profile_name:
+            return json.dumps({
+                "success": False,
+                "error": "profile_name is required",
+                "error_code": "missing_args",
+            })
 
-        if not _is_allowed(caller, Operations.ALL) and not _is_allowed(caller, permission_name):
-            return json.dumps({"success": False, "error": f"Cannot grant '{permission_name}' — you don't hold this permission"})
+        # An op named in both lists resolves to the revoke: dropping a
+        # capability is the safe direction to land on.
+        grant = [op for op in grant if op not in set(revoke)]
+
+        if grant:
+            _require_operation(caller, Operations.PERMISSION_GRANT)
+        if revoke:
+            _require_operation(caller, Operations.PERMISSION_REVOKE)
 
         profile = UserProfile[profile_name]
         if not profile:
-            return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
+            return json.dumps({
+                "success": False,
+                "error": f"Profile '{profile_name}' not found",
+                "error_code": "profile_not_found",
+            })
 
-        try:
-            for perm in profile.permissions:
-                if perm.name == permission_name:
-                    return json.dumps({"success": False, "error": f"Profile already has permission '{permission_name}'"})
-        except Exception:
-            pass
-
-        perm = Permission[permission_name]
-        if not perm:
-            perm = Permission(name=permission_name)
-        profile.permissions.add(perm)
-        logger.info(f"Permission '{permission_name}' granted to profile '{profile_name}' by {_get_caller_principal()}")
-
-        return json.dumps({
-            "success": True,
-            "data": {
-                "message": f"Permission '{permission_name}' granted to profile '{profile_name}'",
-                "profile_name": profile_name,
-                "permission": permission_name,
-            },
-        })
-    except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
-    except Exception as e:
-        logger.error(f"grant_profile_permission error: {e}\n{traceback.format_exc()}")
-        return json.dumps({"success": False, "error": str(e)})
-
-
-def revoke_profile_permission(args) -> str:
-    """Remove a fine-grained Permission entity from a profile."""
-    try:
-        args_dict = _parse_args(args)
-        caller = _get_caller_user()
-        _require_operation(caller, Operations.PERMISSION_REVOKE)
-
-        profile_name = args_dict.get("profile_name")
-        permission_name = args_dict.get("permission_name")
-        if not profile_name or not permission_name:
-            return json.dumps({"success": False, "error": "profile_name and permission_name are required"})
-
-        profile = UserProfile[profile_name]
-        if not profile:
-            return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
-
-        found = None
-        try:
-            for perm in profile.permissions:
-                if perm.name == permission_name:
-                    found = perm
-                    break
-        except Exception:
-            pass
-
-        if not found:
-            return json.dumps({"success": False, "error": f"Profile does not have permission '{permission_name}'"})
-
-        profile.permissions.remove(found)
-        found.delete()
-        logger.info(f"Permission '{permission_name}' revoked from profile '{profile_name}' by {_get_caller_principal()}")
-
-        return json.dumps({
-            "success": True,
-            "data": {
-                "message": f"Permission '{permission_name}' revoked from profile '{profile_name}'",
-                "profile_name": profile_name,
-                "permission": permission_name,
-            },
-        })
-    except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
-    except Exception as e:
-        logger.error(f"revoke_profile_permission error: {e}\n{traceback.format_exc()}")
-        return json.dumps({"success": False, "error": str(e)})
-
-
-def batch_grant_profile_permissions(args) -> str:
-    """Grant multiple permissions to a profile at once.
-
-    Enforces that the caller can only grant permissions they themselves hold
-    (or all permissions if they have the 'all' operation).
-    """
-    try:
-        args_dict = _parse_args(args)
-        caller = _get_caller_user()
-        _require_operation(caller, Operations.PERMISSION_GRANT)
-
-        profile_name = args_dict.get("profile_name")
-        permission_names = args_dict.get("permission_names", [])
-        if not profile_name or not permission_names:
-            return json.dumps({"success": False, "error": "profile_name and permission_names are required"})
-
-        profile = UserProfile[profile_name]
-        if not profile:
-            return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
-
-        caller_ops = set(_get_user_effective_operations(caller))
-        caller_has_all = Operations.ALL in caller_ops
-        if not caller_has_all:
-            forbidden = [p for p in permission_names if p not in caller_ops]
-            if forbidden:
+        for op in grant + revoke:
+            if op not in OPERATIONS_CATALOG:
                 return json.dumps({
                     "success": False,
-                    "error": f"Cannot grant permissions you don't hold: {', '.join(forbidden)}",
+                    "error": f"Unknown operation '{op}'",
+                    "error_code": "unknown_operation",
                 })
 
-        existing = set()
-        try:
-            for perm in profile.permissions:
-                if perm.name:
-                    existing.add(perm.name)
-        except Exception:
-            pass
+        if grant:
+            caller_ops = set(_get_user_effective_operations(caller))
+            caller_has_all = Operations.ALL in caller_ops
+            if not caller_has_all:
+                forbidden = [op for op in grant if op not in caller_ops]
+                if forbidden:
+                    return json.dumps({
+                        "success": False,
+                        "error": f"Cannot grant operations you don't hold: {', '.join(forbidden)}",
+                        "error_code": "cannot_grant_unheld",
+                    })
+
+        current_allowed = _profile_allowed_ops(profile)
+        simulated_effective = _profile_effective_ops(profile)
+        simulated_effective.update(grant)
+        for op in revoke:
+            simulated_effective.discard(op)
+
+        if not _realm_would_have_admin_after(profile, simulated_effective):
+            return json.dumps({
+                "success": False,
+                "error": "This change would leave no profile with full administrative access",
+                "error_code": "would_orphan_admin",
+            })
 
         granted = []
+        revoked = []
         skipped = []
-        for pname in permission_names:
-            if pname in existing:
-                skipped.append(pname)
+
+        for op in grant:
+            if op in current_allowed:
+                skipped.append(op)
                 continue
-            perm = Permission[pname]
-            if not perm:
-                perm = Permission(name=pname)
-            profile.permissions.add(perm)
-            granted.append(pname)
-            existing.add(pname)
-
-        caller_principal = _get_caller_principal()
-        if granted:
-            logger.info(f"Permissions {granted} granted to profile '{profile_name}' by {caller_principal}")
-
-        return json.dumps({
-            "success": True,
-            "data": {
-                "granted": granted,
-                "skipped": skipped,
-                "message": f"{len(granted)} permission(s) granted, {len(skipped)} already existed",
-            },
-        })
-    except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
-    except Exception as e:
-        logger.error(f"batch_grant_profile_permissions error: {e}\n{traceback.format_exc()}")
-        return json.dumps({"success": False, "error": str(e)})
-
-
-def batch_revoke_profile_permissions(args) -> str:
-    """Revoke multiple permissions from a profile at once."""
-    try:
-        args_dict = _parse_args(args)
-        caller = _get_caller_user()
-        _require_operation(caller, Operations.PERMISSION_REVOKE)
-
-        profile_name = args_dict.get("profile_name")
-        permission_names = args_dict.get("permission_names", [])
-        if not profile_name or not permission_names:
-            return json.dumps({"success": False, "error": "profile_name and permission_names are required"})
-
-        profile = UserProfile[profile_name]
-        if not profile:
-            return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
+            profile.add(op)
+            current_allowed.add(op)
+            granted.append(op)
 
         perm_map = {}
         try:
@@ -1157,33 +995,48 @@ def batch_revoke_profile_permissions(args) -> str:
         except Exception:
             pass
 
-        revoked = []
-        not_found = []
-        for pname in permission_names:
-            if pname in perm_map:
-                profile.permissions.remove(perm_map[pname])
-                perm_map[pname].delete()
-                revoked.append(pname)
-            else:
-                not_found.append(pname)
+        for op in revoke:
+            had_allowed = op in current_allowed
+            had_permission = op in perm_map
+            if not had_allowed and not had_permission:
+                skipped.append(op)
+                continue
+            if had_allowed:
+                profile.remove(op)
+                current_allowed.discard(op)
+            if had_permission:
+                profile.permissions.remove(perm_map[op])
+                perm_map[op].delete()
+            revoked.append(op)
 
-        caller_principal = _get_caller_principal()
-        if revoked:
-            logger.info(f"Permissions {revoked} revoked from profile '{profile_name}' by {caller_principal}")
+        if granted or revoked:
+            logger.info(
+                f"Profile '{profile_name}' operations updated by {caller_principal}: "
+                f"granted={granted}, revoked={revoked}"
+            )
 
         return json.dumps({
             "success": True,
             "data": {
+                "profile_name": profile_name,
+                "granted": granted,
                 "revoked": revoked,
-                "not_found": not_found,
-                "message": f"{len(revoked)} permission(s) revoked",
+                "skipped": skipped,
             },
         })
     except PermissionError as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "error_code": "not_permitted",
+        })
     except Exception as e:
-        logger.error(f"batch_revoke_profile_permissions error: {e}\n{traceback.format_exc()}")
-        return json.dumps({"success": False, "error": str(e)})
+        logger.error(f"update_profile_operations error: {e}\n{traceback.format_exc()}")
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "error_code": "internal_error",
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -1208,10 +1061,15 @@ def generate_registration_url(args) -> str:
     try:
         args_dict = _parse_args(args)
         user_id = args_dict.get("user_id", "admin")
+        profile_arg = args_dict.get("profile")
+        profile_name = profile_arg if profile_arg else "member"
+        profile = UserProfile[profile_name]
+        if not profile:
+            return json.dumps({"success": False, "error": f"Profile '{profile_name}' not found"})
         from datetime import datetime
         reg_code = _create(
             code_hash=args_dict.get("code_hash", ""),
-            profile=args_dict.get("profile", "member"),
+            profile=profile_name,
             max_uses=args_dict.get("max_uses", 1),
             expires_in_hours=args_dict.get("expires_in_hours", 24),
             created_by=args_dict.get("created_by", "admin"),
@@ -1226,7 +1084,7 @@ def generate_registration_url(args) -> str:
                 "data": {
                     "code_hash": code_hash[:8],
                     "expires_at": datetime.fromtimestamp(reg_code.expires_at).isoformat(),
-                    "profile": args_dict.get("profile", "member"),
+                    "profile": profile_name,
                 },
             })
         return json.dumps({
@@ -1237,7 +1095,7 @@ def generate_registration_url(args) -> str:
                 "registration_url": reg_code.registration_url,
                 "expires_at": datetime.fromtimestamp(reg_code.expires_at).isoformat(),
                 "user_id": reg_code.user_id,
-                "profile": args_dict.get("profile", "member"),
+                "profile": profile_name,
             },
         })
     except Exception as e:
@@ -1477,10 +1335,7 @@ EXTENSION_FUNCTIONS = {
     "batch_revoke_permissions": batch_revoke_permissions,
     # Profile permissions
     "list_profiles_with_permissions": list_profiles_with_permissions,
-    "grant_profile_permission": grant_profile_permission,
-    "revoke_profile_permission": revoke_profile_permission,
-    "batch_grant_profile_permissions": batch_grant_profile_permissions,
-    "batch_revoke_profile_permissions": batch_revoke_profile_permissions,
+    "update_profile_operations": update_profile_operations,
     # Invitations (merged from census)
     "get_user_count": get_user_count,
     "generate_registration_url": generate_registration_url,

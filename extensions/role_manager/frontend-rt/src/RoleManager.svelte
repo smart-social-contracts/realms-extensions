@@ -67,9 +67,12 @@
 	let profilesLoading = $state(false);
 	let selectedProfile: any | null = $state(null);
 	let profilePermFilter = $state('');
+	let profileCategoryFilter = $state('all');
+	let profileGrantedOnly = $state(false);
 	let profilePendingGrants: Set<string> = $state(new Set());
 	let profilePendingRevokes: Set<string> = $state(new Set());
 	let profilePermApplying = $state(false);
+	let pendingAllGrant = $state(false);
 
 	let filteredUsers = $derived(
 		searchQuery.trim()
@@ -102,6 +105,40 @@
 	});
 
 	let hasPendingChanges = $derived(pendingGrants.size > 0 || pendingRevokes.size > 0);
+	let hasProfilePendingChanges = $derived(profilePendingGrants.size > 0 || profilePendingRevokes.size > 0);
+
+	let profileOperationCategories = $derived(
+		[...new Set(allOperations.map((op) => op.category))].sort(),
+	);
+
+	let filteredProfileOperations = $derived(() => {
+		const q = profilePermFilter.trim().toLowerCase();
+		let ops = allOperations;
+
+		if (q) {
+			ops = ops.filter(
+				(op) =>
+					op.name.toLowerCase().includes(q) ||
+					op.category.toLowerCase().includes(q) ||
+					op.description.toLowerCase().includes(q),
+			);
+		}
+
+		if (profileCategoryFilter !== 'all') {
+			ops = ops.filter((op) => op.category === profileCategoryFilter);
+		}
+
+		if (profileGrantedOnly) {
+			ops = ops.filter((op) => profileRowMatchesGrantedOnly(op.name));
+		}
+
+		const groups: Record<string, OperationDef[]> = {};
+		for (const op of ops) {
+			if (!groups[op.category]) groups[op.category] = [];
+			groups[op.category].push(op);
+		}
+		return groups;
+	});
 
 	async function callSync(fn: string, args: Record<string, any> = {}) {
 		const raw = await ctx.callSync(fn, args);
@@ -480,86 +517,134 @@
 	function selectProfile(profile: any) {
 		selectedProfile = profile;
 		profilePermFilter = '';
+		profileCategoryFilter = 'all';
+		profileGrantedOnly = false;
 		profilePendingGrants = new Set();
 		profilePendingRevokes = new Set();
+		pendingAllGrant = false;
+	}
+
+	function profileOpCurrentlyGranted(opName: string): boolean {
+		if (!selectedProfile) return false;
+		const builtIn = selectedProfile.allowed_to ?? [];
+		const extra = selectedProfile.extra_permissions ?? [];
+		return builtIn.includes(opName) || extra.includes(opName);
+	}
+
+	function profileRowMatchesGrantedOnly(opName: string): boolean {
+		if (!selectedProfile) return false;
+		if (profilePendingGrants.has(opName)) return true;
+		if (profilePendingRevokes.has(opName)) return true;
+		return profileOpCurrentlyGranted(opName);
+	}
+
+	function profileCategoryGrantedCount(category: string): number {
+		if (!selectedProfile) return 0;
+		return allOperations
+			.filter((op) => op.category === category)
+			.filter((op) => isProfilePermChecked(op.name)).length;
+	}
+
+	function profileCategoryTotalCount(category: string): number {
+		return allOperations.filter((op) => op.category === category).length;
+	}
+
+	function mapProfileOpError(errorCode: string | undefined, fallback: string): string {
+		switch (errorCode) {
+			case 'missing_args':
+				return 'Missing required arguments.';
+			case 'profile_not_found':
+				return 'Profile not found.';
+			case 'unknown_operation':
+				return 'One or more operations are not recognized.';
+			case 'not_permitted':
+				return 'You are not permitted to modify this profile.';
+			case 'cannot_grant_unheld':
+				return 'You cannot grant permissions you do not hold yourself.';
+			case 'would_orphan_admin':
+				return 'This change would leave the realm with no profile holding full administrative access.';
+			case 'internal_error':
+				return 'The realm could not apply this change. Please try again.';
+			default:
+				return fallback || 'Failed to update profile permissions';
+		}
 	}
 
 	function toggleProfilePerm(opName: string) {
 		if (!selectedProfile) return;
-		const current = selectedProfile.extra_permissions ?? [];
-		const isGranted = current.includes(opName);
+		const isGranted = profileOpCurrentlyGranted(opName);
+
 		if (isGranted) {
 			if (profilePendingRevokes.has(opName)) {
-				profilePendingRevokes = new Set([...profilePendingRevokes].filter(n => n !== opName));
+				profilePendingRevokes = new Set([...profilePendingRevokes].filter((n) => n !== opName));
 			} else {
 				profilePendingRevokes = new Set([...profilePendingRevokes, opName]);
-				profilePendingGrants = new Set([...profilePendingGrants].filter(n => n !== opName));
+				profilePendingGrants = new Set([...profilePendingGrants].filter((n) => n !== opName));
 			}
+		} else if (profilePendingGrants.has(opName)) {
+			profilePendingGrants = new Set([...profilePendingGrants].filter((n) => n !== opName));
+		} else if (opName === 'all') {
+			pendingAllGrant = true;
 		} else {
-			if (profilePendingGrants.has(opName)) {
-				profilePendingGrants = new Set([...profilePendingGrants].filter(n => n !== opName));
-			} else {
-				profilePendingGrants = new Set([...profilePendingGrants, opName]);
-				profilePendingRevokes = new Set([...profilePendingRevokes].filter(n => n !== opName));
-			}
+			profilePendingGrants = new Set([...profilePendingGrants, opName]);
+			profilePendingRevokes = new Set([...profilePendingRevokes].filter((n) => n !== opName));
 		}
+	}
+
+	function confirmAllGrant() {
+		profilePendingGrants = new Set([...profilePendingGrants, 'all']);
+		profilePendingRevokes = new Set([...profilePendingRevokes].filter((n) => n !== 'all'));
+		pendingAllGrant = false;
+	}
+
+	function discardProfilePermChanges() {
+		profilePendingGrants = new Set();
+		profilePendingRevokes = new Set();
 	}
 
 	function isProfilePermChecked(opName: string): boolean {
 		if (!selectedProfile) return false;
-		const current = selectedProfile.extra_permissions ?? [];
 		if (profilePendingGrants.has(opName)) return true;
 		if (profilePendingRevokes.has(opName)) return false;
-		return current.includes(opName);
+		return profileOpCurrentlyGranted(opName);
 	}
 
 	function profilePermState(opName: string): string {
 		if (!selectedProfile) return 'none';
 		if (profilePendingGrants.has(opName)) return 'pending-grant';
 		if (profilePendingRevokes.has(opName)) return 'pending-revoke';
-		const current = selectedProfile.extra_permissions ?? [];
-		if (current.includes(opName)) return 'granted';
-		const builtIn = selectedProfile.allowed_to ?? [];
-		if (builtIn.includes(opName)) return 'built-in';
+		if ((selectedProfile.allowed_to ?? []).includes(opName)) return 'built-in';
+		if ((selectedProfile.extra_permissions ?? []).includes(opName)) return 'granted';
 		return 'none';
 	}
 
 	async function applyProfilePermChanges() {
 		if (!selectedProfile) return;
+		const toGrant = [...profilePendingGrants];
+		const toRevoke = [...profilePendingRevokes];
+		if (toGrant.length === 0 && toRevoke.length === 0) return;
+
 		profilePermApplying = true;
 		error = '';
 		accessDeniedOp = '';
 		successMsg = '';
 		try {
-			const toGrant = [...profilePendingGrants];
-			const toRevoke = [...profilePendingRevokes];
-			if (toGrant.length > 0) {
-				const res = await callSync('batch_grant_profile_permissions', {
-					profile_name: selectedProfile.name,
-					permission_names: toGrant,
-				});
-				if (!res?.success) {
-					error = res?.error || 'Failed to grant';
-					profilePermApplying = false;
-					return;
-				}
+			const res = await callSync('update_profile_operations', {
+				profile_name: selectedProfile.name,
+				grant: toGrant,
+				revoke: toRevoke,
+			});
+			if (!res?.success) {
+				error = mapProfileOpError(res?.error_code, res?.error);
+				return;
 			}
-			if (toRevoke.length > 0) {
-				const res = await callSync('batch_revoke_profile_permissions', {
-					profile_name: selectedProfile.name,
-					permission_names: toRevoke,
-				});
-				if (!res?.success) {
-					error = res?.error || 'Failed to revoke';
-					profilePermApplying = false;
-					return;
-				}
-			}
-			successMsg = `${toGrant.length} granted, ${toRevoke.length} revoked on profile "${selectedProfile.name}"`;
+			const granted = res.data?.granted?.length ?? toGrant.length;
+			const revoked = res.data?.revoked?.length ?? toRevoke.length;
+			successMsg = `${granted} granted, ${revoked} revoked on profile "${selectedProfile.name}"`;
 			profilePendingGrants = new Set();
 			profilePendingRevokes = new Set();
 			await loadProfilesWithPermissions();
-			const updated = profilesList.find(p => p.name === selectedProfile?.name);
+			const updated = profilesList.find((p) => p.name === selectedProfile?.name);
 			if (updated) selectedProfile = updated;
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
@@ -1051,6 +1136,37 @@
 	<!-- Profiles View -->
 	{:else if view === 'profiles'}
 
+		{#if pendingAllGrant}
+			<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+				<div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border-2 border-red-300">
+					<h3 class="text-lg font-semibold text-red-700 mb-2">Grant unrestricted admin access?</h3>
+					<p class="text-sm text-gray-600 mb-3">
+						The <code class="bg-red-50 text-red-700 px-1 rounded">all</code> operation grants unrestricted administrative access to every user with this profile.
+					</p>
+					<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+						Grant <strong>all</strong> on profile <strong>{selectedProfile?.name}</strong>
+						{#if selectedProfile?.user_count}
+							— affects {selectedProfile.user_count} user{selectedProfile.user_count !== 1 ? 's' : ''}
+						{/if}
+					</div>
+					<div class="flex justify-end gap-3">
+						<button
+							onclick={() => (pendingAllGrant = false)}
+							class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+						>
+							Cancel
+						</button>
+						<button
+							onclick={confirmAllGrant}
+							class="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700"
+						>
+							Grant all
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
+
 		<div class="flex gap-5">
 			<!-- Profile list sidebar -->
 			<div class="w-56 flex-shrink-0">
@@ -1086,118 +1202,126 @@
 							{/if}
 						</div>
 
-						<!-- Built-in operations (from allowed_to, not editable) -->
-						<div class="px-5 py-3 border-b border-gray-100">
-							<h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Built-in Operations ({(selectedProfile.allowed_to ?? []).length})</h4>
-							{#if (selectedProfile.allowed_to ?? []).length === 0}
-								<p class="text-xs text-gray-400 italic">None (observer profile)</p>
-							{:else}
-								<div class="flex flex-wrap gap-1">
-									{#each selectedProfile.allowed_to ?? [] as op}
-										<code class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{op}</code>
-									{/each}
-								</div>
-							{/if}
-						</div>
-
-						<!-- Extra permissions (editable) -->
-						<div class="px-5 py-3 border-b border-gray-200">
-							<div class="flex items-center justify-between mb-2">
-								<h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Extra Permissions ({(selectedProfile.extra_permissions ?? []).length})</h4>
-								{#if profilePendingGrants.size > 0 || profilePendingRevokes.size > 0}
-									<div class="flex items-center gap-2">
-										<span class="text-xs text-gray-500">
-											{#if profilePendingGrants.size > 0}<span class="text-green-600 font-medium">+{profilePendingGrants.size}</span>{/if}
-											{#if profilePendingGrants.size > 0 && profilePendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
-											{#if profilePendingRevokes.size > 0}<span class="text-red-600 font-medium">-{profilePendingRevokes.size}</span>{/if}
-										</span>
-										<button onclick={() => { profilePendingGrants = new Set(); profilePendingRevokes = new Set(); }} class="text-xs text-gray-500 hover:text-gray-700">Discard</button>
-										<button
-											onclick={applyProfilePermChanges}
-											disabled={profilePermApplying}
-											class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-black disabled:opacity-40"
-										>
-											{#if profilePermApplying}
-												<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-											{/if}
-											Apply
-										</button>
-									</div>
-								{/if}
+						<!-- Summary -->
+						<div class="px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
+							<div class="text-sm text-gray-700">
+								<span class="font-semibold">{(selectedProfile.allowed_to ?? []).length + (selectedProfile.extra_permissions ?? []).length}</span> granted
+								<span class="text-gray-400 mx-1">&middot;</span>
+								<span class="text-gray-500">{(selectedProfile.allowed_to ?? []).length} built-in</span>
+								<span class="text-gray-400 mx-1">&middot;</span>
+								<span class="text-gray-500">{(selectedProfile.extra_permissions ?? []).length} extra</span>
 							</div>
-							{#if (selectedProfile.extra_permissions ?? []).length > 0}
-								<div class="flex flex-wrap gap-1 mb-2">
-									{#each selectedProfile.extra_permissions ?? [] as perm}
-										<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
-											{perm}
-											<button onclick={() => toggleProfilePerm(perm)} class="ml-0.5 opacity-60 hover:opacity-100" title="Revoke">&times;</button>
-										</span>
-									{/each}
+							{#if hasProfilePendingChanges}
+								<div class="flex items-center gap-2">
+									<span class="text-xs text-gray-500">
+										{#if profilePendingGrants.size > 0}<span class="text-green-600 font-medium">+{profilePendingGrants.size}</span>{/if}
+										{#if profilePendingGrants.size > 0 && profilePendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
+										{#if profilePendingRevokes.size > 0}<span class="text-red-600 font-medium">-{profilePendingRevokes.size}</span>{/if}
+									</span>
+									<button
+										onclick={discardProfilePermChanges}
+										class="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+									>Discard</button>
+									<button
+										onclick={applyProfilePermChanges}
+										disabled={profilePermApplying}
+										class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-gray-900 text-white font-medium hover:bg-black disabled:opacity-40"
+									>
+										{#if profilePermApplying}
+											<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+										{/if}
+										Apply
+										{#if selectedProfile.user_count != null}
+											<span class="text-gray-300 font-normal">· affects {selectedProfile.user_count} user{selectedProfile.user_count !== 1 ? 's' : ''}</span>
+										{/if}
+									</button>
 								</div>
-							{:else if profilePendingGrants.size === 0}
-								<p class="text-xs text-gray-400 italic mb-2">No extra permissions. Use the filter below to add some.</p>
 							{/if}
 						</div>
 
-						<!-- Permission catalog filter -->
-						<div class="px-5 py-3">
+						<!-- Filters -->
+						<div class="px-5 py-3 border-b border-gray-200 space-y-3">
 							<input
 								type="text"
 								bind:value={profilePermFilter}
-								placeholder="Search permissions to add or remove..."
-								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none mb-2"
+								placeholder="Filter by name, category, or description..."
+								aria-label="Filter profile permissions"
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 							/>
+							<div class="flex items-center gap-2 flex-wrap">
+								<span class="text-xs font-medium text-gray-500">Category:</span>
+								<button
+									onclick={() => (profileCategoryFilter = 'all')}
+									class="px-2.5 py-1 rounded-full text-xs font-medium transition-colors {profileCategoryFilter === 'all' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+								>All</button>
+								{#each profileOperationCategories as category (category)}
+									<button
+										onclick={() => (profileCategoryFilter = category)}
+										class="px-2.5 py-1 rounded-full text-xs font-medium transition-colors {profileCategoryFilter === category ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+									>{category}</button>
+								{/each}
+							</div>
+							<label class="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+								<input
+									type="checkbox"
+									bind:checked={profileGrantedOnly}
+									class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+								/>
+								Granted only
+							</label>
+						</div>
 
-							{#if profilePermFilter.trim()}
-								{@const q = profilePermFilter.trim().toLowerCase()}
-								{@const filtered = allOperations.filter(op =>
-									op.name.toLowerCase().includes(q) ||
-									op.category.toLowerCase().includes(q) ||
-									op.description.toLowerCase().includes(q)
-								)}
-								<div class="max-h-64 overflow-y-auto border border-gray-200 rounded-lg">
-									{#each filtered.slice(0, 30) as op}
+						<!-- Permission catalog -->
+						<div class="max-h-[480px] overflow-y-auto">
+							{#each Object.entries(filteredProfileOperations()) as [category, ops] (category)}
+								<div class="border-b border-gray-100 last:border-b-0">
+									<div class="px-5 py-2 bg-gray-50 sticky top-0 z-10 flex items-center justify-between">
+										<h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{category}</h4>
+										<span class="text-xs text-gray-400">{profileCategoryGrantedCount(category)} / {profileCategoryTotalCount(category)}</span>
+									</div>
+									{#each ops as op (op.name)}
 										{@const state = profilePermState(op.name)}
 										{@const checked = isProfilePermChecked(op.name)}
-										{@const isBuiltIn = (selectedProfile.allowed_to ?? []).includes(op.name)}
+										{@const isAll = op.name === 'all'}
 										<label
-											class="flex items-start gap-2 px-3 py-2 border-b border-gray-100 last:border-b-0 transition-colors
+											class="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-gray-50 cursor-pointer
 												{state === 'pending-grant' ? 'bg-green-50' : state === 'pending-revoke' ? 'bg-red-50' : ''}
-												{isBuiltIn ? 'opacity-50 cursor-default' : 'hover:bg-gray-50 cursor-pointer'}"
+												{isAll ? 'border-l-4 border-red-400 bg-red-50/30' : ''}"
 										>
 											<input
 												type="checkbox"
-												checked={checked || isBuiltIn}
-												disabled={isBuiltIn}
-												onchange={() => { if (!isBuiltIn) toggleProfilePerm(op.name); }}
-												class="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+												checked={checked}
+												onchange={() => toggleProfilePerm(op.name)}
+												class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 {isAll ? 'border-red-400' : ''}"
 											/>
 											<div class="flex-1 min-w-0">
-												<div class="flex items-center gap-2">
-													<code class="text-xs font-medium text-gray-800">{op.name}</code>
+												<div class="flex items-center gap-2 flex-wrap">
+													<code class="text-sm font-medium {isAll ? 'text-red-700' : 'text-gray-900'}">{op.name}</code>
+													{#if isAll}
+														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">DANGEROUS</span>
+													{/if}
 													{#if state === 'pending-grant'}
-														<span class="px-1 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700">WILL GRANT</span>
+														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700">WILL GRANT</span>
 													{:else if state === 'pending-revoke'}
-														<span class="px-1 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">WILL REVOKE</span>
-													{:else if isBuiltIn}
-														<span class="px-1 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-400">BUILT-IN</span>
+														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">WILL REVOKE</span>
+													{:else if state === 'built-in'}
+														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-600">BUILT-IN</span>
 													{:else if state === 'granted'}
-														<span class="px-1 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">EXTRA</span>
+														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-700">EXTRA</span>
 													{/if}
 												</div>
-												<p class="text-xs text-gray-400 mt-0.5">{op.description}</p>
+												<p class="text-xs text-gray-500 mt-0.5">{op.description}</p>
 											</div>
 										</label>
 									{/each}
-									{#if filtered.length === 0}
-										<div class="px-3 py-4 text-center text-xs text-gray-400">No matching permissions</div>
-									{/if}
-									{#if filtered.length > 30}
-										<div class="px-3 py-2 text-center text-xs text-gray-400">Showing first 30 of {filtered.length} results — refine your search</div>
-									{/if}
 								</div>
-							{/if}
+							{:else}
+								<div class="text-center py-8 text-sm text-gray-400">
+									{profilePermFilter || profileGrantedOnly || profileCategoryFilter !== 'all' ? 'No permissions match your filters' : 'Loading permissions...'}
+								</div>
+							{/each}
 						</div>
+
 					</div>
 				{:else}
 					<div class="flex items-center justify-center py-16 text-gray-400 text-sm">
