@@ -211,13 +211,16 @@ def remove_zone(args: str) -> str:
 def get_all_zones(args: str) -> str:
     """All territory zones, for map visualization and zoning admin.
 
-    The zoning map is realm-public, which the host encodes as the Zone
-    policy's ``scope="realm"`` rather than this file deciding it.
+    Territory zones (``land is None``) are realm-public via the Zone policy.
+    Parcel geometry lives on Land; land-linked Zone rows are hidden host-side
+    and skipped here as belt-and-suspenders.
     """
     try:
         rows = ctx.entities.rows("Zone")
         zones = []
         for row in rows:
+            if row.get("land") is not None or row.get("land_id") is not None:
+                continue
             zone = _serialize(row)
             if row.get("owner_id"):
                 zone["user_id"] = row["owner_id"]
