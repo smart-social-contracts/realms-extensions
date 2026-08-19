@@ -3,7 +3,7 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
+	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
 	interface RegistrationCode {
 		code_hash: string;
@@ -21,17 +21,27 @@
 		text: string;
 	}
 
+	interface ProfileDef {
+		name: string;
+		allowed_to: string[];
+	}
+
 	let toasts: Toast[] = $state([]);
 	let toastCounter = $state(0);
 
 	// Generate form
 	let profile = $state('member');
+	let profiles: ProfileDef[] = $state([]);
+	let profilesLoading = $state(false);
 	let maxUses = $state(1);
 	let expiresInHours = $state(24);
 	let generating = $state(false);
 	let generatedLink: string | null = $state(null);
 	let linkCopied = $state(false);
 	let qrSvg: string | null = $state(null);
+	const qrDataUrl = $derived(
+		qrSvg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg)}` : null
+	);
 
 	// Codes list
 	let codes: RegistrationCode[] = $state([]);
@@ -190,8 +200,40 @@
 		return date.toLocaleDateString();
 	}
 
+	function formatProfileLabel(name: string): string {
+		return name
+			.split('_')
+			.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+			.join(' ');
+	}
+
+	async function loadProfiles() {
+		profilesLoading = true;
+		try {
+			const res = await ctx.callSync('get_available_profiles');
+			if (res?.success) {
+				profiles = res.data?.profiles ?? [];
+				if (profiles.length > 0) {
+					const hasMember = profiles.some((p) => p.name === 'member');
+					if (!profiles.some((p) => p.name === profile)) {
+						profile = hasMember ? 'member' : profiles[0].name;
+					}
+				}
+			} else {
+				profiles = [];
+				addToast('Failed to load profiles', 'error');
+			}
+		} catch (e: any) {
+			profiles = [];
+			addToast(`Failed to load profiles: ${e?.message || String(e)}`, 'error');
+		} finally {
+			profilesLoading = false;
+		}
+	}
+
 	$effect(() => {
 		loadCodes();
+		loadProfiles();
 	});
 </script>
 
@@ -219,10 +261,12 @@
 				<select
 					id="inv-profile"
 					bind:value={profile}
-					class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+					disabled={profilesLoading || profiles.length === 0}
+					class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
 				>
-					<option value="member">Member</option>
-					<option value="admin">Administrator</option>
+					{#each profiles as p (p.name)}
+						<option value={p.name}>{formatProfileLabel(p.name)}</option>
+					{/each}
 				</select>
 			</div>
 
@@ -251,7 +295,7 @@
 
 		<button
 			onclick={generateInvitation}
-			disabled={generating}
+			disabled={generating || profilesLoading || profiles.length === 0}
 			class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>
 			{generating ? 'Generating…' : 'Generate Invitation'}
@@ -286,7 +330,9 @@
 				<div class="mt-4 pt-4 border-t border-blue-200">
 					<div class="flex items-start gap-4">
 						<div class="bg-white border border-gray-200 rounded-lg p-2 shrink-0" style="width: 200px; height: 200px;">
-							{@html qrSvg}
+							{#if qrDataUrl}
+								<img src={qrDataUrl} alt="Invitation QR code" class="w-full h-full" />
+							{/if}
 						</div>
 						<div class="flex flex-col gap-2">
 							<span class="text-sm font-medium text-blue-800">QR Code</span>
@@ -349,7 +395,7 @@
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-200">
-						{#each codes as code}
+						{#each codes as code (code.code_hash)}
 							{@const status = getStatus(code)}
 							<tr class="hover:bg-gray-50 transition-colors">
 								<td class="px-4 py-3">
@@ -361,11 +407,8 @@
 									</span>
 								</td>
 								<td class="px-4 py-3">
-									<span class={cn(
-										'px-2 py-0.5 rounded-full text-xs font-medium',
-										code.profile === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-									)}>
-										{code.profile === 'admin' ? 'Admin' : 'Member'}
+									<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+										{formatProfileLabel(code.profile)}
 									</span>
 								</td>
 								<td class="px-4 py-3 text-gray-700">
