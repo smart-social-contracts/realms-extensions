@@ -1,9 +1,22 @@
 {
   "name": "metrics",
-  "version": "1.1.2",
+  "version": "1.1.6",
   "description": "View your realm's finances — balance sheet, income and cash flow statements, budget tracking, charts, and downloadable accounting records.",
   "author": "Smart Social Contracts",
+  "ggg_api_version": 1,
+  "functions": [
+    "issue_draft"
+  ],
+  "capabilities": [
+    "treasury.issue_draft"
+  ],
   "permissions": [],
+  "entry_access": {
+    "default": "realm.data_view",
+    "functions": {
+      "issue_draft": "realm.data_view"
+    }
+  },
   "profiles": [
     "member",
     "admin"
