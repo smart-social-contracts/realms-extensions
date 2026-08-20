@@ -451,6 +451,16 @@ def _http_download(url: str, max_bytes: int = 2_000_000, cycles: int = 30_000_00
 
 def _schedule_execution(proposal_id: str):
     """Schedule async proposal execution via a one-shot timer."""
+    proposal = _find_proposal(proposal_id)
+    if proposal:
+        metadata = _load_metadata(proposal)
+        if metadata.get("defer_execution"):
+            logger.info(
+                f"Skipping execution timer for proposal {proposal_id} "
+                f"(defer_execution — federal driver will execute)"
+            )
+            return
+
     def _exec_callback():
         return _do_execute_proposal(proposal_id)
     ic.set_timer(0, _exec_callback)
@@ -643,6 +653,13 @@ def _do_execute_proposal(proposal_id: str):
         return
 
     metadata = _load_metadata(proposal)
+    if metadata.get("defer_execution"):
+        logger.info(
+            f"Skipping execution for proposal {proposal_id} "
+            f"(defer_execution — federal driver will execute)"
+        )
+        return
+
     code_inline = metadata.get("code_inline")
     codices_list = metadata.get("codices")
     permissions = normalize_proposal_permissions(

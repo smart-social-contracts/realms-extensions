@@ -260,7 +260,11 @@ def _serialize_position(pos) -> dict:
         for a in pos.active_appointments():
             u = a.user
             if u is not None:
-                holders.append({"principal": u.id, "nickname": u.nickname or ""})
+                holders.append({
+                    "principal": u.id,
+                    "nickname": u.nickname or "",
+                    "kind": getattr(a, "kind", "") or "substantive",
+                })
     except Exception:
         pass
 

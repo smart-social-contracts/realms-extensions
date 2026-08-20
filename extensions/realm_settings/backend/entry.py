@@ -294,6 +294,12 @@ def set_realm_stage(args: dict):
 
         if new_stage == "beta":
             lifecycle["deposits_locked"] = True
+            try:
+                from core.org_policy import apply_target_policies
+
+                apply_target_policies()
+            except Exception as e:
+                logger.warning(f"apply_target_policies failed: {e}")
 
         # Legacy: bespoke stage approvals were replaced by the generic
         # governed-action proposal flow (issue #262).

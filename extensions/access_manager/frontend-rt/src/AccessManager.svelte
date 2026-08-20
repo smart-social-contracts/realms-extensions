@@ -126,14 +126,6 @@
 			message.includes('Specified sender delegation has expired')
 			? 'Your session expired. Please refresh the page to continue.'
 			: message;
-		if (type === 'error' && typeof ctx.openModal === 'function') {
-			void ctx.openModal({
-				title: 'Something went wrong',
-				body: friendly,
-				actions: [{ id: 'close', label: 'Close', tone: 'secondary' }],
-			}).catch(() => {});
-			return;
-		}
 		if (typeof ctx.notify === 'function') {
 			ctx.notify(type === 'error' ? 'error' : 'success', friendly);
 			return;
@@ -317,7 +309,7 @@
 	let assignPrincipal = $state('');
 	let posDraft: { title: string; headcount: string; salary: string } = $state({ title: '', headcount: '1', salary: '0' });
 
-	function proposalCreatedToast(res: any) {
+	function proposalCreatedNotice(res: any) {
 		const org = res.data?.org_scope || res.data?.voters_org || res.data?.governed_by || 'the governing org';
 		notify(`Proposal ${res.data.proposal_id} created — members of ${org} must vote (see Voting)`);
 	}
@@ -328,7 +320,7 @@
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
-			proposalCreatedToast(res);
+			proposalCreatedNotice(res);
 		} else {
 			notify(successMsg);
 		}
@@ -341,7 +333,7 @@
 			return false;
 		}
 		if (res.data?.applied === 'proposal') {
-			proposalCreatedToast(res);
+			proposalCreatedNotice(res);
 		} else {
 			notify(successMsg);
 		}
@@ -971,7 +963,7 @@
 					return;
 				}
 				if (res.data?.applied === 'proposal') {
-					proposalCreatedToast(res);
+					proposalCreatedNotice(res);
 				} else if ((res.data?.scheduled ?? 0) === 0) {
 					notify(res.data?.message || 'All salaries for this period are already settled');
 				} else {
@@ -996,7 +988,7 @@
 					return;
 				}
 				if (res.data?.applied === 'proposal') {
-					proposalCreatedToast(res);
+					proposalCreatedNotice(res);
 				} else if (enabled) {
 					notify(`Automatic payroll enabled — runs monthly on day ${res.data?.payday ?? payday}`);
 				} else {
@@ -1372,6 +1364,9 @@
 														{#each pos.holders as h (h.principal)}
 															<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-gray-100 border border-gray-200 rounded-full text-gray-600" title={h.principal}>
 																{@render identityLabel(h)}
+																{#if h.kind === 'acting'}
+																	<span class="text-[10px] text-gray-400">acting</span>
+																{/if}
 																<button onclick={() => endAppointment(pos, h.principal)} class="text-gray-400 hover:text-red-600" title="End appointment">&times;</button>
 															</span>
 														{/each}
