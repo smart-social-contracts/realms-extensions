@@ -244,6 +244,13 @@ def refresh(args: str):
                 )
 
         total_new = sum(r.get("new_txs", 0) for r in results.values())
+        try:
+            from core.treasury_allocation import recognize_unmatched_deposits
+
+            recognize_unmatched_deposits()
+        except Exception as e:
+            logger.warning(f"Vault refresh: deposit recognition skipped: {e}")
+
         return _ok(
             {
                 "TransactionSummary": {
