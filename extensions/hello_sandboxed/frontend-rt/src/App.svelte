@@ -205,7 +205,7 @@
 					disabled={!bridgeReady || !!actionBusy}
 					onclick={() => ctx?.notify('success', 'Hello from the sandboxed extension!')}
 				>
-					Notify (success toast)
+					Notify (success)
 				</Button>
 
 				<Button

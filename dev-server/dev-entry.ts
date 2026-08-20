@@ -14,6 +14,70 @@ declare const __EXT_ID__: string;
 declare const __BACKEND_CANISTER_ID__: string;
 declare const __FILE_REGISTRY_CANISTER_ID__: string;
 
+type ModalAction = { id: string; label: string; tone?: string };
+type ModalPayload = { title: string; body: string; actions: ModalAction[] };
+
+const modalBackdrop = document.getElementById('modal-backdrop')!;
+const modalTitle = document.getElementById('modal-title')!;
+const modalBody = document.getElementById('modal-body')!;
+const modalActions = document.getElementById('modal-actions')!;
+
+type QueuedModal = {
+	payload: ModalPayload;
+	resolve: (result: { actionId: string }) => void;
+};
+
+const modalQueue: QueuedModal[] = [];
+let modalOpen = false;
+
+function actionButtonClass(tone?: string): string {
+	if (tone === 'danger') {
+		return 'rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700';
+	}
+	if (tone === 'secondary') {
+		return 'rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50';
+	}
+	return 'rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700';
+}
+
+function drainModalQueue() {
+	if (modalOpen || modalQueue.length === 0) return;
+	const { payload, resolve } = modalQueue.shift()!;
+	modalOpen = true;
+	modalTitle.textContent = payload.title;
+	modalBody.textContent = payload.body;
+	modalActions.innerHTML = '';
+	for (const action of payload.actions) {
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.textContent = action.label;
+		btn.className = actionButtonClass(action.tone);
+		btn.addEventListener('click', () => {
+			modalBackdrop.classList.add('hidden');
+			modalBackdrop.classList.remove('flex');
+			modalOpen = false;
+			resolve({ actionId: action.id });
+			drainModalQueue();
+		});
+		modalActions.appendChild(btn);
+	}
+	modalBackdrop.classList.remove('hidden');
+	modalBackdrop.classList.add('flex');
+}
+
+function enqueueModal(payload: ModalPayload): Promise<{ actionId: string }> {
+	return new Promise((resolve) => {
+		modalQueue.push({ payload, resolve });
+		drainModalQueue();
+	});
+}
+
+function notifyTitle(level: 'info' | 'success' | 'error'): string {
+	if (level === 'error') return 'Something went wrong';
+	if (level === 'info') return 'Notice';
+	return 'Done';
+}
+
 function readableOf<T>(value: T) {
 	const subs = new Set<(v: T) => void>();
 	return {
@@ -86,6 +150,18 @@ async function main() {
 
 		navigate: async (path: string) => {
 			console.log('[dev] navigate:', path);
+		},
+
+		notify(level: 'info' | 'success' | 'error', message: string) {
+			void enqueueModal({
+				title: notifyTitle(level),
+				body: message,
+				actions: [{ id: 'close', label: 'Close', tone: level === 'error' ? 'secondary' : 'primary' }],
+			});
+		},
+
+		openModal(payload: ModalPayload) {
+			return enqueueModal(payload);
 		},
 
 		t: readableOf((key: string) => key),

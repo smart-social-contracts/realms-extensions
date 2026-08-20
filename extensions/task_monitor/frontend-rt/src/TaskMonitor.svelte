@@ -25,12 +25,6 @@
 		updated_at: number | null;
 	}
 
-	interface Toast {
-		id: number;
-		message: string;
-		type: 'success' | 'error' | 'info';
-	}
-
 	let tasks: Task[] = $state([]);
 	let loading = $state(true);
 	let error = $state('');
@@ -38,9 +32,6 @@
 	let searchTerm = $state('');
 	let statusFilter = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = $state(null);
-
-	let toasts: Toast[] = $state([]);
-	let toastCounter = $state(0);
 
 	let runningTasks: Record<string, boolean> = $state({});
 	let deletingTasks: Record<string, boolean> = $state({});
@@ -86,11 +77,12 @@
 	);
 
 	function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, message, type }];
-		setTimeout(() => {
-			toasts = toasts.filter((t) => t.id !== id);
-		}, 4000);
+		const level = type === 'error' ? 'error' : type === 'info' ? 'info' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, message);
+			return;
+		}
+		console.warn('[extension]', level, message);
 	}
 
 	async function callSync(fn: string, args: Record<string, unknown> = {}) {
@@ -359,29 +351,6 @@
 		return () => clearInterval(interval);
 	});
 </script>
-
-<!-- Toast Notifications -->
-{#if toasts.length > 0}
-	<div class="fixed top-4 right-4 z-50 flex flex-col gap-2" style="min-width:300px">
-		{#each toasts as toast (toast.id)}
-			<div
-				class="px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2
-					{toast.type === 'success' ? 'bg-green-600 text-white' : ''}
-					{toast.type === 'error' ? 'bg-red-600 text-white' : ''}
-					{toast.type === 'info' ? 'bg-blue-600 text-white' : ''}"
-			>
-				{#if toast.type === 'success'}
-					<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-				{:else if toast.type === 'error'}
-					<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-				{:else}
-					<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-				{/if}
-				{toast.message}
-			</div>
-		{/each}
-	</div>
-{/if}
 
 <div class="p-6 max-w-7xl mx-auto">
 	<!-- Code Modal -->

@@ -24,10 +24,15 @@
 		citizenFormat?: boolean;
 	}
 
-	interface Toast {
-		id: number;
-		type: 'success' | 'error';
-		text: string;
+	let activeTab: TabId = $state('import');
+
+	function addToast(text: string, type: 'success' | 'error' = 'success') {
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, text);
+			return;
+		}
+		console.warn('[extension]', level, text);
 	}
 
 	const entityIcons: Record<string, string> = {
@@ -40,10 +45,6 @@
 
 	const citizenImportPlaceholder =
 		'[{"id":"cit-001","name":"Alice","email":"a@example.com","quarter":"Q1"}]';
-
-	let activeTab: TabId = $state('import');
-	let toasts: Toast[] = $state([]);
-	let toastCounter = 0;
 
 	let entityTypes: string[] = $state([]);
 	let selectedType = $state('');
@@ -83,12 +84,6 @@
 	let pendingTotal = $state(0);
 	let pendingLoading = $state(false);
 	let showPending = $state(false);
-
-	function addToast(text: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text, type }];
-		setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); }, 4000);
-	}
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
 		return await ctx.callSync(fn, args);
@@ -389,16 +384,6 @@
 
 	$effect(() => { loadMeta(); });
 </script>
-
-{#if toasts.length > 0}
-	<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
-		{#each toasts as toast (toast.id)}
-			<div class={cn('px-4 py-3 rounded-lg shadow-lg text-sm font-medium', toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white')}>
-				{toast.text}
-			</div>
-		{/each}
-	</div>
-{/if}
 
 <div class="max-w-5xl mx-auto p-4 sm:p-6">
 	<h1 class="text-2xl font-bold text-gray-900 mb-1">Import & Export</h1>

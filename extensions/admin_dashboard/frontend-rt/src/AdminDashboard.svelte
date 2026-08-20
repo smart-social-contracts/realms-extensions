@@ -11,12 +11,6 @@
 		className: string;
 	}
 
-	interface Toast {
-		id: number;
-		type: 'success' | 'error';
-		text: string;
-	}
-
 	const entityIcons: Record<string, string> = {
 		Balance: '💵', Call: '📞', Codex: '📚', Contract: '📝', Dispute: '⚖️',
 		Human: '🧑', Identity: '🆔', Instrument: '💰', Invoice: '🧾', Land: '🏞️',
@@ -33,10 +27,15 @@
 	let loading = $state(true);
 	let error = $state('');
 	let accessDeniedOp = $state('');
-	let toasts: Toast[] = $state([]);
-	let toastCounter = $state(0);
 
-	// Browse
+	function addToast(message: string, type: 'success' | 'error' = 'success') {
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, message);
+			return;
+		}
+		console.warn('[extension]', level, message);
+	}
 	let items: any[] = $state([]);
 	let objLoading = $state(false);
 	let expandedItem: number | null = $state(null);
@@ -48,14 +47,6 @@
 	// Delete
 	let deletingId: string | null = $state(null);
 	let confirmDeleteItem: any | null = $state(null);
-
-	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text: message, type }];
-		setTimeout(() => {
-			toasts = toasts.filter(t => t.id !== id);
-		}, 4000);
-	}
 
 	function getIcon(className: string): string {
 		return entityIcons[className] || '📊';
@@ -201,20 +192,6 @@
 		loadEntityTypes();
 	});
 </script>
-
-<!-- Toast notifications -->
-{#if toasts.length > 0}
-	<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
-		{#each toasts as toast (toast.id)}
-			<div class={cn(
-				'px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all',
-				toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'
-			)}>
-				{toast.text}
-			</div>
-		{/each}
-	</div>
-{/if}
 
 <!-- Delete confirmation modal -->
 {#if confirmDeleteItem}

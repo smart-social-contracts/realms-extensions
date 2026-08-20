@@ -21,7 +21,7 @@ For extensions with `manifest.json` `"runtime": "sandboxed"` and a `frontend/` V
 node bin/dev.js hello_sandboxed
 ```
 
-- **Port 5555** — mock realm host page with bridge server, toast area, confirm modal, and bridge log
+- **Port 5555** — mock realm host page with bridge server, confirm modal, and bridge log
 - **Port 5556** — extension Vite dev server, loaded in a sandboxed iframe (`sandbox="allow-scripts"`)
 
 The mock host enforces manifest `capabilities` and `entry_access.functions`, returns mock results for declared functions (e.g. `greet`), and logs all bridge traffic.

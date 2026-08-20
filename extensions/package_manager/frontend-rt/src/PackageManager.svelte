@@ -46,12 +46,6 @@
 		registryCanisterId: string;
 	}
 
-	interface Toast {
-		id: number;
-		type: 'success' | 'error' | 'info';
-		text: string;
-	}
-
 	const PROTECTED_IDS = new Set([
 		'package_manager',
 		'member_dashboard',
@@ -190,8 +184,6 @@
 	let registryErrors = $state<string[]>([]);
 
 	let busy = $state<Record<string, string>>({});
-	let toasts = $state<Toast[]>([]);
-	let toastCounter = 0;
 
 	let uploadKind = $state<Kind>('extension');
 	let uploadId = $state('');
@@ -243,12 +235,13 @@
 		busy = next;
 	}
 
-	function pushToast(type: Toast['type'], text: string) {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, type, text }];
-		setTimeout(() => {
-			toasts = toasts.filter((t) => t.id !== id);
-		}, 5000);
+	function pushToast(type: 'success' | 'error' | 'info', text: string) {
+		const level = type === 'error' ? 'error' : type === 'info' ? 'info' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, text);
+			return;
+		}
+		console.warn('[extension]', level, text);
 	}
 
 	function fmtSize(bytes: number): string {
@@ -685,25 +678,6 @@
 </script>
 
 <div class={cn('max-w-7xl mx-auto p-4 md:p-6')}>
-	{#if toasts.length > 0}
-		<div class={cn('fixed top-5 right-5 z-50 flex flex-col gap-2 w-80')}>
-			{#each toasts as toast (toast.id)}
-				<div
-					class={cn(
-						'px-4 py-3 rounded-lg text-sm text-white shadow-lg',
-						toast.type === 'success'
-							? 'bg-green-700'
-							: toast.type === 'error'
-								? 'bg-red-700'
-								: 'bg-blue-700',
-					)}
-				>
-					{toast.text}
-				</div>
-			{/each}
-		</div>
-	{/if}
-
 	{#if !authState}
 		<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center max-w-lg mx-auto mt-8')}>
 			<h1 class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2')}>Package Manager</h1>

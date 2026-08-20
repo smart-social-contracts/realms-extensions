@@ -9,15 +9,6 @@
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
-	interface Toast {
-		id: number;
-		type: 'success' | 'error';
-		text: string;
-	}
-
-	let toasts: Toast[] = $state([]);
-	let toastCounter = $state(0);
-
 	let settingsLoading = $state(true);
 	let settingsSaving = $state(false);
 	let settingsMessage = $state('');
@@ -121,11 +112,12 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 	let proposalModalOperation = $state('');
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text: message, type }];
-		setTimeout(() => {
-			toasts = toasts.filter(t => t.id !== id);
-		}, 4000);
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, message);
+			return;
+		}
+		console.warn('[extension]', level, message);
 	}
 
 	function buildTokenWalletProposalLines(): string[] {
@@ -550,19 +542,6 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
 	</div>
 {/snippet}
-
-{#if toasts.length > 0}
-	<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
-		{#each toasts as toast (toast.id)}
-			<div class={cn(
-				'px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all',
-				toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'
-			)}>
-				{toast.text}
-			</div>
-		{/each}
-	</div>
-{/if}
 
 <div class="w-full px-4 max-w-none">
 	<div class="flex justify-between items-center mb-4">

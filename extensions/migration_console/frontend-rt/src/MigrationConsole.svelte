@@ -5,20 +5,19 @@
 
 	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
-	interface Toast { id: number; type: 'success' | 'error'; text: string; }
-
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let data: any = $state(null);
-	let toasts: Toast[] = $state([]);
-	let toastCounter = 0;
 	let expandedOrg: string | null = $state(null);
 	let regenerating: string | null = $state(null);
 
 	function addToast(text: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text, type }];
-		setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); }, 4000);
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, text);
+			return;
+		}
+		console.warn('[extension]', level, text);
 	}
 
 	async function load() {
@@ -207,22 +206,6 @@
 		<h1 class="text-2xl font-bold text-gray-900">Migration Console</h1>
 		<p class="text-sm text-gray-500 mt-1">{extensionDescription}</p>
 	</div>
-
-	<!-- Toasts -->
-	{#if toasts.length > 0}
-		<div class="fixed top-4 right-4 z-50 space-y-2">
-			{#each toasts as toast (toast.id)}
-				<div class={cn(
-					'px-4 py-2 rounded-lg shadow-lg text-sm font-medium transition-all',
-					toast.type === 'success'
-						? 'bg-green-50 text-green-800 border border-green-200'
-						: 'bg-red-50 text-red-800 border border-red-200'
-				)}>
-					{toast.text}
-				</div>
-			{/each}
-		</div>
-	{/if}
 
 	{#if loading}
 		<div class="flex justify-center py-12">

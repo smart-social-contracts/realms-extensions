@@ -3,22 +3,20 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	interface Toast { id: number; type: 'success' | 'error'; text: string; }
-
-	let toasts: Toast[] = $state([]);
-	let toastCounter = $state(0);
+	function addToast(message: string, type: 'success' | 'error' = 'success') {
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, message);
+			return;
+		}
+		console.warn('[extension]', level, message);
+	}
 
 	let extensions: any[] = $state([]);
 	let extLoading = $state(false);
 	let expandedExt: string | null = $state(null);
 	let grantTarget = $state('');
 	let grantType: 'user' | 'department' | 'profile' = $state('user');
-
-	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text: message, type }];
-		setTimeout(() => { toasts = toasts.filter(t => t.id !== id); }, 4000);
-	}
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
 		const raw = await ctx.callSync(fn, args);
@@ -82,17 +80,6 @@
 		loadExtensions();
 	});
 </script>
-
-<!-- Toasts -->
-{#if toasts.length > 0}
-	<div class="fixed top-4 right-4 z-50 space-y-2">
-		{#each toasts as toast (toast.id)}
-			<div class="px-4 py-2 rounded-lg shadow-lg text-sm font-medium transition-all {toast.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}">
-				{toast.text}
-			</div>
-		{/each}
-	</div>
-{/if}
 
 <div class="space-y-4">
 	<div class="flex items-center justify-between">

@@ -15,16 +15,6 @@
 		created_at?: string;
 	}
 
-	interface Toast {
-		id: number;
-		type: 'success' | 'error';
-		text: string;
-	}
-
-	let toasts: Toast[] = $state([]);
-	let toastCounter = $state(0);
-
-	// Generate form
 	let profile = $state('member');
 	let maxUses = $state(1);
 	let expiresInHours = $state(24);
@@ -40,11 +30,12 @@
 	let revokingHash: string | null = $state(null);
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text: message, type }];
-		setTimeout(() => {
-			toasts = toasts.filter(t => t.id !== id);
-		}, 4000);
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, message);
+			return;
+		}
+		console.warn('[extension]', level, message);
 	}
 
 	function generateRandomCode(length: number): string {
@@ -202,19 +193,6 @@
 		loadCodes();
 	});
 </script>
-
-{#if toasts.length > 0}
-	<div class="fixed top-4 right-4 z-50 flex flex-col gap-2">
-		{#each toasts as toast (toast.id)}
-			<div class={cn(
-				'px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all',
-				toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'
-			)}>
-				{toast.text}
-			</div>
-		{/each}
-	</div>
-{/if}
 
 <div class="space-y-6">
 	<!-- Generate New Invitation -->

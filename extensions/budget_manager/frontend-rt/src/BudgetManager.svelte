@@ -9,21 +9,13 @@
 		ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')),
 	);
 
-	interface Toast {
-		id: number;
-		type: 'success' | 'error';
-		text: string;
-	}
-
-	let toasts: Toast[] = $state([]);
-	let toastCounter = 0;
-
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const id = ++toastCounter;
-		toasts = [...toasts, { id, text: message, type }];
-		setTimeout(() => {
-			toasts = toasts.filter((t) => t.id !== id);
-		}, 4000);
+		const level = type === 'error' ? 'error' : 'success';
+		if (typeof ctx.notify === 'function') {
+			ctx.notify(level, message);
+			return;
+		}
+		console.warn('[extension]', level, message);
 	}
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
@@ -751,18 +743,4 @@
 			</div>
 		</div>
 	{/if}
-
-	<!-- Toasts -->
-	<div class="fixed bottom-4 right-4 z-50 space-y-2">
-		{#each toasts as toast (toast.id)}
-			<div
-				class={cn(
-					'px-4 py-2.5 rounded-lg shadow-lg text-sm text-white',
-					toast.type === 'success' ? 'bg-gray-900' : 'bg-red-600',
-				)}
-			>
-				{toast.text}
-			</div>
-		{/each}
-	</div>
 </div>
