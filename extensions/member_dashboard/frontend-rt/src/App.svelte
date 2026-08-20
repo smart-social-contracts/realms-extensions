@@ -49,6 +49,7 @@
 		$state(null);
 	let invoiceLoading = $state(true);
 	let invoiceError = $state('');
+	let refreshingInvoiceId = $state<string | null>(null);
 
 	let paymentAccounts: Record<string, unknown>[] = $state([]);
 	let accountsLoading = $state(true);
@@ -90,6 +91,15 @@
 	async function callExt<T>(fn: string, args: Record<string, unknown> = {}): Promise<ExtEnvelope<T>> {
 		if (!ctx) return { success: false, error: 'Bridge not ready' };
 		const raw = await ctx.callExtension<ExtEnvelope<T> | T>(fn, args);
+		if (raw && typeof raw === 'object' && 'success' in raw) {
+			return raw as ExtEnvelope<T>;
+		}
+		return { success: true, data: raw as T };
+	}
+
+	async function callExtAsync<T>(fn: string, args: Record<string, unknown> = {}): Promise<ExtEnvelope<T>> {
+		if (!ctx) return { success: false, error: 'Bridge not ready' };
+		const raw = await ctx.callExtensionAsync<ExtEnvelope<T> | T>(fn, args);
 		if (raw && typeof raw === 'object' && 'success' in raw) {
 			return raw as ExtEnvelope<T>;
 		}
@@ -249,13 +259,35 @@
 	}
 
 	async function refreshInvoice(record: Record<string, unknown>) {
+		if (!ctx) return;
+		const invoiceId = String(record.id);
+		refreshingInvoiceId = invoiceId;
 		try {
-			const result = await callExt<Record<string, unknown>>('check_invoice_payment', {
+			const result = await callExtAsync<Record<string, unknown>>('check_invoice_payment', {
 				invoice_id: record.id,
 			});
-			if (result.success) await loadInvoices();
-		} catch {
-			/* async ledger check may fail via sync bridge */
+			if (result.success) {
+				await loadInvoices();
+				const data = result.data ?? {};
+				if (data.already_paid || data.paid) {
+					ctx.notify('success', 'Invoice marked as paid');
+				} else {
+					const scanned = data.scanned_transactions;
+					ctx.notify(
+						'info',
+						scanned == null
+							? 'Payment not found yet. Wait a moment and try again.'
+							: `Payment not found in the last ${scanned} treasury transfers.`,
+					);
+				}
+			} else {
+				ctx.notify('error', result.error || 'Failed to check payment');
+			}
+		} catch (e) {
+			ctx.notify('error', bridgeErrorFields(e).message);
+		} finally {
+			refreshingInvoiceId = null;
+			queueMicrotask(reportHeight);
 		}
 	}
 
@@ -639,8 +671,13 @@
 															<Button tone="primary" size="sm" onclick={() => openPaymentModal(record)}>
 																💳 Pay
 															</Button>
-															<Button tone="secondary" size="sm" onclick={() => refreshInvoice(record)}>
-																↻ Refresh
+															<Button
+																tone="secondary"
+																size="sm"
+																disabled={refreshingInvoiceId === String(record.id)}
+																onclick={() => void refreshInvoice(record)}
+															>
+																{refreshingInvoiceId === String(record.id) ? 'Refreshing…' : '↻ Refresh'}
 															</Button>
 															<Button tone="secondary" size="sm" onclick={() => demoMarkAsPaid(record)}>
 																Demo Pay

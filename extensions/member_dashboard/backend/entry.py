@@ -345,19 +345,34 @@ def get_invoice_deposit_address(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def _match_wallet_transfer(invoice):
+    """Find a cached incoming transfer for this invoice's exact nonce amount."""
+    from ic_basilisk_toolkit.entities import WalletTransfer
+
+    token = invoice._find_token()
+    if not token:
+        return None, 0
+    expected = invoice.get_nonce_amount_raw(invoice._get_token_decimals())
+    me = ic.id().to_str()
+    scanned = 0
+    for wt in WalletTransfer.instances():
+        scanned += 1
+        try:
+            if wt.token is None or wt.token.name != token.name:
+                continue
+        except Exception:
+            continue
+        if wt.kind not in ("transfer", "mint"):
+            continue
+        if wt.principal_to and wt.principal_to != me:
+            continue
+        if int(wt.amount or 0) == expected:
+            return wt, scanned
+    return None, scanned
+
+
 def check_invoice_payment(args: str) -> Async[str]:
-    """
-    Check if an invoice has been paid by querying its subaccount balance.
-    If sufficient funds are found, marks the invoice as Paid.
-
-    Queries the realm treasury token's ledger via the invoice's registered Token.
-
-    Args:
-        args: JSON string with {"invoice_id": "..."}
-
-    Returns:
-        JSON string with payment status and balance info
-    """
+    """Pull new treasury transfers, then mark the invoice paid if the nonce matches."""
     try:
         logger.info(f"check_invoice_payment called with args: {args}")
         params = json.loads(args) if args else {}
@@ -366,7 +381,6 @@ def check_invoice_payment(args: str) -> Async[str]:
         if not invoice_id:
             return json.dumps({"success": False, "error": "invoice_id is required"})
 
-        # Find the invoice
         invoice = Invoice[invoice_id]
         if not invoice:
             return json.dumps({"success": False, "error": "Invoice not found"})
@@ -377,88 +391,84 @@ def check_invoice_payment(args: str) -> Async[str]:
                     "success": True,
                     "data": {
                         "already_paid": True,
+                        "paid": True,
                         "invoice_id": invoice_id,
                         "paid_at": getattr(invoice, "paid_at", None),
                     },
                 }
             )
 
-        invoice_currency = (invoice.currency or "").strip()
-        if not invoice_currency:
-            return json.dumps(
-                {
-                    "success": False,
-                    "error_code": "no_treasury_token",
-                    "error": (
-                        "No treasury currency — set the treasury ledger canister "
-                        "in Realm Settings so the token symbol can be resolved"
-                    ),
-                }
-            )
-
-        from ggg import Token
-
-        token = Token[invoice_currency]
+        token = invoice._find_token()
         if not token:
             return json.dumps(
                 {
                     "success": False,
-                    "error": f"No registered Token for '{invoice_currency}'",
+                    "error": (
+                        f"No registered Token with an indexer for "
+                        f"'{invoice.currency or ''}'"
+                    ),
                 }
             )
 
         from ic_basilisk_toolkit.wallet import Wallet
 
-        wallet = Wallet()
-        subaccount = invoice.get_subaccount()
-        balance = yield wallet.balance_of(token.name, subaccount=subaccount)
+        sync = {}
+        try:
+            sync = yield from Wallet().refresh(token.name)
+        except Exception as e:
+            logger.warning(f"check_invoice_payment: wallet.refresh failed: {e}")
+            sync = {"error": str(e)}
 
-        decimals = (
-            int(token.decimals) if token.decimals else invoice._get_token_decimals()
-        )
-        amount_raw = invoice.get_amount_raw(decimals)
-
-        logger.info(
-            f"Invoice {invoice_id}: balance={balance}, required={amount_raw}"
-        )
-
-        if balance >= amount_raw:
-            human_balance = balance / (10 ** decimals)
+        matched, scanned = _match_wallet_transfer(invoice)
+        if matched:
+            decimals = invoice._get_token_decimals()
+            amount = int(matched.amount or 0)
             invoice.mark_paid(
-                payment_currency=invoice_currency,
-                payment_amount=human_balance,
-                payment_amount_raw=balance,
+                payment_currency=invoice.currency,
+                payment_amount=amount / (10 ** decimals),
+                payment_amount_raw=amount,
             )
-
-            logger.info(f"Invoice {invoice_id} marked as Paid")
-
             return json.dumps(
                 {
                     "success": True,
                     "data": {
                         "paid": True,
+                        "already_paid": False,
                         "invoice_id": invoice_id,
-                        "balance_raw": balance,
-                        "amount_required_raw": amount_raw,
-                        "currency": invoice_currency,
-                        "paid_at": invoice.paid_at,
+                        "paid_at": getattr(invoice, "paid_at", None),
+                        "scanned_transactions": scanned,
+                        "new_txs": (sync or {}).get("new_txs"),
                     },
                 }
             )
+
+        refresh_gen = invoice.refresh()
+        if hasattr(refresh_gen, "__next__"):
+            result = yield from refresh_gen
         else:
-            return json.dumps(
-                {
-                    "success": True,
-                    "data": {
-                        "paid": False,
-                        "invoice_id": invoice_id,
-                        "balance_raw": balance,
-                        "amount_required_raw": amount_raw,
-                        "currency": invoice_currency,
-                        "shortfall_raw": amount_raw - balance,
-                    },
-                }
-            )
+            result = refresh_gen
+        if not isinstance(result, dict):
+            return json.dumps({"success": False, "error": str(result)})
+        if result.get("error"):
+            return json.dumps({"success": False, "error": result["error"]})
+
+        paid = result.get("status") == "Paid" or invoice.status == "Paid"
+        return json.dumps(
+            {
+                "success": True,
+                "data": {
+                    "paid": paid,
+                    "already_paid": False,
+                    "invoice_id": invoice_id,
+                    "status": result.get("status") or invoice.status,
+                    "currency": result.get("currency") or invoice.currency,
+                    "payment_method": result.get("payment_method"),
+                    "scanned_transactions": result.get("scanned_transactions", scanned),
+                    "new_txs": (sync or {}).get("new_txs"),
+                    "paid_at": getattr(invoice, "paid_at", None),
+                },
+            }
+        )
 
     except Exception as e:
         logger.error(
