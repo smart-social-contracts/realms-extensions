@@ -847,7 +847,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 							type="text"
 							bind:value={realmSettingsTokenCanisterId}
 							onblur={resolveTokenLedger}
-							placeholder="e.g. 2rqin-xaaaa-aaaah-qunsq-cai"
+							placeholder="e.g. cj65k-laaaa-aaaac-bfxqq-cai"
 							class={cn(
 								'flex-1 px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
 								realmSettingsTokenCanisterId && !tokenCanisterIdValid
