@@ -1,0 +1,10 @@
+{
+  "invoice_paid_title": "Tutto a posto",
+  "notice_close": "Chiudi",
+  "invoice_unnamed": "fattura",
+  "invoice_paid_on": " il {date}",
+  "invoice_paid": "La tua fattura \"{description}\" di {amount} è stata pagata{when}.",
+  "invoice_paid_no_amount": "La tua fattura \"{description}\" è stata pagata{when}.",
+  "invoice_already_paid": "La tua fattura \"{description}\" di {amount} era già pagata{when}.",
+  "invoice_already_paid_no_amount": "La tua fattura \"{description}\" era già pagata{when}."
+}

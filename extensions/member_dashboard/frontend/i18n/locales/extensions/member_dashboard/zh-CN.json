@@ -1,0 +1,10 @@
+{
+  "invoice_paid_title": "没问题",
+  "notice_close": "关闭",
+  "invoice_unnamed": "发票",
+  "invoice_paid_on": "于 {date}",
+  "invoice_paid": "您的发票“{description}”（金额 {amount}）已支付{when}。",
+  "invoice_paid_no_amount": "您的发票“{description}”已支付{when}。",
+  "invoice_already_paid": "您的发票“{description}”（金额 {amount}）此前已支付{when}。",
+  "invoice_already_paid_no_amount": "您的发票“{description}”此前已支付{when}。"
+}

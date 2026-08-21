@@ -19,6 +19,7 @@
 		clipboardCopy,
 		type ExtEnvelope,
 	} from './lib/helpers';
+	import { loadExtensionI18n, t } from './lib/i18n';
 
 	type NotificationItem = {
 		id: string;
@@ -258,6 +259,36 @@
 		}
 	}
 
+	function invoicePaidBody(record: Record<string, unknown>, alreadyPaid: boolean): string {
+		const desc = String(record.metadata || t('invoice_unnamed')).trim() || t('invoice_unnamed');
+		const amount = record.amount != null && record.amount !== '' ? String(record.amount) : '';
+		const currency = record.currency ? String(record.currency) : '';
+		const amountBit = [amount, currency].filter(Boolean).join(' ');
+		const paidOn = formatInvoicePaidDate(record.paid_on as string | null | undefined);
+		const when = paidOn !== '—' ? t('invoice_paid_on', { date: paidOn }) : '';
+		const key = alreadyPaid
+			? amountBit
+				? 'invoice_already_paid'
+				: 'invoice_already_paid_no_amount'
+			: amountBit
+				? 'invoice_paid'
+				: 'invoice_paid_no_amount';
+		return t(key, { description: desc, amount: amountBit, when });
+	}
+
+	async function showInvoicePaidNotice(record: Record<string, unknown>, alreadyPaid: boolean) {
+		const body = invoicePaidBody(record, alreadyPaid);
+		if (ctx?.openModal) {
+			await ctx.openModal({
+				title: t('invoice_paid_title'),
+				body,
+				actions: [{ id: 'close', label: t('notice_close'), tone: 'primary' }],
+			});
+			return;
+		}
+		ctx?.notify('success', body);
+	}
+
 	async function refreshInvoice(record: Record<string, unknown>) {
 		if (!ctx) return;
 		const invoiceId = String(record.id);
@@ -270,7 +301,9 @@
 				await loadInvoices();
 				const data = result.data ?? {};
 				if (data.already_paid || data.paid) {
-					ctx.notify('success', 'Invoice marked as paid');
+					const refreshed =
+						invoiceData?.invoices?.find((inv) => String(inv.id) === invoiceId) ?? record;
+					await showInvoicePaidNotice(refreshed, Boolean(data.already_paid));
 				} else {
 					const scanned = data.scanned_transactions;
 					ctx.notify(
@@ -354,6 +387,7 @@
 			client.onStateChange((state) => {
 				principal = state.principal || '';
 				applyTheme(state.theme);
+				void loadExtensionI18n(state.locale || 'en');
 				queueMicrotask(reportHeight);
 			});
 		} catch (e) {

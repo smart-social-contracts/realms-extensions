@@ -1,0 +1,10 @@
+{
+  "invoice_paid_title": "Alles gut",
+  "notice_close": "Schließen",
+  "invoice_unnamed": "Rechnung",
+  "invoice_paid_on": " am {date}",
+  "invoice_paid": "Ihre Rechnung \"{description}\" über {amount} wurde bezahlt{when}.",
+  "invoice_paid_no_amount": "Ihre Rechnung \"{description}\" wurde bezahlt{when}.",
+  "invoice_already_paid": "Ihre Rechnung \"{description}\" über {amount} war bereits bezahlt{when}.",
+  "invoice_already_paid_no_amount": "Ihre Rechnung \"{description}\" war bereits bezahlt{when}."
+}
