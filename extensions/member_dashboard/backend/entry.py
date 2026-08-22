@@ -140,7 +140,7 @@ def get_public_services(args: str) -> Async[str]:
 
 
 def get_citizenship_status(args: str) -> str:
-    """Get citizenship activation status for a user.
+    """Get membership activation status for a user.
 
     Checks two requirements:
     1. Registration invoice paid
@@ -195,7 +195,7 @@ def get_citizenship_status(args: str) -> str:
         # Overall status
         if invoice_paid and passport_verified:
             status = "active"
-            status_label = "Active Citizen"
+            status_label = "Active member"
         else:
             status = "pending"
             status_label = "Pending Activation"

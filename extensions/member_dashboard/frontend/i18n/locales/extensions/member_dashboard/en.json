@@ -1,7 +1,9 @@
 {
   "dashboard_kicker": "My Dashboard",
-  "dashboard_lede": "Citizenship, messages, and invoices — in one place.",
-  "citizenship_title": "Citizenship",
+  "dashboard_lede": "Membership, messages, and invoices — in one place.",
+  "citizenship_title": "Membership",
+  "membership_status_active": "Active member",
+  "membership_status_pending": "Pending activation",
   "citizenship_steps": "{done} of {total} complete",
   "citizenship_passport": "Passport",
   "citizenship_passport_done": "Verified",

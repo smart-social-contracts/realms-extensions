@@ -526,7 +526,9 @@
 									)}
 									aria-hidden="true"
 								></span>
-								{String(citizenship.status_label || citizenship.status)}
+								{citizenship.status === 'active'
+									? t('membership_status_active')
+									: t('membership_status_pending')}
 							</span>
 						{/if}
 					</div>

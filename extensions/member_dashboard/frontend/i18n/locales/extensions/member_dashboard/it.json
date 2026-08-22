@@ -1,7 +1,9 @@
 {
   "dashboard_kicker": "La mia dashboard",
-  "dashboard_lede": "Cittadinanza, messaggi e fatture — in un unico posto.",
-  "citizenship_title": "Cittadinanza",
+  "dashboard_lede": "Iscrizione, messaggi e fatture — in un unico posto.",
+  "citizenship_title": "Iscrizione",
+  "membership_status_active": "Membro attivo",
+  "membership_status_pending": "Attivazione in sospeso",
   "citizenship_steps": "{done} di {total} completati",
   "citizenship_passport": "Passaporto",
   "citizenship_passport_done": "Verificato",

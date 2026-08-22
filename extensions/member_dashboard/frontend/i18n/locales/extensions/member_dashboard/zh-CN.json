@@ -1,7 +1,9 @@
 {
   "dashboard_kicker": "我的仪表盘",
-  "dashboard_lede": "公民身份、消息和发票，集中在一处。",
-  "citizenship_title": "公民身份",
+  "dashboard_lede": "会籍、消息和发票，集中在一处。",
+  "citizenship_title": "会籍",
+  "membership_status_active": "正式会员",
+  "membership_status_pending": "待激活",
   "citizenship_steps": "已完成 {done} / {total}",
   "citizenship_passport": "护照",
   "citizenship_passport_done": "已验证",
