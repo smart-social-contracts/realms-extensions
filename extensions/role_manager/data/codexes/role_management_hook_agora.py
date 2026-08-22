@@ -66,7 +66,21 @@ def role_revoke_posthook(args):
 
 @hook
 def get_governance_params(args):
-    """Agora: moderate governance rigor, higher for role assignments."""
-    if args.get("proposal_type") == "role_assignment":
+    """Agora: moderate governance rigor, higher for money, wasm, and role votes."""
+    proposal_type = args.get("proposal_type") or ""
+    perms = args.get("requested_permissions") or []
+    if proposal_type == "upgrade" and isinstance(args.get("action"), dict) and args["action"].get("target") == "core":
+        return {"quorum": 40, "threshold": 0.67, "notice_hours": 168}
+    if proposal_type == "transaction":
+        return {"quorum": 25, "threshold": 0.6, "notice_hours": 72}
+    if proposal_type == "role_assignment":
+        return {"quorum": 25, "threshold": 0.6, "notice_hours": 72}
+    risky = (
+        "treasury.transfer",
+        "member.assign_profile",
+        "member.revoke_profile",
+        "member.activate",
+    )
+    if proposal_type == "code_execution" and any(p in risky for p in perms):
         return {"quorum": 25, "threshold": 0.6, "notice_hours": 72}
     return {"quorum": 15, "threshold": 0.5, "notice_hours": 48}
