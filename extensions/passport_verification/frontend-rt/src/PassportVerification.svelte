@@ -140,7 +140,7 @@
 	}
 </script>
 
-<div class="p-6 max-w-2xl mx-auto space-y-6">
+<div class="p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
 	<!-- Header -->
 	<div class="flex items-center gap-3">
 		<div class="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
@@ -180,38 +180,26 @@
 
 	<!-- IDLE STATE -->
 	{#if step === 'idle'}
-		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-			<div class="p-6 sm:p-8">
-				<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Verify with your passport</h2>
-				<p class="text-gray-600 dark:text-gray-400 mb-5">
-					You will use a free phone app called <strong class="font-medium text-gray-800 dark:text-gray-200">RariMe</strong>.
-					It reads your passport on your phone and proves you are a real person. Your passport details stay on your phone — they are not sent to this realm.
-				</p>
-				<ol class="space-y-3 mb-6 text-sm text-gray-700 dark:text-gray-300">
-					<li class="flex gap-3">
-						<span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 text-white text-xs font-semibold flex items-center justify-center">1</span>
-						<span>
-							Install <strong class="font-medium">RariMe</strong> on your phone.
-							<a
-								href="https://app.rarime.com/"
-								target="_blank"
-								rel="noopener noreferrer"
-								class="block mt-0.5 text-gray-800 dark:text-gray-200 underline underline-offset-2"
-							>Get RariMe</a>
-						</span>
-					</li>
-					<li class="flex gap-3">
-						<span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 text-white text-xs font-semibold flex items-center justify-center">2</span>
-						<span>Come back here and tap <strong class="font-medium">Start verification</strong>.</span>
-					</li>
-					<li class="flex gap-3">
-						<span class="flex-shrink-0 w-6 h-6 rounded-full bg-gray-800 text-white text-xs font-semibold flex items-center justify-center">3</span>
-						<span>Scan the QR code with RariMe, or open the link on your phone.</span>
-					</li>
-				</ol>
+		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 sm:p-6">
+			<p class="text-sm text-gray-700 dark:text-gray-300">
+				New to this? You need a free phone app called <strong class="font-medium text-gray-900 dark:text-white">RariMe</strong>.
+				Install it first, then tap Start. RariMe reads your passport on your phone and this realm only gets a yes/no — not your passport details.
+			</p>
+			<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+				After you start, scan the QR code (or open the link) with RariMe.
+			</p>
+			<div class="mt-5 flex flex-col-reverse sm:flex-row gap-2">
+				<a
+					href="https://app.rarime.com/"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600"
+				>
+					Get RariMe
+				</a>
 				<button
 					onclick={generateVerificationLink}
-					class="w-full sm:w-auto px-8 py-3 text-base font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
+					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg"
 				>
 					Start verification
 				</button>

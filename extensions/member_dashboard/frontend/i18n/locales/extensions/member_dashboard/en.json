@@ -8,6 +8,7 @@
   "citizenship_passport": "Passport",
   "citizenship_passport_done": "Verified",
   "citizenship_passport_todo": "Needs verification",
+  "citizenship_passport_hint": "Uses the free RariMe app on your phone.",
   "citizenship_invoice_step": "Invoice",
   "citizenship_invoice_done": "Paid",
   "citizenship_invoice_todo": "Needs payment",
