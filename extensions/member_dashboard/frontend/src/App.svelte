@@ -5,6 +5,8 @@
 	import { PageHeader, Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
 	import {
 		bridgeErrorFields,
+		citizenshipNextActions,
+		CITIZENSHIP_FIELDS,
 		cn,
 		currenciesByNetwork,
 		entries,
@@ -211,6 +213,14 @@
 	async function reloadAll() {
 		if (!isAuthenticated || !principal) return;
 		await Promise.all([loadDashboard(), loadNotifications(), loadInvoices(), loadPaymentAccounts()]);
+	}
+
+	function handleCitizenshipAction(id: 'verify_passport' | 'invoices') {
+		if (id === 'verify_passport') {
+			ctx?.navigate('/extensions/passport_verification');
+			return;
+		}
+		document.getElementById('invoices')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
 	$effect(() => {
@@ -463,17 +473,22 @@
 			{/snippet}
 		</Card>
 	{:else}
-		<PageHeader title={getGreeting()} subtitle={extensionDescription}>
-			{#snippet actions()}
-				<Button tone="secondary" size="sm" disabled={loading} onclick={() => void reloadAll()}>
-					Refresh
-				</Button>
-			{/snippet}
-		</PageHeader>
+		<PageHeader title="My Dashboard" subtitle={`${getGreeting()}. ${extensionDescription}`} />
 
-		{#if summary?.user_name && summary.user_name !== principal}
-			<p class="-mt-4 text-sm text-gray-500 dark:text-gray-400">Signed in as {String(summary.user_name)}</p>
-		{/if}
+		<p class="-mt-4 text-sm text-gray-500 dark:text-gray-400">
+			{#if summary?.user_name && summary.user_name !== principal}
+				<span>Signed in as {String(summary.user_name)}</span>
+				<span class="mx-2 text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
+			{/if}
+			<button
+				type="button"
+				class="text-sm text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-200"
+				disabled={loading}
+				onclick={() => void reloadAll()}
+			>
+				{t('refresh')}
+			</button>
+		</p>
 
 		{#if loading}
 			<Card>
@@ -503,11 +518,11 @@
 				{/snippet}
 			</Card>
 		{:else}
-			{#if citizenship && entries(citizenship).length > 0}
-				<Card title="Citizenship Status">
-					{#snippet children()}
-						<div class="flex items-center justify-between">
-							<span></span>
+			{#if citizenship}
+				<Card>
+					{#snippet header()}
+						<div class="flex items-center justify-between gap-3">
+							<h2 class="text-base font-semibold text-gray-900 dark:text-white">{t('citizenship_title')}</h2>
 							{#if citizenship.status}
 								<span
 									class={cn(
@@ -517,22 +532,39 @@
 											: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
 									)}
 								>
-									{citizenship.status === 'active' ? '✓' : '✗'}
+									{#if citizenship.status === 'active'}✓{:else}<span aria-hidden="true">○</span>{/if}
 									{String(citizenship.status_label || citizenship.status)}
 								</span>
 							{/if}
 						</div>
-						{#if entries(citizenship).filter(([k]) => k !== 'status' && k !== 'status_label').length > 0}
-							<div class="mt-4 space-y-2">
-								{#each entries(citizenship).filter(([k]) => k !== 'status' && k !== 'status_label') as [k, v]}
-									<div
-										class="flex justify-between border-b border-gray-100 pb-1 text-sm dark:border-gray-700"
+					{/snippet}
+					{#snippet children()}
+						<dl class="space-y-2">
+							{#each CITIZENSHIP_FIELDS as field}
+								<div
+									class="flex justify-between border-b border-gray-100 pb-1 text-sm last:border-b-0 dark:border-gray-700"
+								>
+									<dt class="text-gray-500 dark:text-gray-400">{t(field.labelKey)}</dt>
+									<dd class="font-medium text-gray-800 dark:text-gray-200">
+										{#if field.kind === 'bool'}
+											{citizenship[field.key] ? t('citizenship_yes') : t('citizenship_no')}
+										{:else}
+											{citizenship[field.key] ?? 0}
+										{/if}
+									</dd>
+								</div>
+							{/each}
+						</dl>
+						{#if citizenshipNextActions(citizenship).length > 0}
+							<div class="mt-4 flex flex-col gap-2 sm:flex-row">
+								{#each citizenshipNextActions(citizenship) as action}
+									<Button
+										tone={action.tone}
+										size="sm"
+										onclick={() => handleCitizenshipAction(action.id)}
 									>
-										<span class="capitalize text-gray-500 dark:text-gray-400">{k.replace(/_/g, ' ')}</span>
-										<span class="font-medium text-gray-800 dark:text-gray-200">
-											{typeof v === 'object' ? JSON.stringify(v) : String(v)}
-										</span>
-									</div>
+										{t(action.labelKey)}
+									</Button>
 								{/each}
 							</div>
 						{/if}
@@ -559,19 +591,13 @@
 							</div>
 						{/snippet}
 					</Card>
-				{:else if notificationsUnavailable}
+				{:else if notificationsUnavailable || notifications.length === 0}
 					<Card>
 						{#snippet children()}
 							<EmptyState
-								title="Notifications unavailable"
-								message="Could not load notifications. Try refreshing the page."
+								title={t('notifications_empty_title')}
+								message={t('notifications_empty_body')}
 							/>
-						{/snippet}
-					</Card>
-				{:else if notifications.length === 0}
-					<Card>
-						{#snippet children()}
-							<EmptyState title="No notifications" message="Your inbox is empty." />
 						{/snippet}
 					</Card>
 				{:else}
@@ -674,7 +700,7 @@
 				{/if}
 			</section>
 
-			<section class="space-y-4">
+			<section id="invoices" class="space-y-4 scroll-mt-4">
 				<div>
 					<h2 class="text-xl font-bold text-gray-900 dark:text-white">Invoices</h2>
 					<p class="text-sm text-gray-500 dark:text-gray-400">Manage your invoices and payment records</p>

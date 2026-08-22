@@ -105,6 +105,42 @@ export function entries(obj: unknown): [string, unknown][] {
 	return Object.entries(obj).filter(([k]) => !k.startsWith('_'));
 }
 
+export const CITIZENSHIP_FIELDS = [
+	{ key: 'invoice_paid', labelKey: 'citizenship_invoice_paid', kind: 'bool' },
+	{ key: 'passport_verified', labelKey: 'citizenship_passport_verified', kind: 'bool' },
+	{ key: 'total_invoices', labelKey: 'citizenship_total_invoices', kind: 'number' },
+	{ key: 'paid_invoices', labelKey: 'citizenship_paid_invoices', kind: 'number' },
+] as const;
+
+export type CitizenshipAction = {
+	id: 'verify_passport' | 'invoices';
+	labelKey: 'citizenship_verify_passport' | 'citizenship_pay_invoice' | 'citizenship_view_invoices';
+	tone: 'primary' | 'secondary';
+};
+
+export function citizenshipNextActions(
+	citizenship: Record<string, unknown> | null,
+): CitizenshipAction[] {
+	if (!citizenship || citizenship.status === 'active') return [];
+	const actions: CitizenshipAction[] = [];
+	if (!citizenship.passport_verified) {
+		actions.push({
+			id: 'verify_passport',
+			labelKey: 'citizenship_verify_passport',
+			tone: 'primary',
+		});
+	}
+	if (!citizenship.invoice_paid) {
+		const hasInvoice = Number(citizenship.total_invoices || 0) > 0;
+		actions.push({
+			id: 'invoices',
+			labelKey: hasInvoice ? 'citizenship_pay_invoice' : 'citizenship_view_invoices',
+			tone: actions.length ? 'secondary' : 'primary',
+		});
+	}
+	return actions;
+}
+
 export async function clipboardCopy(text: string): Promise<boolean> {
 	try {
 		if (navigator.clipboard?.writeText) {
