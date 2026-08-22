@@ -1,7 +1,9 @@
 {
   "dashboard_kicker": "Mi panel",
-  "dashboard_lede": "Ciudadanía, mensajes y facturas — en un solo lugar.",
-  "citizenship_title": "Ciudadanía",
+  "dashboard_lede": "Membresía, mensajes y facturas — en un solo lugar.",
+  "citizenship_title": "Membresía",
+  "membership_status_active": "Miembro activo",
+  "membership_status_pending": "Activación pendiente",
   "citizenship_steps": "{done} de {total} completado",
   "citizenship_passport": "Pasaporte",
   "citizenship_passport_done": "Verificado",

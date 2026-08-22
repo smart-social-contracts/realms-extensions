@@ -1,7 +1,9 @@
 {
   "dashboard_kicker": "Mon tableau de bord",
-  "dashboard_lede": "Citoyenneté, messages et factures — au même endroit.",
-  "citizenship_title": "Citoyenneté",
+  "dashboard_lede": "Adhésion, messages et factures — au même endroit.",
+  "citizenship_title": "Adhésion",
+  "membership_status_active": "Membre actif",
+  "membership_status_pending": "Activation en attente",
   "citizenship_steps": "{done} sur {total} terminé",
   "citizenship_passport": "Passeport",
   "citizenship_passport_done": "Vérifié",

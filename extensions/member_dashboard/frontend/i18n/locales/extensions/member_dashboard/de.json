@@ -1,7 +1,9 @@
 {
   "dashboard_kicker": "Mein Dashboard",
-  "dashboard_lede": "Bürgerstatus, Nachrichten und Rechnungen — an einem Ort.",
-  "citizenship_title": "Bürgerstatus",
+  "dashboard_lede": "Mitgliedschaft, Nachrichten und Rechnungen — an einem Ort.",
+  "citizenship_title": "Mitgliedschaft",
+  "membership_status_active": "Aktives Mitglied",
+  "membership_status_pending": "Aktivierung ausstehend",
   "citizenship_steps": "{done} von {total} erledigt",
   "citizenship_passport": "Reisepass",
   "citizenship_passport_done": "Geprüft",
