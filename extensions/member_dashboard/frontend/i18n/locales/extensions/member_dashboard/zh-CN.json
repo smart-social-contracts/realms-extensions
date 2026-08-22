@@ -8,6 +8,7 @@
   "citizenship_passport": "护照",
   "citizenship_passport_done": "已验证",
   "citizenship_passport_todo": "待验证",
+  "citizenship_passport_hint": "使用手机上的免费 RariMe 应用。",
   "citizenship_invoice_step": "发票",
   "citizenship_invoice_done": "已支付",
   "citizenship_invoice_todo": "待支付",

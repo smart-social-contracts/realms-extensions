@@ -570,6 +570,7 @@
 										{steps.passport ? t('citizenship_passport_done') : t('citizenship_passport_todo')}
 									</p>
 									{#if !steps.passport}
+										<p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('citizenship_passport_hint')}</p>
 										<div class="mt-3">
 											<Button tone="primary" size="sm" onclick={() => handleCitizenshipAction('verify_passport')}>
 												{t('citizenship_verify_passport')}
