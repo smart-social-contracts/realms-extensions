@@ -1,14 +1,10 @@
 """
 Voting Extension Backend Entry Point
-Governance voting system using GGG entities
 
 Flow:
-  submit_proposal → start_voting → cast_vote (auto-approve on threshold)
-  → auto-execute: download codex, verify checksum, exec() the code
-
-Multi-codex proposals store a codices array in metadata and use the
-basilisk TaskManager to execute each download/install as a separate step,
-avoiding IC instruction limits.
+  submit_proposal (typed) → voting
+  → cast_vote / finalize_proposal → accepted
+  → host dispatcher (transaction / upgrade / poll / code_execution)
 """
 
 import hashlib
@@ -151,6 +147,7 @@ def _proposal_to_dict(proposal: Proposal, *, summary: bool = False) -> Dict[str,
         },
         "total_voters": int(proposal.total_voters or 0),
         "required_threshold": proposal.required_threshold,
+        "proposal_type": (_load_metadata(proposal).get("proposal_type") or ""),
         "metadata": metadata,
     }
 
@@ -203,6 +200,7 @@ def _get_governance_params(proposal: Proposal) -> dict:
             {
                 "proposal_type": proposal_type,
                 "requested_permissions": requested_permissions,
+                "action": metadata.get("action") or {},
             },
             fail_closed=False,
         )
@@ -450,348 +448,84 @@ def _http_download(url: str, max_bytes: int = 2_000_000, cycles: int = 30_000_00
 
 
 def _schedule_execution(proposal_id: str):
-    """Schedule async proposal execution via a one-shot timer."""
+    """Compare-and-set accepted → executing, then timer-drive the dispatcher."""
+    from core.proposal_dispatch import uses_timelock
+
     proposal = _find_proposal(proposal_id)
-    if proposal:
-        metadata = _load_metadata(proposal)
-        if metadata.get("defer_execution"):
-            logger.info(
-                f"Skipping execution timer for proposal {proposal_id} "
-                f"(defer_execution — federal driver will execute)"
-            )
-            return
+    if not proposal:
+        return
+    if proposal.status != "accepted":
+        logger.info(
+            f"Skip schedule for {proposal_id}: status is {proposal.status}"
+        )
+        return
+    metadata = _load_metadata(proposal)
+    if metadata.get("defer_execution"):
+        logger.info(
+            f"Skipping execution timer for proposal {proposal_id} "
+            f"(defer_execution — federal driver will execute)"
+        )
+        return
+
+    ptype = metadata.get("proposal_type") or ""
+    action = metadata.get("action") if isinstance(metadata.get("action"), dict) else {}
+    if ptype == "poll":
+        proposal.status = "executed"
+        logger.info(f"Poll {proposal_id} closed as executed")
+        return
+
+    proposal.status = "executing"
+    delay = 0
+    if uses_timelock(ptype, action):
+        hours = int(_get_governance_params(proposal).get("notice_hours") or 0)
+        delay = max(0, hours * 3600)
+        now_s = ic.time() // 1_000_000_000
+        metadata["execute_after"] = now_s + delay
+        proposal.metadata = json.dumps(metadata)
 
     def _exec_callback():
         return _do_execute_proposal(proposal_id)
-    ic.set_timer(0, _exec_callback)
-    logger.info(f"Scheduled execution for proposal {proposal_id}")
 
+    ic.set_timer(delay, _exec_callback)
+    logger.info(f"Scheduled execution for {proposal_id} in {delay}s")
 
-# ---------------------------------------------------------------------------
-# Multi-codex TaskManager helpers
-# ---------------------------------------------------------------------------
-
-def _build_download_step_code(entry: dict, proposal_id: str) -> str:
-    """Build a self-contained Python code string that downloads one codex,
-    verifies its checksum, and creates/updates the Codex entity.
-
-    The generated code defines ``async_task()`` which yields an HTTP outcall
-    (compatible with basilisk TaskManager async steps).
-    """
-    url = entry["url"]
-    name = entry["name"]
-    checksum = entry.get("checksum", "")
-    # Use repr() so strings are safely quoted inside the generated code
-    return (
-        "import hashlib, json\n"
-        "from ggg import Codex, Proposal\n"
-        "from basilisk.canisters.management import management_canister\n"
-        "from _cdk import ic\n"
-        "\n"
-        f"_URL = {repr(url)}\n"
-        f"_CODEX_NAME = {repr(name)}\n"
-        f"_CHECKSUM = {repr(checksum)}\n"
-        f"_PROPOSAL_ID = {repr(proposal_id)}\n"
-        "\n"
-        "def async_task():\n"
-        "    resp = yield management_canister.http_request({\n"
-        "        'url': _URL,\n"
-        "        'max_response_bytes': 2_000_000,\n"
-        "        'method': {'get': None},\n"
-        "        'headers': [\n"
-        "            {'name': 'User-Agent', 'value': 'Basilisk/1.0'},\n"
-        "            {'name': 'Accept-Encoding', 'value': 'identity'},\n"
-        "        ],\n"
-        "        'body': None,\n"
-        "        'transform': {\n"
-        "            'function': (ic.id(), 'http_transform'),\n"
-        "            'context': bytes(),\n"
-        "        },\n"
-        "    }).with_cycles(30_000_000_000)\n"
-        "\n"
-        "    if 'Ok' not in resp:\n"
-        "        raise RuntimeError(f'HTTP download failed for {_CODEX_NAME}: {resp}')\n"
-        "    body = resp['Ok']['body']\n"
-        "    code = body.decode('utf-8') if isinstance(body, bytes) else body\n"
-        "\n"
-        "    if _CHECKSUM:\n"
-        "        actual = 'sha256:' + hashlib.sha256(code.encode('utf-8')).hexdigest()\n"
-        "        if _CHECKSUM != actual:\n"
-        "            raise RuntimeError(\n"
-        "                f'Checksum mismatch for {_CODEX_NAME}: '"
-        "                f'expected {_CHECKSUM}, got {actual}')\n"
-        "        logger.info(f'Checksum verified for {_CODEX_NAME}: {actual}')\n"
-        "\n"
-        "    existing = Codex[_CODEX_NAME]\n"
-        "    if existing:\n"
-        "        existing.code = code\n"
-        "        existing.description = (\n"
-        "            f'Updated by proposal {_PROPOSAL_ID}')\n"
-        "        action = 'updated'\n"
-        "    else:\n"
-        "        Codex(name=_CODEX_NAME,\n"
-        "              description=f'Created by proposal {_PROPOSAL_ID}',\n"
-        "              code=code)\n"
-        "        action = 'created'\n"
-        "    logger.info(f'Codex {_CODEX_NAME} {action}')\n"
-        "\n"
-        "    # Track progress in proposal metadata\n"
-        "    proposal = Proposal[_PROPOSAL_ID]\n"
-        "    if proposal:\n"
-        "        meta = json.loads(proposal.metadata) if proposal.metadata else {}\n"
-        "        actions = meta.get('codex_actions', [])\n"
-        "        actions.append(f'{_CODEX_NAME}: {action}')\n"
-        "        meta['codex_actions'] = actions\n"
-        "        proposal.metadata = json.dumps(meta)\n"
-        "    return f'{_CODEX_NAME}: {action}'\n"
-    )
-
-
-def _build_finalize_step_code(proposal_id: str) -> str:
-    """Build code for the final step: mark the proposal as executed.
-
-    This used to also refresh entity method overrides. That mechanism was
-    removed in issue #265; codex code now reaches the realm only through
-    sandboxed hooks, which read the current ``Codex`` row on every call and so
-    need no rebinding after an update.
-    """
-    return (
-        "import json\n"
-        "from ggg import Proposal\n"
-        "\n"
-        f"_PROPOSAL_ID = {repr(proposal_id)}\n"
-        "\n"
-        "proposal = Proposal[_PROPOSAL_ID]\n"
-        "if proposal:\n"
-        "    proposal.status = 'executed'\n"
-        "    logger.info(f'Proposal {_PROPOSAL_ID} marked as executed')\n"
-    )
-
-
-def _schedule_multi_codex_execution(proposal_id: str, codices_list: List[dict]):
-    """Create a basilisk Task with one step per codex + a finalize step,
-    then kick off the first step immediately via ic.set_timer."""
-    from basilisk.os.entities import (
-        Call as OSCall,
-        Codex as OSCodex,
-        Task as OSTask,
-        TaskStep as OSTaskStep,
-        TaskSchedule as OSTaskSchedule,
-    )
-    from basilisk.os.task_manager import _create_timer_callback
-    from basilisk.os.status import TaskStatus
-
-    task_name = f"proposal_{proposal_id}_exec"
-    logger.info(f"Creating multi-codex task '{task_name}' with {len(codices_list)} codex(es)")
-
-    task = OSTask(name=task_name, status=TaskStatus.PENDING, step_to_execute=0)
-
-    # One async step per codex download
-    for i, entry in enumerate(codices_list):
-        step_code = _build_download_step_code(entry, proposal_id)
-        codex = OSCodex(
-            name=f"_proposal_{proposal_id}_step_{i}",
-            code=step_code,
-        )
-        call = OSCall(is_async=True, codex=codex)
-        OSTaskStep(call=call, task=task, status=TaskStatus.PENDING, run_next_after=0)
-
-    # Final sync step: refresh overrides + mark executed
-    finalize_code = _build_finalize_step_code(proposal_id)
-    fin_codex = OSCodex(
-        name=f"_proposal_{proposal_id}_finalize",
-        code=finalize_code,
-    )
-    fin_call = OSCall(is_async=False, codex=fin_codex)
-    OSTaskStep(call=fin_call, task=task, status=TaskStatus.PENDING, run_next_after=0)
-
-    # Schedule for immediate execution
-    OSTaskSchedule(
-        name=f"{task_name}_schedule",
-        task=task,
-        run_at=0,
-        repeat_every=0,
-        disabled=False,
-    )
-
-    # Kick off the first step now
-    steps = list(task.steps)
-    if steps:
-        first_step = steps[0]
-        callback = _create_timer_callback(first_step, task)
-        first_step.status = TaskStatus.RUNNING
-        task.status = TaskStatus.RUNNING
-        task.step_to_execute = 1
-        ic.set_timer(0, callback)
-        logger.info(f"Multi-codex task '{task_name}' started ({len(steps)} steps)")
-
-
-# ---------------------------------------------------------------------------
-# Single-codex execution (original path, unchanged)
-# ---------------------------------------------------------------------------
 
 def _do_execute_proposal(proposal_id: str):
-    """Internal generator: verify checksum, run proposal code in the sandbox.
-
-    For single-codex proposals this runs as an async generator driven by
-    Rust's drive_generator.  For multi-codex proposals (codices array in
-    metadata) it delegates to the TaskManager for step-by-step execution.
-    """
-    from core.proposal_execution import (
-        execute_proposal_code,
-        normalize_proposal_permissions,
-        verify_code_checksum,
-    )
+    """Host dispatcher. Timer callbacks that return this generator are driven."""
+    from core.proposal_dispatch import dispatch_proposal, DispatchError
 
     proposal = _find_proposal(proposal_id)
     if not proposal:
         logger.error(f"Execute: proposal {proposal_id} not found")
         return
-
-    if proposal.status not in ("accepted",):
-        logger.error(f"Execute: proposal {proposal_id} status is {proposal.status}, expected accepted")
-        return
-
-    metadata = _load_metadata(proposal)
-    if metadata.get("defer_execution"):
-        logger.info(
-            f"Skipping execution for proposal {proposal_id} "
-            f"(defer_execution — federal driver will execute)"
+    if proposal.status != "executing":
+        logger.error(
+            f"Execute: proposal {proposal_id} status is {proposal.status}, "
+            "expected executing"
         )
         return
-
-    code_inline = metadata.get("code_inline")
-    codices_list = metadata.get("codices")
-    permissions = normalize_proposal_permissions(
-        metadata.get("requested_permissions", [])
-    )
-
-    # --- Inline code path: no download needed ---
-    if code_inline:
-        checksum_error = verify_code_checksum(code_inline, proposal.code_checksum or "")
-        if checksum_error:
-            proposal.status = "failed"
-            proposal.metadata = json.dumps({**metadata, "error": checksum_error})
-            logger.error(f"Execute: inline checksum refused for {proposal_id}: {checksum_error}")
-            return
-
-        proposal.status = "executing"
-        codex_name = metadata.get("codex_name", f"proposal_{proposal_id}_inline")
-        logger.info(f"Executing inline-code proposal {proposal_id} (sandbox)")
-
-        existing_codex = Codex[codex_name]
-        if existing_codex:
-            existing_codex.code = code_inline
-            existing_codex.description = f"Updated by proposal {proposal_id}: {proposal.title}"
-            action = "updated"
-        else:
-            existing_codex = Codex(
-                name=codex_name,
-                description=f"Created by proposal {proposal_id}: {proposal.title}",
-                code=code_inline,
-            )
-            action = "created"
-
-        try:
-            yield from execute_proposal_code(proposal_id, code_inline, permissions)
-            logger.info(f"Inline code executed successfully for proposal {proposal_id}")
-        except Exception as e:
-            proposal.status = "failed"
-            proposal.metadata = json.dumps({**metadata, "error": f"Code execution failed: {e}"})
-            logger.error(f"Execute: inline sandbox exec failed for {proposal_id}: {e}\n{traceback.format_exc()}")
-            return
-
-        proposal.status = "executed"
-        proposal.metadata = json.dumps({**metadata, "codex_name": codex_name, "codex_action": action})
-        logger.info(f"Proposal {proposal_id} fully executed (inline code)")
-        return
-
-    # --- Multi-codex path: delegate to TaskManager ---
-    if codices_list and len(codices_list) > 1:
-        proposal.status = "executing"
-        logger.info(f"Executing multi-codex proposal {proposal_id}: {len(codices_list)} codex(es)")
-        _schedule_multi_codex_execution(proposal_id, codices_list)
-        return
-
-    # --- Single-codex path (original behaviour) ---
-    # If codices array has exactly one entry, extract it
-    if codices_list and len(codices_list) == 1:
-        entry = codices_list[0]
-        code_url = entry.get("url", "")
-        codex_name = entry.get("name", f"proposal_{proposal_id}_codex")
-        expected_checksum = entry.get("checksum", "")
-    else:
-        code_url = proposal.code_url
-        codex_name = metadata.get("codex_name", f"proposal_{proposal_id}_codex")
-        expected_checksum = proposal.code_checksum
-
-    if not code_url:
-        proposal.status = "failed"
-        proposal.metadata = json.dumps({**metadata, "error": "No code URL"})
-        logger.error(f"Execute: proposal {proposal_id} has no code URL")
-        return
-
-    proposal.status = "executing"
-    logger.info(f"Executing proposal {proposal_id}: downloading {code_url}")
-
     try:
-        code_content = yield from _http_download(code_url)
-    except Exception as e:
-        proposal.status = "failed"
-        proposal.metadata = json.dumps({**metadata,
-                                         "error": f"Download failed: {e}"})
-        logger.error(f"Execute: download failed for {proposal_id}: {e}")
-        return
-
-    # Verify checksum (required — fail closed when missing)
-    checksum_error = verify_code_checksum(code_content, expected_checksum or "")
-    if checksum_error:
+        yield from dispatch_proposal(proposal)
+    except DispatchError as e:
+        metadata = _load_metadata(proposal)
         proposal.status = "failed"
         proposal.metadata = json.dumps({
             **metadata,
-            "error": checksum_error,
+            "error": e.error,
+            "error_code": e.error_code,
         })
-        logger.error(f"Execute: checksum refused for {proposal_id}: {checksum_error}")
-        return
-    logger.info(f"Checksum verified for {proposal_id}: {expected_checksum}")
-
-    # Create or update the Codex entity
-    existing_codex = Codex[codex_name]
-    if existing_codex:
-        existing_codex.code = code_content
-        existing_codex.description = f"Updated by proposal {proposal_id}: {proposal.title}"
-        action = "updated"
-    else:
-        existing_codex = Codex(
-            name=codex_name,
-            description=f"Created by proposal {proposal_id}: {proposal.title}",
-            code=code_content,
-        )
-        action = "created"
-
-    logger.info(f"Codex '{codex_name}' {action} for proposal {proposal_id}")
-
-    try:
-        yield from execute_proposal_code(proposal_id, code_content, permissions)
-        logger.info(f"Codex code executed successfully for proposal {proposal_id}")
+        logger.error(f"Execute: dispatch refused {proposal_id}: {e.error}")
     except Exception as e:
+        metadata = _load_metadata(proposal)
         proposal.status = "failed"
         proposal.metadata = json.dumps({
             **metadata,
-            "error": f"Code execution failed: {e}",
-            "codex_name": codex_name,
-            "codex_action": action,
+            "error": str(e),
+            "error_code": "dispatch_failed",
         })
-        logger.error(f"Execute: sandbox exec failed for {proposal_id}: {e}\n{traceback.format_exc()}")
-        return
-
-    proposal.status = "executed"
-    proposal.metadata = json.dumps({
-        **metadata,
-        "codex_name": codex_name,
-        "codex_action": action,
-    })
-    logger.info(f"Proposal {proposal_id} fully executed: codex '{codex_name}' {action} and code ran")
+        logger.error(
+            f"Execute: {proposal_id} failed: {e}\n{traceback.format_exc()}"
+        )
 
 
 def _load_metadata(proposal: Proposal) -> dict:
@@ -873,6 +607,7 @@ def get_proposals(args: str) -> str:
     try:
         args_dict = _parse_args(args)
         status_filter = args_dict.get("status")
+        type_filter = (args_dict.get("proposal_type") or "").strip()
         org_filter = (args_dict.get("org_scope") or "").strip()
         include_non_voting = bool(args_dict.get("include_non_voting", False))
         from_id = max(1, int(args_dict.get("from_id", 1)))
@@ -907,6 +642,8 @@ def get_proposals(args: str) -> str:
                     if not include_non_voting and not _is_voting_proposal(proposal):
                         continue
                     if status_filter and proposal.status != status_filter:
+                        continue
+                    if type_filter and (_load_metadata(proposal).get("proposal_type") or "") != type_filter:
                         continue
                     proposals.append(_proposal_to_dict(proposal, summary=True))
                 if page_filled:
@@ -957,6 +694,8 @@ def get_proposals(args: str) -> str:
                 if not include_non_voting and not _is_voting_proposal(proposal):
                     continue
                 if status_filter and proposal.status != status_filter:
+                    continue
+                if type_filter and (_load_metadata(proposal).get("proposal_type") or "") != type_filter:
                     continue
                 if org_filter and _proposal_org_scope(proposal) != org_filter:
                     continue
@@ -1032,130 +771,133 @@ def get_proposal(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-def submit_proposal(args: str) -> str:
-    """Submit a new proposal.
-
-    Required: title, description
-    Required (one of): code_url (single codex) OR codices (multi-codex array) OR code_inline (inline Python)
-    Optional: code_checksum (sha256:<hex>), codex_name, required_threshold, auto_start_voting (bool)
-
-    Multi-codex format:
-      codices: [{"name": "...", "url": "...", "checksum": "..."}, ...]
-    """
+def submit_proposal(args: str) -> Async[str]:
+    """Submit a typed proposal and open voting immediately."""
     try:
+        from core.access import _check_access
+        from core.extension_errors import permission_denied_payload
+        from core.proposal_dispatch import (
+            freeze_action,
+            persist_code_execution_source,
+            reject_forbidden_submit_keys,
+            submit_gate,
+        )
+
         args_dict = _parse_args(args)
+        forbidden = reject_forbidden_submit_keys(args_dict)
+        if forbidden:
+            return json.dumps({"success": False, **forbidden})
 
-        for field in ("title", "description"):
-            if field not in args_dict:
-                return json.dumps({"success": False, "error": f"{field} is required"})
+        for field in ("title", "description", "proposal_type"):
+            if not str(args_dict.get(field) or "").strip():
+                return json.dumps({
+                    "success": False,
+                    "error": f"{field} is required",
+                    "error_code": "validation_error",
+                })
 
-        # Validate that we have at least one codex source
-        codices = args_dict.get("codices", [])
-        code_url = args_dict.get("code_url", "")
-        code_inline = args_dict.get("code_inline", "")
-        if not codices and not code_url and not code_inline:
-            return json.dumps({"success": False, "error": "code_url, codices array, or code_inline is required"})
+        proposal_type = str(args_dict["proposal_type"]).strip()
+        raw_action = args_dict.get("action") if isinstance(args_dict.get("action"), dict) else {}
 
-        # Validate codices entries
-        if codices:
-            for i, entry in enumerate(codices):
-                if not entry.get("url"):
-                    return json.dumps({"success": False, "error": f"codices[{i}] missing url"})
-                if not entry.get("name"):
-                    return json.dumps({"success": False, "error": f"codices[{i}] missing name"})
-
-        # Security: always use ic.caller() as the proposer identity
         proposer_id = ic.caller().to_str()
         proposer = _find_user(proposer_id)
         if not proposer:
-            return json.dumps({"success": False, "error": f"User {proposer_id} not found"})
+            return json.dumps({
+                "success": False,
+                "error": f"User {proposer_id} not found",
+                "error_code": "unauthenticated",
+            })
 
-        # Generate proposal ID
+        gate = submit_gate(proposal_type, raw_action)
+        if not _check_access(proposer_id, gate):
+            return json.dumps(permission_denied_payload(
+                f"Submitting a {proposal_type} proposal requires '{gate}'",
+                gate,
+            ))
+
+        org_scope = str(args_dict.get("org_scope") or "").strip()
+
         existing = Proposal.instances()
-        proposal_num = len(existing) + 1
-        proposal_id = f"prop_{proposal_num:03d}"
+        proposal_id = f"prop_{len(existing) + 1:03d}"
 
-        # Build metadata
-        metadata = {}
-        if code_inline:
-            metadata["code_inline"] = code_inline
-            display_url = ""
-            codex_name = args_dict.get("codex_name", f"proposal_{proposal_id}_inline")
-            metadata["codex_name"] = codex_name
-            try:
-                from core.proposal_execution import compute_code_checksum
+        source = args_dict.get("source") or ""
+        source_url = str(args_dict.get("source_url") or "").strip()
+        if proposal_type == "code_execution" and not str(source).strip() and source_url:
+            source = yield from _http_download(source_url)
 
-                inline_checksum = compute_code_checksum(code_inline)
-            except Exception:
-                inline_checksum = args_dict.get("code_checksum", "")
-        elif codices:
-            metadata["codices"] = codices
-            display_url = codices[0]["url"]
-            inline_checksum = args_dict.get("code_checksum", "")
-        else:
-            display_url = code_url
-            inline_checksum = args_dict.get("code_checksum", "")
-            if args_dict.get("codex_name"):
-                metadata["codex_name"] = args_dict["codex_name"]
+        action, permissions, err = freeze_action(
+            proposal_type,
+            raw_action,
+            source=source,
+            source_url=source_url,
+            requested_permissions=args_dict.get("requested_permissions"),
+            proposal_id=proposal_id,
+        )
+        if err:
+            return json.dumps({"success": False, **err})
 
-        raw_permissions = args_dict.get("requested_permissions", [])
-        if raw_permissions:
-            metadata["requested_permissions"] = raw_permissions
-        if args_dict.get("proposal_type"):
-            metadata["proposal_type"] = args_dict["proposal_type"]
+        code_url = ""
+        code_checksum = ""
+        if proposal_type == "code_execution":
+            if not str(source).strip():
+                return json.dumps({
+                    "success": False,
+                    "error": "source or source_url is required",
+                    "error_code": "missing_source",
+                })
+            persist_code_execution_source(proposal_id, source, source_url)
+            from core.proposal_execution import compute_code_checksum
+            code_checksum = compute_code_checksum(source)
+            code_url = source_url
 
-        # Apply minimum threshold floor from governance policy
+        metadata = {
+            "proposal_type": proposal_type,
+            "action": action,
+        }
+        if permissions:
+            metadata["requested_permissions"] = permissions
+        if org_scope:
+            metadata["org_scope"] = org_scope
+
         requested_threshold = args_dict.get("required_threshold", 0.6)
+        voting_window = 604_800
+        try:
+            from ggg import Realm
+            realm = Realm[1]
+            if realm and realm.calendar:
+                cal_window = realm.calendar.voting_window
+                if cal_window:
+                    voting_window = int(cal_window)
+        except Exception:
+            pass
+        now_s = ic.time() // 1_000_000_000
 
         proposal = Proposal(
             proposal_id=proposal_id,
-            title=args_dict["title"],
-            description=args_dict["description"],
-            code_url=display_url,
-            code_checksum=inline_checksum,
+            title=str(args_dict["title"]).strip(),
+            description=str(args_dict["description"]).strip(),
+            code_url=code_url,
+            code_checksum=code_checksum,
             proposer=proposer,
-            status="pending_review",
-            voting_deadline="",
+            status="voting",
+            voting_deadline=str(now_s + voting_window),
             votes_yes=0.0,
             votes_no=0.0,
             votes_abstain=0.0,
             total_voters=0.0,
             required_threshold=requested_threshold,
+            org_scope=org_scope,
             metadata=json.dumps(metadata),
         )
 
-        # Enforce minimum threshold floor (codex-defined)
         min_threshold = _get_min_threshold(proposal)
         if proposal.required_threshold < min_threshold:
             proposal.required_threshold = min_threshold
-            logger.info(
-                f"Proposal {proposal_id}: threshold raised from {requested_threshold} "
-                f"to minimum {min_threshold} (governance policy)"
-            )
 
-        codex_count = len(codices) if codices else 1
-        logger.info(f"Proposal {proposal_id} submitted by {proposer_id} ({codex_count} codex(es), inline={'yes' if code_inline else 'no'})")
-
-        # Auto-start voting if requested
-        if args_dict.get("auto_start_voting"):
-            voting_window = 604_800
-            try:
-                from ggg import Realm
-                realm = Realm[1]
-                if realm and realm.calendar:
-                    cal_window = realm.calendar.voting_window
-                    if cal_window:
-                        voting_window = int(cal_window)
-            except Exception:
-                pass
-            now_ns = ic.time()
-            now_s = now_ns // 1_000_000_000
-            deadline_s = now_s + voting_window
-            proposal.status = "voting"
-            proposal.voting_deadline = str(deadline_s)
-            logger.info(f"Auto-started voting for {proposal_id}, deadline in {voting_window}s")
-            _notify_voting_opened(proposal)
-
+        logger.info(
+            f"Proposal {proposal_id} submitted by {proposer_id} type={proposal_type}"
+        )
+        _notify_voting_opened(proposal)
         return json.dumps({"success": True, "data": _proposal_to_dict(proposal)})
     except Exception as e:
         logger.error(f"submit_proposal error: {e}\n{traceback.format_exc()}")
@@ -1454,38 +1196,6 @@ def cast_vote(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-def approve_proposal(args: str) -> str:
-    """Manually approve a proposal and schedule execution."""
-    try:
-        args_dict = _parse_args(args)
-        proposal_id = args_dict.get("proposal_id")
-        if not proposal_id:
-            return json.dumps({"success": False, "error": "proposal_id is required"})
-
-        proposal = _find_proposal(proposal_id)
-        if not proposal:
-            return json.dumps({"success": False, "error": "Proposal not found"})
-
-        if proposal.status in ("accepted", "executing", "executed"):
-            return json.dumps({"success": False, "error": f"Proposal already {proposal.status}"})
-
-        proposal.status = "accepted"
-        logger.info(f"Proposal {proposal_id} manually approved")
-
-        _schedule_execution(proposal_id)
-
-        return json.dumps({
-            "success": True,
-            "data": {
-                "message": "Proposal approved, execution scheduled",
-                "proposal": _proposal_to_dict(proposal),
-            }
-        })
-    except Exception as e:
-        logger.error(f"approve_proposal error: {e}\n{traceback.format_exc()}")
-        return json.dumps({"success": False, "error": str(e)})
-
-
 def execute_proposal(args: str) -> Async[str]:
     """Manually trigger proposal execution (download, verify checksum, exec).
 
@@ -1501,10 +1211,11 @@ def execute_proposal(args: str) -> Async[str]:
         if not proposal:
             return json.dumps({"success": False, "error": "Proposal not found"})
 
-        if proposal.status not in ("accepted",):
+        if proposal.status != "executing":
             return json.dumps({
                 "success": False,
-                "error": f"Proposal must be accepted before execution. Current: {proposal.status}"
+                "error": f"Proposal must be executing. Current: {proposal.status}",
+                "error_code": "not_executing",
             })
 
         yield from _do_execute_proposal(proposal_id)
@@ -1521,183 +1232,63 @@ def execute_proposal(args: str) -> Async[str]:
 
 
 def fetch_proposal_code(args: str) -> str:
-    """Fetch and preview proposal code when content is already on-canister (read-only).
-
-    Accepts proposal_id (loads from proposal) or code_url (checksum helper).
-
-    Returns ``needs_remote: true`` when the code must be downloaded via HTTP;
-    call ``fetch_proposal_code_remote`` for those cases.
-    """
+    """Read stored code-execution source from its reserved Codex row."""
     try:
         args_dict = _parse_args(args)
         proposal_id = args_dict.get("proposal_id")
-        code_url = args_dict.get("code_url")
+        if not proposal_id:
+            return json.dumps({"success": False, "error": "proposal_id is required"})
 
-        if proposal_id:
-            proposal = _find_proposal(proposal_id)
-            if not proposal:
-                return json.dumps({"success": False, "error": "Proposal not found"})
+        proposal = _find_proposal(proposal_id)
+        if not proposal:
+            return json.dumps({"success": False, "error": "Proposal not found"})
 
-            metadata = _load_metadata(proposal)
-            code_inline = metadata.get("code_inline")
-            codices_list = metadata.get("codices") or []
-
-            if codices_list:
-                files = []
-                for entry in codices_list:
-                    name = entry.get("name", "")
-                    if not name:
-                        return json.dumps({"success": False, "error": "codices entry missing name"})
-                    entry_inline = entry.get("code_inline", "")
-                    entry_url = entry.get("url", "")
-                    if entry_inline:
-                        proposed = entry_inline
-                    elif entry_url:
-                        return json.dumps({"success": False, "needs_remote": True})
-                    else:
-                        return json.dumps({
-                            "success": False,
-                            "error": f"codices entry '{name}' has no url or code_inline",
-                        })
-                    files.append(_build_file_preview(
-                        name,
-                        proposed,
-                        code_url=entry_url,
-                        stored_checksum=entry.get("checksum", ""),
-                    ))
-                primary = files[0]
-                return json.dumps({
-                    "success": True,
-                    "data": {
-                        "mode": "multi",
-                        "files": files,
-                        "code": primary["code"],
-                        "original": primary.get("original"),
-                        "is_amendment": primary["is_amendment"],
-                        "codex_name": primary["name"],
-                        "checksum": primary["checksum"],
-                    },
-                })
-
-            if code_inline:
-                codex_name = metadata.get("codex_name", "")
-                file_preview = _build_file_preview(codex_name or "inline", code_inline)
-                return json.dumps({
-                    "success": True,
-                    "data": {
-                        "mode": "single",
-                        "inline": True,
-                        "codex_name": codex_name or None,
-                        **file_preview,
-                        "code_url": None,
-                        "checksum_match": True,
-                    },
-                })
-
-            if not proposal.code_url:
-                return json.dumps({"success": False, "error": "Proposal has no code attached"})
-
-            return json.dumps({"success": False, "needs_remote": True})
-
-        if not code_url:
-            return json.dumps({"success": False, "error": "proposal_id or code_url is required"})
-
-        return json.dumps({"success": False, "needs_remote": True})
+        metadata = _load_metadata(proposal)
+        if metadata.get("proposal_type") != "code_execution":
+            return json.dumps({
+                "success": False,
+                "error": "proposal has no stored code",
+                "error_code": "not_code_execution",
+            })
+        action = metadata.get("action") if isinstance(metadata.get("action"), dict) else {}
+        name = action.get("codex_name") or ""
+        row = Codex[name] if name else None
+        code = getattr(row, "code", None) if row else None
+        if not code:
+            return json.dumps({"success": False, "error": "stored code is missing"})
+        from core.proposal_execution import compute_code_checksum
+        return json.dumps({
+            "success": True,
+            "data": {
+                "mode": "single",
+                "code": code,
+                "codex_name": name,
+                "checksum": compute_code_checksum(code),
+                "code_url": action.get("source_url") or proposal.code_url or None,
+                "is_amendment": False,
+                "original": None,
+            },
+        })
     except Exception as e:
         logger.error(f"fetch_proposal_code error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
 def fetch_proposal_code_remote(args: str) -> Async[str]:
-    """Fetch proposal code that requires an HTTP outcall (read-only)."""
+    """Download a URL at submit time so the proposer can preview and checksum."""
     try:
         args_dict = _parse_args(args)
-        proposal_id = args_dict.get("proposal_id")
-        code_url = args_dict.get("code_url")
-
-        if proposal_id:
-            proposal = _find_proposal(proposal_id)
-            if not proposal:
-                return json.dumps({"success": False, "error": "Proposal not found"})
-
-            metadata = _load_metadata(proposal)
-            codices_list = metadata.get("codices") or []
-
-            if codices_list:
-                files = []
-                for entry in codices_list:
-                    name = entry.get("name", "")
-                    if not name:
-                        return json.dumps({"success": False, "error": "codices entry missing name"})
-                    entry_inline = entry.get("code_inline", "")
-                    entry_url = entry.get("url", "")
-                    if entry_inline:
-                        proposed = entry_inline
-                    elif entry_url:
-                        logger.info(f"Fetching codex preview for {name}: {entry_url}")
-                        proposed = yield from _http_download(entry_url)
-                    else:
-                        return json.dumps({
-                            "success": False,
-                            "error": f"codices entry '{name}' has no url or code_inline",
-                        })
-                    files.append(_build_file_preview(
-                        name,
-                        proposed,
-                        code_url=entry_url,
-                        stored_checksum=entry.get("checksum", ""),
-                    ))
-                primary = files[0]
-                return json.dumps({
-                    "success": True,
-                    "data": {
-                        "mode": "multi",
-                        "files": files,
-                        "code": primary["code"],
-                        "original": primary.get("original"),
-                        "is_amendment": primary["is_amendment"],
-                        "codex_name": primary["name"],
-                        "checksum": primary["checksum"],
-                    },
-                })
-
-            code_url = proposal.code_url
-            if not code_url:
-                return json.dumps({"success": False, "error": "Proposal has no remote code URL"})
-
-            logger.info(f"Fetching code preview from: {code_url}")
-            code_content = yield from _http_download(code_url)
-            codex_name = metadata.get("codex_name", "")
-            file_preview = _build_file_preview(
-                codex_name or "proposal",
-                code_content,
-                code_url=code_url,
-                stored_checksum=proposal.code_checksum or "",
-            )
-            return json.dumps({
-                "success": True,
-                "data": {
-                    "mode": "single",
-                    "codex_name": codex_name or None,
-                    **file_preview,
-                },
-            })
-
+        code_url = str(args_dict.get("code_url") or "").strip()
         if not code_url:
-            return json.dumps({"success": False, "error": "proposal_id or code_url is required"})
-
-        logger.info(f"Fetching code preview from: {code_url}")
+            return json.dumps({"success": False, "error": "code_url is required"})
         code_content = yield from _http_download(code_url)
-        actual_checksum = _checksum_for(code_content)
+        from core.proposal_execution import compute_code_checksum
         return json.dumps({
             "success": True,
             "data": {
-                "mode": "single",
                 "code": code_content,
                 "code_url": code_url,
-                "checksum": actual_checksum,
-                "is_amendment": False,
-                "original": None,
+                "checksum": compute_code_checksum(code_content),
             },
         })
     except Exception as e:
@@ -1744,39 +1335,27 @@ def get_user_vote(args: str) -> str:
         return json.dumps({"success": False, "error": str(e)})
 
 
-def demo_approve_and_execute(args: str) -> Async[str]:
-    """Demo-only: Force-approve and execute a proposal regardless of current status.
-
-    Resets the proposal to 'accepted', then runs the full execution pipeline
-    (download codex, verify checksum, exec).  Available only for demonstration
-    purposes so that testers can re-run execution on any proposal.
-    """
+def get_bridge_verbs(args: str) -> str:
+    """Bridge verbs the Code Execution form may request."""
     try:
-        args_dict = _parse_args(args)
-        proposal_id = args_dict.get("proposal_id")
-        if not proposal_id:
-            return json.dumps({"success": False, "error": "proposal_id is required"})
+        from core.codex_bridge import known_verbs
+        return json.dumps({"success": True, "data": {"verbs": known_verbs()}})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
-        proposal = _find_proposal(proposal_id)
-        if not proposal:
-            return json.dumps({"success": False, "error": "Proposal not found"})
 
-        old_status = proposal.status
-        proposal.status = "accepted"
-        logger.info(f"[DEMO] Proposal {proposal_id} force-approved (was {old_status})")
-
-        yield from _do_execute_proposal(proposal_id)
-
-        proposal = _find_proposal(proposal_id)
+def get_submit_context(args: str) -> str:
+    """UI flags for the typed submit form."""
+    try:
+        from core.proposal_dispatch import baton_configured, registry_canister_id
         return json.dumps({
-            "success": proposal.status == "executed",
+            "success": True,
             "data": {
-                "message": f"Demo: proposal force-approved and executed (was {old_status})",
-                "proposal": _proposal_to_dict(proposal),
-            }
+                "baton_configured": baton_configured(),
+                "registry_canister_id": registry_canister_id(),
+            },
         })
     except Exception as e:
-        logger.error(f"demo_approve_and_execute error: {e}\n{traceback.format_exc()}")
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -1807,15 +1386,17 @@ def get_voting_settings(args: str) -> str:
 
 EXTENSION_FUNCTIONS = {
     "get_voting_settings": get_voting_settings,
+    "get_submit_context": get_submit_context,
+    "get_bridge_verbs": get_bridge_verbs,
     "get_proposals": get_proposals,
     "get_proposal": get_proposal,
+    "get_org_scopes": get_org_scopes,
     "submit_proposal": submit_proposal,
     "start_voting": start_voting,
     "cast_vote": cast_vote,
-    "approve_proposal": approve_proposal,
+    "finalize_proposal": finalize_proposal,
     "execute_proposal": execute_proposal,
     "fetch_proposal_code": fetch_proposal_code,
     "fetch_proposal_code_remote": fetch_proposal_code_remote,
     "get_user_vote": get_user_vote,
-    "demo_approve_and_execute": demo_approve_and_execute,
 }

@@ -1,6 +1,6 @@
 {
   "name": "voting",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Submit proposals that change how your realm works, read what each one would do, and vote yes, no, or abstain while voting is open.",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -25,9 +25,7 @@
       "get_user_vote": "self.data_view",
       "start_voting": "proposal.manage",
       "finalize_proposal": "proposal.manage",
-      "approve_proposal": "proposal.manage",
-      "execute_proposal": "proposal.manage",
-      "demo_approve_and_execute": "demo.manage"
+      "execute_proposal": "proposal.manage"
     }
   }
 }

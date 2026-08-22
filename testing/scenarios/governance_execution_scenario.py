@@ -8,11 +8,10 @@ realm on the `test` network (no Docker, no replica).
 
 Flow:
   1. Self-provision an admin citizen (sha256("admin") self-registration code).
-  2. Submit a proposal carrying inline Python (`code_inline`) whose effect is
-     to create a uniquely-named marker Codex.
-  3. Approve the proposal (manual approval bypasses the member-quorum, which on
-     a large demo realm is otherwise unreachable with a handful of voters).
-  4. Wait for the scheduled execution to run the inline code.
+  2. Submit a ``code_execution`` proposal whose source creates a marker Codex.
+  3. Cast a yes vote. On a test-mode realm, finalize with force if the
+     ballot does not auto-close.
+  4. Wait for the host dispatcher to run the stored source.
   5. Assert the proposal reached `executed` AND the marker Codex now exists —
      i.e. the governance action produced a real, queryable effect.
 
@@ -61,12 +60,13 @@ def run(sc: Scenario):
         sc.check("admin" in profiles, "admin profile granted")
 
         # 2. Submit a proposal carrying inline executable code ----------------
-        sc.step("2. voting.submit_proposal with inline code")
+        sc.step("2. voting.submit_proposal code_execution")
         sp = call_extension("voting", "submit_proposal", {
             "title": f"[{sc.run_id}] execute marker codex",
-            "description": "Governance-execution scenario: create a marker codex",
-            "code_inline": inline_code,
-            "codex_name": marker,
+            "description": "Governance-execution scenario: create a marker Codex",
+            "proposal_type": "code_execution",
+            "source": inline_code,
+            "requested_permissions": [],
         })
         pid = sp.get("data", {}).get("id")
         sc.check(sp.get("success") is True, "submit_proposal succeeded")
@@ -82,13 +82,21 @@ def run(sc: Scenario):
         sc.check(marker not in before, "marker codex absent before execution")
 
         # 4. Approve -> schedules execution -----------------------------------
-        sc.step("4. voting.approve_proposal")
-        ap = call_extension("voting", "approve_proposal", {"proposal_id": pid})
-        sc.check(ap.get("success") is True, "approve_proposal succeeded")
-        sc.check(
-            ap.get("data", {}).get("proposal", {}).get("status") == "accepted",
-            "proposal status is 'accepted'",
-        )
+        sc.step("4. voting.cast_vote yes")
+        cv = call_extension("voting", "cast_vote", {"proposal_id": pid, "vote": "yes"})
+        sc.check(cv.get("success") is True, "cast_vote succeeded")
+        status = cv.get("data", {}).get("proposal", {}).get("status")
+        if status == "voting":
+            fin = call_extension("voting", "finalize_proposal", {
+                "proposal_id": pid, "force": True,
+            })
+            status = (fin.get("data") or {}).get("outcome") or (
+                (fin.get("data") or {}).get("proposal") or {}
+            ).get("status")
+            sc.check(
+                fin.get("success") is True,
+                f"finalize_proposal force (test mode) succeeded (status={status})",
+            )
 
         # 5. Wait for execution to complete -----------------------------------
         sc.step("5. wait for proposal to reach 'executed'")
