@@ -19,6 +19,28 @@ export function getGreeting(): string {
 	return 'Good evening';
 }
 
+export function displayFirstName(
+	summary: Record<string, unknown> | null,
+	principal: string,
+): string {
+	const raw = summary?.user_name;
+	if (typeof raw !== 'string') return '';
+	const name = raw.trim();
+	if (!name || name === principal) return '';
+	return name.split(/\s+/)[0] ?? '';
+}
+
+export function citizenshipSteps(citizenship: Record<string, unknown> | null): {
+	passport: boolean;
+	invoice: boolean;
+	done: number;
+	total: number;
+} {
+	const passport = Boolean(citizenship?.passport_verified);
+	const invoice = Boolean(citizenship?.invoice_paid);
+	return { passport, invoice, done: Number(passport) + Number(invoice), total: 2 };
+}
+
 export function mdToHtml(text: string): string {
 	if (!text) return '';
 	return text

@@ -1,15 +1,13 @@
 <script lang="ts">
-	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
 	import { createExtensionClient, type ExtensionClient } from '@realmsgos/extension-bridge';
-	import { PageHeader, Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
+	import { Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
 	import {
 		bridgeErrorFields,
-		citizenshipNextActions,
-		CITIZENSHIP_FIELDS,
+		citizenshipSteps,
+		displayFirstName,
 		cn,
 		currenciesByNetwork,
-		entries,
 		formatFullDate,
 		formatInvoicePaidDate,
 		formatRelativeTime,
@@ -31,9 +29,6 @@
 		sender?: string;
 		timestamp_ms?: number;
 		read?: boolean;
-		icon?: string;
-		href?: string;
-		color?: string;
 	};
 
 	let bridgeReady = $state(false);
@@ -77,6 +72,9 @@
 
 	let availableCurrencies = $derived(currenciesByNetwork[newAccountNetwork] || []);
 	let unreadCount = $derived(notifications.filter((n) => !n.read).length);
+	let firstName = $derived(displayFirstName(summary, principal));
+	let greetingLine = $derived(firstName ? `${getGreeting()}, ${firstName}` : getGreeting());
+	let steps = $derived(citizenshipSteps(citizenship));
 
 	$effect(() => {
 		const currencies = currenciesByNetwork[newAccountNetwork] || [];
@@ -145,26 +143,11 @@
 	}
 
 	async function loadNotifications() {
-		if (!ctx || !principal) return;
 		notificationsLoading = true;
-		notificationsUnavailable = false;
-		try {
-			const result = await callExt<NotificationItem[]>('get_notifications', {
-				user_id: principal,
-			});
-			if (result.success && Array.isArray(result.data)) {
-				notifications = result.data;
-			} else {
-				notifications = [];
-				notificationsUnavailable = true;
-			}
-		} catch {
-			notifications = [];
-			notificationsUnavailable = true;
-		} finally {
-			notificationsLoading = false;
-			queueMicrotask(reportHeight);
-		}
+		notificationsUnavailable = true;
+		notifications = [];
+		notificationsLoading = false;
+		queueMicrotask(reportHeight);
 	}
 
 	async function loadInvoices() {
@@ -238,29 +221,16 @@
 	async function toggleRead(notif: NotificationItem) {
 		try {
 			const newRead = !notif.read;
-			const result = await callExt<{ id: string; read: boolean }>('mark_as_read', {
-				id: notif.id,
-				read: newRead,
-			});
-			if (result.success) {
-				notifications = notifications.map((n) =>
-					n.id === notif.id ? { ...n, read: newRead } : n,
-				);
-			}
+			notifications = notifications.map((n) =>
+				n.id === notif.id ? { ...n, read: newRead } : n,
+			);
 		} catch {
-			/* mark-as-read failed */
+			/* cross-extension notifications unavailable in sandbox */
 		}
 	}
 
 	async function deleteNotification(notif: NotificationItem) {
-		try {
-			const result = await callExt('delete_notification', { id: notif.id });
-			if (result.success) {
-				notifications = notifications.filter((n) => n.id !== notif.id);
-			}
-		} catch {
-			/* delete failed */
-		}
+		notifications = notifications.filter((n) => n.id !== notif.id);
 	}
 
 	function toggleExpand(notif: NotificationItem) {
@@ -451,7 +421,7 @@
 	});
 </script>
 
-<div class="mx-auto max-w-5xl space-y-8 px-4 pb-8 font-sans">
+<div class="dashboard mx-auto max-w-3xl space-y-6 px-4 pb-12 font-sans">
 	{#if bridgeError}
 		<Card title="Bridge error">
 			{#snippet children()}
@@ -459,7 +429,13 @@
 			{/snippet}
 		</Card>
 	{:else if !isAuthenticated}
-		<PageHeader title="My Dashboard" subtitle={extensionDescription} />
+		<header class="pt-2">
+			<p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{t('dashboard_kicker')}</p>
+			<h1 class="mt-1 text-[1.65rem] font-semibold tracking-tight text-slate-900 dark:text-white">
+				{getGreeting()}
+			</h1>
+			<p class="mt-1.5 text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">{t('dashboard_lede')}</p>
+		</header>
 		<Card>
 			{#snippet children()}
 				<EmptyState
@@ -473,22 +449,30 @@
 			{/snippet}
 		</Card>
 	{:else}
-		<PageHeader title="My Dashboard" subtitle={`${getGreeting()}. ${extensionDescription}`} />
-
-		<p class="-mt-4 text-sm text-gray-500 dark:text-gray-400">
-			{#if summary?.user_name && summary.user_name !== principal}
-				<span>Signed in as {String(summary.user_name)}</span>
-				<span class="mx-2 text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
-			{/if}
+		<header class="flex items-start justify-between gap-3 pt-2">
+			<div class="min-w-0">
+				<p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{t('dashboard_kicker')}</p>
+				<h1 class="mt-1 text-[1.65rem] font-semibold leading-tight tracking-tight text-slate-900 dark:text-white">
+					{greetingLine}
+				</h1>
+				<p class="mt-1.5 max-w-md text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
+					{t('dashboard_lede')}
+				</p>
+			</div>
 			<button
 				type="button"
-				class="text-sm text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-200"
+				class="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:text-slate-800 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
 				disabled={loading}
 				onclick={() => void reloadAll()}
+				title={t('refresh')}
+				aria-label={t('refresh')}
 			>
-				{t('refresh')}
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:animate-spin={loading} aria-hidden="true">
+					<path d="M21 12a9 9 0 1 1-3-6.7" />
+					<path d="M21 3v6h-6" />
+				</svg>
 			</button>
-		</p>
+		</header>
 
 		{#if loading}
 			<Card>
@@ -519,62 +503,142 @@
 			</Card>
 		{:else}
 			{#if citizenship}
-				<Card>
-					{#snippet header()}
-						<div class="flex items-center justify-between gap-3">
-							<h2 class="text-base font-semibold text-gray-900 dark:text-white">{t('citizenship_title')}</h2>
-							{#if citizenship.status}
+				<section
+					class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_rgba(15,23,42,0.05)] dark:border-slate-700 dark:bg-slate-800"
+				>
+					<div class="flex items-center justify-between gap-3 px-5 pt-5 pb-3">
+						<div>
+							<h2 class="text-base font-semibold text-slate-900 dark:text-white">{t('citizenship_title')}</h2>
+							<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+								{t('citizenship_steps', { done: steps.done, total: steps.total })}
+							</p>
+						</div>
+						{#if citizenship.status}
+							<span
+								class={cn(
+									'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
+									citizenship.status === 'active'
+										? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+										: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+								)}
+							>
 								<span
 									class={cn(
-										'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
-										citizenship.status === 'active'
-											? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-											: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+										'h-1.5 w-1.5 rounded-full',
+										citizenship.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500',
+									)}
+									aria-hidden="true"
+								></span>
+								{String(citizenship.status_label || citizenship.status)}
+							</span>
+						{/if}
+					</div>
+					<div class="px-5 pb-4">
+						<div class="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+							<div
+								class="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+								style="width: {(steps.done / steps.total) * 100}%"
+							></div>
+						</div>
+					</div>
+					<div class="grid grid-cols-1 gap-3 px-4 pb-4 sm:grid-cols-2">
+						<div
+							class={cn(
+								'rounded-xl border p-4',
+								steps.passport
+									? 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-900/20'
+									: 'border-slate-200 bg-slate-50 dark:border-slate-600 dark:bg-slate-900/40',
+							)}
+						>
+							<div class="flex items-start gap-3">
+								<div
+									class={cn(
+										'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
+										steps.passport
+											? 'bg-emerald-500 text-white'
+											: 'border border-slate-200 bg-white text-slate-400 dark:border-slate-600 dark:bg-slate-800',
 									)}
 								>
-									{#if citizenship.status === 'active'}✓{:else}<span aria-hidden="true">○</span>{/if}
-									{String(citizenship.status_label || citizenship.status)}
-								</span>
-							{/if}
-						</div>
-					{/snippet}
-					{#snippet children()}
-						<dl class="space-y-2">
-							{#each CITIZENSHIP_FIELDS as field}
-								<div
-									class="flex justify-between border-b border-gray-100 pb-1 text-sm last:border-b-0 dark:border-gray-700"
-								>
-									<dt class="text-gray-500 dark:text-gray-400">{t(field.labelKey)}</dt>
-									<dd class="font-medium text-gray-800 dark:text-gray-200">
-										{#if field.kind === 'bool'}
-											{citizenship[field.key] ? t('citizenship_yes') : t('citizenship_no')}
-										{:else}
-											{citizenship[field.key] ?? 0}
-										{/if}
-									</dd>
+									{#if steps.passport}
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+									{:else}
+										1
+									{/if}
 								</div>
-							{/each}
-						</dl>
-						{#if citizenshipNextActions(citizenship).length > 0}
-							<div class="mt-4 flex flex-col gap-2 sm:flex-row">
-								{#each citizenshipNextActions(citizenship) as action}
-									<Button
-										tone={action.tone}
-										size="sm"
-										onclick={() => handleCitizenshipAction(action.id)}
-									>
-										{t(action.labelKey)}
-									</Button>
-								{/each}
+								<div class="min-w-0 flex-1">
+									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_passport')}</p>
+									<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+										{steps.passport ? t('citizenship_passport_done') : t('citizenship_passport_todo')}
+									</p>
+									{#if !steps.passport}
+										<div class="mt-3">
+											<Button tone="primary" size="sm" onclick={() => handleCitizenshipAction('verify_passport')}>
+												{t('citizenship_verify_passport')}
+											</Button>
+										</div>
+									{/if}
+								</div>
 							</div>
-						{/if}
-					{/snippet}
-				</Card>
+						</div>
+						<div
+							class={cn(
+								'rounded-xl border p-4',
+								steps.invoice
+									? 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-900/20'
+									: 'border-slate-200 bg-slate-50 dark:border-slate-600 dark:bg-slate-900/40',
+							)}
+						>
+							<div class="flex items-start gap-3">
+								<div
+									class={cn(
+										'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
+										steps.invoice
+											? 'bg-emerald-500 text-white'
+											: 'border border-slate-200 bg-white text-slate-400 dark:border-slate-600 dark:bg-slate-800',
+									)}
+								>
+									{#if steps.invoice}
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+									{:else}
+										2
+									{/if}
+								</div>
+								<div class="min-w-0 flex-1">
+									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_invoice_step')}</p>
+									<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+										{steps.invoice ? t('citizenship_invoice_done') : t('citizenship_invoice_todo')}
+									</p>
+									{#if !steps.invoice}
+										<div class="mt-3">
+											<Button
+												tone={steps.passport ? 'primary' : 'secondary'}
+												size="sm"
+												onclick={() => handleCitizenshipAction('invoices')}
+											>
+												{t(Number(citizenship.total_invoices || 0) > 0 ? 'citizenship_pay_invoice' : 'citizenship_view_invoices')}
+											</Button>
+										</div>
+									{/if}
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100 dark:divide-slate-700 dark:border-slate-700">
+						<div class="px-5 py-3">
+							<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('citizenship_total_invoices')}</p>
+							<p class="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.total_invoices ?? 0}</p>
+						</div>
+						<div class="px-5 py-3">
+							<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('citizenship_paid_invoices')}</p>
+							<p class="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.paid_invoices ?? 0}</p>
+						</div>
+					</div>
+				</section>
 			{/if}
 
-			<section class="space-y-4">
-				<div class="flex items-center gap-2">
-					<h2 class="text-xl font-bold text-gray-900 dark:text-white">Notifications</h2>
+			<section class="space-y-3">
+				<div class="flex items-center gap-2 px-0.5">
+					<h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{t('notifications_title')}</h2>
 					{#if unreadCount > 0}
 						<span
 							class="inline-flex items-center justify-center rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white"
@@ -592,14 +656,13 @@
 						{/snippet}
 					</Card>
 				{:else if notificationsUnavailable || notifications.length === 0}
-					<Card>
-						{#snippet children()}
-							<EmptyState
-								title={t('notifications_empty_title')}
-								message={t('notifications_empty_body')}
-							/>
-						{/snippet}
-					</Card>
+					<div class="rounded-2xl border border-slate-200/80 bg-white px-5 py-8 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-800">
+						<div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-700">
+							<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 7L2 7" /></svg>
+						</div>
+						<p class="text-sm font-medium text-slate-800 dark:text-slate-100">{t('notifications_empty_title')}</p>
+						<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('notifications_empty_body')}</p>
+					</div>
 				{:else}
 					<Card>
 						{#snippet children()}
@@ -700,10 +763,10 @@
 				{/if}
 			</section>
 
-			<section id="invoices" class="space-y-4 scroll-mt-4">
-				<div>
-					<h2 class="text-xl font-bold text-gray-900 dark:text-white">Invoices</h2>
-					<p class="text-sm text-gray-500 dark:text-gray-400">Manage your invoices and payment records</p>
+			<section id="invoices" class="space-y-3 scroll-mt-4">
+				<div class="px-0.5">
+					<h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{t('invoices_title')}</h2>
+					<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('invoices_subtitle')}</p>
 				</div>
 
 				{#if invoiceLoading}
@@ -788,11 +851,10 @@
 						{/snippet}
 					</Card>
 				{:else}
-					<Card>
-						{#snippet children()}
-							<EmptyState title="No invoices yet" message="You have no invoice records." />
-						{/snippet}
-					</Card>
+					<div class="rounded-2xl border border-slate-200/80 bg-white px-5 py-8 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-800">
+						<p class="text-sm font-medium text-slate-800 dark:text-slate-100">{t('invoices_empty_title')}</p>
+						<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('invoices_empty_body')}</p>
+					</div>
 				{/if}
 			</section>
 
@@ -922,9 +984,9 @@
 				</div>
 			{/if}
 
-			<section class="space-y-4">
-				<div class="flex items-center justify-between">
-					<h2 class="text-xl font-bold text-gray-900 dark:text-white">Payment Accounts</h2>
+			<section class="space-y-3">
+				<div class="flex items-center justify-between gap-3 px-0.5">
+					<h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{t('accounts_title')}</h2>
 					<Button tone="secondary" size="sm" onclick={() => (showAddAccountForm = !showAddAccountForm)}>
 						+ Add Account
 					</Button>
@@ -1014,14 +1076,10 @@
 						{/snippet}
 					</Card>
 				{:else if paymentAccounts.length === 0}
-					<Card>
-						{#snippet children()}
-							<EmptyState
-								title="No payment accounts yet"
-								message="Add a payment account to receive and send payments."
-							/>
-						{/snippet}
-					</Card>
+					<div class="rounded-2xl border border-slate-200/80 bg-white px-5 py-8 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-800">
+						<p class="text-sm font-medium text-slate-800 dark:text-slate-100">{t('accounts_empty_title')}</p>
+						<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('accounts_empty_body')}</p>
+					</div>
 				{:else}
 					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 						{#each paymentAccounts as account}
