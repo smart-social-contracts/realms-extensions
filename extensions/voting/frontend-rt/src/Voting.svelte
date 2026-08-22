@@ -1,14 +1,46 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy } from 'svelte';
-	import MonacoDiffPane from './MonacoDiffPane.svelte';
 	import MonacoPane from './MonacoPane.svelte';
+	import FederalVotes from './FederalVotes.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
 	const EXTENSION_ID = 'voting';
 
-	type View = 'list' | 'form' | 'detail';
+	type View = 'list' | 'form' | 'detail' | 'federal';
+	type ProposalType = 'transaction' | 'upgrade' | 'poll' | 'code_execution';
+	type UpgradeTarget = 'codex' | 'extension' | 'core';
+
+	const PROPOSAL_TYPE_OPTIONS: { value: ProposalType | ''; label: string }[] = [
+		{ value: '', label: 'All types' },
+		{ value: 'transaction', label: 'Transaction' },
+		{ value: 'upgrade', label: 'Upgrade' },
+		{ value: 'poll', label: 'Poll' },
+		{ value: 'code_execution', label: 'Code execution' },
+	];
+	const FORM_TYPE_OPTIONS: { value: ProposalType; label: string; subtitle: string }[] = [
+		{
+			value: 'transaction',
+			label: 'Transaction',
+			subtitle: 'Propose a treasury transfer from the realm vault.',
+		},
+		{
+			value: 'upgrade',
+			label: 'Upgrade',
+			subtitle: 'Install or upgrade a codex, extension, or core orchestration action.',
+		},
+		{
+			value: 'poll',
+			label: 'Poll',
+			subtitle: 'Ask the realm a question — no automated action if approved.',
+		},
+		{
+			value: 'code_execution',
+			label: 'Code execution',
+			subtitle: 'Submit Python code to run on the realm backend if approved.',
+		},
+	];
 
 	function getExtensionBasePath(): string {
 		if (typeof window === 'undefined') return '/extensions/voting';
@@ -27,7 +59,6 @@
 		if (!rest) return null;
 		const proposalsMatch = rest.match(/^proposals\/(.+)$/);
 		if (proposalsMatch) return decodeURIComponent(proposalsMatch[1]);
-		// Legacy URL shapes (still accepted when opened directly)
 		if (rest.startsWith('p=')) {
 			return decodeURIComponent(rest.slice('p='.length));
 		}
@@ -81,6 +112,7 @@
 	let listNextFromId = $state(1);
 	let orgFilter = $state('');
 	let statusFilter = $state('');
+	let typeFilter = $state('');
 	let sortBy = $state('newest');
 	let orgOptions: string[] = $state([]);
 	const STATUS_OPTIONS = [
@@ -105,37 +137,34 @@
 
 	let formTitle = $state('');
 	let formDescription = $state('');
-	let codexEntries: { url: string; name: string; checksum: string; calculating: boolean }[] = $state([
-		{ url: '', name: '', checksum: '', calculating: false },
-	]);
+	let formProposalType = $state<ProposalType>('poll');
+	let formOrgScope = $state('');
+	let formToken = $state('');
+	let formToPrincipal = $state('');
+	let formAmount = $state('');
+	let formUpgradeTarget = $state<UpgradeTarget>('extension');
+	let formPackageId = $state('');
+	let formVersion = $state('');
+	let formActionId = $state('');
+	let formCoreDecision = $state<'approve' | 'reject'>('approve');
+	let formSource = $state('');
+	let formSourceUrl = $state('');
+	let formRequestedPermissions = $state<string[]>([]);
+	let codeFetching = $state(false);
+	let submitContext: { baton_configured?: boolean; registry_canister_id?: string } | null = $state(null);
+	let bridgeVerbs: string[] = $state([]);
+	let vaultTokens: { name: string; symbol: string; decimals: number }[] = $state([]);
+	let vaultBalance: string | null = $state(null);
 	let submitting = $state(false);
 	let submitMsg = $state('');
-
-	type CodeFile = {
-		name: string;
-		code: string;
-		original?: string | null;
-		is_amendment: boolean;
-		checksum?: string;
-		code_url?: string | null;
-	};
 
 	let selectedProposal: any = $state(null);
 	let detailLoading = $state(!!initialProposalId);
 	let codeContent = $state('');
 	let codeChecksum = $state('');
-	let codeFiles: CodeFile[] = $state([]);
-	let selectedFileIndex = $state(0);
 	let codeLoading = $state(false);
 	let codeError = $state('');
-
-	let activeCodeFile = $derived(codeFiles[selectedFileIndex] ?? null);
-	let showCodeDiff = $derived(
-		!!activeCodeFile?.is_amendment && !!(activeCodeFile?.original ?? '').length,
-	);
-	let executing = $state(false);
-	let actionMsg = $state('');
-	let actionError = $state('');
+	let votingInProgress = $state('');
 
 	let votingSettings: { voting_window_seconds: number; voting_window_days: number } | null = $state(null);
 	let linkCopied = $state(false);
@@ -194,6 +223,315 @@
 		sortedProposals.slice((currentPage - 1) * pageSize, currentPage * pageSize),
 	);
 
+	let selectedProposalType = $derived(
+		selectedProposal ? getProposalType(selectedProposal) : '',
+	);
+	let selectedProposalAction = $derived(
+		selectedProposal ? parseProposalAction(selectedProposal) : {},
+	);
+	let selectedProposalPermissions = $derived(
+		selectedProposal ? parseProposalPermissions(selectedProposal) : [],
+	);
+	let formSubtitle = $derived(
+		FORM_TYPE_OPTIONS.find((o) => o.value === formProposalType)?.subtitle ?? '',
+	);
+	let showCoreUpgrade = $derived(!!submitContext?.baton_configured);
+
+	function parseProposalMetadata(proposal: any): Record<string, any> {
+		try {
+			const meta = proposal?.metadata;
+			if (typeof meta === 'string') return JSON.parse(meta);
+			return meta && typeof meta === 'object' ? meta : {};
+		} catch {
+			return {};
+		}
+	}
+
+	function getProposalType(proposal: any): string {
+		const direct = String(proposal?.proposal_type || '').trim();
+		if (direct) return direct;
+		return String(parseProposalMetadata(proposal).proposal_type || '').trim();
+	}
+
+	function parseProposalAction(proposal: any): Record<string, any> {
+		const meta = parseProposalMetadata(proposal);
+		const action = meta.action;
+		return action && typeof action === 'object' ? action : {};
+	}
+
+	function parseProposalPermissions(proposal: any): string[] {
+		const meta = parseProposalMetadata(proposal);
+		const perms = meta.requested_permissions;
+		return Array.isArray(perms) ? perms.map(String) : [];
+	}
+
+	function proposalTypeLabel(type: string): string {
+		if (!type) return 'Unknown';
+		return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+	}
+
+	function proposalTypeColor(type: string): string {
+		switch (type) {
+			case 'transaction':
+				return 'bg-blue-100 text-blue-800';
+			case 'upgrade':
+				return 'bg-purple-100 text-purple-800';
+			case 'poll':
+				return 'bg-sky-100 text-sky-800';
+			case 'code_execution':
+				return 'bg-amber-100 text-amber-800';
+			default:
+				return 'bg-gray-100 text-gray-700';
+		}
+	}
+
+	function isValidUrl(s: string): boolean {
+		try {
+			new URL(s);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	function isPinnedSemver(v: string): boolean {
+		const s = v.trim();
+		if (!s || s.toLowerCase() === 'latest') return false;
+		return /^\d+\.\d+\.\d+(-[\w.]+)?(\+[\w.]+)?$/.test(s);
+	}
+
+	function isValidBaseAmount(s: string): boolean {
+		return /^[1-9][0-9]*$/.test(s.trim());
+	}
+
+	function formatTokenBalance(raw: number | string | null | undefined, decimals: number): string {
+		const n = Number(raw);
+		if (!Number.isFinite(n)) return '—';
+		return (n / Math.pow(10, decimals)).toLocaleString(undefined, {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: Math.min(decimals, 8),
+		});
+	}
+
+	async function vaultSyncCall(fn: string, args: Record<string, any> = {}) {
+		const raw = await ctx.backend.extension_sync_call('vault', fn, JSON.stringify(args));
+		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+		const inner = envelope?.response ?? envelope;
+		return typeof inner === 'string' ? JSON.parse(inner) : inner;
+	}
+
+	async function loadSubmitContext() {
+		try {
+			const res = await callSync('get_submit_context');
+			if (res?.success && res.data) submitContext = res.data;
+			else submitContext = res?.data ?? null;
+		} catch {
+			submitContext = null;
+		}
+	}
+
+	async function loadBridgeVerbs() {
+		try {
+			const res = await callSync('get_bridge_verbs');
+			const verbs = res?.data?.verbs ?? res?.verbs;
+			bridgeVerbs = Array.isArray(verbs) ? verbs.map(String) : [];
+		} catch {
+			bridgeVerbs = [];
+		}
+	}
+
+	async function loadVaultTokens() {
+		try {
+			const res = await vaultSyncCall('get_active_tokens', {});
+			const tokens = res?.data?.ActiveTokens ?? res?.ActiveTokens ?? [];
+			vaultTokens = (Array.isArray(tokens) ? tokens : []).map((t: any) => ({
+				name: String(t.name || t.symbol || ''),
+				symbol: String(t.symbol || t.name || ''),
+				decimals: Number(t.decimals) || 8,
+			})).filter((t) => t.name);
+			if (!formToken && vaultTokens.length) formToken = vaultTokens[0].name;
+		} catch {
+			vaultTokens = [];
+		}
+	}
+
+	async function loadVaultBalanceForToken(token: string) {
+		if (!token) {
+			vaultBalance = null;
+			return;
+		}
+		try {
+			const res = await vaultSyncCall('get_vault_balance', { token });
+			const bal = res?.data?.Balance ?? res?.Balance;
+			if (bal?.amount != null) vaultBalance = String(bal.amount);
+			else vaultBalance = null;
+		} catch {
+			vaultBalance = null;
+		}
+	}
+
+	function togglePermission(verb: string) {
+		if (formRequestedPermissions.includes(verb)) {
+			formRequestedPermissions = formRequestedPermissions.filter((v) => v !== verb);
+		} else {
+			formRequestedPermissions = [...formRequestedPermissions, verb];
+		}
+	}
+
+	async function openSubmitForm() {
+		view = 'form';
+		await Promise.all([loadSubmitContext(), loadBridgeVerbs(), loadOrgOptions(), loadVaultTokens()]);
+		if (formToken) await loadVaultBalanceForToken(formToken);
+	}
+
+	function resetFormFields() {
+		formTitle = '';
+		formDescription = '';
+		formProposalType = 'poll';
+		formOrgScope = '';
+		formToken = vaultTokens[0]?.name ?? '';
+		formToPrincipal = '';
+		formAmount = '';
+		formUpgradeTarget = 'extension';
+		formPackageId = '';
+		formVersion = '';
+		formActionId = '';
+		formCoreDecision = 'approve';
+		formSource = '';
+		formSourceUrl = '';
+		formRequestedPermissions = [];
+		vaultBalance = null;
+	}
+
+	async function fetchRemoteCode() {
+		const url = formSourceUrl.trim();
+		if (!url || !isValidUrl(url)) {
+			error = 'Please enter a valid code URL';
+			return;
+		}
+		codeFetching = true;
+		error = '';
+		accessDeniedOp = '';
+		try {
+			const res = await callAsync('fetch_proposal_code_remote', { code_url: url });
+			if (res?.success) {
+				formSource = res.data?.code ?? '';
+			} else {
+				error = res?.error || 'Failed to fetch code';
+			}
+		} catch (e: any) {
+			const op = ctx.ui?.accessDeniedOperation?.(e);
+			if (op != null) {
+				accessDeniedOp = op;
+				error = '';
+			} else {
+				accessDeniedOp = '';
+				error = e?.message ?? String(e);
+			}
+		} finally {
+			codeFetching = false;
+		}
+	}
+
+	function buildSubmitArgs(): Record<string, any> | null {
+		const title = formTitle.trim();
+		const description = formDescription.trim();
+		if (!title || !description) {
+			error = 'Title and description are required';
+			return null;
+		}
+
+		const args: Record<string, any> = {
+			title,
+			description,
+			proposal_type: formProposalType,
+		};
+		const orgScope = formOrgScope.trim();
+		if (orgScope) args.org_scope = orgScope;
+
+		if (formProposalType === 'poll') {
+			args.action = {};
+			return args;
+		}
+
+		if (formProposalType === 'transaction') {
+			const token = formToken.trim();
+			const toPrincipal = formToPrincipal.trim();
+			const amount = formAmount.trim();
+			if (!token || !toPrincipal) {
+				error = 'Token and recipient principal are required';
+				return null;
+			}
+			if (!isValidBaseAmount(amount)) {
+				error = 'Amount must be a positive decimal string of ledger base units';
+				return null;
+			}
+			args.action = { token, to_principal: toPrincipal, amount };
+			return args;
+		}
+
+		if (formProposalType === 'upgrade') {
+			if (formUpgradeTarget === 'core') {
+				const actionId = formActionId.trim();
+				if (!actionId) {
+					error = 'Orchestration action ID is required';
+					return null;
+				}
+				args.action = {
+					target: 'core',
+					action_id: actionId,
+					decision: formCoreDecision,
+				};
+				return args;
+			}
+			const packageId = formPackageId.trim();
+			const version = formVersion.trim();
+			if (!packageId) {
+				error = 'Package ID is required';
+				return null;
+			}
+			if (!isPinnedSemver(version)) {
+				error = 'Version must be a pinned semver (not empty or "latest")';
+				return null;
+			}
+			const registryId = String(submitContext?.registry_canister_id || '').trim();
+			args.action = {
+				target: formUpgradeTarget,
+				package_id: packageId,
+				version,
+				...(registryId ? { registry_canister_id: registryId } : {}),
+			};
+			return args;
+		}
+
+		const source = formSource.trim();
+		const sourceUrl = formSourceUrl.trim();
+		if (!source && !sourceUrl) {
+			error = 'Paste code or provide a URL to fetch';
+			return null;
+		}
+		args.action = {};
+		if (source) args.source = source;
+		if (sourceUrl) args.source_url = sourceUrl;
+		args.requested_permissions = [...formRequestedPermissions];
+		return args;
+	}
+
+	function isFormValid(): boolean {
+		if (!formTitle.trim() || !formDescription.trim()) return false;
+		if (formProposalType === 'transaction') {
+			return !!(formToken.trim() && formToPrincipal.trim() && isValidBaseAmount(formAmount));
+		}
+		if (formProposalType === 'upgrade') {
+			if (formUpgradeTarget === 'core') return !!formActionId.trim();
+			return !!(formPackageId.trim() && isPinnedSemver(formVersion));
+		}
+		if (formProposalType === 'code_execution') {
+			return !!(formSource.trim() || (formSourceUrl.trim() && isValidUrl(formSourceUrl.trim())));
+		}
+		return true;
+	}
+
 	async function callSync(fn: string, args: Record<string, any> = {}) {
 		const raw = await ctx.callSync(fn, args);
 		return typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -208,6 +546,7 @@
 		const args: Record<string, any> = { from_id: fromId, page_size: LIST_FETCH_SIZE };
 		if (orgFilter) args.org_scope = orgFilter;
 		if (statusFilter) args.status = statusFilter;
+		if (typeFilter) args.proposal_type = typeFilter;
 		const res = await callSync('get_proposals', args);
 		if (res?.success) {
 			const batch = res.data?.proposals ?? res.data ?? [];
@@ -318,34 +657,6 @@
 		} finally {
 			listLoadingMore = false;
 		}
-	}
-
-	function applyCodePreview(data: any) {
-		if (data?.files?.length) {
-			codeFiles = data.files.map((f: any) => ({
-				name: f.name || 'codex',
-				code: f.code ?? '',
-				original: f.original ?? null,
-				is_amendment: !!f.is_amendment && !!(f.original ?? '').length,
-				checksum: f.checksum,
-				code_url: f.code_url,
-			}));
-		} else {
-			codeFiles = [
-				{
-					name: data?.codex_name || 'proposal',
-					code: data?.code ?? '',
-					original: data?.original ?? null,
-					is_amendment: !!data?.is_amendment && !!(data?.original ?? '').length,
-					checksum: data?.checksum,
-					code_url: data?.code_url,
-				},
-			];
-		}
-		selectedFileIndex = 0;
-		const primary = codeFiles[0];
-		codeContent = primary?.code ?? '';
-		codeChecksum = primary?.checksum ?? '';
 	}
 
 	function proposalPath(proposal: any | string | null): string {
@@ -500,24 +811,13 @@
 		view = 'detail';
 		codeContent = '';
 		codeChecksum = '';
-		codeFiles = [];
-		selectedFileIndex = 0;
 		codeError = '';
-		actionMsg = '';
-		actionError = '';
 		if (!opts?.skipUrlSync && proposal?.id) {
 			syncProposalUrl(proposal, { replace: false });
 		}
 		publishProposalFocus(proposal);
-		await fetchCode(proposal);
-	}
-
-	function selectCodeFile(index: number) {
-		selectedFileIndex = index;
-		const file = codeFiles[index];
-		if (file) {
-			codeContent = file.code;
-			codeChecksum = file.checksum ?? '';
+		if (getProposalType(proposal) === 'code_execution') {
+			await fetchCode(proposal);
 		}
 	}
 
@@ -525,18 +825,17 @@
 		codeLoading = true;
 		codeError = '';
 		try {
-			let res = await callSync('fetch_proposal_code', { proposal_id: proposal.id });
-			if (res?.needs_remote) {
-				res = await callAsync('fetch_proposal_code_remote', { proposal_id: proposal.id });
-			}
+			const res = await callSync('fetch_proposal_code', { proposal_id: proposal.id });
 			if (res?.success) {
-				applyCodePreview(res.data ?? {});
+				const data = res.data ?? {};
+				codeContent = data.code ?? '';
+				codeChecksum = data.checksum ?? '';
 			} else {
-				codeFiles = [];
+				codeContent = '';
 				codeError = res?.error || 'Failed to fetch code';
 			}
 		} catch (e: any) {
-			codeFiles = [];
+			codeContent = '';
 			codeError = e?.message || String(e);
 		} finally {
 			codeLoading = false;
@@ -574,141 +873,18 @@
 		}
 	}
 
-	async function handleDemoApproveAndExecute() {
-		if (!selectedProposal) return;
-		executing = true;
-		actionError = '';
-		actionMsg = '';
-		try {
-			const res = await callAsync('demo_approve_and_execute', { proposal_id: selectedProposal.id });
-			if (res?.success) {
-				actionMsg = res.data?.message || 'Proposal approved and executed';
-				if (res.data?.proposal) selectedProposal = { ...selectedProposal, ...res.data.proposal };
-				await loadProposals();
-			} else {
-				actionError = res?.error || 'Failed to approve and execute';
-			}
-		} catch (e: any) {
-			actionError = e?.message || String(e);
-		} finally {
-			executing = false;
-		}
-	}
-
-	function extractCodexName(url: string): string {
-		try {
-			const filename = new URL(url).pathname.split('/').pop() || '';
-			return filename.endsWith('.py') ? filename.slice(0, -3) : filename;
-		} catch {
-			return '';
-		}
-	}
-
-	function isValidUrl(s: string): boolean {
-		try {
-			new URL(s);
-			return true;
-		} catch {
-			return false;
-		}
-	}
-
-	function onUrlChange(i: number) {
-		const entry = codexEntries[i];
-		if (entry.url && isValidUrl(entry.url) && !entry.name) {
-			codexEntries[i].name = extractCodexName(entry.url);
-		}
-	}
-
-	function addCodexEntry() {
-		codexEntries = [...codexEntries, { url: '', name: '', checksum: '', calculating: false }];
-	}
-
-	function removeCodexEntry(i: number) {
-		if (codexEntries.length <= 1) return;
-		codexEntries = codexEntries.filter((_, idx) => idx !== i);
-	}
-
-	async function calculateChecksum(i: number) {
-		const entry = codexEntries[i];
-		if (!entry.url.trim() || !isValidUrl(entry.url)) {
-			error = 'Please enter a valid URL';
-			return;
-		}
-		codexEntries[i].calculating = true;
-		error = '';
-		accessDeniedOp = '';
-		try {
-			let res = await callSync('fetch_proposal_code', { code_url: entry.url.trim() });
-			if (res?.needs_remote) {
-				res = await callAsync('fetch_proposal_code_remote', { code_url: entry.url.trim() });
-			}
-			if (res?.success) {
-				codexEntries[i].checksum = res.data?.checksum ?? '';
-			} else {
-				error = res?.error || 'Failed to fetch checksum';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			codexEntries[i].calculating = false;
-		}
-	}
-
-	function hasValidCodex(): boolean {
-		return codexEntries.some((e) => e.url.trim() && isValidUrl(e.url.trim()));
-	}
-
 	async function submitProposal() {
-		if (!formTitle.trim() || !formDescription.trim()) {
-			error = 'Title and description are required';
-			return;
-		}
-		const validEntries = codexEntries.filter((e) => e.url.trim() && e.name.trim());
-		if (validEntries.length === 0) {
-			error = 'At least one codex entry with URL and name is required';
-			return;
-		}
-		for (const entry of validEntries) {
-			if (!isValidUrl(entry.url)) {
-				error = 'One or more codex URLs are invalid';
-				return;
-			}
-		}
+		const args = buildSubmitArgs();
+		if (!args) return;
 		submitting = true;
 		error = '';
 		accessDeniedOp = '';
 		submitMsg = '';
 		try {
-			const args: Record<string, any> = {
-				title: formTitle.trim(),
-				description: formDescription.trim(),
-				proposer: ctx.principal || 'anonymous',
-			};
-			if (validEntries.length === 1) {
-				args.code_url = validEntries[0].url.trim();
-				args.code_checksum = validEntries[0].checksum.trim();
-				args.codex_name = validEntries[0].name.trim();
-			} else {
-				args.codices = validEntries.map((e) => ({
-					url: e.url.trim(),
-					name: e.name.trim(),
-					checksum: e.checksum.trim(),
-				}));
-			}
-			const res = await callSync('submit_proposal', args);
+			const res = await callAsync('submit_proposal', args);
 			if (res?.success) {
 				submitMsg = 'Proposal submitted successfully!';
-				formTitle = '';
-				formDescription = '';
-				codexEntries = [{ url: '', name: '', checksum: '', calculating: false }];
+				resetFormFields();
 				await loadProposals();
 				setTimeout(() => {
 					submitMsg = '';
@@ -732,9 +908,7 @@
 	}
 
 	function cancelForm() {
-		formTitle = '';
-		formDescription = '';
-		codexEntries = [{ url: '', name: '', checksum: '', calculating: false }];
+		resetFormFields();
 		error = '';
 		accessDeniedOp = '';
 		submitMsg = '';
@@ -902,15 +1076,6 @@
 		return id.slice(0, 8) + '...' + id.slice(-6);
 	}
 
-	function parseCodices(proposal: any): any[] {
-		try {
-			const meta = typeof proposal.metadata === 'string' ? JSON.parse(proposal.metadata) : (proposal.metadata || {});
-			return meta.codices || [];
-		} catch {
-			return [];
-		}
-	}
-
 	onMount(() => {
 		countdownTimer = setInterval(() => {
 			nowMs = Date.now();
@@ -1007,6 +1172,11 @@
 					<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold {statusColor(selectedProposal.status)}">
 						{statusLabel(selectedProposal.status)}
 					</span>
+					{#if selectedProposalType}
+						<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold {proposalTypeColor(selectedProposalType)}">
+							{proposalTypeLabel(selectedProposalType)}
+						</span>
+					{/if}
 					{#if selectedProposal.org_scope}
 						<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
 							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
@@ -1151,74 +1321,89 @@
 				</div>
 			{/if}
 
-			<!-- Actions -->
-			<div class="flex flex-wrap gap-3 items-center">
-				<button
-					onclick={handleDemoApproveAndExecute}
-					disabled={executing}
-					class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-50 transition-colors"
-				>
-					{#if executing}
-						<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-						Executing…
-					{:else}
-						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-						Approve & Execute
+			<!-- Action summary (non code_execution) -->
+			{#if selectedProposalType && selectedProposalType !== 'code_execution'}
+				<div class="rounded-lg border border-gray-200 bg-white p-5">
+					<h3 class="text-base font-semibold text-gray-900 mb-3">Proposal action</h3>
+					{#if selectedProposalType === 'poll'}
+						<p class="text-sm text-gray-600">Advisory poll — no automated action on approval.</p>
+					{:else if selectedProposalType === 'transaction'}
+						<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+							<div>
+								<dt class="text-xs text-gray-500">Token</dt>
+								<dd class="font-medium text-gray-900">{selectedProposalAction.token || '—'}</dd>
+							</div>
+							<div>
+								<dt class="text-xs text-gray-500">Amount (base units)</dt>
+								<dd class="font-mono text-gray-900">{selectedProposalAction.amount || '—'}</dd>
+							</div>
+							<div class="sm:col-span-2">
+								<dt class="text-xs text-gray-500">Recipient</dt>
+								<dd class="font-mono text-xs break-all text-gray-900">{selectedProposalAction.to_principal || '—'}</dd>
+							</div>
+						</dl>
+					{:else if selectedProposalType === 'upgrade'}
+						<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+							<div>
+								<dt class="text-xs text-gray-500">Target</dt>
+								<dd class="font-medium text-gray-900">{proposalTypeLabel(selectedProposalAction.target || '')}</dd>
+							</div>
+							{#if selectedProposalAction.target === 'core'}
+								<div>
+									<dt class="text-xs text-gray-500">Action ID</dt>
+									<dd class="font-mono text-xs break-all text-gray-900">{selectedProposalAction.action_id || '—'}</dd>
+								</div>
+								<div>
+									<dt class="text-xs text-gray-500">Decision</dt>
+									<dd class="font-medium text-gray-900 capitalize">{selectedProposalAction.decision || '—'}</dd>
+								</div>
+							{:else}
+								<div>
+									<dt class="text-xs text-gray-500">Package</dt>
+									<dd class="font-mono text-gray-900">{selectedProposalAction.package_id || '—'}</dd>
+								</div>
+								<div>
+									<dt class="text-xs text-gray-500">Version</dt>
+									<dd class="font-mono text-gray-900">{selectedProposalAction.version || '—'}</dd>
+								</div>
+								{#if selectedProposalAction.registry_canister_id}
+									<div class="sm:col-span-2">
+										<dt class="text-xs text-gray-500">Registry</dt>
+										<dd class="font-mono text-xs break-all text-gray-700">{selectedProposalAction.registry_canister_id}</dd>
+									</div>
+								{/if}
+							{/if}
+						</dl>
 					{/if}
-				</button>
-				<span class="text-xs text-gray-400">Demo feature</span>
-			</div>
-
-			{#if actionError}
-				<div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</div>
-			{/if}
-			{#if actionMsg}
-				<div class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 flex items-center gap-2">
-					<svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-					{actionMsg}
 				</div>
 			{/if}
 
+			{#if selectedProposalType === 'code_execution' && selectedProposalPermissions.length > 0}
+				<div class="rounded-lg border border-gray-200 bg-white p-5">
+					<h3 class="text-base font-semibold text-gray-900 mb-2">Requested permissions</h3>
+					<div class="flex flex-wrap gap-1.5">
+						{#each selectedProposalPermissions as perm}
+							<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 font-mono">{perm}</span>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			{#if selectedProposalType === 'code_execution'}
 			<!-- Proposal Code -->
 			<div class="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden flex flex-col min-h-[28rem]">
 				<div class="bg-gray-100 px-4 py-2.5 border-b flex items-center justify-between flex-wrap gap-2">
 					<div class="flex items-center gap-2">
 						<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
 						<h3 class="font-semibold text-sm text-gray-800">Proposal Code</h3>
-						{#if showCodeDiff}
-							<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Diff vs realm codex</span>
-						{/if}
 					</div>
 					<div class="flex items-center gap-2">
-						{#if activeCodeFile?.code_url}
-							<a href={activeCodeFile.code_url} target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-600 hover:underline">View source</a>
-						{:else if selectedProposal.code_url}
-							<a href={selectedProposal.code_url} target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-600 hover:underline">View source</a>
+						{#if selectedProposalAction.source_url || selectedProposal.code_url}
+							<a href={selectedProposalAction.source_url || selectedProposal.code_url} target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-600 hover:underline">View source</a>
 						{/if}
-						<span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-mono">
-							{activeCodeFile?.name ?? 'proposal.py'}
-						</span>
+						<span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-mono">proposal.py</span>
 					</div>
 				</div>
-
-				{#if codeFiles.length > 1}
-					<div class="flex flex-wrap gap-1 px-4 py-2 border-b border-gray-200 bg-white">
-						{#each codeFiles as file, i}
-							<button
-								type="button"
-								onclick={() => selectCodeFile(i)}
-								class="text-xs px-3 py-1.5 rounded-md font-mono transition-colors {selectedFileIndex === i
-									? 'bg-indigo-600 text-white'
-									: 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-							>
-								{file.name}
-								{#if file.is_amendment}
-									<span class="opacity-75"> (Δ)</span>
-								{/if}
-							</button>
-						{/each}
-					</div>
-				{/if}
 
 				<div class="flex-1 p-4 flex flex-col min-h-0">
 					{#if codeLoading}
@@ -1229,25 +1414,16 @@
 					{:else if codeError}
 						<div class="text-sm text-red-600 mb-3">{codeError}</div>
 						<button onclick={() => fetchCode(selectedProposal)} class="text-sm px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Retry</button>
-					{:else if activeCodeFile?.code}
+					{:else if codeContent}
 						<div class="voting-monaco-wrap rounded-lg overflow-hidden border border-gray-200 bg-white">
-							{#key `${activeCodeFile.name}-${codeChecksum}`}
-								{#if showCodeDiff}
-									<MonacoDiffPane
-										original={activeCodeFile.original ?? ''}
-										modified={activeCodeFile.code}
-										language="python"
-										readOnly={true}
-									/>
-								{:else}
-									<MonacoPane code={activeCodeFile.code} language="python" readOnly={true} />
-								{/if}
+							{#key codeChecksum}
+								<MonacoPane code={codeContent} language="python" readOnly={true} />
 							{/key}
 						</div>
 						{#if codeChecksum}
 							<div class="mt-3 pt-3 border-t border-gray-200 flex justify-between items-center text-xs text-gray-500">
 								<span>Checksum: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{codeChecksum}</code></span>
-								<span>{activeCodeFile.code.split('\n').length} lines</span>
+								<span>{codeContent.split('\n').length} lines</span>
 							</div>
 						{/if}
 					{:else}
@@ -1259,8 +1435,9 @@
 			</div>
 
 			<div class="text-xs text-gray-400 pb-4">
-				<span class="font-medium">Security note:</span> Always review proposal code carefully before voting.
+				<span class="font-medium">Security note:</span> Approved code will be executed on the realm backend. Review carefully before voting.
 			</div>
+			{/if}
 		</div>
 		{/if}
 
@@ -1269,10 +1446,39 @@
 		<div class="rounded-lg border border-gray-200 bg-white p-6">
 			<div class="mb-5">
 				<h2 class="text-xl font-semibold text-gray-900 mb-1">Submit a Proposal</h2>
-				<p class="text-sm text-gray-500">Propose a new codex or code change for the realm.</p>
+				<p class="text-sm text-gray-500">{formSubtitle}</p>
 			</div>
 
 			<form onsubmit={(e) => { e.preventDefault(); submitProposal(); }} class="space-y-4">
+				<div>
+					<label for="rt-type" class="block text-sm font-medium text-gray-700 mb-1">Proposal type *</label>
+					<select
+						id="rt-type"
+						bind:value={formProposalType}
+						disabled={submitting}
+						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+					>
+						{#each FORM_TYPE_OPTIONS as opt}
+							<option value={opt.value}>{opt.label}</option>
+						{/each}
+					</select>
+				</div>
+
+				<div>
+					<label for="rt-org" class="block text-sm font-medium text-gray-700 mb-1">Department scope</label>
+					<select
+						id="rt-org"
+						bind:value={formOrgScope}
+						disabled={submitting}
+						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+					>
+						<option value="">Realm-wide</option>
+						{#each orgOptions as org}
+							<option value={org}>{org}</option>
+						{/each}
+					</select>
+				</div>
+
 				<div>
 					<label for="rt-title" class="block text-sm font-medium text-gray-700 mb-1">Title *</label>
 					<input
@@ -1299,93 +1505,191 @@
 					></textarea>
 				</div>
 
-				<!-- Codex Entries -->
-				<div>
-					<div class="flex items-center justify-between mb-2">
-						<label class="block text-sm font-medium text-gray-700">Codex Files *</label>
-						<button
-							type="button"
-							onclick={addCodexEntry}
-							disabled={submitting}
-							class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-						>
-							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-							Add codex
-						</button>
-					</div>
-					<p class="text-xs text-gray-400 mb-3">Provide URLs to Python codex files for governance review.</p>
-
-					{#each codexEntries as entry, i}
-						<div class="border border-gray-200 rounded-lg p-3 mb-3 {codexEntries.length > 1 ? 'bg-gray-50' : ''}">
-							{#if codexEntries.length > 1}
-								<div class="flex items-center justify-between mb-2">
-									<span class="text-xs font-medium text-gray-400">Codex {i + 1}</span>
-									<button type="button" onclick={() => removeCodexEntry(i)} disabled={submitting} class="text-red-400 hover:text-red-600 text-xs">&times;</button>
-								</div>
+				{#if formProposalType === 'transaction'}
+					<div class="space-y-3 rounded-lg border border-gray-200 p-4 bg-gray-50">
+						<div>
+							<label for="rt-token" class="block text-sm font-medium text-gray-700 mb-1">Token *</label>
+							<select
+								id="rt-token"
+								bind:value={formToken}
+								onchange={() => loadVaultBalanceForToken(formToken)}
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							>
+								{#if vaultTokens.length === 0}
+									<option value="">No tokens available</option>
+								{:else}
+									{#each vaultTokens as token}
+										<option value={token.name}>{token.symbol || token.name}</option>
+									{/each}
+								{/if}
+							</select>
+						</div>
+						<div>
+							<label for="rt-amount" class="block text-sm font-medium text-gray-700 mb-1">Amount (ledger base units) *</label>
+							<input
+								id="rt-amount"
+								type="text"
+								inputmode="numeric"
+								bind:value={formAmount}
+								placeholder="100000000"
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							/>
+							{#if vaultBalance != null}
+								{@const tokenMeta = vaultTokens.find((t) => t.name === formToken)}
+								<p class="text-xs text-gray-500 mt-1">
+									Vault balance: {formatTokenBalance(vaultBalance, tokenMeta?.decimals ?? 8)}
+									{tokenMeta?.symbol ?? formToken}
+								</p>
 							{/if}
-							<div class="space-y-2">
-								<div>
-									<label for="codex-url-{i}" class="block text-xs font-medium text-gray-600 mb-0.5">Code URL</label>
-									<input
-										id="codex-url-{i}"
-										type="url"
-										bind:value={entry.url}
-										onchange={() => onUrlChange(i)}
-										placeholder="https://example.com/codex.py"
-										disabled={submitting}
-										class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
-									/>
-								</div>
-								<div class="grid grid-cols-2 gap-2">
-									<div>
-										<label for="codex-name-{i}" class="block text-xs font-medium text-gray-600 mb-0.5">Codex Name</label>
-										<input
-											id="codex-name-{i}"
-											bind:value={entry.name}
-											placeholder="my_codex"
-											disabled={submitting}
-											class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
-										/>
-									</div>
-									<div>
-										<label for="codex-cksum-{i}" class="block text-xs font-medium text-gray-600 mb-0.5">Checksum</label>
-										<div class="flex gap-1">
-											<input
-												id="codex-cksum-{i}"
-												bind:value={entry.checksum}
-												placeholder="Auto-calculated"
-												disabled={submitting || entry.calculating}
-												class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
-											/>
-											<button
-												type="button"
-												onclick={() => calculateChecksum(i)}
-												disabled={submitting || entry.calculating || !entry.url.trim()}
-												class="px-2.5 py-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 disabled:opacity-40"
-											>
-												{#if entry.calculating}
-													<div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-												{:else}
-													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-												{/if}
-											</button>
-										</div>
-									</div>
-								</div>
+						</div>
+						<div>
+							<label for="rt-recipient" class="block text-sm font-medium text-gray-700 mb-1">Recipient principal *</label>
+							<input
+								id="rt-recipient"
+								type="text"
+								bind:value={formToPrincipal}
+								placeholder="aaaaa-aa"
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							/>
+						</div>
+					</div>
+				{:else if formProposalType === 'upgrade'}
+					<div class="space-y-3 rounded-lg border border-gray-200 p-4 bg-gray-50">
+						<div>
+							<label for="rt-upgrade-target" class="block text-sm font-medium text-gray-700 mb-1">Upgrade target *</label>
+							<select
+								id="rt-upgrade-target"
+								bind:value={formUpgradeTarget}
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							>
+								<option value="codex">Codex</option>
+								<option value="extension">Extension</option>
+								{#if showCoreUpgrade}
+									<option value="core">Core orchestration</option>
+								{/if}
+							</select>
+						</div>
+						{#if formUpgradeTarget === 'core'}
+							<div>
+								<label for="rt-action-id" class="block text-sm font-medium text-gray-700 mb-1">Orchestration action ID *</label>
+								<input
+									id="rt-action-id"
+									type="text"
+									bind:value={formActionId}
+									disabled={submitting}
+									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								/>
+							</div>
+							<div>
+								<label for="rt-decision" class="block text-sm font-medium text-gray-700 mb-1">Decision *</label>
+								<select
+									id="rt-decision"
+									bind:value={formCoreDecision}
+									disabled={submitting}
+									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								>
+									<option value="approve">Approve</option>
+									<option value="reject">Reject</option>
+								</select>
+							</div>
+						{:else}
+							<div>
+								<label for="rt-package" class="block text-sm font-medium text-gray-700 mb-1">Package ID *</label>
+								<input
+									id="rt-package"
+									type="text"
+									bind:value={formPackageId}
+									placeholder="my_extension"
+									disabled={submitting}
+									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								/>
+							</div>
+							<div>
+								<label for="rt-version" class="block text-sm font-medium text-gray-700 mb-1">Version (pinned semver) *</label>
+								<input
+									id="rt-version"
+									type="text"
+									bind:value={formVersion}
+									placeholder="1.2.3"
+									disabled={submitting}
+									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								/>
+							</div>
+							{#if submitContext?.registry_canister_id}
+								<p class="text-xs text-gray-500">Registry: <code class="bg-gray-100 px-1 rounded">{submitContext.registry_canister_id}</code></p>
+							{/if}
+						{/if}
+					</div>
+				{:else if formProposalType === 'code_execution'}
+					<div class="space-y-3">
+						<div>
+							<label for="rt-source-url" class="block text-sm font-medium text-gray-700 mb-1">Code URL (optional)</label>
+							<div class="flex gap-2">
+								<input
+									id="rt-source-url"
+									type="url"
+									bind:value={formSourceUrl}
+									placeholder="https://example.com/script.py"
+									disabled={submitting || codeFetching}
+									class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								/>
+								<button
+									type="button"
+									onclick={fetchRemoteCode}
+									disabled={submitting || codeFetching || !formSourceUrl.trim()}
+									class="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+								>
+									{#if codeFetching}
+										<div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+									{:else}
+										Fetch
+									{/if}
+								</button>
 							</div>
 						</div>
-					{/each}
-				</div>
-
-				<!-- Security Warning -->
-				<div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
-					<h4 class="font-medium text-amber-800 text-sm mb-1">Security Notice</h4>
-					<ul class="text-xs text-amber-700 space-y-0.5">
-						<li>• All proposals are publicly visible to realm members</li>
-						<li>• Code is fetched and checksummed for integrity verification</li>
-						<li>• Approved codices will be executed on the realm backend</li>
-					</ul>
-				</div>
+						<div>
+							<label for="rt-source" class="block text-sm font-medium text-gray-700 mb-1">Python source *</label>
+							<textarea
+								id="rt-source"
+								bind:value={formSource}
+								placeholder="# Paste proposal code here…"
+								rows="12"
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-y"
+							></textarea>
+						</div>
+						{#if bridgeVerbs.length > 0}
+							<div>
+								<label class="block text-sm font-medium text-gray-700 mb-2">Requested permissions</label>
+								<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+									{#each bridgeVerbs as verb}
+										<label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+											<input
+												type="checkbox"
+												checked={formRequestedPermissions.includes(verb)}
+												onchange={() => togglePermission(verb)}
+												disabled={submitting}
+												class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+											/>
+											<span class="font-mono text-xs">{verb}</span>
+										</label>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						<div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+							<h4 class="font-medium text-amber-800 text-sm mb-1">Security notice</h4>
+							<ul class="text-xs text-amber-700 space-y-0.5">
+								<li>• All proposals are publicly visible to realm members</li>
+								<li>• Approved code will be executed on the realm backend</li>
+							</ul>
+						</div>
+					</div>
+				{/if}
 
 				<div class="flex justify-end gap-3 pt-2">
 					<button
@@ -1398,7 +1702,7 @@
 					</button>
 					<button
 						type="submit"
-						disabled={submitting || !formTitle.trim() || !formDescription.trim() || !hasValidCodex()}
+						disabled={submitting || !isFormValid()}
 						class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
 					>
 						{#if submitting}
@@ -1413,7 +1717,7 @@
 			</form>
 		</div>
 
-	<!-- Proposals List View (default) -->
+	<!-- Proposals list or realm-wide votes -->
 	{:else}
 		<div class="rounded-lg border border-gray-200 bg-white">
 			<!-- Tab bar & refresh -->
@@ -1427,13 +1731,21 @@
 						Proposals
 					</button>
 					<button
-						onclick={() => view = 'form'}
+						onclick={openSubmitForm}
 						class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
 						Submit Proposal
 					</button>
+					<button
+						onclick={() => view = 'federal'}
+						class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium {view === 'federal' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+						Realm-wide
+					</button>
 				</div>
+				{#if view !== 'federal'}
 				<button
 					onclick={() => loadProposals()}
 					disabled={listLoading}
@@ -1447,8 +1759,12 @@
 						Refresh
 					{/if}
 				</button>
+				{/if}
 			</div>
 
+			{#if view === 'federal'}
+				<FederalVotes {ctx} onopenleg={(id) => openProposalById(id)} />
+			{:else}
 			<!-- Filters -->
 			<div class="flex flex-wrap items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50">
 				<div class="flex items-center gap-2">
@@ -1475,6 +1791,16 @@
 					{/each}
 				</select>
 				<select
+					bind:value={typeFilter}
+					onchange={() => onFilterChange()}
+					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					aria-label="Filter by proposal type"
+				>
+					{#each PROPOSAL_TYPE_OPTIONS as opt}
+						<option value={opt.value}>{opt.label}</option>
+					{/each}
+				</select>
+				<select
 					bind:value={sortBy}
 					onchange={() => { currentPage = 1; }}
 					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
@@ -1484,9 +1810,9 @@
 						<option value={opt.value}>{opt.label}</option>
 					{/each}
 				</select>
-				{#if orgFilter || statusFilter}
+				{#if orgFilter || statusFilter || typeFilter}
 					<button
-						onclick={() => { orgFilter = ''; statusFilter = ''; onFilterChange(); }}
+						onclick={() => { orgFilter = ''; statusFilter = ''; typeFilter = ''; onFilterChange(); }}
 						class="text-xs text-indigo-600 hover:text-indigo-800"
 					>
 						Clear filters
@@ -1503,9 +1829,9 @@
 			{:else if !listLoading && proposals.length === 0}
 				<div class="text-center py-12">
 					<svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-					{#if orgFilter || statusFilter}
+					{#if orgFilter || statusFilter || typeFilter}
 						<p class="text-gray-500 text-sm">No proposals match the current filters</p>
-						<p class="text-gray-400 text-xs mt-1">Try clearing the department or status filter.</p>
+						<p class="text-gray-400 text-xs mt-1">Try clearing the filters.</p>
 					{:else}
 						<p class="text-gray-500 text-sm">No proposals yet</p>
 						<p class="text-gray-400 text-xs mt-1">Be the first to submit a proposal for this realm.</p>
@@ -1525,6 +1851,11 @@
 										<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(proposal.status)}">
 											{statusLabel(proposal.status)}
 										</span>
+										{#if getProposalType(proposal)}
+											<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {proposalTypeColor(getProposalType(proposal))}">
+												{proposalTypeLabel(getProposalType(proposal))}
+											</span>
+										{/if}
 										{#if proposal.org_scope}
 											<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
 												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
@@ -1621,6 +1952,7 @@
 						</button>
 					</div>
 				{/if}
+			{/if}
 			{/if}
 		</div>
 	{/if}
