@@ -429,9 +429,8 @@
 			{/snippet}
 		</Card>
 	{:else if !isAuthenticated}
-		<header class="pt-2">
-			<p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{t('dashboard_kicker')}</p>
-			<h1 class="mt-1 text-[1.65rem] font-semibold tracking-tight text-slate-900 dark:text-white">
+		<header class="pt-1">
+			<h1 class="text-[1.65rem] font-semibold tracking-tight text-slate-900 dark:text-white">
 				{getGreeting()}
 			</h1>
 			<p class="mt-1.5 text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">{t('dashboard_lede')}</p>
@@ -449,10 +448,9 @@
 			{/snippet}
 		</Card>
 	{:else}
-		<header class="flex items-start justify-between gap-3 pt-2">
+		<header class="flex items-start justify-between gap-3 pt-1">
 			<div class="min-w-0">
-				<p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{t('dashboard_kicker')}</p>
-				<h1 class="mt-1 text-[1.65rem] font-semibold leading-tight tracking-tight text-slate-900 dark:text-white">
+				<h1 class="text-[1.65rem] font-semibold leading-tight tracking-tight text-slate-900 dark:text-white">
 					{greetingLine}
 				</h1>
 				<p class="mt-1.5 max-w-md text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
@@ -475,11 +473,10 @@
 		</header>
 
 		{#if loading}
-			<Card>
-				{#snippet children()}
-					<EmptyState title="Loading dashboard…" />
-				{/snippet}
-			</Card>
+			<div class="space-y-3" aria-busy="true" aria-label="Loading dashboard">
+				<div class="h-36 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800"></div>
+				<div class="h-24 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800"></div>
+			</div>
 		{:else if accessDeniedOp}
 			<Card>
 				{#snippet children()}
