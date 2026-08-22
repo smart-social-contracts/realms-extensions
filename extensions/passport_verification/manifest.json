@@ -1,8 +1,8 @@
 {
   "name": "passport_verification",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "runtime": "in_process",
-  "description": "Prove your identity with your passport without revealing personal details — scan a code on your phone to complete verification.",
+  "description": "Prove your identity with your passport using the RariMe app on your phone. Your passport details stay on your device.",
   "author": "Realms Team",
   "permissions": [],
   "functions": [
@@ -28,7 +28,7 @@
     "name": "RariMe Passport",
     "provider_url": "https://app.rarime.com/",
     "logo": "rarime.png",
-    "description": "Verified passport identity using zero-knowledge proofs"
+    "description": "Verified passport identity using the RariMe phone app"
   },
   "entry_access": {
     "default": "realm.admin",
