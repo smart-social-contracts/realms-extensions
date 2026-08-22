@@ -28,14 +28,15 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.backend.extension_sync_call(
+			const raw = await ctx.backend.extension_async_call(
 				'voting',
 				'submit_proposal',
 				JSON.stringify({
 					title,
 					description,
-					code_inline: codeInline,
-					auto_start_voting: true,
+					proposal_type: 'code_execution',
+					source: codeInline,
+					requested_permissions: [],
 				}),
 			);
 			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
