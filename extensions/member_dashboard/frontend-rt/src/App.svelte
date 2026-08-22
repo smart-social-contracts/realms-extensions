@@ -500,10 +500,8 @@
 			</Card>
 		{:else}
 			{#if citizenship}
-				<section
-					class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_rgba(15,23,42,0.05)] dark:border-slate-700 dark:bg-slate-800"
-				>
-					<div class="flex items-center justify-between gap-3 px-5 pt-5 pb-3">
+				<section class="overflow-hidden rounded-xl border border-slate-200/70 bg-white dark:border-slate-700 dark:bg-slate-800">
+					<div class="flex items-center justify-between gap-3 px-4 pt-4 pb-2">
 						<div>
 							<h2 class="text-base font-semibold text-slate-900 dark:text-white">{t('citizenship_title')}</h2>
 							<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -513,7 +511,7 @@
 						{#if citizenship.status}
 							<span
 								class={cn(
-									'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
+									'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
 									citizenship.status === 'active'
 										? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
 										: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
@@ -532,105 +530,88 @@
 							</span>
 						{/if}
 					</div>
-					<div class="px-5 pb-4">
-						<div class="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+					<div class="px-4 pb-2">
+						<div class="h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
 							<div
 								class="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
 								style="width: {(steps.done / steps.total) * 100}%"
 							></div>
 						</div>
 					</div>
-					<div class="grid grid-cols-1 gap-3 px-4 pb-4 sm:grid-cols-2">
-						<div
-							class={cn(
-								'rounded-xl border p-4',
-								steps.passport
-									? 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-900/20'
-									: 'border-slate-200 bg-slate-50 dark:border-slate-600 dark:bg-slate-900/40',
-							)}
-						>
-							<div class="flex items-start gap-3">
-								<div
-									class={cn(
-										'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
-										steps.passport
-											? 'bg-emerald-500 text-white'
-											: 'border border-slate-200 bg-white text-slate-400 dark:border-slate-600 dark:bg-slate-800',
-									)}
-								>
-									{#if steps.passport}
-										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-									{:else}
-										1
-									{/if}
-								</div>
-								<div class="min-w-0 flex-1">
+					<ol class="divide-y divide-slate-100 dark:divide-slate-700">
+						<li class="flex items-start gap-3 px-4 py-3">
+							<div
+								class={cn(
+									'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+									steps.passport
+										? 'bg-emerald-500 text-white'
+										: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300',
+								)}
+							>
+								{#if steps.passport}
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+								{:else}
+									1
+								{/if}
+							</div>
+							<div class="min-w-0 flex-1">
+								<div class="flex items-center justify-between gap-3">
 									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_passport')}</p>
-									<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-										{steps.passport ? t('citizenship_passport_done') : t('citizenship_passport_todo')}
-									</p>
 									{#if !steps.passport}
-										<p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('citizenship_passport_hint')}</p>
-										<div class="mt-3">
-											<Button tone="primary" size="sm" onclick={() => handleCitizenshipAction('verify_passport')}>
-												{t('citizenship_verify_passport')}
-											</Button>
-										</div>
+										<Button tone="primary" size="sm" onclick={() => handleCitizenshipAction('verify_passport')}>
+											{t('citizenship_verify_passport')}
+										</Button>
 									{/if}
 								</div>
+								<p class="mt-0.5 text-xs leading-snug text-slate-500 dark:text-slate-400">
+									{steps.passport
+										? t('citizenship_passport_done')
+										: `${t('citizenship_passport_todo')} · ${t('citizenship_passport_hint')}`}
+								</p>
 							</div>
-						</div>
-						<div
-							class={cn(
-								'rounded-xl border p-4',
-								steps.invoice
-									? 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-900/20'
-									: 'border-slate-200 bg-slate-50 dark:border-slate-600 dark:bg-slate-900/40',
-							)}
-						>
-							<div class="flex items-start gap-3">
-								<div
-									class={cn(
-										'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
-										steps.invoice
-											? 'bg-emerald-500 text-white'
-											: 'border border-slate-200 bg-white text-slate-400 dark:border-slate-600 dark:bg-slate-800',
-									)}
-								>
-									{#if steps.invoice}
-										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-									{:else}
-										2
-									{/if}
-								</div>
-								<div class="min-w-0 flex-1">
+						</li>
+						<li class="flex items-start gap-3 px-4 py-3">
+							<div
+								class={cn(
+									'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+									steps.invoice
+										? 'bg-emerald-500 text-white'
+										: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300',
+								)}
+							>
+								{#if steps.invoice}
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+								{:else}
+									2
+								{/if}
+							</div>
+							<div class="min-w-0 flex-1">
+								<div class="flex items-center justify-between gap-3">
 									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_invoice_step')}</p>
-									<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-										{steps.invoice ? t('citizenship_invoice_done') : t('citizenship_invoice_todo')}
-									</p>
 									{#if !steps.invoice}
-										<div class="mt-3">
-											<Button
-												tone={steps.passport ? 'primary' : 'secondary'}
-												size="sm"
-												onclick={() => handleCitizenshipAction('invoices')}
-											>
-												{t(Number(citizenship.total_invoices || 0) > 0 ? 'citizenship_pay_invoice' : 'citizenship_view_invoices')}
-											</Button>
-										</div>
+										<Button
+											tone={steps.passport ? 'primary' : 'secondary'}
+											size="sm"
+											onclick={() => handleCitizenshipAction('invoices')}
+										>
+											{t(Number(citizenship.total_invoices || 0) > 0 ? 'citizenship_pay_invoice' : 'citizenship_view_invoices')}
+										</Button>
 									{/if}
 								</div>
+								<p class="mt-0.5 text-xs leading-snug text-slate-500 dark:text-slate-400">
+									{steps.invoice ? t('citizenship_invoice_done') : t('citizenship_invoice_todo')}
+								</p>
 							</div>
-						</div>
-					</div>
+						</li>
+					</ol>
 					<div class="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100 dark:divide-slate-700 dark:border-slate-700">
-						<div class="px-5 py-3">
+						<div class="px-4 py-2.5">
 							<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('citizenship_total_invoices')}</p>
-							<p class="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.total_invoices ?? 0}</p>
+							<p class="text-base font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.total_invoices ?? 0}</p>
 						</div>
-						<div class="px-5 py-3">
+						<div class="px-4 py-2.5">
 							<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('citizenship_paid_invoices')}</p>
-							<p class="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.paid_invoices ?? 0}</p>
+							<p class="text-base font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.paid_invoices ?? 0}</p>
 						</div>
 					</div>
 				</section>
