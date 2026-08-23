@@ -7,7 +7,6 @@
 		citizenshipSteps,
 		displayFirstName,
 		cn,
-		currenciesByNetwork,
 		formatFullDate,
 		formatInvoicePaidDate,
 		formatRelativeTime,
@@ -15,7 +14,6 @@
 		getPaymentCliCommand,
 		getStatusColor,
 		mdToHtml,
-		networks,
 		clipboardCopy,
 		type ExtEnvelope,
 	} from './lib/helpers';
@@ -52,16 +50,6 @@
 	let invoiceError = $state('');
 	let refreshingInvoiceId = $state<string | null>(null);
 
-	let paymentAccounts: Record<string, unknown>[] = $state([]);
-	let accountsLoading = $state(true);
-	let accountsError = $state('');
-	let showAddAccountForm = $state(false);
-	let newAccountLabel = $state('');
-	let newAccountAddress = $state('');
-	let newAccountNetwork = $state('ICP');
-	let newAccountCurrency = $state('ICP');
-	let addingAccount = $state(false);
-
 	let showPaymentModal = $state(false);
 	let paymentInfo: Record<string, unknown> | null = $state(null);
 	let paymentLoading = $state(false);
@@ -70,18 +58,10 @@
 
 	let ctx: ExtensionClient | null = null;
 
-	let availableCurrencies = $derived(currenciesByNetwork[newAccountNetwork] || []);
 	let unreadCount = $derived(notifications.filter((n) => !n.read).length);
 	let firstName = $derived(displayFirstName(summary, principal));
 	let greetingLine = $derived(firstName ? `${getGreeting()}, ${firstName}` : getGreeting());
 	let steps = $derived(citizenshipSteps(citizenship));
-
-	$effect(() => {
-		const currencies = currenciesByNetwork[newAccountNetwork] || [];
-		if (currencies.length > 0 && !currencies.find((c) => c.value === newAccountCurrency)) {
-			newAccountCurrency = currencies[0].value;
-		}
-	});
 
 	function applyTheme(theme: 'light' | 'dark') {
 		document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -172,30 +152,9 @@
 		}
 	}
 
-	async function loadPaymentAccounts() {
-		if (!ctx || !principal) return;
-		accountsLoading = true;
-		accountsError = '';
-		try {
-			const result = await callExt<Record<string, unknown>[]>('list_payment_accounts', {
-				user_id: principal,
-			});
-			if (result.success && result.data) {
-				paymentAccounts = result.data;
-			} else {
-				paymentAccounts = [];
-			}
-		} catch {
-			paymentAccounts = [];
-		} finally {
-			accountsLoading = false;
-			queueMicrotask(reportHeight);
-		}
-	}
-
 	async function reloadAll() {
 		if (!isAuthenticated || !principal) return;
-		await Promise.all([loadDashboard(), loadNotifications(), loadInvoices(), loadPaymentAccounts()]);
+		await Promise.all([loadDashboard(), loadNotifications(), loadInvoices()]);
 	}
 
 	function handleCitizenshipAction(id: 'verify_passport' | 'invoices') {
@@ -212,7 +171,6 @@
 			loading = false;
 			notificationsLoading = false;
 			invoiceLoading = false;
-			accountsLoading = false;
 			return;
 		}
 		void reloadAll();
@@ -341,51 +299,6 @@
 			if (result.success) await loadInvoices();
 		} catch {
 			/* access denied surfaced on next load */
-		}
-	}
-
-	async function addPaymentAccount() {
-		if (!newAccountAddress || !newAccountLabel || !ctx) return;
-		addingAccount = true;
-		try {
-			const result = await callExt('add_payment_account', {
-				user_id: principal,
-				address: newAccountAddress,
-				label: newAccountLabel,
-				network: newAccountNetwork,
-				currency: newAccountCurrency,
-			});
-			if (result.success) {
-				await loadPaymentAccounts();
-				newAccountLabel = '';
-				newAccountAddress = '';
-				newAccountNetwork = 'ICP';
-				newAccountCurrency = 'ICP';
-				showAddAccountForm = false;
-				ctx.notify('success', 'Payment account added');
-			} else if (result.error) {
-				ctx.notify('error', result.error);
-			}
-		} catch (e) {
-			ctx?.notify('error', bridgeErrorFields(e).message);
-		} finally {
-			addingAccount = false;
-			queueMicrotask(reportHeight);
-		}
-	}
-
-	async function removePaymentAccount(accountId: string) {
-		try {
-			const result = await callExt('remove_payment_account', {
-				user_id: principal,
-				account_id: accountId,
-			});
-			if (result.success) {
-				await loadPaymentAccounts();
-				ctx?.notify('success', 'Payment account removed');
-			}
-		} catch {
-			/* silent */
 		}
 	}
 
@@ -964,152 +877,6 @@
 					</div>
 				</div>
 			{/if}
-
-			<section class="space-y-3">
-				<div class="flex items-center justify-between gap-3 px-0.5">
-					<h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{t('accounts_title')}</h2>
-					<Button tone="secondary" size="sm" onclick={() => (showAddAccountForm = !showAddAccountForm)}>
-						+ Add Account
-					</Button>
-				</div>
-
-				{#if showAddAccountForm}
-					<Card title="Add payment account">
-						{#snippet children()}
-							<div class="space-y-4">
-								<div>
-									<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Label</label>
-									<input
-										type="text"
-										bind:value={newAccountLabel}
-										placeholder="e.g. My ICP Wallet"
-										class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-									/>
-								</div>
-								<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-									<div>
-										<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-											>Network</label
-										>
-										<select
-											bind:value={newAccountNetwork}
-											class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-										>
-											{#each networks as net}
-												<option value={net.value}>{net.label}</option>
-											{/each}
-										</select>
-									</div>
-									<div>
-										<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-											>Currency</label
-										>
-										<select
-											bind:value={newAccountCurrency}
-											class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-										>
-											{#each availableCurrencies as cur}
-												<option value={cur.value}>{cur.label}</option>
-											{/each}
-										</select>
-									</div>
-								</div>
-								<div>
-									<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Address</label
-									>
-									<input
-										type="text"
-										bind:value={newAccountAddress}
-										placeholder="Wallet address or IBAN"
-										class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-									/>
-								</div>
-								<div class="flex justify-end gap-2">
-									<Button
-										tone="secondary"
-										size="sm"
-										onclick={() => {
-											showAddAccountForm = false;
-											newAccountLabel = '';
-											newAccountAddress = '';
-										}}>Cancel</Button
-									>
-									<Button
-										tone="primary"
-										size="sm"
-										disabled={addingAccount || !newAccountLabel || !newAccountAddress}
-										onclick={() => addPaymentAccount()}
-									>
-										{addingAccount ? 'Saving…' : 'Save'}
-									</Button>
-								</div>
-							</div>
-						{/snippet}
-					</Card>
-				{/if}
-
-				{#if accountsLoading && paymentAccounts.length === 0}
-					<Card>
-						{#snippet children()}
-							<div class="flex justify-center py-6">
-								<div class="h-6 w-6 animate-spin rounded-full border-b-2 border-blue-600"></div>
-							</div>
-						{/snippet}
-					</Card>
-				{:else if paymentAccounts.length === 0}
-					<div class="rounded-2xl border border-slate-200/80 bg-white px-5 py-8 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700 dark:bg-slate-800">
-						<p class="text-sm font-medium text-slate-800 dark:text-slate-100">{t('accounts_empty_title')}</p>
-						<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('accounts_empty_body')}</p>
-					</div>
-				{:else}
-					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-						{#each paymentAccounts as account}
-							<Card>
-								{#snippet children()}
-									<div class="flex items-center justify-between">
-										<strong class="text-lg text-gray-900 dark:text-white">{account.label}</strong>
-										{#if account.is_verified}
-											<span
-												class="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400"
-												>✓ Verified</span
-											>
-										{/if}
-									</div>
-									<div class="mt-2 flex gap-2">
-										<span
-											class="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-											>{account.network}</span
-										>
-										<span
-											class="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-											>{account.currency}</span
-										>
-									</div>
-									<div class="mt-3 overflow-x-auto rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-750">
-										<code class="break-all font-mono text-sm text-gray-700 dark:text-gray-300"
-											>{account.address}</code
-										>
-									</div>
-									<div class="mt-3 flex items-center justify-between">
-										{#if account.created_at}
-											<span class="text-xs text-gray-500 dark:text-gray-400"
-												>Created: {new Date(String(account.created_at)).toLocaleDateString()}</span
-											>
-										{:else}
-											<span></span>
-										{/if}
-										<button
-											onclick={() => removePaymentAccount(String(account.id))}
-											class="rounded px-2 py-1 text-xs text-red-500 transition-colors hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20"
-											>🗑 Remove</button
-										>
-									</div>
-								{/snippet}
-							</Card>
-						{/each}
-					</div>
-				{/if}
-			</section>
 		{/if}
 	{/if}
 </div>

@@ -182,25 +182,3 @@ export async function clipboardCopy(text: string): Promise<boolean> {
 		return false;
 	}
 }
-
-export const networks = [
-	{ value: 'ICP', label: 'Internet Computer (ICP)' },
-	{ value: 'Bitcoin', label: 'Bitcoin' },
-	{ value: 'Ethereum', label: 'Ethereum' },
-	{ value: 'SEPA', label: 'SEPA Bank Transfer' },
-];
-
-export const currenciesByNetwork: Record<string, Array<{ value: string; label: string }>> = {
-	ICP: [
-		{ value: 'ICP', label: 'ICP' },
-		{ value: 'ckBTC', label: 'ckBTC' },
-		{ value: 'ckETH', label: 'ckETH' },
-	],
-	Bitcoin: [{ value: 'BTC', label: 'Bitcoin (BTC)' }],
-	Ethereum: [
-		{ value: 'ETH', label: 'Ethereum (ETH)' },
-		{ value: 'USDC', label: 'USDC' },
-		{ value: 'USDT', label: 'USDT' },
-	],
-	SEPA: [{ value: 'EUR', label: 'Euro (EUR)' }],
-};
