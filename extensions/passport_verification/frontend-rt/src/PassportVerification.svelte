@@ -161,7 +161,7 @@
 				<div class="flex items-center {i < steps.length - 1 ? 'flex-1' : ''}">
 					<div class="flex flex-col items-center">
 						<div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold
-							{currentStepIndex >= stepIdx ? 'bg-gray-800 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">
+							{currentStepIndex >= stepIdx ? 'bg-[var(--color-primary-600,#2563eb)] text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">
 							{#if currentStepIndex > stepIdx}
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
 							{:else}
@@ -171,7 +171,7 @@
 						<span class="text-xs mt-1 {currentStepIndex >= stepIdx ? 'text-gray-700 dark:text-gray-300 font-medium' : 'text-gray-400 dark:text-gray-500'}">{label}</span>
 					</div>
 					{#if i < steps.length - 1}
-						<div class="flex-1 h-0.5 mx-3 mb-5 {currentStepIndex > stepIdx ? 'bg-gray-800' : 'bg-gray-200 dark:bg-gray-700'}"></div>
+						<div class="flex-1 h-0.5 mx-3 mb-5 {currentStepIndex > stepIdx ? 'bg-[var(--color-primary-600,#2563eb)]' : 'bg-gray-200 dark:bg-gray-700'}"></div>
 					{/if}
 				</div>
 			{/each}
@@ -199,7 +199,7 @@
 				</a>
 				<button
 					onclick={generateVerificationLink}
-					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg"
+					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] rounded-lg"
 				>
 					Start verification
 				</button>
@@ -302,7 +302,7 @@
 				<button
 					onclick={checkVerificationStatus}
 					disabled={checkingStatus}
-					class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 disabled:opacity-50 rounded-lg flex items-center gap-2 transition-colors"
+					class="px-6 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:opacity-50 rounded-lg flex items-center gap-2 transition-colors"
 				>
 					{#if checkingStatus}
 						<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
@@ -360,7 +360,7 @@
 			<p class="text-gray-600 dark:text-gray-400 mb-6">Passport verification was not successful. Please try again.</p>
 			<button
 				onclick={resetVerification}
-				class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
+				class="px-6 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] rounded-lg transition-colors"
 			>
 				Try Again
 			</button>
@@ -376,7 +376,7 @@
 			<p class="text-gray-600 dark:text-gray-400 mb-6">{errorMessage}</p>
 			<button
 				onclick={resetVerification}
-				class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
+				class="px-6 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] rounded-lg transition-colors"
 			>
 				Try Again
 			</button>

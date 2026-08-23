@@ -18,6 +18,7 @@
 	let realmSettingsWelcome = $state('');
 	let realmSettingsLogoUrl = $state('');
 	let realmSettingsBackgroundUrl = $state('');
+	let realmSettingsPrimaryColor = $state('#3b82f6');
 	let realmSettingsOpenRegistration = $state(false);
 	let realmSettingsAiAssistantEnabled = $state(true);
 	let realmSettingsFileRegistryId = $state('');
@@ -145,6 +146,10 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		return lines;
 	}
 
+	function isValidHexColor(value: string): boolean {
+		return /^#[0-9A-Fa-f]{6}$/.test(value);
+	}
+
 	function buildRealmConfigCode(): string {
 		const lines = ['from ggg import Realm', '', 'realm = Realm.load("1")'];
 		if (realmSettingsName) lines.push(`realm.name = ${JSON.stringify(realmSettingsName)}`);
@@ -163,6 +168,23 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		if (realmSettingsFileRegistryId) lines.push(`realm.file_registry_canister_id = ${JSON.stringify(realmSettingsFileRegistryId)}`);
 		if (realmSettingsMarketplaceId) lines.push(`realm.marketplace_canister_id = ${JSON.stringify(realmSettingsMarketplaceId)}`);
 		lines.push(...buildTokenWalletProposalLines());
+		lines.push('');
+		lines.push('import json');
+		lines.push('_md = json.loads(realm.manifest_data or "{}")');
+		lines.push('_setup = _md.get("setup") or {}');
+		lines.push('if not isinstance(_setup, dict):');
+		lines.push('    _setup = {}');
+		lines.push('_branding = _setup.get("branding") or {}');
+		lines.push('if not isinstance(_branding, dict):');
+		lines.push('    _branding = {}');
+		lines.push('_colors = _branding.get("colors") or {}');
+		lines.push('if not isinstance(_colors, dict):');
+		lines.push('    _colors = {}');
+		lines.push(`_colors["primary"] = ${JSON.stringify(realmSettingsPrimaryColor)}`);
+		lines.push('_branding["colors"] = _colors');
+		lines.push('_setup["branding"] = _branding');
+		lines.push('_md["setup"] = _setup');
+		lines.push('realm.manifest_data = json.dumps(_md)');
 		return lines.join('\n');
 	}
 
@@ -186,6 +208,10 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				realmSettingsWelcome = s.realm_welcome_message || '';
 				realmSettingsLogoUrl = s.logo_url || '';
 				realmSettingsBackgroundUrl = s.background_image_url || '';
+				realmSettingsPrimaryColor =
+					typeof s.primary_color === 'string' && isValidHexColor(s.primary_color)
+						? s.primary_color
+						: '#3b82f6';
 				realmSettingsOpenRegistration = !!s.open_registration;
 				realmSettingsAiAssistantEnabled = s.ai_assistant_enabled !== false;
 				realmSettingsFileRegistryId = s.file_registry_canister_id || '';
@@ -267,6 +293,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 				welcome_message: realmSettingsWelcome,
 				logo_url: realmSettingsLogoUrl,
 				background_image_url: realmSettingsBackgroundUrl,
+				primary_color: realmSettingsPrimaryColor,
 				open_registration: realmSettingsOpenRegistration,
 				ai_assistant_enabled: realmSettingsAiAssistantEnabled,
 				token_canister_id: realmSettingsTokenCanisterId.trim(),
@@ -538,7 +565,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 			disabled={activeTab === 'notifications'
 				? settingsSaving || !emailDirty
 				: settingsSaving || !infraValid || governanceVotingWindowDays == null}
-			class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+			class="px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
 	</div>
 {/snippet}
@@ -690,7 +717,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 							'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
 							currentStage === 'production'
 								? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-								: 'bg-blue-600 text-white hover:bg-blue-700',
+								: 'bg-[var(--color-primary-600,#2563eb)] text-white hover:bg-[var(--color-primary-700,#1d4ed8)]',
 							'disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
 						)}
 					>
@@ -735,7 +762,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		<!-- Branding -->
 		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Branding</h2>
-			<p class="text-sm text-gray-500 mb-5">Logo and background imagery used across the realm UI.</p>
+			<p class="text-sm text-gray-500 mb-5">Logo, background imagery, and primary color used across the realm UI — including main action buttons.</p>
 			<div class="space-y-5">
 				<div>
 					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
@@ -758,6 +785,30 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 							<span class="text-xs text-gray-500">Preview</span>
 						</div>
 					{/if}
+				</div>
+				<div>
+					<label for="rs-primary-color" class="block text-sm font-medium text-gray-700 mb-1">Primary color</label>
+					<div class="flex items-center gap-3">
+						<input
+							id="rs-primary-color"
+							type="color"
+							bind:value={realmSettingsPrimaryColor}
+							class="h-10 w-14 cursor-pointer rounded border border-gray-300 bg-white p-1"
+						/>
+						<input
+							type="text"
+							bind:value={realmSettingsPrimaryColor}
+							placeholder="#3b82f6"
+							maxlength="7"
+							class="w-32 px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						/>
+						<div
+							class="h-10 w-10 rounded border border-gray-200 shrink-0"
+							style="background-color: {isValidHexColor(realmSettingsPrimaryColor) ? realmSettingsPrimaryColor : '#3b82f6'}"
+							title="Preview"
+						></div>
+					</div>
+					<p class="mt-1 text-xs text-gray-500">Hex color for primary buttons and accents (e.g. #3b82f6).</p>
 				</div>
 			</div>
 		</section>
@@ -1001,7 +1052,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 							type="button"
 							onclick={sendTestEmail}
 							disabled={!adminEmail.trim()}
-							class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+							class="px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 						>
 							Send test email to {adminEmail || 'my address'}
 						</button>
@@ -1060,7 +1111,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 					type="button"
 					onclick={submitGovernedProposal}
 					disabled={governedSubmitting}
-					class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+					class="px-4 py-2 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 transition-colors"
 				>{governedSubmitting ? 'Submitting…' : 'Submit proposal'}</button>
 			</div>
 		</div>

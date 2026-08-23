@@ -2,3 +2,11 @@
 
 @source "./**/*.{html,js,svelte,ts}";
 @source "../node_modules/@realmsgos/extension-ui/dist/**/*.{html,js,svelte,ts}";
+
+/* Map the published Button's Tailwind blues onto the realm primary token */
+.bg-blue-600 {
+  background-color: var(--color-primary-600, #2563eb);
+}
+.hover\:bg-blue-700:hover {
+  background-color: var(--color-primary-700, #1d4ed8);
+}
