@@ -1,5 +1,11 @@
 # Extensions — Agent Guide
 
+## Do not deploy without confirmation
+
+**Do not deploy automatically.** The human triggers all deployments.
+
+If a change needs a deployment to take effect or to be verified, state that clearly in your reply (what, where, and why) and wait for explicit confirmation before running any deploy, install, upgrade, reinstall, rollout, seed, or publish-to-canister command.
+
 ## What is an extension?
 
 An extension is a self-contained frontend (Svelte) + optional backend (Python `entry.py`) module that runs inside a realm. The frontend is mounted by the main realm shell; the backend runs as a Python module inside the realm canister.
@@ -34,7 +40,7 @@ Then open `http://localhost:5555/`.
 
 ## Deploying an extension
 
-After testing locally, deploy with:
+After testing locally, and **only after the human confirms a deploy**, deploy with:
 
 ```bash
 # 1. Build the frontend
