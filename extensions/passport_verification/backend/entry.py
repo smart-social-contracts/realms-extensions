@@ -30,6 +30,90 @@ class AppConfig(ExtensionEntity):
 
 
 RARIMO_API_BASE = "https://api.app.rarime.com"
+VERIFICATION_LINK_PATH = "/integrations/verificator-svc/private/verification-link"
+# verificator-svc rejects non-decimal event_id ("must be decimal and less
+# than field modulo"). Unix seconds fit; hex / slugs / empty do not.
+_EVENT_ID_MAX_DIGITS = 76
+
+
+def _decimal_event_id(raw) -> str:
+    value = "" if raw is None else str(raw).strip()
+    if value.isdigit() and 1 <= len(value) <= _EVENT_ID_MAX_DIGITS:
+        return value
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if digits:
+        return digits[:_EVENT_ID_MAX_DIGITS]
+    # Stable non-time fallback so replicated outcalls agree on the payload.
+    acc = 0
+    for ch in value or "event":
+        acc = (acc * 131 + ord(ch)) % 10**18
+    return str(acc or 1)
+
+
+def _format_jsonapi_errors(errors) -> str:
+    parts = []
+    if isinstance(errors, list):
+        for err in errors:
+            if not isinstance(err, dict):
+                continue
+            meta = err.get("meta") if isinstance(err.get("meta"), dict) else {}
+            field = meta.get("field")
+            msg = meta.get("error") or err.get("detail") or err.get("title")
+            if field and msg:
+                parts.append(f"{field}: {msg}")
+            elif msg:
+                parts.append(str(msg))
+    return "; ".join(parts) or "Verification service rejected the request"
+
+
+def _decode_http_body(response):
+    body = response.get("body") or b""
+    raw = body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else str(body)
+    status = int(response.get("status") or response.get("status_code") or 0)
+    try:
+        data = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        snippet = raw[:180].replace("\n", " ")
+        return {
+            "success": False,
+            "error": (
+                f"Verification service returned non-JSON "
+                f"(HTTP {status or 'unknown'}): {snippet}"
+            ),
+        }
+    if isinstance(data, dict) and data.get("errors"):
+        return {
+            "success": False,
+            "error": _format_jsonapi_errors(data.get("errors")),
+            "errors": data.get("errors"),
+        }
+    if status and status >= 400:
+        return {
+            "success": False,
+            "error": f"Verification service HTTP {status}",
+            "body": data,
+        }
+    return data
+
+
+def _with_rarime_app_url(response_data):
+    if (
+        isinstance(response_data, dict)
+        and isinstance(response_data.get("data"), dict)
+        and isinstance(response_data["data"].get("attributes"), dict)
+    ):
+        proof_params_url = response_data["data"]["attributes"].get(
+            "get_proof_params", ""
+        )
+        if proof_params_url:
+            encoded_url = quote(proof_params_url, safe="")
+            rarime_url = (
+                "https://app.rarime.com/external?type=proof-request"
+                f"&proof_params_url={encoded_url}"
+            )
+            response_data["data"]["attributes"]["rarime_app_url"] = rarime_url
+            logger.info(f"🔗 Formatted RariMe app URL: {rarime_url}")
+    return response_data
 
 
 def register_entities():
@@ -87,7 +171,7 @@ def get_event_id(args: str) -> str:
     """
     config = AppConfig["application_id"]
     if config and config.value:
-        return config.value
+        return _decimal_event_id(config.value)
 
     # Self-healing: generate application ID if missing
     logger.warning("Application ID not found in storage, generating now...")
@@ -96,7 +180,7 @@ def get_event_id(args: str) -> str:
 
     AppConfig(key="application_id", value=app_id)
     logger.info(f"🆕 Generated application ID on-the-fly: {app_id}")
-    return app_id
+    return _decimal_event_id(app_id)
 
 
 @update
@@ -139,40 +223,35 @@ def get_verification_link(args: str) -> Async[str]:
     logger.info(
         f"📤 Sending HTTP POST request to Rarimo API with payload: {json.dumps(payload)}"
     )
-    logger.info("🔄 Using 100M cycles for HTTP request")
+    logger.info("🔄 Using 500M cycles for HTTP request")
 
     http_result: CallResult[HttpResponse] = yield management_canister.http_request(
         {
-            "url": f"{RARIMO_API_BASE}/integrations/verificator-svc/private/verification-link",
-            "max_response_bytes": 2_000,
+            "url": f"{RARIMO_API_BASE}{VERIFICATION_LINK_PATH}",
+            "max_response_bytes": 8_000,
             "method": {"post": None},
-            "headers": [{"name": "Content-Type", "value": "application/json"}],
+            "headers": [
+                {"name": "Content-Type", "value": "application/json"},
+                {
+                    "name": "Accept",
+                    "value": "application/vnd.api+json, application/json",
+                },
+            ],
             "body": json.dumps(payload).encode("utf-8"),
             "transform": {
                 "function": (ic.id(), "http_transform"),
                 "context": bytes(),
             },
         }
-    ).with_cycles(100_000_000)
+    ).with_cycles(500_000_000)
 
     logger.info(f"✅ HTTP request sent to Rarimo API. Result: {http_result}")
 
     def format_response(response):
-        """Format the response to include proper RariMe app URL"""
-        response_data = json.loads(response["body"].decode("utf-8"))
-
-        if "data" in response_data and "attributes" in response_data["data"]:
-            proof_params_url = response_data["data"]["attributes"].get(
-                "get_proof_params", ""
-            )
-            if proof_params_url:
-                encoded_url = quote(proof_params_url, safe="")
-                rarime_url = f"https://app.rarime.com/external?type=proof-request&proof_params_url={encoded_url}"
-
-                response_data["data"]["attributes"]["rarime_app_url"] = rarime_url
-                logger.info(f"🔗 Formatted RariMe app URL: {rarime_url}")
-
-        return json.dumps(response_data)
+        response_data = _decode_http_body(response)
+        if isinstance(response_data, dict) and response_data.get("success") is False:
+            return json.dumps(response_data)
+        return json.dumps(_with_rarime_app_url(response_data))
 
     return match(
         http_result,
@@ -202,28 +281,34 @@ def check_verification_status(args: str) -> Async[str]:
     session_id = get_session_id(args)
     logger.info(f"🔍 Checking verification status for session: {session_id}")
     logger.info("📤 Sending HTTP GET request to check status")
-    logger.info("🔄 Using 100M cycles for status check request")
+    logger.info("🔄 Using 500M cycles for status check request")
 
     http_result: CallResult[HttpResponse] = yield management_canister.http_request(
         {
-            "url": f"https://api.app.rarime.com/integrations/verificator-svc/private/verification-status/{session_id}",
-            "max_response_bytes": 2_000,
+            "url": (
+                f"{RARIMO_API_BASE}/integrations/verificator-svc"
+                f"/private/verification-status/{session_id}"
+            ),
+            "max_response_bytes": 8_000,
             "method": {"get": None},
-            "headers": [],
+            "headers": [
+                {
+                    "name": "Accept",
+                    "value": "application/vnd.api+json, application/json",
+                }
+            ],
             "body": bytes(),
             "transform": {
                 "function": (ic.id(), "http_transform"),
                 "context": bytes(),
             },
         }
-    ).with_cycles(100_000_000)
+    ).with_cycles(500_000_000)
 
     return match(
         http_result,
         {
-            "Ok": lambda response: json.dumps(
-                json.loads(response["body"].decode("utf-8"))
-            ),
+            "Ok": lambda response: json.dumps(_decode_http_body(response)),
             "Err": lambda err: json.dumps({"success": False, "error": str(err)}),
         },
     )
@@ -232,18 +317,28 @@ def check_verification_status(args: str) -> Async[str]:
 @query
 def get_current_application_id(args: str) -> str:
     """Get the current application ID without generating a new one (query method)."""
+    from core.runtime_flags import skip_passport_zkproof
+
+    skip_zk = bool(skip_passport_zkproof())
     config = AppConfig["application_id"]
     if config:
         return json.dumps(
             {
                 "application_id": config.value,
                 "status": "initialized",
+                "skip_passport_zkproof": skip_zk,
                 "created_at": (
                     str(config.created_at) if hasattr(config, "created_at") else None
                 ),
             }
         )
-    return json.dumps({"application_id": None, "status": "not_initialized"})
+    return json.dumps(
+        {
+            "application_id": None,
+            "status": "not_initialized",
+            "skip_passport_zkproof": skip_zk,
+        }
+    )
 
 
 @update
