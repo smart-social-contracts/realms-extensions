@@ -179,6 +179,85 @@ export async function requestVerificationLink(opts: {
 	return parsed;
 }
 
+export type FlowStep = 'idle' | 'generating' | 'pending' | 'verified' | 'failed' | 'error';
+
+export type CheckOutcome = 'verified' | 'failed' | 'pending';
+
+export const CHECKING_COPY = {
+	title: 'Checking verification status…',
+	subtitle: 'Please wait. This can take a few seconds.',
+};
+
+export const NOT_YET_VERIFIED_MODAL = {
+	title: 'An error occurred',
+	body: 'Your passport has not been verified yet. Are you sure you finished verification in the RariMe app?',
+};
+
+export const GO_HOME_ACTION = { type: 'navigate.home' } as const;
+
+export function canGoBack(step: FlowStep): boolean {
+	return step === 'pending' || step === 'generating';
+}
+
+export function canRestartFlow(step: FlowStep): boolean {
+	return step !== 'verified';
+}
+
+export function verifiedHeading(alreadyVerifiedOnLoad: boolean): string {
+	return alreadyVerifiedOnLoad
+		? 'You are already verified'
+		: 'Passport Verified Successfully!';
+}
+
+export function interpretIdentityStatus(result: unknown): { verified: boolean } {
+	const rec = asRecord(result);
+	return { verified: rec?.verified === true };
+}
+
+export function interpretVerificationStatus(result: unknown): CheckOutcome {
+	const rec = asRecord(result);
+	if (!rec) return 'pending';
+
+	const data = asRecord(rec.data);
+	const attributes = asRecord(data?.attributes);
+	const nestedStatus = typeof attributes?.status === 'string' ? attributes.status : '';
+	if (nestedStatus === 'verified') return 'verified';
+	if (nestedStatus === 'failed' || nestedStatus === 'failed_verification') return 'failed';
+
+	const topStatus =
+		(typeof rec.status === 'string' && rec.status) ||
+		(typeof rec.verification_status === 'string' && rec.verification_status) ||
+		'';
+	if (topStatus === 'verified' || topStatus === 'approved') return 'verified';
+	if (topStatus === 'failed' || topStatus === 'failed_verification') return 'failed';
+	return 'pending';
+}
+
+export async function showNotYetVerifiedModal(ctx: {
+	openModal?: (payload: {
+		title: string;
+		body: string;
+		actions: { id: string; label: string; tone?: 'primary' | 'secondary' | 'danger' }[];
+	}) => Promise<unknown>;
+	notify?: (level: 'error' | 'info' | 'success' | 'warning', message: string) => void;
+}): Promise<void> {
+	if (typeof ctx.openModal === 'function') {
+		await ctx.openModal({
+			title: NOT_YET_VERIFIED_MODAL.title,
+			body: NOT_YET_VERIFIED_MODAL.body,
+			actions: [{ id: 'close', label: 'Close', tone: 'secondary' }],
+		});
+		return;
+	}
+	ctx.notify?.('error', NOT_YET_VERIFIED_MODAL.body);
+}
+
+export function requestGoHome(ctx: {
+	host?: { dispatch?: (action: { type: string }) => void };
+}): void {
+	ctx.host?.dispatch?.(GO_HOME_ACTION);
+}
+
 export async function requestVerificationStatus(userId: string): Promise<unknown> {
 	if (!userId) {
 		throw new Error('Sign in to check verification status');

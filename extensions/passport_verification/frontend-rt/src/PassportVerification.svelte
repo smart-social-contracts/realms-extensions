@@ -1,9 +1,17 @@
 <script lang="ts">
 	import {
+		CHECKING_COPY,
+		canGoBack,
+		canRestartFlow,
+		interpretIdentityStatus,
 		interpretVerificationLinkResult,
+		interpretVerificationStatus,
 		readPrincipal,
+		requestGoHome,
 		requestVerificationLink,
 		requestVerificationStatus,
+		showNotYetVerifiedModal,
+		verifiedHeading,
 	} from './verificator';
 
 	let { ctx }: { ctx: any } = $props();
@@ -21,6 +29,8 @@
 	let checkingStatus = $state(false);
 	let showDetails = $state(false);
 	let showGetApp = $state(false);
+	let alreadyVerifiedOnLoad = $state(false);
+	let identityStatusLoaded = $state(false);
 
 	let currentStepIndex = $derived(
 		step === 'idle' ? 0
@@ -43,7 +53,24 @@
 		return await ctx.callAsync(fn, args);
 	}
 
+	async function loadExistingIdentity() {
+		try {
+			const status = interpretIdentityStatus(await callSync('get_identity_status'));
+			if (status.verified) {
+				alreadyVerifiedOnLoad = true;
+				step = 'verified';
+			}
+		} catch {
+			/* stay on Start if status is unavailable */
+		} finally {
+			identityStatusLoaded = true;
+		}
+	}
+
+	loadExistingIdentity();
+
 	async function generateVerificationLink() {
+		if (!canRestartFlow(step) || alreadyVerifiedOnLoad) return;
 		try {
 			step = 'generating';
 			errorMessage = '';
@@ -91,6 +118,7 @@
 	}
 
 	async function checkVerificationStatus() {
+		if (checkingStatus) return;
 		try {
 			checkingStatus = true;
 			const userId = readPrincipal(ctx);
@@ -101,26 +129,23 @@
 				result = await callAsync('check_verification_status', { user_id: userId });
 			}
 
+			const outcome = interpretVerificationStatus(result);
 			const payload = result as any;
-			if (payload?.data?.attributes) {
-				const status = payload.data.attributes.status;
-				if (status === 'verified') {
-					step = 'verified';
-					verificationResult = payload.data.attributes;
-					await createPassportIdentity(payload);
-				} else if (status === 'failed' || status === 'failed_verification') {
-					step = 'failed';
-					errorMessage = 'Passport verification failed';
-				}
-			} else {
-				const st = payload?.status ?? payload?.verification_status ?? '';
-				if (st === 'verified' || st === 'approved') {
-					step = 'verified';
-					verificationResult = payload;
-				}
+			if (outcome === 'verified') {
+				step = 'verified';
+				verificationResult = payload?.data?.attributes ?? payload;
+				await createPassportIdentity(payload);
+				return;
 			}
+			if (outcome === 'failed') {
+				step = 'failed';
+				errorMessage = 'Passport verification failed';
+				return;
+			}
+			await showNotYetVerifiedModal(ctx);
 		} catch (e: any) {
 			console.error('Error checking verification status:', e);
+			await showNotYetVerifiedModal(ctx);
 		} finally {
 			checkingStatus = false;
 		}
@@ -146,7 +171,7 @@
 		}
 	}
 
-	function resetVerification() {
+	function clearFlowFields() {
 		step = 'idle';
 		verificationLink = '';
 		qrCodeUrl = '';
@@ -155,8 +180,23 @@
 		sessionId = '';
 		eventId = '';
 		copied = false;
+		checkingStatus = false;
 		showDetails = false;
 		showGetApp = false;
+	}
+
+	function goBackToStart() {
+		if (!canGoBack(step) || alreadyVerifiedOnLoad) return;
+		clearFlowFields();
+	}
+
+	function tryAgain() {
+		if (!canRestartFlow(step) || alreadyVerifiedOnLoad) return;
+		clearFlowFields();
+	}
+
+	function goHome() {
+		requestGoHome(ctx);
 	}
 </script>
 
@@ -193,8 +233,18 @@
 		</div>
 	{/if}
 
+	<!-- LOADING EXISTING IDENTITY -->
+	{#if !identityStatusLoaded}
+		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center">
+			<svg class="animate-spin h-8 w-8 text-gray-700 dark:text-gray-300 mx-auto mb-4" viewBox="0 0 24 24">
+				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+			</svg>
+			<p class="text-gray-600 dark:text-gray-400 font-medium">Checking whether you are already verified…</p>
+		</div>
+
 	<!-- IDLE STATE -->
-	{#if step === 'idle'}
+	{:else if step === 'idle'}
 		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 sm:p-6">
 			<div class="flex flex-col gap-2">
 				<button
@@ -285,6 +335,20 @@
 						Open RariMe, scan the QR code (or tap the link), and finish the steps in the app. Your passport stays on your phone. When you are done, tap <strong>Check status</strong> below.
 					</p>
 				</div>
+
+				{#if checkingStatus}
+					<div
+						data-testid="check-waiting"
+						class="flex flex-col items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-6 dark:border-gray-700 dark:bg-gray-900"
+					>
+						<svg class="animate-spin h-6 w-6 text-gray-700 dark:text-gray-300" viewBox="0 0 24 24">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+						</svg>
+						<p class="text-sm font-medium text-gray-800 dark:text-gray-200">{CHECKING_COPY.title}</p>
+						<p class="text-sm text-gray-500 dark:text-gray-400">{CHECKING_COPY.subtitle}</p>
+					</div>
+				{/if}
 			</div>
 
 			<!-- Collapsible Technical Details -->
@@ -331,7 +395,7 @@
 					{/if}
 				</button>
 				<button
-					onclick={resetVerification}
+					onclick={goBackToStart}
 					class="px-6 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
 				>
 					Cancel
@@ -345,7 +409,7 @@
 			<div class="w-16 h-16 mx-auto mb-4 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-md">
 				<svg class="w-8 h-8 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
 			</div>
-			<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Passport Verified Successfully!</h2>
+			<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">{verifiedHeading(alreadyVerifiedOnLoad)}</h2>
 
 			{#if verificationResult}
 				<div class="bg-white/60 dark:bg-gray-800/60 rounded-lg p-4 mb-4 max-w-sm mx-auto text-left space-y-2">
@@ -367,6 +431,14 @@
 			<p class="text-sm text-gray-600 dark:text-gray-400 max-w-md mx-auto">
 				Your passport has been verified. This realm only received a confirmation — not your passport details.
 			</p>
+
+			<button
+				type="button"
+				onclick={goHome}
+				class="mt-6 inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg"
+			>
+				Go to My Dashboard
+			</button>
 		</div>
 
 	<!-- FAILED STATE -->
@@ -378,7 +450,7 @@
 			<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Verification Failed</h2>
 			<p class="text-gray-600 dark:text-gray-400 mb-6">Passport verification was not successful. Please try again.</p>
 			<button
-				onclick={resetVerification}
+				onclick={tryAgain}
 				class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
 			>
 				Try Again
@@ -394,7 +466,7 @@
 			<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Error Occurred</h2>
 			<p class="text-gray-600 dark:text-gray-400 mb-6">{errorMessage}</p>
 			<button
-				onclick={resetVerification}
+				onclick={tryAgain}
 				class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
 			>
 				Try Again
