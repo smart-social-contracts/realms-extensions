@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { description as extensionDescription } from '../../manifest.json';
-
 	let { ctx }: { ctx: any } = $props();
 
 	type VerificationStep = 'idle' | 'generating' | 'pending' | 'verified' | 'failed' | 'error';
@@ -15,6 +13,7 @@
 	let copied = $state(false);
 	let checkingStatus = $state(false);
 	let showDetails = $state(false);
+	let showGetApp = $state(false);
 
 	let currentStepIndex = $derived(
 		step === 'idle' ? 0
@@ -137,31 +136,27 @@
 		eventId = '';
 		copied = false;
 		showDetails = false;
+		showGetApp = false;
 	}
 </script>
 
 <div class="p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
 	<!-- Header -->
-	<div class="flex items-center gap-3">
-		<div class="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
-			<svg class="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-			</svg>
-		</div>
-		<div>
-			<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Passport Verification</h1>
-			<p class="text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
-		</div>
+	<div>
+		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Passport Verification</h1>
+		<p class="text-sm text-gray-500 dark:text-gray-400">Your passport stays on your phone.</p>
 	</div>
 
 	<!-- Step Indicator -->
 	{#if step !== 'error' && step !== 'failed'}
 		<div class="flex items-center justify-between">
 			{#each steps as { label, index: stepIdx }, i}
-				<div class="flex items-center {i < steps.length - 1 ? 'flex-1' : ''}">
-					<div class="flex flex-col items-center">
-						<div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold
-							{currentStepIndex >= stepIdx ? 'bg-[var(--color-primary-600,#2563eb)] text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">
+				<div class="flex items-center {i < steps.length - 1 ? 'min-w-0 flex-1' : 'shrink-0'}">
+					<div class="flex shrink-0 flex-col items-center">
+						<div
+							class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold
+							{currentStepIndex >= stepIdx ? 'bg-gray-800 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}"
+						>
 							{#if currentStepIndex > stepIdx}
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
 							{:else}
@@ -171,7 +166,7 @@
 						<span class="text-xs mt-1 {currentStepIndex >= stepIdx ? 'text-gray-700 dark:text-gray-300 font-medium' : 'text-gray-400 dark:text-gray-500'}">{label}</span>
 					</div>
 					{#if i < steps.length - 1}
-						<div class="flex-1 h-0.5 mx-3 mb-5 {currentStepIndex > stepIdx ? 'bg-[var(--color-primary-600,#2563eb)]' : 'bg-gray-200 dark:bg-gray-700'}"></div>
+						<div class="min-w-0 flex-1 h-0.5 mx-3 mb-5 {currentStepIndex > stepIdx ? 'bg-gray-800' : 'bg-gray-200 dark:bg-gray-700'}"></div>
 					{/if}
 				</div>
 			{/each}
@@ -181,28 +176,32 @@
 	<!-- IDLE STATE -->
 	{#if step === 'idle'}
 		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 sm:p-6">
-			<p class="text-sm text-gray-700 dark:text-gray-300">
-				New to this? You need a free phone app called <strong class="font-medium text-gray-900 dark:text-white">RariMe</strong>.
-				Install it first, then tap Start. RariMe reads your passport on your phone and this realm only gets a yes/no — not your passport details.
-			</p>
-			<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-				After you start, scan the QR code (or open the link) with RariMe.
-			</p>
-			<div class="mt-5 flex flex-col-reverse sm:flex-row gap-2">
-				<a
-					href="https://app.rarime.com/"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600"
-				>
-					Get RariMe
-				</a>
+			<div class="flex flex-col gap-2">
 				<button
+					type="button"
 					onclick={generateVerificationLink}
-					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] rounded-lg"
+					class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg"
 				>
-					Start verification
+					Start
 				</button>
+				{#if showGetApp}
+					<a
+						href="https://app.rarime.com/"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600"
+					>
+						Get RariMe
+					</a>
+				{:else}
+					<button
+						type="button"
+						onclick={() => showGetApp = true}
+						class="self-center px-2 py-1 text-sm text-gray-500 dark:text-gray-400 underline underline-offset-2"
+					>
+						Need the app?
+					</button>
+				{/if}
 			</div>
 		</div>
 
@@ -302,7 +301,7 @@
 				<button
 					onclick={checkVerificationStatus}
 					disabled={checkingStatus}
-					class="px-6 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:opacity-50 rounded-lg flex items-center gap-2 transition-colors"
+					class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 disabled:opacity-50 rounded-lg flex items-center gap-2 transition-colors"
 				>
 					{#if checkingStatus}
 						<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
@@ -360,7 +359,7 @@
 			<p class="text-gray-600 dark:text-gray-400 mb-6">Passport verification was not successful. Please try again.</p>
 			<button
 				onclick={resetVerification}
-				class="px-6 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] rounded-lg transition-colors"
+				class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
 			>
 				Try Again
 			</button>
@@ -376,7 +375,7 @@
 			<p class="text-gray-600 dark:text-gray-400 mb-6">{errorMessage}</p>
 			<button
 				onclick={resetVerification}
-				class="px-6 py-2.5 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] hover:bg-[var(--color-primary-700,#1d4ed8)] rounded-lg transition-colors"
+				class="px-6 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded-lg transition-colors"
 			>
 				Try Again
 			</button>
