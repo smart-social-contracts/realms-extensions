@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Host applyTheme() toggles html.dark. Without this, Tailwind v4 dark:
+   follows prefers-color-scheme and iOS dark mode paints navy cards on a
+   light host page. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @source "./**/*.{html,js,svelte,ts}";
 @source "../node_modules/@realmsgos/extension-ui/dist/**/*.{html,js,svelte,ts}";
 
