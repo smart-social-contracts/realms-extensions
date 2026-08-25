@@ -17,7 +17,7 @@ test.describe('Passport Verification Extension E2E Tests', () => {
   test('should display the page header and description', async ({ page }) => {
     test.setTimeout(TIMEOUT);
     await expect(page.getByRole('heading', { name: 'Passport Verification' })).toBeVisible();
-    await expect(page.getByText('Zero-knowledge identity verification via RariMe')).toBeVisible();
+    await expect(page.getByText('Your passport stays on your phone.')).toBeVisible();
     await page.screenshot({ path: 'test-results/01-page-header.png', fullPage: true });
   });
 
@@ -29,19 +29,27 @@ test.describe('Passport Verification Extension E2E Tests', () => {
     await page.screenshot({ path: 'test-results/02-step-indicator.png', fullPage: true });
   });
 
-  test('should show idle state hero card with Start Verification button', async ({ page }) => {
+  test('should show idle state with Start as the primary action', async ({ page }) => {
     test.setTimeout(TIMEOUT);
-    await expect(page.getByRole('heading', { name: 'Verify Your Passport Identity' })).toBeVisible();
-    await expect(page.getByText('Your passport data never leaves your device')).toBeVisible();
-    const startButton = page.getByRole('button', { name: 'Start Verification' });
+    await expect(page.getByRole('heading', { name: 'Passport Verification' })).toBeVisible();
+    const startButton = page.getByRole('button', { name: 'Start', exact: true });
     await expect(startButton).toBeVisible();
     await expect(startButton).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Need the app?' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Get RariMe' })).toHaveCount(0);
     await page.screenshot({ path: 'test-results/03-idle-state.png', fullPage: true });
   });
 
-  test('should show generating state when Start Verification is clicked', async ({ page }) => {
+  test('should reveal Get RariMe only after Need the app', async ({ page }) => {
     test.setTimeout(TIMEOUT);
-    const startButton = page.getByRole('button', { name: 'Start Verification' });
+    await page.getByRole('button', { name: 'Need the app?' }).click();
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Get RariMe' })).toBeVisible();
+  });
+
+  test('should show generating state when Start is clicked', async ({ page }) => {
+    test.setTimeout(TIMEOUT);
+    const startButton = page.getByRole('button', { name: 'Start', exact: true });
     await startButton.click();
 
     // Should show spinner and "Generating verification link..." text
@@ -59,7 +67,7 @@ test.describe('Passport Verification Extension E2E Tests', () => {
 
   test('should transition to pending or error after generating', async ({ page }) => {
     test.setTimeout(90000);
-    const startButton = page.getByRole('button', { name: 'Start Verification' });
+    const startButton = page.getByRole('button', { name: 'Start', exact: true });
     await startButton.click();
 
     // Wait for the HTTP outcall to complete (up to 30s for IC HTTP outcalls)
@@ -92,8 +100,8 @@ test.describe('Passport Verification Extension E2E Tests', () => {
     // (create_passport_identity + get_identity_status).
     test.setTimeout(TIMEOUT);
 
-    // Verify the idle state is correct (pre-verification)
-    await expect(page.getByRole('heading', { name: 'Verify Your Passport Identity' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Passport Verification' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
     await page.screenshot({ path: 'test-results/07-verified-state-check.png', fullPage: true });
   });
 });
