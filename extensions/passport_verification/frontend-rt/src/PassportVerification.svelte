@@ -1,4 +1,11 @@
 <script lang="ts">
+	import {
+		interpretVerificationLinkResult,
+		readPrincipal,
+		requestVerificationLink,
+		requestVerificationStatus,
+	} from './verificator';
+
 	let { ctx }: { ctx: any } = $props();
 
 	type VerificationStep = 'idle' | 'generating' | 'pending' | 'verified' | 'failed' | 'error';
@@ -43,33 +50,40 @@
 
 			const eventIdData = await callSync('get_current_application_id');
 			eventId = eventIdData?.application_id ?? eventIdData?.data?.application_id ?? '';
+			const skipZk = !!(
+				eventIdData?.skip_passport_zkproof ?? eventIdData?.data?.skip_passport_zkproof
+			);
 
-			const userId = ctx.principal || '';
-			const result = await callAsync('get_verification_link', { user_id: userId });
+			const userId = readPrincipal(ctx);
+			let result: unknown;
+			if (skipZk) {
+				result = await callAsync('get_verification_link', { user_id: userId });
+			} else {
+				try {
+					result = await requestVerificationLink({ userId, eventId });
+				} catch {
+					// CSP or canister-only environments still go through the outcall.
+					result = await callAsync('get_verification_link', { user_id: userId });
+				}
+			}
 
-		if (result?.data?.attributes) {
-			if (result.data.attributes.test_mode) {
-				sessionId = result.data.id || userId;
+			const parsed = interpretVerificationLinkResult(result, userId);
+			if (!parsed.ok) {
+				step = 'error';
+				errorMessage = parsed.error;
+				return;
+			}
+			if (parsed.testMode) {
+				sessionId = parsed.id || userId;
 				step = 'verified';
-				verificationResult = result.data.attributes;
+				verificationResult = parsed.attributes;
 				await createPassportIdentity(result);
 				return;
 			}
-			const verificationUrl =
-				result.data.attributes.rarime_app_url || result.data.attributes.get_proof_params;
-			verificationLink = verificationUrl;
-			qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(verificationUrl)}`;
-			sessionId = result.data.id || userId;
+			verificationLink = parsed.url;
+			qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(parsed.url)}`;
+			sessionId = parsed.id || userId;
 			step = 'pending';
-		} else if (result?.link || result?.data?.link) {
-				verificationLink = result.link ?? result.data.link;
-				qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(verificationLink)}`;
-				sessionId = userId;
-				step = 'pending';
-			} else {
-				step = 'error';
-				errorMessage = 'Invalid response format from verification service';
-			}
 		} catch (e: any) {
 			step = 'error';
 			errorMessage = e?.message || 'Network error occurred';
@@ -79,24 +93,30 @@
 	async function checkVerificationStatus() {
 		try {
 			checkingStatus = true;
-			const userId = ctx.principal || '';
-			const result = await callAsync('check_verification_status', { user_id: userId });
+			const userId = readPrincipal(ctx);
+			let result: unknown;
+			try {
+				result = await requestVerificationStatus(userId);
+			} catch {
+				result = await callAsync('check_verification_status', { user_id: userId });
+			}
 
-			if (result?.data?.attributes) {
-				const status = result.data.attributes.status;
+			const payload = result as any;
+			if (payload?.data?.attributes) {
+				const status = payload.data.attributes.status;
 				if (status === 'verified') {
 					step = 'verified';
-					verificationResult = result.data.attributes;
-					await createPassportIdentity(result);
-				} else if (status === 'failed') {
+					verificationResult = payload.data.attributes;
+					await createPassportIdentity(payload);
+				} else if (status === 'failed' || status === 'failed_verification') {
 					step = 'failed';
 					errorMessage = 'Passport verification failed';
 				}
 			} else {
-				const st = result?.status ?? result?.verification_status ?? '';
+				const st = payload?.status ?? payload?.verification_status ?? '';
 				if (st === 'verified' || st === 'approved') {
 					step = 'verified';
-					verificationResult = result;
+					verificationResult = payload;
 				}
 			}
 		} catch (e: any) {

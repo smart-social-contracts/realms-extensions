@@ -73,19 +73,18 @@ test.describe('Passport Verification Extension E2E Tests', () => {
     // Wait for the HTTP outcall to complete (up to 30s for IC HTTP outcalls)
     await page.waitForTimeout(15000);
 
-    // After generating, we should see one of:
-    // - Pending state: QR code section with "Check Status" button
-    // - Error state: "Error Occurred" (acceptable for staging if Rarimo API has issues)
-    // The "Application ID not found" error should never appear
+    // After generating, we should see the pending QR / Check Status UI.
+    // A JSON:API error document must not be misread as a format mismatch.
     const appIdError = page.getByText('Application ID not found');
     await expect(appIdError).not.toBeVisible();
 
     // Either QR/pending UI or error UI should be visible
     // We check for a button that only appears in post-generating states
+    await expect(page.getByText('Invalid response format from verification service')).toHaveCount(0);
     const checkStatusButton = page.getByRole('button', { name: 'Check Status' });
     const tryAgainButton = page.getByRole('button', { name: 'Try Again' });
 
-    // At least one of these buttons should be visible (pending or error state)
+    // Pending QR UI, or a real service error — never the old format-mismatch dead end.
     await expect(
       checkStatusButton.or(tryAgainButton).first()
     ).toBeVisible({ timeout: 30000 });
