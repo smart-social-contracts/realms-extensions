@@ -1,5 +1,16 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
+	import {
+		buildCreateLitigationParams,
+		findDirectoryHit,
+		needsDefendantQuarterPicker,
+		normalizeQuarters,
+		quarterCanisterId,
+		quarterIdFromEntry,
+		quarterLabel,
+		type DirectoryEntry,
+		type QuarterInfo,
+	} from './createLitigationParams';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -31,9 +42,16 @@
 	let formTitle = $state('');
 	let formDescription = $state('');
 	let formDefendant = $state('');
+	let formDefendantQuarterId = $state('');
 	let creating = $state(false);
 	let createError = $state('');
 	let createSuccess = $state(false);
+
+	// Host quarter list (ctx.realmInfo, else backend.status) + this canister.
+	let quarters: QuarterInfo[] = $state([]);
+	let activeQuarterId = $state('');
+	let quartersLoaded = $state(false);
+	let quartersLoad: Promise<void> | null = null;
 
 	// Courts — every case is filed at a court, so the list is needed by the
 	// create form (court picker / empty-state) and the admin Courts tab.
@@ -106,7 +124,7 @@
 
 	// Defendant autocomplete — realm directory (users + departments) is fetched
 	// once from the host's `directory_list` query and filtered client-side.
-	let directory: any[] = $state([]);
+	let directory: DirectoryEntry[] = $state([]);
 	let directoryLoaded = $state(false);
 	let directoryLoading = $state(false);
 	let showDefendantSuggestions = $state(false);
@@ -124,29 +142,53 @@
 			.slice(0, 8);
 	});
 
-	let selectedDefendantEntry: any = $state(null);
+	let selectedDefendantEntry: DirectoryEntry | null = $state(null);
 	// The principal actually submitted. When the user picks a suggestion we show
 	// its friendly label in the input but keep the real principal here.
 	let defendantPrincipal = $state('');
 
+	let directoryHit = $derived.by(() => {
+		if (selectedDefendantEntry) return selectedDefendantEntry;
+		return findDirectoryHit(directory, defendantPrincipal || formDefendant) ?? null;
+	});
+
+	let selectedQuarterName = $derived.by(() => {
+		const id = formDefendantQuarterId || quarterIdFromEntry(directoryHit);
+		if (!id || id === activeQuarterId) return '';
+		const q = quarters.find((x) => quarterCanisterId(x) === id);
+		return q ? quarterLabel(q) : '';
+	});
+
 	let defendantLabel = $derived.by(() => {
-		if (selectedDefendantEntry) {
-			const e = selectedDefendantEntry;
+		const e = selectedDefendantEntry || directoryHit;
+		if (e) {
 			// A department is filed against as a whole entity, so don't show its
 			// head's principal (that would imply the case targets one person).
 			if (e.kind === 'department') return `${e.label} (department)`;
 			const p = e.principal;
-			return `${e.label} (${e.kind})${p && p !== e.label ? ` — ${p}` : ''}`;
+			const base = `${e.label} (${e.kind})${p && p !== e.label ? ` — ${p}` : ''}`;
+			return selectedQuarterName ? `${base} · ${selectedQuarterName}` : base;
 		}
-		const v = formDefendant.trim();
-		if (!v) return '';
-		const hit = directory.find((e) => e.principal === v);
-		return hit ? `${hit.label} (${hit.kind})` : '';
+		return '';
 	});
 
 	// A defendant is valid if a directory entry was picked (user OR department)
 	// or the user typed a raw principal directly.
 	let hasDefendant = $derived(!!selectedDefendantEntry || !!defendantPrincipal.trim());
+
+	let showDefendantQuarterPicker = $derived(
+		needsDefendantQuarterPicker({
+			selectedEntry: selectedDefendantEntry,
+			directory,
+			defendantPrincipal: defendantPrincipal || formDefendant,
+			quarters,
+			activeQuarterId,
+		}),
+	);
+
+	let defendantQuarterMissing = $derived(
+		showDefendantQuarterPicker && !formDefendantQuarterId.trim(),
+	);
 
 	async function loadDirectory() {
 		if (directoryLoaded || directoryLoading || !ctx.backend?.directory_list) return;
@@ -166,13 +208,61 @@
 		}
 	}
 
-	function selectDefendant(entry: any) {
+	function applyKnownQuarter(entry: DirectoryEntry | null | undefined) {
+		const qid = quarterIdFromEntry(entry);
+		if (qid) {
+			formDefendantQuarterId = qid !== activeQuarterId ? qid : '';
+			return;
+		}
+		if (entry) formDefendantQuarterId = '';
+	}
+
+	function selectDefendant(entry: DirectoryEntry) {
 		if (!entry) return;
 		// Show the human-friendly label in the box, submit the real principal.
 		formDefendant = entry.label || entry.principal || '';
 		defendantPrincipal = entry.principal || '';
 		selectedDefendantEntry = entry;
 		showDefendantSuggestions = false;
+		applyKnownQuarter(entry);
+	}
+
+	function mergeQuarters(raw: unknown) {
+		const next = normalizeQuarters(raw);
+		if (next.length) quarters = next;
+	}
+
+	function applyRealmInfo(info: any) {
+		if (!info || typeof info !== 'object') return;
+		if (Array.isArray(info.quarters)) mergeQuarters(info.quarters);
+		const fromInfo = String(info.canisterId || info.canister_id || '').trim();
+		if (fromInfo) activeQuarterId = fromInfo;
+	}
+
+	async function loadQuarters() {
+		if (quartersLoad) return quartersLoad;
+		quartersLoad = (async () => {
+			if (ctx.config?.canisterId) activeQuarterId = String(ctx.config.canisterId);
+			if (typeof ctx.backend?.get_canister_id === 'function') {
+				try {
+					const id = await ctx.backend.get_canister_id();
+					if (id) activeQuarterId = String(id);
+				} catch {
+					// Non-fatal: config.canisterId is enough when present.
+				}
+			}
+			if (typeof ctx.backend?.status === 'function') {
+				try {
+					const raw: any = await ctx.backend.status();
+					const status = raw?.data?.status ?? raw;
+					if (Array.isArray(status?.quarters)) mergeQuarters(status.quarters);
+				} catch (e) {
+					console.warn('[justice_litigation] quarter list load failed', e);
+				}
+			}
+			quartersLoaded = true;
+		})();
+		return quartersLoad;
 	}
 
 	// Verdict modal
@@ -357,30 +447,39 @@
 			createError = 'Secure sharing is unavailable in this host version.';
 			return;
 		}
+		if (!quartersLoaded) await loadQuarters();
+		if (
+			needsDefendantQuarterPicker({
+				selectedEntry: selectedDefendantEntry,
+				directory,
+				defendantPrincipal,
+				quarters,
+				activeQuarterId,
+			}) &&
+			!formDefendantQuarterId.trim()
+		) {
+			createError = "Select the defendant's quarter.";
+			return;
+		}
 		creating = true;
 		createError = '';
 		createSuccess = false;
 		try {
 			// 1. Open the case (no plaintext leaves the browser): reserve an id,
 			//    its sharing scope, and the recipient principals (justice dept).
-			// Build the defendant payload. A department is recorded by name/id
-			// (the host Case.defendant only holds a User); a person by principal.
-			const e = selectedDefendantEntry;
-			const defendantParams =
-				e && e.kind === 'department'
-					? {
-							defendant_kind: 'department',
-							defendant_department: e.label || '',
-							defendant_department_id: e.id || '',
-						}
-					: {
-							defendant_kind: 'user',
-							defendant_principal: (e?.principal || defendantPrincipal).trim(),
-						};
-			const created: any = await callExt('create_litigation', {
-				...defendantParams,
-				...(selectedCourtId ? { court_id: selectedCourtId } : {}),
-			});
+			// A department is recorded by name/id; a person by principal.
+			// Cross-quarter users also send defendant_quarter_id (remote canister).
+			const created: any = await callExt(
+				'create_litigation',
+				buildCreateLitigationParams({
+					selectedEntry: selectedDefendantEntry,
+					defendantPrincipal,
+					directory,
+					courtId: selectedCourtId,
+					pickedQuarterId: formDefendantQuarterId,
+					activeQuarterId,
+				}),
+			);
 			const cdata = created?.data ?? created;
 			const id = cdata?.id;
 			const scope = cdata?.scope;
@@ -405,6 +504,7 @@
 			formTitle = '';
 			formDescription = '';
 			formDefendant = '';
+			formDefendantQuarterId = '';
 			defendantPrincipal = '';
 			selectedDefendantEntry = null;
 			await loadLitigations();
@@ -469,6 +569,7 @@
 		formTitle = '';
 		formDescription = '';
 		formDefendant = '';
+		formDefendantQuarterId = '';
 		defendantPrincipal = '';
 		selectedDefendantEntry = null;
 		createError = '';
@@ -528,6 +629,18 @@
 			loading = false;
 			error = 'User not authenticated';
 		}
+	});
+
+	$effect(() => {
+		const unsub = ctx.realmInfo?.subscribe?.((v: any) => applyRealmInfo(v));
+		if (ctx.realmInfo && typeof ctx.realmInfo === 'object' && !ctx.realmInfo.subscribe) {
+			applyRealmInfo(ctx.realmInfo);
+		}
+		return () => unsub?.();
+	});
+
+	$effect(() => {
+		if (!quartersLoaded) void loadQuarters();
 	});
 
 	$effect(() => {
@@ -888,65 +1001,93 @@
 							>
 								Defendant
 							</label>
-							<div class="relative">
-								<input
-									id="jl-defendant"
-									type="text"
-									bind:value={formDefendant}
-									oninput={() => {
-									selectedDefendantEntry = null;
-									defendantPrincipal = formDefendant.trim();
-									showDefendantSuggestions = true;
-								}}
-									onfocus={() => (showDefendantSuggestions = true)}
-									onblur={() => setTimeout(() => (showDefendantSuggestions = false), 250)}
-									autocomplete="off"
-									placeholder="Search by name, department, or principal…"
-									disabled={creating}
-									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
-								/>
-								{#if defendantSuggestions.length > 0}
-									<ul
-										class="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1"
-									>
-										{#each defendantSuggestions as s (s.kind + ':' + s.principal + ':' + s.label)}
-											<li>
-												<button
-													type="button"
-													onmousedown={() => selectDefendant(s)}
-													class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm hover:bg-indigo-50 dark:hover:bg-gray-700 transition-colors"
-												>
-													<span
-														class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide {s.kind ===
-														'department'
-															? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
-															: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'}"
+							<div class="flex gap-2 items-start">
+								<div class="relative flex-1 min-w-0">
+									<input
+										id="jl-defendant"
+										type="text"
+										bind:value={formDefendant}
+										oninput={() => {
+											selectedDefendantEntry = null;
+											defendantPrincipal = formDefendant.trim();
+											showDefendantSuggestions = true;
+											const hit = findDirectoryHit(directory, defendantPrincipal);
+											applyKnownQuarter(hit);
+										}}
+										onfocus={() => (showDefendantSuggestions = true)}
+										onblur={() => setTimeout(() => (showDefendantSuggestions = false), 250)}
+										autocomplete="off"
+										placeholder="Search by name, department, or principal…"
+										disabled={creating}
+										class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+									/>
+									{#if defendantSuggestions.length > 0}
+										<ul
+											class="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1"
+										>
+											{#each defendantSuggestions as s (s.kind + ':' + s.principal + ':' + s.label)}
+												<li>
+													<button
+														type="button"
+														onmousedown={() => selectDefendant(s)}
+														class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm hover:bg-indigo-50 dark:hover:bg-gray-700 transition-colors"
 													>
-														{s.kind}
-													</span>
-													<span class="flex-1 min-w-0">
-														<span class="block font-medium text-gray-900 dark:text-white truncate">
-															{s.label}
+														<span
+															class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide {s.kind ===
+															'department'
+																? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+																: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'}"
+														>
+															{s.kind}
 														</span>
-														{#if s.kind === 'department'}
-															<span class="block text-xs text-gray-500 dark:text-gray-400 truncate">
-																whole department
+														<span class="flex-1 min-w-0">
+															<span class="block font-medium text-gray-900 dark:text-white truncate">
+																{s.label}
 															</span>
-														{:else if s.principal && s.principal !== s.label}
-															<span class="block font-mono text-xs text-gray-500 dark:text-gray-400 truncate">
-																{s.principal}
-															</span>
-														{/if}
-													</span>
-												</button>
-											</li>
-										{/each}
-									</ul>
+															{#if s.kind === 'department'}
+																<span class="block text-xs text-gray-500 dark:text-gray-400 truncate">
+																	whole department
+																</span>
+															{:else if s.principal && s.principal !== s.label}
+																<span class="block font-mono text-xs text-gray-500 dark:text-gray-400 truncate">
+																	{s.principal}
+																</span>
+															{/if}
+														</span>
+													</button>
+												</li>
+											{/each}
+										</ul>
+									{/if}
+								</div>
+								{#if showDefendantQuarterPicker}
+									<div class="w-40 shrink-0">
+										<label for="jl-defendant-quarter" class="sr-only">Defendant quarter</label>
+										<select
+											id="jl-defendant-quarter"
+											bind:value={formDefendantQuarterId}
+											disabled={creating}
+											class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+										>
+											<option value="">Quarter…</option>
+											{#each quarters as q (quarterCanisterId(q))}
+												<option value={quarterCanisterId(q)}>
+													{quarterLabel(q)}{quarterCanisterId(q) === activeQuarterId
+														? ' (here)'
+														: ''}
+												</option>
+											{/each}
+										</select>
+									</div>
 								{/if}
 							</div>
 							{#if defendantLabel}
 								<p class="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
 									Selected: {defendantLabel}
+								</p>
+							{:else if showDefendantQuarterPicker}
+								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+									Not in this quarter's directory — pick their quarter.
 								</p>
 							{:else}
 								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1085,6 +1226,7 @@
 								!formTitle.trim() ||
 								!formDescription.trim() ||
 								!hasDefendant ||
+								defendantQuarterMissing ||
 								(courtsLoaded && activeCourts.length === 0)}
 						>
 							{#if creating}

@@ -278,7 +278,7 @@ These entry points power the **Justice & Litigation** sidebar UI and the private
 | Function | Description |
 |----------|-------------|
 | `get_litigations` | List litigations visible to the caller; returns `content_scope` + `content_ciphertext` for client-side decryption |
-| `create_litigation` | Open a case (step 1): returns `scope` and `recipients` |
+| `create_litigation` | Open a case (step 1): returns `scope` and `recipients`. Include `defendant_quarter_id` (remote canister id) when the defendant lives in another quarter. |
 | `set_litigation_content` | Attach encrypted title/description (step 2) |
 | `get_justice_audience` | List Justice department principals who receive decryption keys |
 
@@ -332,4 +332,4 @@ levied against, since a fine you cannot see is a fine you cannot pay.
 
 **Category:** Public Services  
 **Access:** Members and Admins  
-**Version:** 0.5.0
+**Version:** 0.5.1
