@@ -21,6 +21,8 @@
 		theme = 'vs',
 		initialRange = null,
 		onSelectionChange = undefined,
+		minimapEnabled = true,
+		wordWrap = false,
 	}: {
 		code?: string;
 		language?: string;
@@ -28,6 +30,8 @@
 		theme?: string;
 		initialRange?: LineRange | null;
 		onSelectionChange?: (selection: SelectionInfo | null) => void;
+		minimapEnabled?: boolean;
+		wordWrap?: boolean;
 	} = $props();
 
 	let container: HTMLDivElement | undefined = $state();
@@ -93,12 +97,12 @@
 					readOnly,
 					theme,
 					automaticLayout: true,
-					minimap: { enabled: true },
+					minimap: { enabled: minimapEnabled },
 					scrollBeyondLastLine: false,
 					fontSize: 13,
 					lineNumbers: 'on',
 					renderLineHighlight: 'all',
-					wordWrap: 'off',
+					wordWrap: wordWrap ? 'on' : 'off',
 					padding: { top: 12, bottom: 12 },
 					scrollbar: {
 						verticalScrollbarSize: 10,
@@ -149,6 +153,13 @@
 
 	$effect(() => {
 		editor?.updateOptions({ readOnly });
+	});
+
+	$effect(() => {
+		editor?.updateOptions({
+			minimap: { enabled: minimapEnabled },
+			wordWrap: wordWrap ? 'on' : 'off',
+		});
 	});
 
 	$effect(() => {
