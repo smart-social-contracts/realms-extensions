@@ -3,8 +3,18 @@
 	import { onMount } from 'svelte';
 	import InvitationManager from './InvitationManager.svelte';
 	import ExtensionAccess from './ExtensionAccess.svelte';
+	import {
+		isNarrowViewport,
+		persistSessionFlag,
+		readSessionFlag,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
+
+	const HELP_KEY = 'role-manager-help-open';
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	type Tab = 'people' | 'profiles' | 'invitations' | 'extensions';
 	type View = 'users' | 'detail' | 'assign' | 'permission' | 'profiles';
@@ -61,7 +71,12 @@
 	let callerCanGrantPerms = $state(false);
 	let callerCanRevokePerms = $state(false);
 	let callerGrantableOps: Set<string> = $state(new Set());
-	let showHelp = $state(false);
+	let showHelp = $state(readSessionFlag(HELP_KEY) === true);
+
+	function toggleHelp() {
+		showHelp = !showHelp;
+		persistSessionFlag(HELP_KEY, showHelp);
+	}
 
 	let profilesList: any[] = $state([]);
 	let profilesLoading = $state(false);
@@ -729,33 +744,132 @@
 	});
 </script>
 
-<div class="w-full px-6 pt-8 max-w-none">
-	<!-- Header -->
-	<div class="mb-6">
-		<div class="flex items-center gap-2">
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 6px 12px;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid #d1d5db;
+		background: #fff;
+		color: #374151;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: transparent;
+		color: #6b7280;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.chrome-tab.is-on {
+		border-bottom-color: #111827;
+		color: #111827;
+	}
+
+	.chrome-btn.is-on {
+		background: #111827;
+		color: #fff;
+		border-color: #111827;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+
+		.chrome-tab {
+			width: 40px;
+			justify-content: center;
+			padding: 10px 0;
+		}
+	}
+</style>
+
+<div class="w-full px-3 pt-4 sm:px-6 sm:pt-8 max-w-none">
+	<!-- Header: title on its own row -->
+	<div class="flex flex-col gap-2 mb-4 sm:mb-6">
+		<div>
 			<h1 class="text-3xl font-bold text-gray-900 mb-1">Users</h1>
-			<button
-				onclick={() => showHelp = !showHelp}
-				class="mt-0.5 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-				title="How permissions work"
-			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-			</button>
+			<p class="text-gray-500 text-sm">{extensionDescription}</p>
 		</div>
-		<p class="text-gray-500 text-sm">{extensionDescription}</p>
+		<button
+			type="button"
+			onclick={toggleHelp}
+			class="chrome-btn self-start"
+			title="How permissions work"
+			aria-label="How permissions work"
+			aria-pressed={showHelp}
+			class:is-on={showHelp}
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+			<span class="chrome-label">Help</span>
+		</button>
 	</div>
 
-	<!-- Tabs -->
-	<div class="border-b border-gray-200 mb-6">
-		<nav class="flex gap-6">
-			{#each [['people', 'People'], ['profiles', 'Profiles'], ['invitations', 'Invitations'], ['extensions', 'Extension Access']] as [id, label]}
-				<button
-					onclick={() => { activeTab = id as Tab; if (id === 'people') { view = 'users'; } else if (id === 'profiles') { view = 'profiles'; loadProfilesWithPermissions(); } }}
-					class="pb-3 text-sm font-medium border-b-2 transition-colors {activeTab === id ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-				>
-					{label}
-				</button>
-			{/each}
+	<!-- Tabs: icon-only on a narrow viewport -->
+	<div class="border-b border-gray-200 mb-6 overflow-x-auto">
+		<nav class="flex">
+			<button
+				type="button"
+				onclick={() => { activeTab = 'people'; view = 'users'; }}
+				class="chrome-tab {activeTab === 'people' ? 'is-on' : ''}"
+				title="People"
+				aria-label="People"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+				<span class="chrome-label">People</span>
+			</button>
+			<button
+				type="button"
+				onclick={() => { activeTab = 'profiles'; view = 'profiles'; loadProfilesWithPermissions(); }}
+				class="chrome-tab {activeTab === 'profiles' ? 'is-on' : ''}"
+				title="Profiles"
+				aria-label="Profiles"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2"/></svg>
+				<span class="chrome-label">Profiles</span>
+			</button>
+			<button
+				type="button"
+				onclick={() => { activeTab = 'invitations'; }}
+				class="chrome-tab {activeTab === 'invitations' ? 'is-on' : ''}"
+				title="Invitations"
+				aria-label="Invitations"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+				<span class="chrome-label">Invitations</span>
+			</button>
+			<button
+				type="button"
+				onclick={() => { activeTab = 'extensions'; }}
+				class="chrome-tab {activeTab === 'extensions' ? 'is-on' : ''}"
+				title="Extension Access"
+				aria-label="Extension Access"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+				<span class="chrome-label">Extension Access</span>
+			</button>
 		</nav>
 	</div>
 
@@ -778,7 +892,7 @@
 						<li>Permissions inherited <em>via a profile</em> cannot be individually revoked — remove the profile instead.</li>
 					</ul>
 				</div>
-				<button onclick={() => showHelp = false} class="text-blue-400 hover:text-blue-600 ml-3 flex-shrink-0">&times;</button>
+				<button onclick={() => { showHelp = false; persistSessionFlag(HELP_KEY, false); }} class="text-blue-400 hover:text-blue-600 ml-3 flex-shrink-0">&times;</button>
 			</div>
 		</div>
 	{/if}
@@ -849,13 +963,13 @@
 
 		<div class="space-y-5">
 			<!-- User info -->
-			<div class="rounded-lg border border-gray-200 bg-white p-5">
-				<div class="flex items-center justify-between mb-3">
+			<div class="bg-white p-0 sm:p-5 sm:rounded-lg sm:border sm:border-gray-200">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
 					<div>
 						<h2 class="text-xl font-bold text-gray-900">{selectedUser.nickname || 'Unnamed User'}</h2>
-						<code class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{selectedUser.principal}</code>
+						<code class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded break-all">{selectedUser.principal}</code>
 					</div>
-					<div class="flex gap-2">
+					<div class="flex flex-wrap gap-2">
 						<button
 							onclick={() => { view = 'assign'; assignProfileName = ''; }}
 							class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black transition-colors"
@@ -1333,29 +1447,31 @@
 
 	<!-- Users List View (default) -->
 	{:else}
-		<div class="rounded-lg border border-gray-200 bg-white">
-			<!-- Toolbar -->
-			<div class="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-				<div class="flex-1 max-w-sm">
+		<div class="bg-white border-y border-gray-200 sm:rounded-lg sm:border">
+			<!-- Toolbar: search wins width; refresh is icon-only on narrow -->
+			<div class="flex items-center gap-2 px-3 py-3 sm:px-5 border-b border-gray-200">
+				<div class="flex-1 min-w-0">
 					<input
 						type="text"
 						bind:value={searchQuery}
-						placeholder="Search by principal, nickname, or profile..."
+						placeholder={narrow ? 'Search users…' : 'Search by principal, nickname, or profile...'}
 						class="w-full rounded-lg border border-gray-300 px-3.5 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 					/>
 				</div>
 			<button
+				type="button"
 				onclick={loadUsers}
 				disabled={loading}
-				class="ml-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+				class="chrome-btn"
+				title={loading ? 'Loading' : 'Refresh'}
+				aria-label={loading ? 'Loading' : 'Refresh'}
 			>
 				{#if loading}
 					<div class="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-					Loading...
 				{:else}
-					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-					Refresh
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
 				{/if}
+				<span class="chrome-label">{loading ? 'Loading…' : 'Refresh'}</span>
 			</button>
 			</div>
 

@@ -1,7 +1,14 @@
 <script lang="ts">
 	import qrcode from 'qrcode-generator';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
@@ -231,7 +238,7 @@
 
 <div class="space-y-6">
 	<!-- Generate New Invitation -->
-	<div class="bg-white shadow-sm rounded-lg p-6 border border-gray-200">
+	<div class="bg-white p-0 sm:p-6 sm:shadow-sm sm:rounded-lg sm:border sm:border-gray-200">
 		<h2 class="text-lg font-semibold text-gray-900 mb-4">Generate New Invitation</h2>
 
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -307,7 +314,7 @@
 
 			{#if qrSvg}
 				<div class="mt-4 pt-4 border-t border-blue-200">
-					<div class="flex items-start gap-4">
+					<div class="flex flex-col sm:flex-row items-start gap-4">
 						<div class="bg-white border border-gray-200 rounded-lg p-2 shrink-0" style="width: 200px; height: 200px;">
 							{#if qrDataUrl}
 								<img src={qrDataUrl} alt="Invitation QR code" class="w-full h-full" />
@@ -336,16 +343,18 @@
 	</div>
 
 	<!-- Active Invitations -->
-	<div class="bg-white shadow-sm rounded-lg border border-gray-200">
-		<div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+	<div class="bg-white border-y border-gray-200 sm:shadow-sm sm:rounded-lg sm:border">
+		<div class="flex flex-col gap-2 px-0 py-3 sm:px-6 sm:py-4 sm:border-b sm:border-gray-200">
 			<h2 class="text-lg font-semibold text-gray-900">Invitations</h2>
 			<button
+				type="button"
 				onclick={loadCodes}
 				disabled={listLoading}
-				class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+				class="self-start p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
 				title="Refresh"
+				aria-label="Refresh"
 			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
 				</svg>
 			</button>
@@ -359,6 +368,44 @@
 		{:else if codes.length === 0}
 			<div class="text-center py-10">
 				<p class="text-gray-500">No invitation codes found.</p>
+			</div>
+		{:else if narrow}
+			<div class="divide-y divide-gray-200">
+				{#each codes as code (code.code_hash)}
+					{@const status = getStatus(code)}
+					<article class="py-3">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0">
+								<span
+									class="font-mono text-xs bg-gray-100 px-2 py-1 rounded cursor-help"
+									title={code.code_hash}
+								>
+									{code.code_hash.slice(0, 12)}…
+								</span>
+								<div class="mt-2 flex flex-wrap items-center gap-1.5">
+									<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+										{formatProfileLabel(code.profile)}
+									</span>
+									<span class={cn('px-2 py-0.5 rounded-full text-xs font-medium', status.color)}>
+										{status.label}
+									</span>
+								</div>
+								<div class="mt-1 text-xs text-gray-500">
+									{code.uses_count} / {code.max_uses || '∞'} uses · {formatExpiry(code.expires_at)}
+								</div>
+							</div>
+							{#if !code.revoked && !(code.max_uses > 0 && code.uses_count >= code.max_uses)}
+								<button
+									onclick={() => revokeCode(code.code_hash)}
+									disabled={revokingHash === code.code_hash}
+									class="shrink-0 px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+								>
+									{revokingHash === code.code_hash ? 'Revoking…' : 'Revoke'}
+								</button>
+							{/if}
+						</div>
+					</article>
+				{/each}
 			</div>
 		{:else}
 			<div class="overflow-x-auto">

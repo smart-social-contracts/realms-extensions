@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx, addToast }: { ctx: any; addToast?: (msg: string, type?: 'success' | 'error') => void } = $props();
+
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	const cn = $derived(
 		ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')),
@@ -409,14 +416,21 @@
 	});
 </script>
 
-<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
-	<div class="flex items-start justify-between gap-3 mb-1">
+<div class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
+	<div class="flex flex-col gap-2 mb-1">
 		<h2 class="text-lg font-semibold text-gray-900">Quarters & Auto-Scaling</h2>
 		<button
+			type="button"
 			onclick={() => load()}
-			class="text-sm text-blue-600 hover:underline disabled:text-gray-400"
+			class="self-start p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:text-gray-400"
 			disabled={loading}
-		>Refresh</button>
+			title="Refresh"
+			aria-label="Refresh"
+		>
+			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+			</svg>
+		</button>
 	</div>
 	<p class="text-sm text-gray-500 mb-5">
 		Horizontal scaling across quarters. New users are sharded into a fresh quarter once the
@@ -432,27 +446,51 @@
 	{:else}
 		<!-- Scale policy -->
 		{#if policy}
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-				<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-					<div class="text-xs text-gray-500 mb-1">Capacity (N)</div>
-					<div class="text-lg font-bold text-gray-900">{policy.n.toLocaleString()}</div>
-					<div class="text-[11px] text-gray-400">network: {policy.network || 'ic'}</div>
-				</div>
-				<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-					<div class="text-xs text-gray-500 mb-1">Scale threshold (90%)</div>
-					<div class="text-lg font-bold text-gray-900">{policy.threshold.toLocaleString()}</div>
-				</div>
-				<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-					<div class="text-xs text-gray-500 mb-1">Fullest quarter</div>
-					<div class="text-lg font-bold text-gray-900">{maxPopulation.toLocaleString()}</div>
-				</div>
-				<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-					<div class="text-xs text-gray-500 mb-1">Status</div>
-					<div class={cn('text-sm font-bold', policy.scale_in_flight ? 'text-amber-600' : policy.should_scale ? 'text-orange-600' : 'text-green-600')}>
-						{policy.scale_in_flight ? 'Scaling queued' : policy.should_scale ? 'Threshold reached' : 'Healthy'}
+			{#if narrow}
+				<div class="grid grid-cols-2 mb-4 border-y border-gray-200">
+					<div class="px-3 py-2 border-b border-r border-gray-200">
+						<div class="text-xs text-gray-500">Capacity (N)</div>
+						<div class="text-lg font-bold text-gray-900">{policy.n.toLocaleString()}</div>
+						<div class="text-[11px] text-gray-400">network: {policy.network || 'ic'}</div>
+					</div>
+					<div class="px-3 py-2 border-b border-gray-200">
+						<div class="text-xs text-gray-500">Scale threshold (90%)</div>
+						<div class="text-lg font-bold text-gray-900">{policy.threshold.toLocaleString()}</div>
+					</div>
+					<div class="px-3 py-2 border-r border-gray-200">
+						<div class="text-xs text-gray-500">Fullest quarter</div>
+						<div class="text-lg font-bold text-gray-900">{maxPopulation.toLocaleString()}</div>
+					</div>
+					<div class="px-3 py-2">
+						<div class="text-xs text-gray-500">Status</div>
+						<div class={cn('text-sm font-bold', policy.scale_in_flight ? 'text-amber-600' : policy.should_scale ? 'text-orange-600' : 'text-green-600')}>
+							{policy.scale_in_flight ? 'Scaling queued' : policy.should_scale ? 'Threshold reached' : 'Healthy'}
+						</div>
 					</div>
 				</div>
-			</div>
+			{:else}
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+						<div class="text-xs text-gray-500 mb-1">Capacity (N)</div>
+						<div class="text-lg font-bold text-gray-900">{policy.n.toLocaleString()}</div>
+						<div class="text-[11px] text-gray-400">network: {policy.network || 'ic'}</div>
+					</div>
+					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+						<div class="text-xs text-gray-500 mb-1">Scale threshold (90%)</div>
+						<div class="text-lg font-bold text-gray-900">{policy.threshold.toLocaleString()}</div>
+					</div>
+					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+						<div class="text-xs text-gray-500 mb-1">Fullest quarter</div>
+						<div class="text-lg font-bold text-gray-900">{maxPopulation.toLocaleString()}</div>
+					</div>
+					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+						<div class="text-xs text-gray-500 mb-1">Status</div>
+						<div class={cn('text-sm font-bold', policy.scale_in_flight ? 'text-amber-600' : policy.should_scale ? 'text-orange-600' : 'text-green-600')}>
+							{policy.scale_in_flight ? 'Scaling queued' : policy.should_scale ? 'Threshold reached' : 'Healthy'}
+						</div>
+					</div>
+				</div>
+			{/if}
 
 			<!-- Progress toward threshold -->
 			<div class="mb-4">
@@ -469,7 +507,7 @@
 			</div>
 
 			<!-- Controls -->
-			<div class="flex flex-wrap items-center gap-4 py-3 border-t border-gray-100">
+			<div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-4 py-3 border-t border-gray-100">
 				<label class="relative inline-flex items-center cursor-pointer">
 					<input
 						type="checkbox"
@@ -482,7 +520,7 @@
 					<span class="ml-3 text-sm font-medium text-gray-700">Auto-scaling {policy.auto_scale_enabled ? 'enabled' : 'disabled'}</span>
 				</label>
 
-				<div class="ml-auto flex items-center gap-2">
+				<div class="flex flex-col sm:flex-row sm:ml-auto items-stretch sm:items-center gap-2">
 					{#if !policy.scale_in_flight}
 						<button
 							onclick={requestScale}
@@ -597,6 +635,33 @@
 			</h3>
 			{#if quarters.length === 0}
 				<p class="text-sm text-gray-500">No quarter data available.</p>
+			{:else if narrow}
+				<div class="divide-y divide-gray-200 border-y border-gray-200">
+					{#each quarters as q (q.canister_id)}
+						<article
+							class={cn(
+								'py-3',
+								q.is_capital && 'bg-blue-50/40',
+								provisionJob?.canisterId === q.canister_id &&
+									'bg-green-50',
+							)}
+						>
+							<div class="flex items-start justify-between gap-2">
+								<div class="min-w-0">
+									<div class="font-medium text-gray-900">
+										{q.name}{#if q.is_capital}<span class="ml-1 text-[10px] uppercase tracking-wide text-blue-600">capital</span>{/if}
+									</div>
+									<div class="mt-0.5 font-mono text-xs text-gray-500 break-all">{q.canister_id}</div>
+								</div>
+								<span class="shrink-0 text-xs text-gray-500">#{q.index ?? 0}</span>
+							</div>
+							<div class="mt-1 flex items-center justify-between text-xs text-gray-600">
+								<span>{q.population.toLocaleString()} members</span>
+								<span>{q.status}</span>
+							</div>
+						</article>
+					{/each}
+				</div>
 			{:else}
 				<div class="overflow-x-auto rounded-lg border border-gray-200">
 					<table class="min-w-full text-sm">

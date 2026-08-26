@@ -1,7 +1,12 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import Sankey from './Sankey.svelte';
 	import Timeline from './Timeline.svelte';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -319,35 +324,91 @@
 		{ id: 'budgets', label: 'Budgets' },
 		{ id: 'settings', label: 'Settings' },
 	];
+
+	let narrow = $state(isNarrowViewport());
+	const unsubNarrow = subscribeNarrowViewport((value) => {
+		narrow = value;
+	});
+	onDestroy(unsubNarrow);
+
+	const panelClass = $derived(
+		narrow
+			? 'p-3 bg-white border-y border-gray-200'
+			: 'p-4 bg-white border border-gray-200 rounded-xl',
+	);
+	const metricClass = $derived(
+		narrow
+			? 'p-3 bg-white border border-gray-200'
+			: 'p-3 bg-white border border-gray-200 rounded-xl',
+	);
 </script>
 
-<div class="p-6 max-w-6xl mx-auto">
-	<!-- Header -->
-	<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+<style>
+	.chrome-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: transparent;
+		color: #6b7280;
+		cursor: pointer;
+	}
+
+	.chrome-tab.is-on {
+		border-bottom-color: #111827;
+		color: #111827;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-tab {
+			width: 40px;
+			justify-content: center;
+			padding: 10px 0;
+		}
+	}
+</style>
+
+<div class={cn('max-w-6xl mx-auto', narrow ? 'p-3' : 'p-6')}>
+	<!-- Header: title on its own row -->
+	<div class="flex flex-col gap-2 mb-4">
 		<div>
 			<h1 class="text-xl font-semibold text-gray-900">Budget management</h1>
 			<p class="text-sm text-gray-500">{extensionDescription}</p>
 		</div>
-		<div class="flex items-center gap-2">
+		<div class="flex items-center gap-2 min-w-0">
 			{#if overview}
-				<span class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full">
-					epoch: {overview.epoch_length}
-				</span>
-				<span
-					class={cn(
-						'px-2 py-1 text-xs rounded-full',
-						overview.schedule_active
-							? 'bg-green-50 text-green-700'
-							: 'bg-gray-100 text-gray-500',
-					)}
-				>
-					{overview.schedule_active ? 'automatic' : 'manual'}
-				</span>
+				{#if narrow}
+					<span class="text-xs text-gray-500 shrink-0">
+						{overview.epoch_length} · {overview.schedule_active ? 'automatic' : 'manual'}
+					</span>
+				{:else}
+					<span class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full">
+						epoch: {overview.epoch_length}
+					</span>
+					<span
+						class={cn(
+							'px-2 py-1 text-xs rounded-full',
+							overview.schedule_active
+								? 'bg-green-50 text-green-700'
+								: 'bg-gray-100 text-gray-500',
+						)}
+					>
+						{overview.schedule_active ? 'automatic' : 'manual'}
+					</span>
+				{/if}
 			{/if}
 			<select
 				value={selectedPeriod}
 				onchange={(e) => selectPeriod((e.target as HTMLSelectElement).value)}
-				class="px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:ring-1 focus:ring-gray-400"
+				class="min-w-0 flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:ring-1 focus:ring-gray-400"
 			>
 				{#each [...(overview?.periods ?? [])].reverse() as p (p.id)}
 					<option value={p.id}>{p.id}{p.status === 'open' ? ' (open)' : ''}</option>
@@ -363,35 +424,56 @@
 	{:else}
 		<!-- Summary cards -->
 		{#if status}
-			<div class="grid grid-cols-3 gap-3 mb-4">
-				<div class="p-3 bg-white border border-gray-200 rounded-xl">
+			<div class={cn('grid gap-3 mb-4', narrow ? 'grid-cols-1' : 'grid-cols-3')}>
+				<div class={metricClass}>
 					<div class="text-xs text-gray-500">Recognized revenue</div>
 					<div class="text-lg font-semibold text-gray-900">{fmt(status.pool)}</div>
 				</div>
-				<div class="p-3 bg-white border border-gray-200 rounded-xl">
+				<div class={metricClass}>
 					<div class="text-xs text-gray-500">Allocated</div>
 					<div class="text-lg font-semibold text-emerald-700">{fmt(status.allocated)}</div>
 				</div>
-				<div class="p-3 bg-white border border-gray-200 rounded-xl">
+				<div class={metricClass}>
 					<div class="text-xs text-gray-500">Unallocated reserve</div>
 					<div class="text-lg font-semibold text-amber-700">{fmt(status.unallocated)}</div>
 				</div>
 			</div>
 		{/if}
 
-		<!-- Tabs -->
-		<div class="flex gap-1 mb-4 border-b border-gray-200">
+		<!-- Tabs: icon-only on a narrow viewport -->
+		<div class="flex mb-4 border-b border-gray-200">
 			{#each tabs as tab (tab.id)}
 				<button
+					type="button"
 					onclick={() => (activeTab = tab.id)}
-					class={cn(
-						'px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors',
-						activeTab === tab.id
-							? 'border-gray-900 text-gray-900'
-							: 'border-transparent text-gray-500 hover:text-gray-700',
-					)}
+					class="chrome-tab {activeTab === tab.id ? 'is-on' : ''}"
+					title={tab.label}
+					aria-label={tab.label}
 				>
-					{tab.label}
+					{#if tab.id === 'flow'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4M4 17h12m0 0l-4 4m4-4l-4-4" />
+						</svg>
+					{:else if tab.id === 'timeline'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+						</svg>
+					{:else if tab.id === 'allocation'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+						</svg>
+					{:else if tab.id === 'budgets'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+						</svg>
+					{:else}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+						</svg>
+					{/if}
+					<span class="chrome-label">{tab.label}</span>
 				</button>
 			{/each}
 		</div>
@@ -401,7 +483,7 @@
 				<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
 			</div>
 		{:else if activeTab === 'timeline'}
-			<div class="p-4 bg-white border border-gray-200 rounded-xl">
+			<div class={panelClass}>
 				{#if timelineLoading && !timeline}
 					<div class="flex items-center justify-center py-12">
 						<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
@@ -415,7 +497,7 @@
 						onselect={onTimelineSelect}
 					/>
 					{#if selectedPeriod && status}
-						<div class="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-3 text-sm">
+						<div class={cn('mt-4 pt-4 border-t border-gray-100 grid gap-3 text-sm', narrow ? 'grid-cols-1' : 'grid-cols-3')}>
 							<div>
 								<div class="text-xs text-gray-500">Selected · {selectedPeriod}</div>
 								<div class="font-medium text-gray-900">{fmt(status.pool)}</div>
@@ -436,7 +518,7 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'flow'}
-			<div class="p-4 bg-white border border-gray-200 rounded-xl">
+			<div class={panelClass}>
 				{#if flows}
 					<Sankey nodes={flows.nodes} links={flows.links} format={fmt} />
 				{:else}
@@ -444,9 +526,9 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'allocation'}
-			<div class="grid md:grid-cols-2 gap-4">
+			<div class={cn('grid gap-4', narrow ? 'grid-cols-1' : 'md:grid-cols-2')}>
 				<!-- Revenue mix -->
-				<div class="p-4 bg-white border border-gray-200 rounded-xl">
+				<div class={panelClass}>
 					<h2 class="text-sm font-semibold text-gray-700 mb-3">
 						Revenue this epoch — {overview?.source_fund}
 					</h2>
@@ -478,7 +560,7 @@
 				</div>
 
 				<!-- Rule editor -->
-				<div class="p-4 bg-white border border-gray-200 rounded-xl">
+				<div class={panelClass}>
 					<div class="flex items-center justify-between mb-3">
 						<h2 class="text-sm font-semibold text-gray-700">Allocation rule</h2>
 						{#if overview?.rule}
@@ -556,48 +638,74 @@
 				</div>
 			</div>
 		{:else if activeTab === 'budgets'}
-			<div class="p-4 bg-white border border-gray-200 rounded-xl">
+			<div class={panelClass}>
 				<h2 class="text-sm font-semibold text-gray-700 mb-3">
 					Planned vs actual — {selectedPeriod}
 				</h2>
 				{#if (budgets?.budgets ?? []).length > 0}
-					<table class="w-full text-sm">
-						<thead>
-							<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
-								<th class="py-2 pr-3">Fund</th>
-								<th class="py-2 pr-3">Category</th>
-								<th class="py-2 pr-3 text-right">Planned</th>
-								<th class="py-2 pr-3 text-right">Actual</th>
-								<th class="py-2 text-right">Variance</th>
-							</tr>
-						</thead>
-						<tbody class="divide-y divide-gray-100">
+					{#if narrow}
+						<div class="divide-y divide-gray-200">
 							{#each budgets.budgets as b (b.id)}
-								<tr>
-									<td class="py-2 pr-3 font-medium text-gray-900">{b.fund}</td>
-									<td class="py-2 pr-3 text-gray-600 capitalize">{b.category.replace(/_/g, ' ')}</td>
-									<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.planned)}</td>
-									<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.actual)}</td>
-									<td
-										class={cn(
-											'py-2 text-right font-medium',
-											b.variance >= 0 ? 'text-emerald-700' : 'text-red-600',
-										)}
-									>
-										{b.variance >= 0 ? '+' : ''}{fmt(b.variance)}
-									</td>
-								</tr>
+								<article class="py-3">
+									<div class="flex items-start justify-between gap-2">
+										<div class="min-w-0">
+											<div class="font-medium text-gray-900">{b.fund}</div>
+											<div class="text-xs text-gray-500 capitalize">{b.category.replace(/_/g, ' ')}</div>
+										</div>
+										<div
+											class={cn(
+												'shrink-0 text-sm font-medium',
+												b.variance >= 0 ? 'text-emerald-700' : 'text-red-600',
+											)}
+										>
+											{b.variance >= 0 ? '+' : ''}{fmt(b.variance)}
+										</div>
+									</div>
+									<div class="mt-1 text-xs text-gray-500">
+										Planned {fmt(b.planned)} · Actual {fmt(b.actual)}
+									</div>
+								</article>
 							{/each}
-						</tbody>
-					</table>
+						</div>
+					{:else}
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
+									<th class="py-2 pr-3">Fund</th>
+									<th class="py-2 pr-3">Category</th>
+									<th class="py-2 pr-3 text-right">Planned</th>
+									<th class="py-2 pr-3 text-right">Actual</th>
+									<th class="py-2 text-right">Variance</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-gray-100">
+								{#each budgets.budgets as b (b.id)}
+									<tr>
+										<td class="py-2 pr-3 font-medium text-gray-900">{b.fund}</td>
+										<td class="py-2 pr-3 text-gray-600 capitalize">{b.category.replace(/_/g, ' ')}</td>
+										<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.planned)}</td>
+										<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.actual)}</td>
+										<td
+											class={cn(
+												'py-2 text-right font-medium',
+												b.variance >= 0 ? 'text-emerald-700' : 'text-red-600',
+											)}
+										>
+											{b.variance >= 0 ? '+' : ''}{fmt(b.variance)}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{/if}
 				{:else}
 					<p class="text-sm text-gray-400 py-4">No budgets recorded for this epoch.</p>
 				{/if}
 			</div>
 		{:else if activeTab === 'settings'}
-			<div class="grid md:grid-cols-2 gap-4">
+			<div class={cn('grid gap-4', narrow ? 'grid-cols-1' : 'md:grid-cols-2')}>
 				<!-- Epoch config -->
-				<div class="p-4 bg-white border border-gray-200 rounded-xl">
+				<div class={panelClass}>
 					<h2 class="text-sm font-semibold text-gray-700 mb-3">Calendar epochs</h2>
 					<label class="block text-xs text-gray-500 mb-1" for="epoch-length">Epoch length</label>
 					<select
@@ -663,15 +771,15 @@
 				</div>
 
 				<!-- Schedule -->
-				<div class="p-4 bg-white border border-gray-200 rounded-xl">
+				<div class={panelClass}>
 					<h2 class="text-sm font-semibold text-gray-700 mb-3">Automatic treasury</h2>
 					<div class="flex items-center justify-between py-2">
 						<div class="text-sm text-gray-600">
 							Daily sweep of unmatched deposits
 							{#if overview?.schedule_active}
-								<span class="ml-2 px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded-full">on</span>
+								<span class={narrow ? 'ml-2 text-xs text-emerald-700' : 'ml-2 px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded-full'}>on</span>
 							{:else}
-								<span class="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">off</span>
+								<span class={narrow ? 'ml-2 text-xs text-gray-500' : 'ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full'}>off</span>
 							{/if}
 						</div>
 					</div>

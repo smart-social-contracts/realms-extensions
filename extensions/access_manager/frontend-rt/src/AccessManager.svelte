@@ -1,5 +1,10 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -94,6 +99,35 @@
 	type DeptTab = 'overview' | 'members' | 'permissions' | 'authority' | 'fund';
 	// Fund tab (issue #260)
 	let activeTab: DeptTab = $state('overview');
+	let narrow = $state(isNarrowViewport());
+	const unsubNarrow = subscribeNarrowViewport((value) => {
+		narrow = value;
+	});
+	onDestroy(unsubNarrow);
+
+	const deptTabs: { id: DeptTab; label: string }[] = [
+		{ id: 'overview', label: 'Overview' },
+		{ id: 'members', label: 'Members' },
+		{ id: 'permissions', label: 'Permissions' },
+		{ id: 'authority', label: 'Authority' },
+		{ id: 'fund', label: 'Fund' },
+	];
+
+	const boxClass = $derived(
+		narrow
+			? 'p-3 border-y border-gray-200 bg-white space-y-2'
+			: 'p-4 border border-gray-200 rounded-xl bg-white space-y-2',
+	);
+	const nestedBoxClass = $derived(
+		narrow
+			? 'p-3 border border-gray-200 bg-white space-y-3'
+			: 'p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-3',
+	);
+	const metricClass = $derived(
+		narrow
+			? 'p-3 bg-white border border-gray-200'
+			: 'p-3 bg-white border border-gray-200 rounded-lg',
+	);
 	let showPermPicker = $state(false);
 	let authFilter = $state('');
 	let expandedAuthRows: Set<string> = $state(new Set());
@@ -954,6 +988,11 @@
 		if (selectedDeptName) void loadFund(selectedDeptName);
 	}
 
+	function selectTab(id: DeptTab) {
+		if (id === 'fund') openFundTab();
+		else activeTab = id;
+	}
+
 	async function runPayroll(deptName: string) {
 		payrollBusy = true;
 		try {
@@ -1043,21 +1082,85 @@
 	{/if}
 {/snippet}
 
-<div class="w-full min-h-full p-4 sm:p-6 lg:p-8">
-	<!-- Header -->
-	<div class="mb-6">
-		<h1 class="text-2xl font-bold text-gray-900">Departments</h1>
-		<p class="text-sm text-gray-500 mt-1">{extensionDescription}</p>
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 6px 12px;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid #111827;
+		background: #111827;
+		color: #fff;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-btn.is-cancel {
+		border-color: #d1d5db;
+		background: #fff;
+		color: #374151;
+	}
+
+	.chrome-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: transparent;
+		color: #4b5563;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-tab.is-on {
+		border-bottom-color: #111827;
+		color: #111827;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+
+		.chrome-tab {
+			width: 40px;
+			justify-content: center;
+			padding: 10px 0;
+		}
+	}
+</style>
+
+<div class={cn('w-full min-h-full', narrow ? 'p-3' : 'p-4 sm:p-6 lg:p-8')}>
+	<!-- Header: title on its own row -->
+	<div class="flex flex-col gap-2 mb-4">
+		<div>
+			<h1 class="text-2xl font-bold text-gray-900">Departments</h1>
+			<p class="text-sm text-gray-500 mt-1">{extensionDescription}</p>
+		</div>
 	</div>
 
 	<div class="space-y-4">
 		{#if departmentsBlockedMessage}
-			<div class="p-4 border border-amber-200 bg-amber-50 rounded-xl text-sm text-amber-900">
+			<div class={cn('border border-amber-200 bg-amber-50 text-sm text-amber-900', narrow ? 'p-3' : 'p-4 rounded-xl')}>
 				{departmentsBlockedMessage}
 			</div>
 		{/if}
 
-		<div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+		<div class={cn('flex gap-3', narrow ? 'flex-col' : 'flex-row items-end justify-between')}>
 			{#if !departmentsBlockedMessage}
 			<div class="flex-1 min-w-0">
 				<label for="org-select" class="block text-xs font-medium text-gray-500 mb-1">
@@ -1083,14 +1186,29 @@
 					{/if}
 				</select>
 			</div>
-			<button onclick={() => showNewDept = !showNewDept} class="shrink-0 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800">
-				{showNewDept ? 'Cancel' : '+ New Department'}
+			<button
+				type="button"
+				onclick={() => showNewDept = !showNewDept}
+				class="chrome-btn {showNewDept ? 'is-cancel' : ''}"
+				title={showNewDept ? 'Cancel' : 'New Department'}
+				aria-label={showNewDept ? 'Cancel' : 'New Department'}
+			>
+				{#if showNewDept}
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				{:else}
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+					</svg>
+				{/if}
+				<span class="chrome-label">{showNewDept ? 'Cancel' : '+ New Department'}</span>
 			</button>
 			{/if}
 		</div>
 
 		{#if showNewDept}
-			<div class="p-4 border border-gray-200 rounded-xl bg-gray-50 space-y-3">
+			<div class={nestedBoxClass}>
 				<input bind:value={newDeptName} placeholder="Department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptDesc} placeholder="Description (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptHead} placeholder="Head principal (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
@@ -1119,8 +1237,8 @@
 			<p class="text-center text-gray-500 py-8">No departments yet. Root is created on realm init.</p>
 		{:else if selectedDept}
 			{@const dept = selectedDept}
-			<div class="border border-gray-200 rounded-xl overflow-hidden">
-				<div class="px-4 py-4 sm:px-6 bg-white border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
+			<div class={cn('border border-gray-200 overflow-hidden', narrow ? '' : 'rounded-xl')}>
+				<div class={cn('bg-white border-b border-gray-100 flex flex-wrap items-start justify-between gap-3', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					<div class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<h2 class="text-lg font-semibold text-gray-900">{dept.name}</h2>
@@ -1134,57 +1252,44 @@
 					</div>
 				</div>
 
-				<!-- Tabs -->
-				<div class="px-4 sm:px-6 py-2 bg-gray-100 flex gap-2 overflow-x-auto">
-					<button
-						onclick={() => (activeTab = 'overview')}
-						class={cn(
-							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-							activeTab === 'overview' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
-						)}
-					>
-						Overview
-					</button>
-					<button
-						onclick={() => (activeTab = 'members')}
-						class={cn(
-							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-							activeTab === 'members' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
-						)}
-					>
-						Members
-					</button>
-					<button
-						onclick={() => (activeTab = 'permissions')}
-						class={cn(
-							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-							activeTab === 'permissions' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
-						)}
-					>
-						Permissions
-					</button>
-					<button
-						onclick={() => (activeTab = 'authority')}
-						class={cn(
-							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-							activeTab === 'authority' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
-						)}
-					>
-						Authority
-					</button>
-					<button
-						onclick={openFundTab}
-						class={cn(
-							'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-							activeTab === 'fund' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70'
-						)}
-					>
-						Fund
-					</button>
+				<!-- Tabs: icon-only on a narrow viewport -->
+				<div class={cn('flex border-b border-gray-200 bg-white', narrow ? 'px-1' : 'px-4 sm:px-6')}>
+					{#each deptTabs as tab (tab.id)}
+						<button
+							type="button"
+							onclick={() => selectTab(tab.id)}
+							class="chrome-tab {activeTab === tab.id ? 'is-on' : ''}"
+							title={tab.label}
+							aria-label={tab.label}
+						>
+							{#if tab.id === 'overview'}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+								</svg>
+							{:else if tab.id === 'members'}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+								</svg>
+							{:else if tab.id === 'permissions'}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+								</svg>
+							{:else if tab.id === 'authority'}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+								</svg>
+							{:else}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+								</svg>
+							{/if}
+							<span class="chrome-label">{tab.label}</span>
+						</button>
+					{/each}
 				</div>
 
 				{#if activeTab === 'overview'}
-				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					{#if dept.head}
 						<div class="text-sm">
 							<span class="font-medium text-gray-700">Head:</span>
@@ -1195,21 +1300,33 @@
 						<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
 					{/if}
 
-					<div class="flex flex-wrap gap-1.5">
-						<span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded-full font-medium">
+					{#if narrow}
+						<div class="text-xs text-gray-500">
 							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
-						</span>
-						{#if (dept.policy?.quorum_percent ?? 0) > 0}
-							<span class="px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded-full font-medium">
-								Quorum {dept.policy?.quorum_percent}%
+							{#if (dept.policy?.quorum_percent ?? 0) > 0}
+								· Quorum {dept.policy?.quorum_percent}%
+							{/if}
+							{#if dept.fund}
+								· Fund {dept.fund.code}
+							{/if}
+						</div>
+					{:else}
+						<div class="flex flex-wrap gap-1.5">
+							<span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded-full font-medium">
+								Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
 							</span>
-						{/if}
-						{#if dept.fund}
-							<span class="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded-full font-medium">
-								Fund {dept.fund.code}
-							</span>
-						{/if}
-					</div>
+							{#if (dept.policy?.quorum_percent ?? 0) > 0}
+								<span class="px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded-full font-medium">
+									Quorum {dept.policy?.quorum_percent}%
+								</span>
+							{/if}
+							{#if dept.fund}
+								<span class="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded-full font-medium">
+									Fund {dept.fund.code}
+								</span>
+							{/if}
+						</div>
+					{/if}
 
 					<!-- Policy + budget -->
 					{#if policyDraft[dept.name]}
@@ -1313,9 +1430,9 @@
 							{/if}
 
 							{#if dept.positions?.length > 0}
-								<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+								<div class={cn('grid gap-2', narrow ? 'grid-cols-1' : 'sm:grid-cols-2 xl:grid-cols-3')}>
 									{#each dept.positions as pos (pos.key)}
-										<div class="px-3 py-2 bg-white border border-gray-200 rounded-lg">
+										<div class={cn('px-3 py-2 bg-white border border-gray-200', narrow ? '' : 'rounded-lg')}>
 											{#if editingPosition === pos.key}
 												<div class="flex flex-wrap items-end gap-2">
 													<label class="text-xs text-gray-500">Title
@@ -1416,7 +1533,7 @@
 					{/if}
 				</div>
 				{:else if activeTab === 'members'}
-				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
 						<p class="text-xs text-gray-500">
 							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
@@ -1429,7 +1546,7 @@
 					{:else}
 						<div class="flex flex-col gap-1">
 							{#each dept.members as m (m.principal)}
-								<div class="flex items-center justify-between text-sm bg-white px-3 py-1.5 rounded-lg border border-gray-200">
+								<div class={cn('flex items-center justify-between text-sm bg-white px-3 py-1.5 border border-gray-200', narrow ? '' : 'rounded-lg')}>
 									<div class="min-w-0 flex-1">{@render identityLabel(m)}</div>
 									<div class="flex items-center gap-0.5 shrink-0 ml-2">
 										<button
@@ -1528,7 +1645,7 @@
 					{/if}
 				</div>
 				{:else if activeTab === 'permissions'}
-				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<div class="text-sm font-medium text-gray-700">Permissions ({(deptPermissions[dept.name] ?? []).length})</div>
 						{#if !deptPermissionsBlocked[dept.name]}
@@ -1577,12 +1694,12 @@
 					{/if}
 				</div>
 				{:else if activeTab === 'authority'}
-				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					<div>
 						<h3 class="text-sm font-semibold text-gray-800">Authority (department over department)</h3>
 						<p class="text-sm text-gray-500 mt-1">Grant permissions from root (or another department) over a local or remote-quarter department.</p>
 					</div>
-					<div class="p-4 border border-gray-200 rounded-xl bg-white space-y-2">
+					<div class={boxClass}>
 						<input bind:value={authTarget} placeholder="Local target department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 						<input bind:value={authRemoteCanister} placeholder="Remote quarter canister id (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 						<input bind:value={authRemoteOrg} placeholder="Remote department name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
@@ -1605,6 +1722,38 @@
 						/>
 						{#if filteredAuthorities.length === 0}
 							<p class="text-sm text-gray-400">No authority grants match your filter.</p>
+						{:else if narrow}
+							<div class="divide-y divide-gray-200 border-y border-gray-200 bg-white">
+								{#each filteredAuthorities as auth (auth.id)}
+									{@const perms = auth.permissions ?? []}
+									{@const expanded = expandedAuthRows.has(auth.id)}
+									{@const visiblePerms = expanded ? perms : perms.slice(0, 3)}
+									<article class="py-3">
+										<div class="flex items-start justify-between gap-3">
+											<div class="min-w-0">
+												<div class="text-xs text-gray-500">From {auth.grantor}</div>
+												<div class="font-medium text-gray-900">{authTargetLabel(auth)}</div>
+												{#if auth.target_quarter_canister_id}
+													<div class="text-xs text-gray-400 font-mono">{shortPrincipal(auth.target_quarter_canister_id)}</div>
+												{/if}
+											</div>
+											<button type="button" onclick={() => revokeAuthority(auth.id)} class="shrink-0 text-red-500 hover:text-red-700 text-xs">Revoke</button>
+										</div>
+										<div class="mt-1 text-xs text-gray-600 break-words">
+											{visiblePerms.join(', ')}
+											{#if perms.length > 3}
+												<button
+													type="button"
+													onclick={() => toggleAuthRowExpanded(auth.id)}
+													class="ml-1 text-indigo-600 hover:text-indigo-800"
+												>
+													{expanded ? 'Show less' : `+${perms.length - 3} more`}
+												</button>
+											{/if}
+										</div>
+									</article>
+								{/each}
+							</div>
 						{:else}
 							<div class="overflow-x-auto border border-gray-200 rounded-lg bg-white">
 								<table class="w-full text-sm min-w-[36rem]">
@@ -1658,7 +1807,7 @@
 				</div>
 				{:else if activeTab === 'fund'}
 				<!-- Fund tab: inflows, outflows, balance, payroll (issue #260) -->
-				<div class="px-4 py-4 sm:px-6 bg-gray-50 space-y-4">
+				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					{#if fundLoading}
 						<div class="flex justify-center py-8">
 							<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
@@ -1675,28 +1824,37 @@
 								<span class="font-medium text-gray-800">{fundData.fund.name || fundData.fund.code}</span>
 								<span class="ml-2 font-mono text-xs text-gray-400">{fundData.fund.code}</span>
 								{#if fundData.fund.fund_type}
-									<span class="ml-2 px-1.5 py-0.5 text-xs bg-indigo-50 text-indigo-600 rounded-full">{fundData.fund.fund_type}</span>
+									<span class={narrow ? 'ml-2 text-xs text-indigo-600' : 'ml-2 px-1.5 py-0.5 text-xs bg-indigo-50 text-indigo-600 rounded-full'}>{fundData.fund.fund_type}</span>
 								{/if}
 							</div>
 							<button
+								type="button"
 								onclick={() => loadFund(dept.name)}
 								class="px-2 py-1 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100"
+								title="Refresh"
+								aria-label="Refresh"
 							>
-								Refresh
+								{#if narrow}
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+									</svg>
+								{:else}
+									Refresh
+								{/if}
 							</button>
 						</div>
 
 						<!-- Totals -->
-						<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-							<div class="p-3 bg-white border border-gray-200 rounded-lg">
+						<div class={cn('grid gap-2', narrow ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-3')}>
+							<div class={metricClass}>
 								<div class="text-xs text-gray-500">Inflows</div>
 								<div class="text-lg font-semibold text-green-700">+{formatAmount(fundData.totals?.inflows)}</div>
 							</div>
-							<div class="p-3 bg-white border border-gray-200 rounded-lg">
+							<div class={metricClass}>
 								<div class="text-xs text-gray-500">Outflows</div>
 								<div class="text-lg font-semibold text-red-700">-{formatAmount(fundData.totals?.outflows)}</div>
 							</div>
-							<div class="p-3 bg-white border border-gray-200 rounded-lg">
+							<div class={metricClass}>
 								<div class="text-xs text-gray-500">Cash balance</div>
 								<div class={`text-lg font-semibold ${(fundData.totals?.cash_balance ?? 0) >= 0 ? 'text-gray-900' : 'text-red-700'}`}>
 									{formatAmount(fundData.totals?.cash_balance)}
@@ -1756,7 +1914,7 @@
 									{/each}
 								</div>
 								<!-- Automatic payroll (standing schedule) -->
-								<div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg">
+								<div class={cn('flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200', narrow ? '' : 'rounded-lg')}>
 									<div class="text-xs text-gray-600">
 										<span class="font-medium text-gray-700">Automatic payroll</span>
 										{#if payrollData.schedule_active}
@@ -1829,6 +1987,32 @@
 									No ledger entries yet. Inflows (e.g. litigation fines) and outflows
 									(e.g. salaries) appear here once recorded against this fund.
 								</p>
+							{:else if narrow}
+								<div class="max-h-72 overflow-y-auto divide-y divide-gray-200 border-y border-gray-200 bg-white">
+									{#each fundData.entries as entry (entry.id)}
+										<article class="py-2.5">
+											<div class="flex items-start justify-between gap-3">
+												<div class="min-w-0">
+													<div class="text-xs text-gray-500">{(entry.entry_date || '').slice(0, 10)}</div>
+													<div class="text-sm text-gray-900">
+														{entry.entry_type} · {entry.category}
+													</div>
+													{#if entry.description}
+														<div class="text-xs text-gray-500 break-words">{entry.description}</div>
+													{/if}
+												</div>
+												<div class="shrink-0 text-right font-mono text-xs text-gray-700">
+													{#if entry.debit}
+														<div>Dr {formatAmount(entry.debit)}</div>
+													{/if}
+													{#if entry.credit}
+														<div>Cr {formatAmount(entry.credit)}</div>
+													{/if}
+												</div>
+											</div>
+										</article>
+									{/each}
+								</div>
 							{:else}
 								<div class="max-h-72 overflow-y-auto border border-gray-200 rounded-lg bg-white">
 									<table class="w-full text-xs">

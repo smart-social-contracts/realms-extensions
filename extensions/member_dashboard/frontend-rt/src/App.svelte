@@ -3,6 +3,10 @@
 	import { createExtensionClient, type ExtensionClient } from '@realmsgos/extension-bridge';
 	import { Card, Button, EmptyState, AccessDenied } from '@realmsgos/extension-ui';
 	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
+	import {
 		bridgeErrorFields,
 		citizenshipSteps,
 		displayFirstName,
@@ -57,6 +61,8 @@
 	let copied = $state(false);
 
 	let ctx: ExtensionClient | null = null;
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	let unreadCount = $derived(notifications.filter((n) => !n.read).length);
 	let firstName = $derived(displayFirstName(summary, principal));
@@ -560,7 +566,75 @@
 				{:else}
 					<Card>
 						{#snippet children()}
-							<div class="overflow-x-auto">
+							{#if narrow}
+								<div class="divide-y divide-slate-100 dark:divide-slate-700">
+									{#each notifications as notif (notif.id)}
+										<article
+											class={cn(
+												'px-1 py-3',
+												!notif.read && 'bg-blue-50/50 dark:bg-blue-900/10',
+											)}
+										>
+											<div class="flex items-start justify-between gap-3">
+												<div class="min-w-0">
+													<div class="flex items-center gap-2">
+														{#if !notif.read}
+															<div class="h-2 w-2 shrink-0 rounded-full bg-blue-500"></div>
+														{/if}
+														<div
+															class={cn(
+																'text-sm',
+																notif.read
+																	? 'text-gray-600 dark:text-gray-400'
+																	: 'font-semibold text-gray-900 dark:text-white',
+															)}
+														>
+															{notif.title || 'Notification'}
+														</div>
+													</div>
+													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+														{notif.sender || '—'} · {formatRelativeTime(notif.timestamp_ms || 0)}
+													</div>
+												</div>
+												<!-- svelte-ignore a11y_click_events_have_key_events -->
+												<div class="flex shrink-0 gap-1" onclick={(e: MouseEvent) => e.stopPropagation()}>
+													<button
+														onclick={() => toggleExpand(notif)}
+														title={expandedId === notif.id ? 'Collapse' : 'Read message'}
+														class={cn(
+															'rounded p-1 transition-colors hover:bg-gray-200 dark:hover:bg-gray-600',
+															expandedId === notif.id ? 'text-blue-500' : 'text-gray-400',
+														)}
+													>
+														{expandedId === notif.id ? '👁‍🗨' : '👁'}
+													</button>
+													<button
+														onclick={() => toggleRead(notif)}
+														title={notif.read ? 'Mark as unread' : 'Mark as read'}
+														class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300"
+													>
+														{notif.read ? '✉' : '📬'}
+													</button>
+													<button
+														onclick={() => deleteNotification(notif)}
+														title="Delete"
+														class="rounded p-1 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+													>
+														🗑
+													</button>
+												</div>
+											</div>
+											{#if expandedId === notif.id && (notif.message || notif.body)}
+												<div
+													class="mt-3 border-t border-gray-100 pt-3 text-sm leading-relaxed text-gray-700 dark:border-gray-700 dark:text-gray-300"
+												>
+													{@html mdToHtml(notif.message || notif.body || '')}
+												</div>
+											{/if}
+										</article>
+									{/each}
+								</div>
+							{:else}
 								<table class="w-full">
 									<thead>
 										<tr
@@ -651,7 +725,7 @@
 										{/each}
 									</tbody>
 								</table>
-							</div>
+							{/if}
 						{/snippet}
 					</Card>
 				{/if}
@@ -678,7 +752,59 @@
 				{:else if invoiceData?.invoices && invoiceData.invoices.length > 0}
 					<Card>
 						{#snippet children()}
-							<div class="overflow-x-auto">
+							{#if narrow}
+								<div class="divide-y divide-slate-100 dark:divide-slate-700">
+									{#each invoiceData.invoices as record}
+										<article class="py-3">
+											<div class="flex items-start justify-between gap-3">
+												<div class="min-w-0">
+													<div class="text-sm font-medium text-gray-900 dark:text-white">
+														{String(record.metadata || 'Invoice')}
+													</div>
+													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+														{formatInvoicePaidDate(record.paid_on as string | null | undefined)}
+													</div>
+												</div>
+												<div class="shrink-0 text-right">
+													<div class="font-semibold text-gray-900 dark:text-white">
+														{record.amount} {record.currency}
+													</div>
+													<span
+														class={cn(
+															'mt-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium',
+															getStatusColor(String(record.status)),
+														)}>{record.status}</span
+													>
+												</div>
+											</div>
+											<div class="mt-2">
+												{#if record.status === 'Pending' || record.status === 'Overdue'}
+													<div class="flex flex-wrap items-center gap-2">
+														<Button tone="primary" size="sm" onclick={() => openPaymentModal(record)}>
+															💳 Pay
+														</Button>
+														<Button
+															tone="secondary"
+															size="sm"
+															disabled={refreshingInvoiceId === String(record.id)}
+															onclick={() => void refreshInvoice(record)}
+														>
+															{refreshingInvoiceId === String(record.id) ? 'Refreshing…' : '↻ Refresh'}
+														</Button>
+														<Button tone="secondary" size="sm" onclick={() => demoMarkAsPaid(record)}>
+															Demo Pay
+														</Button>
+													</div>
+												{:else if record.status === 'Paid'}
+													<span class="text-xs text-green-600 dark:text-green-400">Paid</span>
+												{:else}
+													<span class="text-xs text-gray-400 dark:text-gray-500">—</span>
+												{/if}
+											</div>
+										</article>
+									{/each}
+								</div>
+							{:else}
 								<table class="w-full text-left text-sm">
 									<thead class="bg-gray-50 text-xs uppercase text-gray-700 dark:bg-gray-750 dark:text-gray-400">
 										<tr>
@@ -741,7 +867,7 @@
 										{/each}
 									</tbody>
 								</table>
-							</div>
+							{/if}
 						{/snippet}
 					</Card>
 				{:else}

@@ -1,7 +1,17 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
+	import {
+		isNarrowViewport,
+		persistSessionFlag,
+		readSessionFlag,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
+
+	const ADVANCED_UPLOAD_KEY = 'package-manager-advanced-upload';
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
@@ -167,7 +177,12 @@
 	let kindFilter = $state<KindFilter>('all');
 	let installedFilter = $state<InstalledFilter>('all');
 	let availableFilter = $state<AvailableFilter>('actionable');
-	let showAdvancedUpload = $state(false);
+	let showAdvancedUpload = $state(readSessionFlag(ADVANCED_UPLOAD_KEY) === true);
+
+	function toggleAdvancedUpload() {
+		showAdvancedUpload = !showAdvancedUpload;
+		persistSessionFlag(ADVANCED_UPLOAD_KEY, showAdvancedUpload);
+	}
 	let openMenuKey = $state<string | null>(null);
 	let selectedVersions = $state<Record<string, string>>({});
 
@@ -677,7 +692,62 @@
 	});
 </script>
 
-<div class={cn('max-w-7xl mx-auto p-4 md:p-6')}>
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 6px 12px;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid #d1d5db;
+		background: #fff;
+		color: #374151;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: transparent;
+		color: #6b7280;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.chrome-tab.is-on {
+		border-bottom-color: #4f46e5;
+		color: #4f46e5;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label,
+		.chrome-count {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+
+		.chrome-tab {
+			padding: 10px 10px;
+		}
+	}
+</style>
+
+<div class={cn('max-w-7xl mx-auto px-3 py-4 md:p-6')}>
 	{#if !authState}
 		<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center max-w-lg mx-auto mt-8')}>
 			<h1 class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2')}>Package Manager</h1>
@@ -700,7 +770,7 @@
 			</p>
 		</div>
 	{:else}
-		<div class={cn('mb-5 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4')}>
+		<div class={cn('mb-5 flex flex-col gap-2')}>
 			<div>
 				<h1 class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>Package Manager</h1>
 				<p class={cn('text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-2xl')}>{extensionDescription}</p>
@@ -709,40 +779,69 @@
 				</p>
 			</div>
 			<button
+				type="button"
 				onclick={refreshAll}
 				disabled={installedLoading || registryLoading || registriesLoading}
-				class={cn(
-					'px-4 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 rounded-lg shrink-0',
-					'text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800',
-					'hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed',
-				)}
+				class="chrome-btn self-start"
+				title={installedLoading || registryLoading || registriesLoading ? 'Loading' : 'Refresh'}
+				aria-label={installedLoading || registryLoading || registriesLoading ? 'Loading' : 'Refresh'}
 			>
-				Refresh
+				{#if installedLoading || registryLoading || registriesLoading}
+					<div class="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+				{:else}
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+				{/if}
+				<span class="chrome-label">{installedLoading || registryLoading || registriesLoading ? 'Loading…' : 'Refresh'}</span>
 			</button>
 		</div>
 
-		<div class={cn('grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5')}>
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
-				<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Installed</div>
-				<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>{installed.length}</div>
-			</div>
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
-				<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Updates</div>
-				<div class={cn('text-2xl font-semibold', updateCount > 0 ? 'text-amber-600' : 'text-gray-900 dark:text-gray-100')}>
-					{updateCount}
+		{#if narrow}
+			<div class={cn('grid grid-cols-2 mb-5 border-y border-gray-200 dark:border-gray-700')}>
+				<div class={cn('px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Installed</div>
+					<div class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100')}>{installed.length}</div>
+				</div>
+				<div class={cn('px-3 py-2 border-b border-gray-200 dark:border-gray-700')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Updates</div>
+					<div class={cn('text-xl font-semibold', updateCount > 0 ? 'text-amber-600' : 'text-gray-900 dark:text-gray-100')}>
+						{updateCount}
+					</div>
+				</div>
+				<div class={cn('px-3 py-2 border-r border-gray-200 dark:border-gray-700')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Available</div>
+					<div class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100')}>{actionableCount}</div>
+				</div>
+				<div class={cn('px-3 py-2')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
+					<div class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100')}>
+						{registries.length || (FILE_REGISTRY_FALLBACK ? 1 : 0)}
+					</div>
 				</div>
 			</div>
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
-				<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Available</div>
-				<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>{actionableCount}</div>
-			</div>
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
-				<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
-				<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>
-					{registries.length || (FILE_REGISTRY_FALLBACK ? 1 : 0)}
+		{:else}
+			<div class={cn('grid grid-cols-4 gap-3 mb-5')}>
+				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Installed</div>
+					<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>{installed.length}</div>
+				</div>
+				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Updates</div>
+					<div class={cn('text-2xl font-semibold', updateCount > 0 ? 'text-amber-600' : 'text-gray-900 dark:text-gray-100')}>
+						{updateCount}
+					</div>
+				</div>
+				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Available</div>
+					<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>{actionableCount}</div>
+				</div>
+				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
+					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
+					<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>
+						{registries.length || (FILE_REGISTRY_FALLBACK ? 1 : 0)}
+					</div>
 				</div>
 			</div>
-		</div>
+		{/if}
 
 		<div class={cn('flex flex-col sm:flex-row gap-3 mb-4')}>
 			<input
@@ -767,70 +866,58 @@
 			</select>
 		</div>
 
-		<nav class={cn('flex border-b border-gray-200 dark:border-gray-700 mb-5')} role="tablist">
+		<nav class={cn('flex border-b border-gray-200 dark:border-gray-700 mb-5 overflow-x-auto')} role="tablist">
 			<button
+				type="button"
 				role="tab"
 				aria-selected={activeTab === 'installed'}
 				onclick={() => (activeTab = 'installed')}
-				class={cn(
-					'px-5 py-2.5 text-sm font-medium border-b-2 inline-flex items-center gap-2 transition-colors',
-					activeTab === 'installed'
-						? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-						: 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
-				)}
+				class="chrome-tab {activeTab === 'installed' ? 'is-on' : ''}"
+				title="Installed"
 			>
 				Installed
-				<span class={cn('text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700')}>{installed.length}</span>
+				<span class={cn('chrome-count text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700')}>{installed.length}</span>
 			</button>
 			<button
+				type="button"
 				role="tab"
 				aria-selected={activeTab === 'available'}
 				onclick={() => (activeTab = 'available')}
-				class={cn(
-					'px-5 py-2.5 text-sm font-medium border-b-2 inline-flex items-center gap-2 transition-colors',
-					activeTab === 'available'
-						? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-						: 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
-				)}
+				class="chrome-tab {activeTab === 'available' ? 'is-on' : ''}"
+				title="Available"
 			>
 				Available
-				<span class={cn('text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700')}>{actionableCount}</span>
+				<span class={cn('chrome-count text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700')}>{actionableCount}</span>
 			</button>
 			{#if mpAvailable}
 				<button
+					type="button"
 					role="tab"
 					aria-selected={activeTab === 'marketplace'}
 					onclick={() => {
 						activeTab = 'marketplace';
 						if (!mpLoaded) void loadMarketplace();
 					}}
-					class={cn(
-						'px-5 py-2.5 text-sm font-medium border-b-2 transition-colors',
-						activeTab === 'marketplace'
-							? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-							: 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
-					)}
+					class="chrome-tab {activeTab === 'marketplace' ? 'is-on' : ''}"
+					title="Marketplace"
 				>
 					Marketplace
 				</button>
 			{/if}
 			<button
+				type="button"
 				role="tab"
 				aria-selected={activeTab === 'advanced'}
 				onclick={() => (activeTab = 'advanced')}
-				class={cn(
-					'px-5 py-2.5 text-sm font-medium border-b-2 transition-colors',
-					activeTab === 'advanced'
-						? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-						: 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300',
-				)}
+				class="chrome-tab {activeTab === 'advanced' ? 'is-on' : ''}"
+				title="Advanced"
 			>
 				Advanced
 			</button>
 		</nav>
 
 		{#if activeTab === 'installed'}
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5')}>
+			<div class={cn('bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 py-4 sm:border sm:rounded-xl sm:p-4 md:p-5')}>
 				<div class={cn('flex flex-wrap items-center gap-2 mb-4')}>
 					<button
 						onclick={() => (installedFilter = 'all')}
@@ -866,6 +953,98 @@
 							? 'No packages installed yet. Check the Available tab to install from a registry.'
 							: 'No packages match your filters.'}
 					</p>
+				{:else if narrow}
+					<div class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
+						{#each filteredInstalled as item (rowKey(item.kind, item.id))}
+							{@const st = statusFor(item)}
+							{@const cat = findCatalogEntry(item)}
+							{@const stBadge = statusBadge(st)}
+							{@const rowBusy = busy[rowKey(item.kind, item.id)]}
+							{@const menuKey = rowKey(item.kind, item.id)}
+							<article class={cn('py-3 relative')}>
+								<div class={cn('flex items-start justify-between gap-3')}>
+									<div class={cn('min-w-0')}>
+										<div class={cn('font-medium text-gray-900 dark:text-gray-100')}>
+											{displayName(item.manifest, item.id)}
+										</div>
+										<div class={cn('text-xs font-mono text-gray-500')}>{item.id}</div>
+									</div>
+									<span class={cn('shrink-0 inline-block text-xs font-medium px-2 py-0.5 rounded-full', stBadge.cls)}>
+										{stBadge.label}
+									</span>
+								</div>
+								<div class={cn('mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500')}>
+									<span class={cn('inline-block font-medium px-2 py-0.5 rounded-full', kindBadge(item.kind))}>
+										{item.kind}
+									</span>
+									<span>{item.version || '—'}{cat?.latest ? ` → ${cat.latest}` : ''}</span>
+									{#if showRegistryColumn && item.source?.registry_canister_id}
+										<span class={cn('font-mono')} title={item.source.registry_canister_id}>
+											{shortId(item.source.registry_canister_id)}
+										</span>
+									{/if}
+								</div>
+								{#if displayDescription(item.manifest)}
+									<div class={cn('text-xs text-gray-500 mt-1')}>{displayDescription(item.manifest)}</div>
+								{/if}
+								<div class={cn('mt-2')}>
+									{#if rowBusy}
+										<span class={cn('inline-flex items-center gap-1.5 text-xs text-gray-500')}>
+											{@html spinnerSvg}
+											{rowBusy}
+										</span>
+									{:else}
+										<div class={cn('inline-flex items-center gap-1.5')}>
+											{#if st === 'outdated'}
+												<button
+													onclick={() => updateInstalled(item)}
+													class={cn('text-xs font-medium px-3 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700')}
+												>
+													Update
+												</button>
+											{/if}
+											<button
+												onclick={(e) => {
+													e.stopPropagation();
+													openMenuKey = openMenuKey === menuKey ? null : menuKey;
+												}}
+												class={cn('text-xs font-medium px-2 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50')}
+												aria-label="More actions"
+											>
+												⋯
+											</button>
+										</div>
+										{#if openMenuKey === menuKey}
+											<div
+												role="menu"
+												onclick={(e) => e.stopPropagation()}
+												class={cn(
+													'absolute right-0 top-full mt-1 z-20 min-w-[140px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg py-1 text-left',
+												)}
+											>
+												{#if item.kind === 'codex'}
+													<button
+														onclick={() => reloadCodex(item)}
+														class={cn('block w-full px-3 py-2 text-xs text-left hover:bg-gray-50 dark:hover:bg-gray-700')}
+													>
+														Reload codex
+													</button>
+												{/if}
+												{#if !PROTECTED_IDS.has(item.id)}
+													<button
+														onclick={() => uninstall(item)}
+														class={cn('block w-full px-3 py-2 text-xs text-left text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20')}
+													>
+														Uninstall…
+													</button>
+												{/if}
+											</div>
+										{/if}
+									{/if}
+								</div>
+							</article>
+						{/each}
+					</div>
 				{:else}
 					<div class={cn('overflow-x-auto')}>
 						<table class={cn('w-full text-sm')}>
@@ -981,7 +1160,7 @@
 		{/if}
 
 		{#if activeTab === 'available'}
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5')}>
+			<div class={cn('bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 py-4 sm:border sm:rounded-xl sm:p-4 md:p-5')}>
 				<div class={cn('flex flex-wrap items-center gap-2 mb-4')}>
 					<button
 						onclick={() => (availableFilter = 'actionable')}
@@ -1034,6 +1213,99 @@
 								? 'Everything from the registry is installed and up to date.'
 								: 'No packages match your filters.'}
 						</p>
+					{:else if narrow}
+						<div class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
+							{#each filteredAvailable as entry (rowKey(entry.kind, entry.id) + ':' + entry.registryCanisterId)}
+								{@const installedItem = isInstalled(entry)}
+								{@const installedVersion = installedItem?.version ?? ''}
+								{@const isOutdated =
+									installedItem &&
+									entry.latest &&
+									installedVersion &&
+									compareVersions(entry.latest, installedVersion) > 0}
+								{@const rowBusy = busy[rowKey(entry.kind, entry.id)]}
+								{@const verKey = rowKey(entry.kind, entry.id)}
+								<article class={cn('py-3')}>
+									<div class={cn('flex items-start justify-between gap-3')}>
+										<div class={cn('min-w-0')}>
+											<div class={cn('font-medium text-gray-900 dark:text-gray-100')}>
+												{displayName(entry.manifest, entry.id)}
+											</div>
+											<div class={cn('text-xs font-mono text-gray-500')}>{entry.id}</div>
+										</div>
+										{#if isOutdated}
+											<span class={cn('shrink-0 inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800')}>
+												update available
+											</span>
+										{:else if installedItem}
+											<span class={cn('shrink-0 inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-800')}>
+												installed
+											</span>
+										{:else}
+											<span class={cn('shrink-0 inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600')}>
+												not installed
+											</span>
+										{/if}
+									</div>
+									<div class={cn('mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500')}>
+										<span class={cn('inline-block font-medium px-2 py-0.5 rounded-full', kindBadge(entry.kind))}>
+											{entry.kind}
+										</span>
+										{#if entry.versions.length > 1}
+											<select
+												class={cn('text-xs border border-gray-300 rounded px-2 py-1 bg-white dark:bg-gray-800')}
+												value={selectedVersionFor(entry)}
+												onchange={(e) => {
+													selectedVersions = {
+														...selectedVersions,
+														[verKey]: (e.currentTarget as HTMLSelectElement).value,
+													};
+												}}
+											>
+												{#each [...entry.versions].sort((a, b) => compareVersions(b, a)) as v}
+													<option value={v}>{v}{v === entry.latest ? ' (latest)' : ''}</option>
+												{/each}
+											</select>
+										{:else}
+											<span>{entry.latest || '—'}</span>
+										{/if}
+										{#if showRegistryColumn}
+											<span class={cn('font-mono')} title={entry.registryCanisterId}>
+												{shortId(entry.registryCanisterId)}
+											</span>
+										{/if}
+									</div>
+									{#if displayDescription(entry.manifest)}
+										<div class={cn('text-xs text-gray-500 mt-1')}>{displayDescription(entry.manifest)}</div>
+									{/if}
+									<div class={cn('mt-2')}>
+										{#if rowBusy}
+											<span class={cn('inline-flex items-center gap-1.5 text-xs text-gray-500')}>
+												{@html spinnerSvg}
+												{rowBusy}
+											</span>
+										{:else if !installedItem}
+											<button
+												onclick={() => installFromRegistry(entry, selectedVersionFor(entry))}
+												disabled={!selectedVersionFor(entry)}
+												class={cn('text-xs font-medium px-3 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50')}
+											>
+												Install
+											</button>
+										{:else if isOutdated}
+											<button
+												onclick={() => installFromRegistry(entry, selectedVersionFor(entry))}
+												class={cn('text-xs font-medium px-3 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700')}
+											>
+												Update
+											</button>
+										{:else}
+											<span class={cn('text-xs text-gray-400')}>Up to date</span>
+										{/if}
+									</div>
+								</article>
+							{/each}
+						</div>
 					{:else}
 						<div class={cn('overflow-x-auto')}>
 							<table class={cn('w-full text-sm')}>
@@ -1151,7 +1423,7 @@
 		{/if}
 
 		{#if activeTab === 'marketplace'}
-			<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 md:p-5')}>
+			<div class={cn('bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 py-4 sm:border sm:rounded-xl sm:p-4 md:p-5')}>
 				<div class={cn('flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4')}>
 					<p class={cn('text-sm text-gray-600 dark:text-gray-400')}>
 						Paid and third-party offerings from the shared marketplace. Once acquired, packages
@@ -1203,7 +1475,7 @@
 							{@const extId = ext.extension_id || ext.id || ext.name}
 							{@const owned = mpPurchasedIds.has(extId)}
 							{@const isFree = Number(ext.price_e8s) === 0}
-							<div class={cn('border border-gray-200 dark:border-gray-700 rounded-xl p-4 flex flex-col')}>
+							<div class={cn('border-y border-gray-200 dark:border-gray-700 py-4 sm:border sm:rounded-xl sm:p-4 flex flex-col')}>
 								<div class={cn('flex justify-between items-start mb-2')}>
 									<div>
 										<h3 class={cn('font-semibold text-gray-900 dark:text-gray-100 capitalize')}>
@@ -1246,7 +1518,7 @@
 
 		{#if activeTab === 'advanced'}
 			<div class={cn('space-y-4 max-w-2xl')}>
-				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5')}>
+				<div class={cn('bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 py-4 sm:border sm:rounded-xl sm:p-5')}>
 					<h2 class={cn('text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1')}>Manual folder upload</h2>
 					<p class={cn('text-xs text-gray-500 mb-4')}>
 						For local development only. Production installs should be published to a file registry first.
@@ -1254,7 +1526,7 @@
 					</p>
 
 					<button
-						onclick={() => (showAdvancedUpload = !showAdvancedUpload)}
+						onclick={toggleAdvancedUpload}
 						class={cn('text-sm font-medium text-indigo-600 hover:text-indigo-800 mb-4')}
 					>
 						{showAdvancedUpload ? 'Hide upload form' : 'Show upload form'}

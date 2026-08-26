@@ -1,6 +1,6 @@
 {
   "name": "package_manager",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Install, update, and remove extensions and codex packages, browse what's available from registries, and buy offerings from the marketplace.",
   "author": "Realms Team",
   "categories": [

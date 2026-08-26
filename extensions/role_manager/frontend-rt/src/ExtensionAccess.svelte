@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const level = type === 'error' ? 'error' : 'success';
@@ -82,18 +89,20 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
+	<div class="flex flex-col gap-2">
 		<div>
 			<h2 class="text-lg font-semibold text-gray-800">Extension Access ({extensions.length})</h2>
 			<p class="text-sm text-gray-500 mt-0.5">Control who sees each extension in the sidebar — per user, department, or profile.</p>
 		</div>
 		<button
+			type="button"
 			onclick={() => loadExtensions()}
 			disabled={extLoading}
-			class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+			class="self-start p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
 			title="Refresh"
+			aria-label="Refresh"
 		>
-			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
 			</svg>
 		</button>
@@ -110,18 +119,18 @@
 		<p class="text-center text-gray-500 py-8">No Extension entities found. Extensions are seeded when installed.</p>
 	{:else}
 		{#each extensions as ext (ext.name)}
-			<div class="border border-gray-200 rounded-xl overflow-hidden">
+			<div class="border-y border-gray-200 sm:border sm:rounded-xl overflow-hidden">
 				<button
 					onclick={() => expandedExt = expandedExt === ext.name ? null : ext.name}
-					class="w-full px-4 py-3 flex items-center justify-between bg-white hover:bg-gray-50 text-left"
+					class="w-full px-0 py-3 sm:px-4 flex items-center justify-between bg-white hover:bg-gray-50 text-left"
 				>
-					<div>
+					<div class="min-w-0">
 						<span class="font-medium text-gray-900">{ext.name}</span>
 						{#if ext.description}
-							<span class="ml-2 text-sm text-gray-500">— {ext.description}</span>
+							<span class="block sm:inline sm:ml-2 text-sm text-gray-500">{narrow ? '' : '— '}{ext.description}</span>
 						{/if}
 					</div>
-					<span class="text-xs text-gray-500">{expandedExt === ext.name ? '▲' : '▼'}</span>
+					<span class="text-xs text-gray-500 shrink-0 ml-2">{expandedExt === ext.name ? '▲' : '▼'}</span>
 				</button>
 
 				{#if expandedExt === ext.name}
