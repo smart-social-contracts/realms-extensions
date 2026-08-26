@@ -23,6 +23,30 @@
 	const MONACO_THEME = 'vs';
 	const MONACO_LANGUAGE = 'python';
 	const EXTENSION_ID = 'codex_viewer';
+	const SIDEBAR_COLLAPSED_KEY = 'codex-viewer-sidebar-collapsed';
+
+	function readSidebarCollapsed(): boolean {
+		try {
+			return sessionStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+
+	function persistSidebarCollapsed(collapsed: boolean) {
+		try {
+			sessionStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+		} catch {
+			/* sessionStorage unavailable */
+		}
+	}
+
+	let sidebarCollapsed = $state(readSidebarCollapsed());
+
+	function toggleSidebar() {
+		sidebarCollapsed = !sidebarCollapsed;
+		persistSidebarCollapsed(sidebarCollapsed);
+	}
 
 	let codexes: Codex[] = $state([]);
 	let loading = $state(true);
@@ -315,6 +339,27 @@
 	});
 </script>
 
+{#snippet showSidebarButton()}
+	<button
+		class="btn-icon"
+		onclick={toggleSidebar}
+		title="Show file list"
+		aria-label="Show file list"
+		aria-expanded={!sidebarCollapsed}
+		aria-controls="codex-sidebar"
+	>
+		<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				stroke-width="2"
+				d="M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"
+			/>
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 4v16" />
+		</svg>
+	</button>
+{/snippet}
+
 <div class="codex-workspace">
 	{#if accessDeniedOp}
 		<div class="codex-denied">
@@ -329,22 +374,41 @@
 			<div class="error-banner">{error}</div>
 		</div>
 	{:else}
-		<aside class="codex-sidebar">
+		<aside class="codex-sidebar" class:collapsed={sidebarCollapsed} id="codex-sidebar">
 			<div class="sidebar-header">
 				<div>
 					<h1 class="title">Codex Viewer</h1>
 					<p class="subtitle">{extensionDescription}</p>
 				</div>
-				<button class="btn-icon" onclick={loadCodexes} disabled={loading} title="Refresh">
-					<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-						/>
-					</svg>
-				</button>
+				<div class="sidebar-header-actions">
+					<button
+						class="btn-icon"
+						onclick={toggleSidebar}
+						title="Hide file list"
+						aria-label="Hide file list"
+						aria-expanded={!sidebarCollapsed}
+						aria-controls="codex-sidebar"
+					>
+						<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M15 19l-7-7 7-7"
+							/>
+						</svg>
+					</button>
+					<button class="btn-icon" onclick={loadCodexes} disabled={loading} title="Refresh">
+						<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+							/>
+						</svg>
+					</button>
+				</div>
 			</div>
 
 			<div class="search-box">
@@ -396,9 +460,19 @@
 		</aside>
 
 		<main class="codex-editor-pane">
+			{#if sidebarCollapsed && !selectedCodex}
+				<div class="editor-toolbar">
+					<div class="toolbar-left">
+						{@render showSidebarButton()}
+					</div>
+				</div>
+			{/if}
 			{#if selectedCodex}
 				<div class="editor-toolbar">
 					<div class="toolbar-left">
+						{#if sidebarCollapsed}
+							{@render showSidebarButton()}
+						{/if}
 						<h2 class="editor-title">{selectedCodex.name || getCodexId(selectedCodex)}</h2>
 						<span class="badge badge-lang">{MONACO_LANGUAGE}</span>
 						{#if selectedCodex.version}
@@ -495,6 +569,10 @@
 		min-height: 0;
 	}
 
+	.codex-sidebar.collapsed {
+		display: none;
+	}
+
 	.sidebar-header {
 		display: flex;
 		align-items: flex-start;
@@ -502,6 +580,13 @@
 		gap: 8px;
 		padding: 16px 16px 12px;
 		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.sidebar-header-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
 	}
 
 	.title {
