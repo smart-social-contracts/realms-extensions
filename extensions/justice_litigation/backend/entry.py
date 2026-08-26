@@ -11,9 +11,8 @@ read access. The title and description are encrypted client-side into an opaque
 blob; this canister never sees the plaintext, the data-encryption key, or any
 vetKey.
 
-Cross-quarter cases live on the plaintiff's quarter, with the defendant's home
-canister recorded in ``defendant_quarter_id``. Acting against a remote defendant
-needs an inter-canister call and is not implemented.
+A cross-Mundus defendant is a ``realm://`` User address (or a pasted
+principal). That address is not a venue; a judge still Transfers.
 """
 
 import json
@@ -29,7 +28,6 @@ LITIGATION_FIELDS = (
     "defendant_department",
     "defendant_department_id",
     "defendant_quarter_id",
-    "lives_in",
 )
 
 
@@ -86,13 +84,6 @@ def get_my_roles(args: str = "") -> str:
 def get_justice_audience(args: str = "") -> str:
     """Principals the client must IBE-wrap a litigation's key for."""
     return _ok(ctx.justice.audience())
-
-
-@_handle
-def get_directory(args: str = "") -> str:
-    """Local directory. Optional lives_in scopes the search; never all quarters."""
-    params = _parse_args(args)
-    return _ok(ctx.justice.directory(_text(params, "lives_in")))
 
 
 # ---------------------------------------------------------------------------

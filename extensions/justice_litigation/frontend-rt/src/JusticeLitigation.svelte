@@ -31,7 +31,6 @@
 	let formTitle = $state('');
 	let formDescription = $state('');
 	let formDefendant = $state('');
-	let formLivesIn = $state('');
 	let creating = $state(false);
 	let createError = $state('');
 	let createSuccess = $state(false);
@@ -105,19 +104,16 @@
 		return '—';
 	}
 
-	// Defendant autocomplete — this canister only. Optional "lives in" is a
-	// lookup hint that scopes the local list; a remote hint means paste a
-	// principal. Never federate across all quarters (issue #325).
+	// Defendant autocomplete — this canister only (issue #325). Cross-Mundus
+	// defendants are a pasted realm:// address, not a federated directory.
 	let directory: any[] = $state([]);
 	let directoryLoaded = $state(false);
 	let directoryLoading = $state(false);
 	let showDefendantSuggestions = $state(false);
-	let directorySelf = $state('');
-	let pastePrincipalOnly = $state(false);
 
 	let defendantSuggestions = $derived.by(() => {
 		const q = formDefendant.trim().toLowerCase();
-		if (pastePrincipalOnly || !q || !showDefendantSuggestions) return [];
+		if (!q || !showDefendantSuggestions || q.startsWith('realm://')) return [];
 		return directory
 			.filter(
 				(e) =>
@@ -153,20 +149,18 @@
 	let hasDefendant = $derived(!!selectedDefendantEntry || !!defendantPrincipal.trim());
 
 	async function loadDirectory() {
-		if (directoryLoading) return;
+		if (directoryLoaded || directoryLoading || !ctx.backend?.directory_list) return;
 		directoryLoading = true;
 		try {
-			const hint = formLivesIn.trim();
-			const resp: any = await callExt('get_directory', hint ? { lives_in: hint } : {});
-			const data = resp?.data ?? resp;
-			directory = Array.isArray(data?.entries) ? data.entries : [];
-			directorySelf = data?.self || '';
-			pastePrincipalOnly = !!data?.paste_principal;
+			const resp: any = await ctx.backend.directory_list();
+			if (resp?.success && resp?.data?.message) {
+				const parsed = JSON.parse(resp.data.message);
+				directory = Array.isArray(parsed?.entries) ? parsed.entries : [];
+			}
 			directoryLoaded = true;
 		} catch (e) {
-			// Non-fatal: the user can still paste a raw principal.
+			// Non-fatal: paste a principal or realm:// address.
 			console.warn('[justice_litigation] directory load failed', e);
-			pastePrincipalOnly = !!formLivesIn.trim() && formLivesIn.trim() !== directorySelf;
 		} finally {
 			directoryLoading = false;
 		}
@@ -383,11 +377,9 @@
 							defendant_kind: 'user',
 							defendant_principal: (e?.principal || defendantPrincipal).trim(),
 						};
-			const hint = formLivesIn.trim();
 			const created: any = await callExt('create_litigation', {
 				...defendantParams,
 				...(selectedCourtId ? { court_id: selectedCourtId } : {}),
-				...(hint ? { lives_in: hint } : {}),
 			});
 			const cdata = created?.data ?? created;
 			const id = cdata?.id;
@@ -539,9 +531,7 @@
 	});
 
 	$effect(() => {
-		if (tab !== 'create') return;
-		void formLivesIn;
-		void loadDirectory();
+		if (tab === 'create' && !directoryLoaded) void loadDirectory();
 	});
 
 	$effect(() => {
@@ -893,29 +883,6 @@
 					<div class="space-y-4">
 						<div>
 							<label
-								for="jl-lives-in"
-								class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-							>
-								Lives in
-								<span class="font-normal text-gray-500 dark:text-gray-400">
-									(optional lookup hint)
-								</span>
-							</label>
-							<input
-								id="jl-lives-in"
-								type="text"
-								bind:value={formLivesIn}
-								placeholder="Quarter canister id — scopes search, does not file there"
-								disabled={creating}
-								class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
-							/>
-							<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-								Not a venue. A judge still Transfers. Omit and paste a principal if you
-								do not know the quarter.
-							</p>
-						</div>
-						<div>
-							<label
 								for="jl-defendant"
 								class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
 							>
@@ -934,9 +901,7 @@
 									onfocus={() => (showDefendantSuggestions = true)}
 									onblur={() => setTimeout(() => (showDefendantSuggestions = false), 250)}
 									autocomplete="off"
-									placeholder={pastePrincipalOnly
-										? 'Paste principal (hint is another quarter)'
-										: 'Search by name, department, or paste a principal…'}
+									placeholder="Search locally, or paste a principal / realm:// address"
 									disabled={creating}
 									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
 								/>
@@ -985,7 +950,7 @@
 								</p>
 							{:else}
 								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-									Start typing to pick a user or department, or paste a principal ID.
+									Search locally, or paste a principal / realm:// address.
 								</p>
 							{/if}
 						</div>
