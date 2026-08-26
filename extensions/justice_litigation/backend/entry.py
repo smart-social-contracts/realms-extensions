@@ -311,11 +311,17 @@ def withdraw_appeal(args: str = "") -> str:
 
 @_handle
 def transfer_case(args: str = "") -> str:
-    """Mark the origin docket transferred. Dest is a metadata pointer only."""
+    """Judge Transfer: freeze origin and send justice.transfer.
+
+    Dest is a dest canister id, not a filer venue picker.
+    """
     params = _parse_args(args)
     return _ok(ctx.justice.transfer_case(
         case_id=_text(params, "case_id"),
         dest=params.get("dest"),
+        ciphertext=str(params.get("ciphertext", "") or ""),
+        wrapped_deks=params.get("wrapped_deks"),
+        origin_scope=_text(params, "origin_scope"),
     ))
 
 
