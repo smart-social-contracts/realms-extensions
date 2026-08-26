@@ -24,21 +24,40 @@
 	const MONACO_LANGUAGE = 'python';
 	const EXTENSION_ID = 'codex_viewer';
 	const SIDEBAR_COLLAPSED_KEY = 'codex-viewer-sidebar-collapsed';
+	const WORD_WRAP_KEY = 'codex-viewer-word-wrap';
+	const MINIMAP_KEY = 'codex-viewer-minimap';
+	const NARROW_VIEWPORT = '(max-width: 720px)';
 
-	function readSidebarCollapsed(): boolean {
+	function isNarrowViewport(): boolean {
+		if (typeof window === 'undefined') return false;
+		return window.matchMedia(NARROW_VIEWPORT).matches;
+	}
+
+	function readSessionFlag(key: string): boolean | null {
 		try {
-			return sessionStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+			const value = sessionStorage.getItem(key);
+			if (value === '1') return true;
+			if (value === '0') return false;
+			return null;
 		} catch {
-			return false;
+			return null;
 		}
 	}
 
-	function persistSidebarCollapsed(collapsed: boolean) {
+	function persistSessionFlag(key: string, value: boolean) {
 		try {
-			sessionStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+			sessionStorage.setItem(key, value ? '1' : '0');
 		} catch {
 			/* sessionStorage unavailable */
 		}
+	}
+
+	function readSidebarCollapsed(): boolean {
+		return readSessionFlag(SIDEBAR_COLLAPSED_KEY) === true;
+	}
+
+	function persistSidebarCollapsed(collapsed: boolean) {
+		persistSessionFlag(SIDEBAR_COLLAPSED_KEY, collapsed);
 	}
 
 	let codexes: Codex[] = $state([]);
@@ -55,6 +74,9 @@
 	let pendingExplainOnLoad = $state(false);
 	let urlSyncTimer: ReturnType<typeof setTimeout> | undefined;
 	let sidebarCollapsed = $state(readSidebarCollapsed());
+	const narrowDefault = isNarrowViewport();
+	let wordWrap = $state(readSessionFlag(WORD_WRAP_KEY) ?? narrowDefault);
+	let minimapEnabled = $state(readSessionFlag(MINIMAP_KEY) ?? !narrowDefault);
 
 	let filteredCodexes = $derived(
 		searchTerm.trim()
@@ -328,13 +350,32 @@
 		persistSidebarCollapsed(sidebarCollapsed);
 	}
 
+	function toggleWordWrap() {
+		wordWrap = !wordWrap;
+		persistSessionFlag(WORD_WRAP_KEY, wordWrap);
+	}
+
+	function toggleMinimap() {
+		minimapEnabled = !minimapEnabled;
+		persistSessionFlag(MINIMAP_KEY, minimapEnabled);
+	}
+
+	function setAssistantFabHidden(hidden: boolean) {
+		if (typeof document !== 'undefined') {
+			document.documentElement.classList.toggle('codex-viewer-hide-assistant-fab', hidden);
+		}
+		ctx.host?.dispatch?.({ type: hidden ? 'assistant.hideFab' : 'assistant.showFab' });
+	}
+
 	onMount(() => {
+		setAssistantFabHidden(true);
 		void loadCodexes();
 	});
 
 	onDestroy(() => {
 		clearTimeout(urlSyncTimer);
 		ctx.host?.setFocus?.(null);
+		setAssistantFabHidden(false);
 	});
 </script>
 
@@ -458,10 +499,7 @@
 		<main class="codex-editor-pane">
 			{#if selectedCodex}
 				<div class="editor-toolbar">
-					<div class="toolbar-left">
-						{#if sidebarCollapsed}
-							{@render sidebarToggle()}
-						{/if}
+					<div class="toolbar-title-row">
 						<h2 class="editor-title">{selectedCodex.name || getCodexId(selectedCodex)}</h2>
 						<span class="badge badge-lang">{MONACO_LANGUAGE}</span>
 						{#if selectedCodex.version}
@@ -469,17 +507,122 @@
 						{/if}
 					</div>
 					<div class="toolbar-actions">
-						<button class="btn-action" onclick={copyCode}>
-							{copied ? 'Copied' : 'Copy'}
+						{#if sidebarCollapsed}
+							{@render sidebarToggle()}
+						{/if}
+						<button
+							type="button"
+							class="btn-action"
+							onclick={copyCode}
+							title={copied ? 'Copied' : 'Copy'}
+							aria-label={copied ? 'Copied' : 'Copy'}
+						>
+							{#if copied}
+								<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M5 13l4 4L19 7"
+									/>
+								</svg>
+							{:else}
+								<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+									/>
+								</svg>
+							{/if}
+							<span class="btn-label">{copied ? 'Copied' : 'Copy'}</span>
 						</button>
-						<button class="btn-action" onclick={copyLink} title="Copy link to this codex or selection">
-							{linkCopied ? 'Link copied' : 'Copy link'}
+						<button
+							type="button"
+							class="btn-action"
+							onclick={copyLink}
+							title={linkCopied ? 'Link copied' : 'Copy link to this codex or selection'}
+							aria-label={linkCopied ? 'Link copied' : 'Copy link'}
+						>
+							{#if linkCopied}
+								<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M5 13l4 4L19 7"
+									/>
+								</svg>
+							{:else}
+								<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+									/>
+								</svg>
+							{/if}
+							<span class="btn-label">{linkCopied ? 'Link copied' : 'Copy link'}</span>
 						</button>
 						{#if aiAssistantEnabled}
-						<button class="btn-action btn-explain" onclick={explainWithAI}>
-							{explainButtonLabel}
-						</button>
+							<button
+								type="button"
+								class="btn-action btn-explain"
+								onclick={explainWithAI}
+								title={explainButtonLabel}
+								aria-label={explainButtonLabel}
+							>
+								<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+									/>
+								</svg>
+								<span class="btn-label">{explainButtonLabel}</span>
+							</button>
 						{/if}
+						<button
+							type="button"
+							class="btn-action"
+							class:is-on={wordWrap}
+							onclick={toggleWordWrap}
+							title={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
+							aria-label={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
+							aria-pressed={wordWrap}
+						>
+							<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 6h16M4 12h10a4 4 0 010 8H8m0 0l3-3m-3 3l3 3"
+								/>
+							</svg>
+							<span class="btn-label">Wrap</span>
+						</button>
+						<button
+							type="button"
+							class="btn-action"
+							class:is-on={minimapEnabled}
+							onclick={toggleMinimap}
+							title={minimapEnabled ? 'Hide minimap' : 'Show minimap'}
+							aria-label={minimapEnabled ? 'Hide minimap' : 'Show minimap'}
+							aria-pressed={minimapEnabled}
+						>
+							<svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+								/>
+							</svg>
+							<span class="btn-label">Minimap</span>
+						</button>
 					</div>
 				</div>
 
@@ -499,6 +642,8 @@
 								readOnly={true}
 								initialRange={initialRange}
 								onSelectionChange={handleSelectionChange}
+								wordWrap={wordWrap}
+								minimapEnabled={minimapEnabled}
 							/>
 						{/key}
 					{:else}
@@ -729,16 +874,18 @@
 
 	.editor-toolbar {
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 8px;
 		padding: 10px 16px;
 		border-bottom: 1px solid #e5e7eb;
 		background: #fff;
 		flex-shrink: 0;
+		container-type: inline-size;
+		container-name: editor-toolbar;
 	}
 
-	.toolbar-left {
+	.toolbar-title-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
@@ -753,6 +900,7 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		min-width: 0;
 	}
 
 	.badge {
@@ -777,11 +925,16 @@
 
 	.toolbar-actions {
 		display: flex;
-		gap: 8px;
-		flex-shrink: 0;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
 	}
 
 	.btn-action {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
 		padding: 5px 12px;
 		font-size: 0.8125rem;
 		font-weight: 500;
@@ -790,10 +943,17 @@
 		background: #fff;
 		color: #374151;
 		cursor: pointer;
+		flex-shrink: 0;
 	}
 
 	.btn-action:hover {
 		background: #f9fafb;
+	}
+
+	.btn-action.is-on {
+		background: #eef2ff;
+		border-color: #6366f1;
+		color: #4338ca;
 	}
 
 	.btn-explain {
@@ -804,6 +964,42 @@
 
 	.btn-explain:hover {
 		opacity: 0.92;
+	}
+
+	@media (max-width: 720px) {
+		.badge-lang {
+			display: none;
+		}
+
+		.btn-label {
+			display: none;
+		}
+
+		.btn-action {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+
+		.editor-toolbar {
+			padding: 10px 12px;
+		}
+	}
+
+	@container editor-toolbar (max-width: 560px) {
+		.btn-label {
+			display: none;
+		}
+
+		.btn-action {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+	}
+
+	:global(html.codex-viewer-hide-assistant-fab .assistant-fab) {
+		display: none !important;
 	}
 
 	.editor-description {
