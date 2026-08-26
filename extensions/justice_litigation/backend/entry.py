@@ -303,6 +303,34 @@ def decide_appeal(args: str = "") -> str:
     ))
 
 
+@_handle
+def withdraw_appeal(args: str = "") -> str:
+    params = _parse_args(args)
+    return _ok(ctx.justice.withdraw_appeal(_text(params, "appeal_id")))
+
+
+@_handle
+def transfer_case(args: str = "") -> str:
+    """Mark the origin docket transferred. Dest is a metadata pointer only."""
+    params = _parse_args(args)
+    return _ok(ctx.justice.transfer_case(
+        case_id=_text(params, "case_id"),
+        dest=params.get("dest"),
+    ))
+
+
+@_handle
+def begin_executing(args: str = "") -> str:
+    params = _parse_args(args)
+    return _ok(ctx.justice.begin_executing(_text(params, "case_id")))
+
+
+@_handle
+def close_case(args: str = "") -> str:
+    params = _parse_args(args)
+    return _ok(ctx.justice.close_case(_text(params, "case_id")))
+
+
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
