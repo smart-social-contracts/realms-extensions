@@ -11,9 +11,8 @@ read access. The title and description are encrypted client-side into an opaque
 blob; this canister never sees the plaintext, the data-encryption key, or any
 vetKey.
 
-Cross-quarter cases live on the plaintiff's quarter, with the defendant's home
-canister recorded in ``defendant_quarter_id``. Acting against a remote defendant
-needs an inter-canister call and is not implemented.
+A cross-Mundus defendant is a ``realm://`` User address (or a pasted
+principal). That address is not a venue; a judge still Transfers.
 """
 
 import json
@@ -301,6 +300,40 @@ def decide_appeal(args: str = "") -> str:
         decision=str(params.get("decision", "") or ""),
         reasoning=str(params.get("reasoning", "") or ""),
     ))
+
+
+@_handle
+def withdraw_appeal(args: str = "") -> str:
+    params = _parse_args(args)
+    return _ok(ctx.justice.withdraw_appeal(_text(params, "appeal_id")))
+
+
+@_handle
+def transfer_case(args: str = "") -> str:
+    """Judge Transfer: freeze origin and send justice.transfer.
+
+    Dest is a dest canister id, not a filer venue picker.
+    """
+    params = _parse_args(args)
+    return _ok(ctx.justice.transfer_case(
+        case_id=_text(params, "case_id"),
+        dest=params.get("dest"),
+        ciphertext=str(params.get("ciphertext", "") or ""),
+        wrapped_deks=params.get("wrapped_deks"),
+        origin_scope=_text(params, "origin_scope"),
+    ))
+
+
+@_handle
+def begin_executing(args: str = "") -> str:
+    params = _parse_args(args)
+    return _ok(ctx.justice.begin_executing(_text(params, "case_id")))
+
+
+@_handle
+def close_case(args: str = "") -> str:
+    params = _parse_args(args)
+    return _ok(ctx.justice.close_case(_text(params, "case_id")))
 
 
 # ---------------------------------------------------------------------------

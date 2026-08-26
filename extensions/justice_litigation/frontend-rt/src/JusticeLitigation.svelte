@@ -104,8 +104,8 @@
 		return '—';
 	}
 
-	// Defendant autocomplete — realm directory (users + departments) is fetched
-	// once from the host's `directory_list` query and filtered client-side.
+	// Defendant autocomplete — this canister only (issue #325). Cross-Mundus
+	// defendants are a pasted realm:// address, not a federated directory.
 	let directory: any[] = $state([]);
 	let directoryLoaded = $state(false);
 	let directoryLoading = $state(false);
@@ -113,7 +113,7 @@
 
 	let defendantSuggestions = $derived.by(() => {
 		const q = formDefendant.trim().toLowerCase();
-		if (!q || !showDefendantSuggestions) return [];
+		if (!q || !showDefendantSuggestions || q.startsWith('realm://')) return [];
 		return directory
 			.filter(
 				(e) =>
@@ -159,7 +159,7 @@
 			}
 			directoryLoaded = true;
 		} catch (e) {
-			// Non-fatal: the user can still paste a raw principal.
+			// Non-fatal: paste a principal or realm:// address.
 			console.warn('[justice_litigation] directory load failed', e);
 		} finally {
 			directoryLoading = false;
@@ -901,7 +901,7 @@
 									onfocus={() => (showDefendantSuggestions = true)}
 									onblur={() => setTimeout(() => (showDefendantSuggestions = false), 250)}
 									autocomplete="off"
-									placeholder="Search by name, department, or principal…"
+									placeholder="Search locally, or paste a principal / realm:// address"
 									disabled={creating}
 									class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
 								/>
@@ -950,7 +950,7 @@
 								</p>
 							{:else}
 								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-									Start typing to pick a user or department, or paste a principal ID.
+									Search locally, or paste a principal / realm:// address.
 								</p>
 							{/if}
 						</div>
