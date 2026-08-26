@@ -4,8 +4,15 @@
 	import QuartersPanel from './QuartersPanel.svelte';
 	import SandboxPanel from './SandboxPanel.svelte';
 	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let narrow = $state(isNarrowViewport());
+	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
@@ -49,15 +56,6 @@ let emailDirty = $derived(realmSettingsEmailEnabled !== savedEmailEnabled);
 
 type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'notifications' | 'advanced';
 let activeTab: SettingsTab = $state('general');
-
-const settingsTabs: { id: SettingsTab; label: string }[] = [
-	{ id: 'general', label: 'General' },
-	{ id: 'governance', label: 'Governance' },
-	{ id: 'treasury', label: 'Treasury' },
-	{ id: 'infrastructure', label: 'Infrastructure' },
-	{ id: 'notifications', label: 'Notifications' },
-	{ id: 'advanced', label: 'Advanced' },
-];
 
 	async function callExt(fn: string, args: Record<string, unknown> = {}) {
 		return await ctx.callSync(fn, args);
@@ -551,8 +549,42 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 	});
 </script>
 
+<style>
+	.chrome-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: transparent;
+		color: #6b7280;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.chrome-tab.is-on {
+		border-bottom-color: #111827;
+		color: #111827;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-tab {
+			width: 40px;
+			justify-content: center;
+			padding: 10px 0;
+		}
+	}
+</style>
+
 {#snippet saveBar()}
-	<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
+	<div class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 		{#if settingsMessage}
 			<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{settingsMessage}</div>
 		{/if}
@@ -570,39 +602,85 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 	</div>
 {/snippet}
 
-<div class="w-full px-4 max-w-none">
-	<div class="flex justify-between items-center mb-4">
+<div class="w-full px-3 sm:px-4 max-w-none">
+	<div class="flex flex-col gap-2 mb-4">
 		<div>
 			<h1 class="text-3xl font-bold text-gray-900">Settings</h1>
 			<p class="text-gray-600 mt-1">{extensionDescription}</p>
 		</div>
 	</div>
 
-	<div class="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
-		{#each settingsTabs as tab (tab.id)}
-			<button
-				type="button"
-				onclick={() => (activeTab = tab.id)}
-				class={cn(
-					'px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors whitespace-nowrap',
-					activeTab === tab.id
-						? 'border-gray-900 text-gray-900'
-						: 'border-transparent text-gray-500 hover:text-gray-700',
-				)}
-			>
-				{tab.label}
-			</button>
-		{/each}
+	<div class="flex mb-6 border-b border-gray-200 overflow-x-auto">
+		<button
+			type="button"
+			onclick={() => (activeTab = 'general')}
+			class="chrome-tab {activeTab === 'general' ? 'is-on' : ''}"
+			title="General"
+			aria-label="General"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+			<span class="chrome-label">General</span>
+		</button>
+		<button
+			type="button"
+			onclick={() => (activeTab = 'governance')}
+			class="chrome-tab {activeTab === 'governance' ? 'is-on' : ''}"
+			title="Governance"
+			aria-label="Governance"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>
+			<span class="chrome-label">Governance</span>
+		</button>
+		<button
+			type="button"
+			onclick={() => (activeTab = 'treasury')}
+			class="chrome-tab {activeTab === 'treasury' ? 'is-on' : ''}"
+			title="Treasury"
+			aria-label="Treasury"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+			<span class="chrome-label">Treasury</span>
+		</button>
+		<button
+			type="button"
+			onclick={() => (activeTab = 'infrastructure')}
+			class="chrome-tab {activeTab === 'infrastructure' ? 'is-on' : ''}"
+			title="Infrastructure"
+			aria-label="Infrastructure"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+			<span class="chrome-label">Infrastructure</span>
+		</button>
+		<button
+			type="button"
+			onclick={() => (activeTab = 'notifications')}
+			class="chrome-tab {activeTab === 'notifications' ? 'is-on' : ''}"
+			title="Notifications"
+			aria-label="Notifications"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+			<span class="chrome-label">Notifications</span>
+		</button>
+		<button
+			type="button"
+			onclick={() => (activeTab = 'advanced')}
+			class="chrome-tab {activeTab === 'advanced' ? 'is-on' : ''}"
+			title="Advanced"
+			aria-label="Advanced"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+			<span class="chrome-label">Advanced</span>
+		</button>
 	</div>
 
 	{#if settingsLoading && activeTab !== 'advanced'}
-		<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<div class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<div class="flex items-center justify-center py-10">
 				<div class="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
 			</div>
 		</div>
 	{:else if activeTab === 'general'}
-	<div class="bg-white shadow-sm rounded-lg p-6 mb-6">
+	<div class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 		<h2 class="text-lg font-semibold text-gray-900 mb-1">Realm Lifecycle</h2>
 		<p class="text-sm text-gray-500 mb-5">
 			Current operational stage of this realm.
@@ -620,7 +698,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 			</div>
 		{:else}
 			<!-- Stage timeline -->
-			<div class="relative mb-6">
+			<div class="relative mb-6 overflow-x-auto">
 				<div class="flex items-center justify-between">
 					{#each STAGES as stage, i}
 						{@const isCurrent = i === stageIndex}
@@ -658,47 +736,74 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 
 			<!-- Lifecycle metrics -->
 			{#if currentStage === 'alpha' || currentStage === 'beta'}
-				<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-						<div class="text-xs text-gray-500 mb-1">Registered Users</div>
-						<div class="text-lg font-bold text-gray-900">{lifecycleData.registered_users?.toLocaleString() ?? '—'}</div>
-					</div>
-					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-						<div class="text-xs text-gray-500 mb-1">Critical Mass</div>
-						<div class="text-lg font-bold text-gray-900">{lifecycleData.critical_mass?.toLocaleString() ?? '—'}</div>
-					</div>
-					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-						<div class="text-xs text-gray-500 mb-1">Deposits Locked</div>
-						<div class={cn('text-lg font-bold', lifecycleData.deposits_locked ? 'text-amber-600' : 'text-gray-400')}>
-							{lifecycleData.deposits_locked ? 'Yes' : 'No'}
+				{#if narrow}
+					<div class="grid grid-cols-2 mb-5 border-y border-gray-200">
+						<div class="px-3 py-2 border-b border-r border-gray-200">
+							<div class="text-xs text-gray-500">Registered Users</div>
+							<div class="text-lg font-bold text-gray-900">{lifecycleData.registered_users?.toLocaleString() ?? '—'}</div>
+						</div>
+						<div class="px-3 py-2 border-b border-gray-200">
+							<div class="text-xs text-gray-500">Critical Mass</div>
+							<div class="text-lg font-bold text-gray-900">{lifecycleData.critical_mass?.toLocaleString() ?? '—'}</div>
+						</div>
+						<div class="px-3 py-2 border-r border-gray-200">
+							<div class="text-xs text-gray-500">Deposits Locked</div>
+							<div class={cn('text-lg font-bold', lifecycleData.deposits_locked ? 'text-amber-600' : 'text-gray-400')}>
+								{lifecycleData.deposits_locked ? 'Yes' : 'No'}
+							</div>
+						</div>
+						<div class="px-3 py-2">
+							<div class="text-xs text-gray-500">Progress</div>
+							<div class="text-lg font-bold text-blue-600">
+								{lifecycleData.critical_mass
+									? Math.min(100, Math.round((lifecycleData.registered_users / lifecycleData.critical_mass) * 100))
+									: 0}%
+							</div>
 						</div>
 					</div>
-					<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-						<div class="text-xs text-gray-500 mb-1">Progress</div>
-						<div class="text-lg font-bold text-blue-600">
-							{lifecycleData.critical_mass
-								? Math.min(100, Math.round((lifecycleData.registered_users / lifecycleData.critical_mass) * 100))
-								: 0}%
+				{:else}
+					<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+							<div class="text-xs text-gray-500 mb-1">Registered Users</div>
+							<div class="text-lg font-bold text-gray-900">{lifecycleData.registered_users?.toLocaleString() ?? '—'}</div>
+						</div>
+						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+							<div class="text-xs text-gray-500 mb-1">Critical Mass</div>
+							<div class="text-lg font-bold text-gray-900">{lifecycleData.critical_mass?.toLocaleString() ?? '—'}</div>
+						</div>
+						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+							<div class="text-xs text-gray-500 mb-1">Deposits Locked</div>
+							<div class={cn('text-lg font-bold', lifecycleData.deposits_locked ? 'text-amber-600' : 'text-gray-400')}>
+								{lifecycleData.deposits_locked ? 'Yes' : 'No'}
+							</div>
+						</div>
+						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+							<div class="text-xs text-gray-500 mb-1">Progress</div>
+							<div class="text-lg font-bold text-blue-600">
+								{lifecycleData.critical_mass
+									? Math.min(100, Math.round((lifecycleData.registered_users / lifecycleData.critical_mass) * 100))
+									: 0}%
+							</div>
 						</div>
 					</div>
-				</div>
+				{/if}
 			{/if}
 
 			{#if currentStage === 'beta'}
-				<div class="grid grid-cols-3 gap-3 mb-5">
-					<div class={cn('rounded-lg p-3 border', lifecycleData.land_acquired ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100')}>
+				<div class={cn('mb-5', narrow ? 'grid grid-cols-1 gap-0 border-y border-gray-200 divide-y divide-gray-200' : 'grid grid-cols-3 gap-3')}>
+					<div class={cn(narrow ? 'px-3 py-2' : 'rounded-lg p-3 border', !narrow && (lifecycleData.land_acquired ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'))}>
 						<div class="text-xs text-gray-500 mb-1">Land Acquired</div>
 						<div class={cn('text-sm font-semibold', lifecycleData.land_acquired ? 'text-green-700' : 'text-gray-400')}>
 							{lifecycleData.land_acquired ? 'Ready' : 'Pending'}
 						</div>
 					</div>
-					<div class={cn('rounded-lg p-3 border', lifecycleData.infrastructure_ready ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100')}>
+					<div class={cn(narrow ? 'px-3 py-2' : 'rounded-lg p-3 border', !narrow && (lifecycleData.infrastructure_ready ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'))}>
 						<div class="text-xs text-gray-500 mb-1">Infrastructure</div>
 						<div class={cn('text-sm font-semibold', lifecycleData.infrastructure_ready ? 'text-green-700' : 'text-gray-400')}>
 							{lifecycleData.infrastructure_ready ? 'Ready' : 'Pending'}
 						</div>
 					</div>
-					<div class={cn('rounded-lg p-3 border', lifecycleData.providers_ready ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100')}>
+					<div class={cn(narrow ? 'px-3 py-2' : 'rounded-lg p-3 border', !narrow && (lifecycleData.providers_ready ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'))}>
 						<div class="text-xs text-gray-500 mb-1">Providers</div>
 						<div class={cn('text-sm font-semibold', lifecycleData.providers_ready ? 'text-green-700' : 'text-gray-400')}>
 							{lifecycleData.providers_ready ? 'Ready' : 'Pending'}
@@ -709,7 +814,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 
 			<!-- Advance button -->
 			{#if nextStage && currentStage !== 'terminated'}
-				<div class="flex items-center gap-3 pt-2 border-t border-gray-100">
+				<div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-2 border-t border-gray-100">
 					<button
 						onclick={() => advanceStage()}
 						disabled={lifecycleAdvancing}
@@ -737,7 +842,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 	</div>
 
 		<!-- Identity -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Identity</h2>
 			<p class="text-sm text-gray-500 mb-5">How this realm presents itself to members and visitors.</p>
 			<div class="space-y-5">
@@ -760,7 +865,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		</section>
 
 		<!-- Branding -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Branding</h2>
 			<p class="text-sm text-gray-500 mb-5">Logo, background imagery, and primary color used across the realm UI — including main action buttons.</p>
 			<div class="space-y-5">
@@ -814,7 +919,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		</section>
 
 		<!-- Registration & features -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Registration &amp; features</h2>
 			<p class="text-sm text-gray-500 mb-5">Membership access and optional realm features.</p>
 			<div class="space-y-5">
@@ -843,7 +948,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 
 		{@render saveBar()}
 	{:else if activeTab === 'governance'}
-		<section id="governance" class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section id="governance" class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Voting window</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				How long new proposals stay open for voting. Applies to proposals created after you save.
@@ -883,7 +988,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		{@render saveBar()}
 	{:else if activeTab === 'treasury'}
 		<!-- Currency -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency token</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				Fungible treasury token used for balances, invoices, and transfers in this realm.
@@ -958,7 +1063,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		</section>
 
 		<!-- Land NFT -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Land NFT collection</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				Non-fungible token canister for land deeds minted from the Land Registry extension.
@@ -984,7 +1089,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		{@render saveBar()}
 	{:else if activeTab === 'infrastructure'}
 		<!-- Infrastructure -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Infrastructure</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				Where this realm downloads and purchases extensions, codices, and assistants.
@@ -1027,7 +1132,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
 		{@render saveBar()}
 	{:else if activeTab === 'notifications'}
 		<!-- Email notifications -->
-		<section class="bg-white shadow-sm rounded-lg p-6 mb-6">
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Email notifications</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				When enabled, every notification emails members who have a verified address.

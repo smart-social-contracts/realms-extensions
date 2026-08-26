@@ -1,6 +1,6 @@
 {
   "name": "role_manager",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "runtime": "in_process",
   "description": "See everyone in your realm, assign roles, grant or revoke permissions, send registration invites, and choose which extensions each person may use.",
   "author": "Smart Social Contracts",

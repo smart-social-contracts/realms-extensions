@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let {
 		ctx,
@@ -349,7 +353,13 @@
 		onopenleg?.(proposalId);
 	}
 
+	let narrow = $state(isNarrowViewport());
+	let unsubNarrow: (() => void) | undefined;
+
 	onMount(() => {
+		unsubNarrow = subscribeNarrowViewport((value) => {
+			narrow = value;
+		});
 		const urlId = parseFederalIdFromUrl();
 		if (urlId) {
 			void openVote(urlId);
@@ -357,9 +367,49 @@
 			void loadVotes();
 		}
 	});
+
+	onDestroy(() => {
+		unsubNarrow?.();
+	});
 </script>
 
-<div class="p-5">
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 6px 12px;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid #d1d5db;
+		background: #fff;
+		color: #4b5563;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-btn.chrome-primary {
+		background: #111827;
+		border-color: #111827;
+		color: #fff;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+	}
+</style>
+
+<div class="px-3 py-3 sm:p-5">
 	{#if accessDeniedOp}
 		{#if ctx.ui?.AccessDenied}
 			{@const AccessDenied = ctx.ui.AccessDenied}
@@ -472,48 +522,69 @@
 				{/if}
 
 				{#if Array.isArray(voteDetail.legs) && voteDetail.legs.length}
-					<div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
-						<div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+					<div class="border-y border-gray-200 sm:rounded-lg sm:border overflow-hidden">
+						<div class="px-3 py-2 sm:px-4 sm:py-3 border-b border-gray-200">
 							<h3 class="text-sm font-semibold text-gray-900">Quarter legs</h3>
 						</div>
-						<div class="overflow-x-auto">
-							<table class="min-w-full text-sm">
-								<thead class="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
-									<tr>
-										<th class="px-4 py-2">Quarter</th>
-										<th class="px-4 py-2">Status</th>
-										<th class="px-4 py-2">Outcome</th>
-										<th class="px-4 py-2">Yes</th>
-										<th class="px-4 py-2">No</th>
-										<th class="px-4 py-2">Abstain</th>
-										<th class="px-4 py-2">Proposal</th>
-									</tr>
-								</thead>
-								<tbody class="divide-y divide-gray-100">
-									{#each voteDetail.legs as leg (leg.quarter_canister_id + leg.proposal_id)}
-										<tr class="hover:bg-gray-50">
-											<td class="px-4 py-2 font-mono text-xs">{truncateId(leg.quarter_canister_id)}</td>
-											<td class="px-4 py-2">
-												<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(leg.status)}">
-													{statusLabel(leg.status)}
-												</span>
-											</td>
-											<td class="px-4 py-2">{statusLabel(leg.outcome) || '—'}</td>
-											<td class="px-4 py-2">{leg.votes_yes ?? 0}</td>
-											<td class="px-4 py-2">{leg.votes_no ?? 0}</td>
-											<td class="px-4 py-2">{leg.votes_abstain ?? 0}</td>
-											<td class="px-4 py-2">
-												{#if leg.proposal_id}
-													<code class="text-xs bg-gray-100 px-1 py-0.5 rounded">{leg.proposal_id}</code>
-												{:else}
-													—
-												{/if}
-											</td>
+						{#if narrow}
+							<div class="divide-y divide-gray-100">
+								{#each voteDetail.legs as leg (leg.quarter_canister_id + leg.proposal_id)}
+									<div class="px-3 py-3 text-sm">
+										<div class="flex items-center justify-between gap-2">
+											<code class="text-xs">{truncateId(leg.quarter_canister_id)}</code>
+											<span class="text-xs font-semibold {statusColor(leg.status)} px-2 py-0.5">
+												{statusLabel(leg.status)}
+											</span>
+										</div>
+										<div class="mt-1 text-xs text-gray-500">
+											{statusLabel(leg.outcome) || '—'} · Y {leg.votes_yes ?? 0} · N {leg.votes_no ?? 0} · A {leg.votes_abstain ?? 0}
+										</div>
+										{#if leg.proposal_id}
+											<div class="mt-1 text-xs text-gray-500">Proposal <code>{leg.proposal_id}</code></div>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<div class="overflow-x-auto">
+								<table class="min-w-full text-sm">
+									<thead class="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
+										<tr>
+											<th class="px-4 py-2">Quarter</th>
+											<th class="px-4 py-2">Status</th>
+											<th class="px-4 py-2">Outcome</th>
+											<th class="px-4 py-2">Yes</th>
+											<th class="px-4 py-2">No</th>
+											<th class="px-4 py-2">Abstain</th>
+											<th class="px-4 py-2">Proposal</th>
 										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
+									</thead>
+									<tbody class="divide-y divide-gray-100">
+										{#each voteDetail.legs as leg (leg.quarter_canister_id + leg.proposal_id)}
+											<tr class="hover:bg-gray-50">
+												<td class="px-4 py-2 font-mono text-xs">{truncateId(leg.quarter_canister_id)}</td>
+												<td class="px-4 py-2">
+													<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(leg.status)}">
+														{statusLabel(leg.status)}
+													</span>
+												</td>
+												<td class="px-4 py-2">{statusLabel(leg.outcome) || '—'}</td>
+												<td class="px-4 py-2">{leg.votes_yes ?? 0}</td>
+												<td class="px-4 py-2">{leg.votes_no ?? 0}</td>
+												<td class="px-4 py-2">{leg.votes_abstain ?? 0}</td>
+												<td class="px-4 py-2">
+													{#if leg.proposal_id}
+														<code class="text-xs bg-gray-100 px-1 py-0.5 rounded">{leg.proposal_id}</code>
+													{:else}
+														—
+													{/if}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
 					</div>
 				{/if}
 
@@ -673,29 +744,33 @@
 		</form>
 
 	{:else}
-		<div class="flex items-center justify-between mb-4">
+		<div class="flex flex-col gap-2 mb-4">
 			<h2 class="text-lg font-semibold text-gray-900">Realm-wide votes</h2>
 			<div class="flex gap-2">
 				<button
 					type="button"
 					onclick={() => loadVotes()}
 					disabled={listLoading}
-					class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+					class="chrome-btn"
+					title={listLoading ? 'Loading' : 'Refresh'}
+					aria-label={listLoading ? 'Loading' : 'Refresh'}
 				>
 					{#if listLoading}
 						<div class="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
 					{:else}
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
 					{/if}
-					Refresh
+					<span class="chrome-label">{listLoading ? 'Loading…' : 'Refresh'}</span>
 				</button>
 				<button
 					type="button"
 					onclick={goToForm}
-					class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black"
+					class="chrome-btn chrome-primary"
+					title="Propose realm-wide vote"
+					aria-label="Propose realm-wide vote"
 				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-					Propose realm-wide vote
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+					<span class="chrome-label">Propose realm-wide vote</span>
 				</button>
 			</div>
 		</div>

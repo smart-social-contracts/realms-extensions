@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -655,14 +659,17 @@
 
 	const everydayTabs: { id: TabId; label: string }[] = [
 		{ id: 'activity', label: 'Activity' },
-		{ id: 'send', label: 'Send' },
 		{ id: 'lookup', label: 'Lookup' },
 	];
+
+	let narrow = $state(isNarrowViewport());
 
 	// ── Init ─────────────────────────────────────────────────
 
 	onMount(() => {
-		const unsubs: (() => void)[] = [];
+		const unsubs: (() => void)[] = [subscribeNarrowViewport((value) => {
+			narrow = value;
+		})];
 		if (ctx.userProfiles?.subscribe) {
 			unsubs.push(
 				ctx.userProfiles.subscribe((v: string[]) => {
@@ -728,9 +735,10 @@
 	</svg>
 {/snippet}
 
-<div class={cn('max-w-4xl mx-auto p-6 space-y-6')}>
-	<!-- Header -->
-	<div class={cn('flex justify-between items-start gap-4')}>
+<div class={cn('max-w-4xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6')}>
+	<!-- Header: title on its own row -->
+	<div class={cn('flex flex-col gap-2')}>
+		<div class={cn('flex justify-between items-start gap-4')}>
 		<div>
 			<h1 class={cn('text-2xl font-bold text-gray-900 dark:text-gray-100')}>Vault</h1>
 			<p class={cn('text-sm text-gray-500 dark:text-gray-400 mt-1')}>{extensionDescription}</p>
@@ -751,6 +759,7 @@
 				{@render refreshIcon()}
 			</span>
 		</button>
+		</div>
 	</div>
 
 	<!-- Hero balance card -->
@@ -767,7 +776,8 @@
 					{@const bal = tokenBalances[token] || 0}
 					<div
 						class={cn(
-							'flex items-center justify-between gap-4 bg-white/60 dark:bg-gray-800/40 rounded-lg p-4',
+							'flex items-center justify-between gap-4 py-3 sm:bg-white/60 sm:dark:bg-gray-800/40 sm:rounded-lg sm:p-4',
+							'border-b border-indigo-200/60 last:border-0 dark:border-indigo-800/40 sm:border-0',
 						)}
 						title={rawUnitsLabel(bal)}
 					>
@@ -916,7 +926,7 @@
 		</div>
 	{/if}
 
-	<!-- Tabs -->
+	<!-- Tabs: Activity + Lookup. Send is only the balance-card CTA. -->
 	<nav class={cn('flex border-b border-gray-200 dark:border-gray-700')}>
 		{#each everydayTabs as t (t.id)}
 			<button
@@ -925,7 +935,7 @@
 					activeTab = t.id;
 				}}
 				class={cn(
-					'px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
+					'px-3 py-2.5 sm:px-4 text-sm font-medium border-b-2 transition-colors',
 					activeTab === t.id
 						? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400'
 						: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300',
@@ -941,14 +951,16 @@
 					activeTab = 'admin';
 				}}
 				class={cn(
-					'ml-auto px-4 py-2.5 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5',
+					'ml-auto px-3 py-2.5 sm:px-4 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5',
 					activeTab === 'admin'
 						? 'border-gray-400 text-gray-700 dark:text-gray-300 dark:border-gray-500'
 						: 'border-transparent text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400',
 				)}
+				title="Admin"
+				aria-label="Admin"
 			>
 				{@render gearIcon()}
-				Admin
+				<span class="hidden sm:inline">Admin</span>
 			</button>
 		{/if}
 	</nav>
@@ -958,12 +970,12 @@
 		{#if activeTab === 'activity'}
 			<div
 				class={cn(
-					'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden',
+					'bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 overflow-hidden sm:border sm:rounded-xl',
 				)}
 			>
 				<h2
 					class={cn(
-						'text-lg font-semibold p-6 border-b border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
+						'text-lg font-semibold px-4 py-3 sm:p-6 border-b border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100',
 					)}
 				>
 					Activity
@@ -1002,6 +1014,69 @@
 							Transfers and ledger events will appear here after the vault syncs.
 						</p>
 					</div>
+				{:else if narrow}
+					<div class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
+						{#each transactions as tx (tx._id || tx.tx_id)}
+							{@const txDate = tx.timestamp ? parseTimestamp(tx.timestamp) : null}
+							{@const from = partyLabel(tx.principal_from)}
+							{@const to = partyLabel(tx.principal_to)}
+							{@const amt = txAmountDisplay(tx)}
+							<article class={cn('px-4 py-3')}>
+								<div class={cn('flex items-start justify-between gap-3')}>
+									<div class={cn('min-w-0')}>
+										<div class={cn('text-xs font-medium', typeBadgeClass(tx.kind))}>
+											{typeLabel(tx.kind)}
+										</div>
+										<div class={cn('mt-1 text-xs text-gray-500 dark:text-gray-400')}>
+											To
+											{#if to.copyable}
+												<button
+													type="button"
+													onclick={() => copyToClipboard(tx.principal_to)}
+													class={cn('text-indigo-600 dark:text-indigo-400 hover:underline')}
+													title={to.title}
+												>
+													{to.display}
+												</button>
+											{:else}
+												<span title={to.title}>{to.display}</span>
+											{/if}
+										</div>
+										<div class={cn('mt-0.5 text-xs text-gray-400')}>
+											From
+											{#if from.copyable}
+												<button
+													type="button"
+													onclick={() => copyToClipboard(tx.principal_from)}
+													class={cn('text-indigo-600 dark:text-indigo-400 hover:underline')}
+													title={from.title}
+												>
+													{from.display}
+												</button>
+											{:else}
+												<span title={from.title}>{from.display}</span>
+											{/if}
+										</div>
+									</div>
+									<div class={cn('text-right shrink-0')}>
+										<div class={cn('font-medium tabular-nums text-sm', amt.className)} title={amt.title}>
+											{amt.text}
+										</div>
+										{#if txDate}
+											<button
+												type="button"
+												onclick={() => copyToClipboard(txDate.toLocaleString())}
+												class={cn('text-xs text-gray-400 hover:underline')}
+												title={txDate.toLocaleString()}
+											>
+												{timeAgo(txDate)}
+											</button>
+										{/if}
+									</div>
+								</div>
+							</article>
+						{/each}
+					</div>
 				{:else}
 					<div class={cn('overflow-x-auto')}>
 						<table class={cn('w-full text-sm')}>
@@ -1023,7 +1098,7 @@
 									</th>
 									<th
 										class={cn(
-											'px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hidden sm:table-cell',
+											'px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase',
 										)}
 									>
 										From
@@ -1078,7 +1153,7 @@
 												{typeLabel(tx.kind)}
 											</span>
 										</td>
-										<td class={cn('px-4 py-3 hidden sm:table-cell')}>
+										<td class={cn('px-4 py-3')}>
 											{#if from.copyable}
 												<button
 													type="button"
@@ -1199,9 +1274,18 @@
 		{:else if activeTab === 'send'}
 			<div
 				class={cn(
-					'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6',
+					'bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 p-4 sm:border sm:rounded-xl sm:p-6',
 				)}
 			>
+				<button
+					type="button"
+					onclick={() => {
+						activeTab = 'activity';
+					}}
+					class={cn('text-sm text-indigo-600 dark:text-indigo-400 mb-3 inline-flex items-center gap-1')}
+				>
+					← Activity
+				</button>
 				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4')}>Send tokens</h2>
 				<form
 					onsubmit={(e) => {
@@ -1398,23 +1482,40 @@
 				</p>
 
 				<div class={cn('flex flex-wrap gap-2 mb-4')}>
-					{#each [{ id: 'user', label: 'Member' }, { id: 'invoice', label: 'Invoice' }, { id: 'raw', label: 'Advanced' }] as mode (mode.id)}
-						<button
-							type="button"
-							onclick={() => {
-								lookupMode = mode.id as 'user' | 'invoice' | 'raw';
+					{#if narrow}
+						<select
+							bind:value={lookupMode}
+							onchange={() => {
 								lookupResult = null;
 							}}
 							class={cn(
-								'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-								lookupMode === mode.id
-									? 'bg-indigo-600 text-white'
-									: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
+								'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100',
 							)}
+							aria-label="Lookup mode"
 						>
-							{mode.label}
-						</button>
-					{/each}
+							<option value="user">Member</option>
+							<option value="invoice">Invoice</option>
+							<option value="raw">Advanced</option>
+						</select>
+					{:else}
+						{#each [{ id: 'user', label: 'Member' }, { id: 'invoice', label: 'Invoice' }, { id: 'raw', label: 'Advanced' }] as mode (mode.id)}
+							<button
+								type="button"
+								onclick={() => {
+									lookupMode = mode.id as 'user' | 'invoice' | 'raw';
+									lookupResult = null;
+								}}
+								class={cn(
+									'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+									lookupMode === mode.id
+										? 'bg-indigo-600 text-white'
+										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
+								)}
+							>
+								{mode.label}
+							</button>
+						{/each}
+					{/if}
 				</div>
 
 				{#if lookupMode === 'raw'}

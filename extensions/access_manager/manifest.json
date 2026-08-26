@@ -1,6 +1,6 @@
 {
   "name": "access_manager",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "runtime": "in_process",
   "description": "Organise your realm into departments: set who leads them, how many approvals a decision needs, which fund pays for them, who works there, and which departments answer to which.",
   "author": "Smart Social Contracts",

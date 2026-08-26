@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import { exportCsv } from '../../../_shared/frontend/csv-export';
+	import { isNarrowViewport, subscribeNarrowViewport } from '../../../_shared/frontend/mobile-chrome';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	let { ctx }: { ctx: Record<string, any> } = $props();
@@ -11,6 +13,13 @@
 	}
 
 	let tab = $state<'accounting' | 'records' | 'visualizations'>('accounting');
+	let narrow = $state(isNarrowViewport());
+	const unsubNarrow = subscribeNarrowViewport((value) => {
+		narrow = value;
+	});
+	onDestroy(() => {
+		unsubNarrow();
+	});
 
 let budgets: any[] = $state([]);
 let ledgerEntries: any[] = $state([]);
@@ -166,6 +175,13 @@ let accessDeniedOp = $state('');
 		if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
 		if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
 		return amount.toLocaleString();
+	}
+
+	function formatRecValue(value: unknown): string {
+		if (value == null || value === '') return '—';
+		if (typeof value === 'object') return JSON.stringify(value);
+		if (typeof value === 'number') return fmt(value);
+		return String(value);
 	}
 
 	function formatCategory(cat: string): string {
@@ -759,36 +775,63 @@ let accessDeniedOp = $state('');
 			loadRecordsPage();
 		}
 	});
+
+	let panelClass = $derived(
+		narrow
+			? 'bg-white dark:bg-gray-800 overflow-hidden mb-6 border-y border-gray-200 dark:border-gray-700'
+			: 'bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6'
+	);
+	let panelHeadClass = $derived(
+		narrow
+			? 'bg-gray-50 dark:bg-gray-750 px-3 py-3 border-b border-gray-200 dark:border-gray-700'
+			: 'bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700'
+	);
+	let panelBodyClass = $derived(narrow ? 'p-3' : 'p-6');
 </script>
 
-<div class="w-full max-w-5xl mx-auto px-4 py-6 font-sans">
-	<div class="mb-6">
+<div class={cn('w-full max-w-5xl mx-auto font-sans', narrow ? 'px-3 py-4' : 'px-4 py-6')}>
+	<div class={narrow ? 'mb-4' : 'mb-6'}>
 		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Financial Reports</h1>
 		<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{extensionDescription}</p>
 	</div>
 
-	<div class="mb-6 px-1 py-2 bg-gray-100 dark:bg-gray-800 flex gap-2 overflow-x-auto rounded-lg">
+	<div class="flex border-b border-gray-200 dark:border-gray-700 mb-4">
 		<button
+			type="button"
+			class="chrome-tab {tab === 'accounting' ? 'is-on' : ''}"
 			onclick={() => (tab = 'accounting')}
-			class={cn(
-				'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-				tab === 'accounting' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700'
-			)}
-		>Accounting</button>
+			title="Accounting"
+			aria-label="Accounting"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m-6 4h6m-6 4h4M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
+			</svg>
+			<span class="chrome-label">Accounting</span>
+		</button>
 		<button
+			type="button"
+			class="chrome-tab {tab === 'visualizations' ? 'is-on' : ''}"
 			onclick={() => (tab = 'visualizations')}
-			class={cn(
-				'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-				tab === 'visualizations' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700'
-			)}
-		>Visualizations</button>
+			title="Visualizations"
+			aria-label="Visualizations"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+			</svg>
+			<span class="chrome-label">Visualizations</span>
+		</button>
 		<button
+			type="button"
+			class="chrome-tab {tab === 'records' ? 'is-on' : ''}"
 			onclick={() => (tab = 'records')}
-			class={cn(
-				'px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap shrink-0 transition-colors',
-				tab === 'records' ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-white/70 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700'
-			)}
-		>Records</button>
+			title="Records"
+			aria-label="Records"
+		>
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+			</svg>
+			<span class="chrome-label">Records</span>
+		</button>
 	</div>
 
 	{#if accessDeniedOp}
@@ -828,8 +871,22 @@ let accessDeniedOp = $state('');
 					type="button"
 					onclick={generateDraftSnapshot}
 					disabled={draftBusy}
-					class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-				>{draftBusy ? 'Generating…' : 'Generate draft snapshot'}</button>
+					class="chrome-btn chrome-btn-primary shrink-0"
+					title={draftBusy ? 'Generating…' : 'Generate draft snapshot'}
+					aria-label={draftBusy ? 'Generating draft snapshot' : 'Generate draft snapshot'}
+				>
+					{#if draftBusy}
+						<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+						</svg>
+					{:else}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+						</svg>
+					{/if}
+					<span class="chrome-label">{draftBusy ? 'Generating…' : 'Generate draft snapshot'}</span>
+				</button>
 			</div>
 			{#if draftError}
 				<p class="text-sm text-red-600 dark:text-red-400 mt-1">{draftError}</p>
@@ -865,20 +922,24 @@ let accessDeniedOp = $state('');
 				<span class="text-xs text-gray-500 dark:text-gray-400">Summary</span>
 				{@render statementCurrencyNote()}
 			</div>
-			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-				<div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm">
+			<div
+				class={narrow
+					? 'grid grid-cols-2 gap-px bg-gray-200 dark:bg-gray-700 mb-6'
+					: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6'}
+			>
+				<div class={narrow ? 'bg-white dark:bg-gray-800 p-4' : 'bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm'}>
 					<div class="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">Total Assets</div>
 					<div class="text-2xl font-bold text-gray-800 dark:text-white">{fmtCompact(balanceSheet.totalAssets)}</div>
 				</div>
-				<div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm">
+				<div class={narrow ? 'bg-white dark:bg-gray-800 p-4' : 'bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm'}>
 					<div class="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">Total Liabilities</div>
 					<div class="text-2xl font-bold text-gray-600 dark:text-gray-300">{fmtCompact(balanceSheet.totalLiabilities)}</div>
 				</div>
-				<div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm">
+				<div class={narrow ? 'bg-white dark:bg-gray-800 p-4' : 'bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm'}>
 					<div class="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">Net Position</div>
 					<div class="text-2xl font-bold text-gray-800 dark:text-white">{fmtCompact(balanceSheet.netPosition)}</div>
 				</div>
-				<div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm">
+				<div class={narrow ? 'bg-white dark:bg-gray-800 p-4' : 'bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm'}>
 					<div class="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">Net Income</div>
 					<div class={cn('text-2xl font-bold', incomeStatement.netIncome >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
 						{incomeStatement.netIncome >= 0 ? '+' : ''}{fmtCompact(incomeStatement.netIncome)}
@@ -887,14 +948,14 @@ let accessDeniedOp = $state('');
 			</div>
 
 			<!-- Balance Sheet -->
-			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
-				<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+			<div class={panelClass}>
+				<div class={panelHeadClass}>
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📋 Balance Sheet</h3>
 						{@render statementCurrencyNote()}
 					</div>
 				</div>
-				<div class="p-6">
+				<div class={panelBodyClass}>
 					<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
 						<div>
 							<h4 class="font-semibold text-blue-800 dark:text-blue-400 mb-3 flex items-center">
@@ -952,14 +1013,14 @@ let accessDeniedOp = $state('');
 			</div>
 
 			<!-- Income Statement -->
-			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
-				<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+			<div class={panelClass}>
+				<div class={panelHeadClass}>
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📈 Income Statement</h3>
 						{@render statementCurrencyNote()}
 					</div>
 				</div>
-				<div class="p-6">
+				<div class={panelBodyClass}>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 						<div>
 							<h4 class="font-semibold text-blue-800 dark:text-blue-400 mb-3 flex items-center">
@@ -996,7 +1057,7 @@ let accessDeniedOp = $state('');
 							</div>
 						</div>
 					</div>
-					<div class="mt-6 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+					<div class={cn('mt-6 p-4', narrow ? 'border-t border-blue-200 dark:border-blue-800' : 'rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800')}>
 						<div class="flex justify-between items-center">
 							<span class="font-semibold text-blue-700 dark:text-blue-300">
 								Net Income ({incomeStatement.netIncome >= 0 ? 'Surplus' : 'Deficit'})
@@ -1010,20 +1071,20 @@ let accessDeniedOp = $state('');
 			</div>
 
 			<!-- Cash Flow Statement -->
-			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
-				<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+			<div class={panelClass}>
+				<div class={panelHeadClass}>
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">💰 Cash Flow Statement</h3>
 						{@render statementCurrencyNote()}
 					</div>
 				</div>
-				<div class="p-6 space-y-4">
+				<div class={cn(panelBodyClass, 'space-y-4')}>
 					{#each [
 						{ label: 'Operating Activities', sub: 'Day-to-day operations', value: cashFlow.operating },
 						{ label: 'Investing Activities', sub: 'Capital expenditures', value: cashFlow.investing },
 						{ label: 'Financing Activities', sub: 'Bonds and debt', value: cashFlow.financing },
 					] as item (item.label)}
-						<div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-750 rounded-lg">
+						<div class={cn('flex justify-between items-center p-3', narrow ? 'border-b border-gray-100 dark:border-gray-700 last:border-0' : 'bg-gray-50 dark:bg-gray-750 rounded-lg')}>
 							<div>
 								<span class="font-medium text-gray-700 dark:text-gray-300">{item.label}</span>
 								<p class="text-xs text-gray-500 dark:text-gray-400">{item.sub}</p>
@@ -1044,14 +1105,14 @@ let accessDeniedOp = $state('');
 
 			<!-- Funds Overview -->
 			{#if funds.length > 0}
-				<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
-					<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+				<div class={panelClass}>
+					<div class={panelHeadClass}>
 						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">🏦 Funds Overview</h3>
 					</div>
-					<div class="p-6">
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+					<div class={panelBodyClass}>
+						<div class={narrow ? 'divide-y divide-gray-200 dark:divide-gray-700' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'}>
 							{#each funds as fund (fund.code ?? fund.id ?? fund.name)}
-								<div class="p-4 bg-gray-50 dark:bg-gray-750 rounded-lg border border-gray-200 dark:border-gray-600">
+								<div class={narrow ? 'py-3' : 'p-4 bg-gray-50 dark:bg-gray-750 rounded-lg border border-gray-200 dark:border-gray-600'}>
 									<div class="flex items-center justify-between mb-2">
 										<span class="font-semibold text-gray-800 dark:text-gray-200">{fund.name || fund.code}</span>
 										<span class="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full">{fund.fund_type || 'general'}</span>
@@ -1066,58 +1127,105 @@ let accessDeniedOp = $state('');
 
 			<!-- Budget Performance -->
 			{#if budgets.length > 0}
-				<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
-					<div class="bg-gray-50 dark:bg-gray-750 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+				<div class={panelClass}>
+					<div class={panelHeadClass}>
 						<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 							<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📊 Budget Performance</h3>
 							{@render statementCurrencyNote()}
 						</div>
 					</div>
-					<div class="p-6 overflow-x-auto">
-						<table class="w-full text-sm">
-							<thead>
-								<tr class="border-b border-gray-200 dark:border-gray-600">
-									<th class="text-left py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Category</th>
-									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
-										Planned{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
-									</th>
-									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
-										Actual{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
-									</th>
-									<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
-										Variance{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
-									</th>
-									<th class="text-center py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Status</th>
-								</tr>
-							</thead>
-							<tbody>
+					<div class={narrow ? 'px-3 py-1' : 'p-6 overflow-x-auto'}>
+						{#if narrow}
+							<div class="divide-y divide-gray-200 dark:divide-gray-700">
 								{#each budgets as budget (budget.id ?? budget.name ?? budget.category)}
 									{@const variance = (budget.actual_amount || 0) - (budget.planned_amount || 0)}
 									{@const variancePercent = budget.planned_amount ? ((variance / budget.planned_amount) * 100).toFixed(1) : '0'}
-									<tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
-										<td class="py-3 px-4">
-											<div class="font-medium text-gray-800 dark:text-gray-200">{budget.name || budget.category}</div>
-											<div class="text-xs text-gray-500 dark:text-gray-400">{budget.budget_type || 'expense'}</div>
-										</td>
-										<td class="py-3 px-4 text-right text-gray-600 dark:text-gray-400">{fmtCompact(budget.planned_amount || 0)}</td>
-										<td class="py-3 px-4 text-right text-gray-800 dark:text-gray-200 font-medium">{fmtCompact(budget.actual_amount || 0)}</td>
-										<td class={cn('py-3 px-4 text-right', variance >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-red-500 dark:text-red-400')}>
-											{variance >= 0 ? '+' : ''}{fmtCompact(variance)} ({variancePercent}%)
-										</td>
-										<td class="py-3 px-4 text-center">
+									<article class="py-3">
+										<div class="flex items-start justify-between gap-2">
+											<div class="min-w-0">
+												<div class="font-medium text-gray-800 dark:text-gray-200">{budget.name || budget.category}</div>
+												<div class="text-xs text-gray-500 dark:text-gray-400">{budget.budget_type || 'expense'}</div>
+											</div>
 											<span class={cn(
-												'px-2 py-1 text-xs rounded-full',
+												'shrink-0 text-xs px-2 py-0.5',
 												budget.status === 'adopted' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400' :
 												budget.status === 'draft' ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' :
 												'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
 											)}>
 												{budget.status || 'draft'}
 											</span>
-										</td>
-									</tr>
+										</div>
+										<dl class="mt-2 space-y-1 text-sm">
+											<div class="flex justify-between gap-3">
+												<dt class="text-gray-500 dark:text-gray-400">
+													Planned{#if accountingSymbol && !ledgerCurrencyMixed}<span> ({accountingSymbol})</span>{/if}
+												</dt>
+												<dd class="text-gray-600 dark:text-gray-300 tabular-nums">{fmtCompact(budget.planned_amount || 0)}</dd>
+											</div>
+											<div class="flex justify-between gap-3">
+												<dt class="text-gray-500 dark:text-gray-400">
+													Actual{#if accountingSymbol && !ledgerCurrencyMixed}<span> ({accountingSymbol})</span>{/if}
+												</dt>
+												<dd class="text-gray-800 dark:text-gray-200 font-medium tabular-nums">{fmtCompact(budget.actual_amount || 0)}</dd>
+											</div>
+											<div class="flex justify-between gap-3">
+												<dt class="text-gray-500 dark:text-gray-400">
+													Variance{#if accountingSymbol && !ledgerCurrencyMixed}<span> ({accountingSymbol})</span>{/if}
+												</dt>
+												<dd class={cn('tabular-nums', variance >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-red-500 dark:text-red-400')}>
+													{variance >= 0 ? '+' : ''}{fmtCompact(variance)} ({variancePercent}%)
+												</dd>
+											</div>
+										</dl>
+									</article>
 								{/each}
-							</tbody>
-						</table>
+							</div>
+						{:else}
+							<table class="w-full text-sm">
+								<thead>
+									<tr class="border-b border-gray-200 dark:border-gray-600">
+										<th class="text-left py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Category</th>
+										<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
+											Planned{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
+										</th>
+										<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
+											Actual{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
+										</th>
+										<th class="text-right py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">
+											Variance{#if accountingSymbol && !ledgerCurrencyMixed}<span class="font-normal text-gray-500 dark:text-gray-400"> ({accountingSymbol})</span>{/if}
+										</th>
+										<th class="text-center py-3 px-4 font-semibold text-gray-700 dark:text-gray-300">Status</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each budgets as budget (budget.id ?? budget.name ?? budget.category)}
+										{@const variance = (budget.actual_amount || 0) - (budget.planned_amount || 0)}
+										{@const variancePercent = budget.planned_amount ? ((variance / budget.planned_amount) * 100).toFixed(1) : '0'}
+										<tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
+											<td class="py-3 px-4">
+												<div class="font-medium text-gray-800 dark:text-gray-200">{budget.name || budget.category}</div>
+												<div class="text-xs text-gray-500 dark:text-gray-400">{budget.budget_type || 'expense'}</div>
+											</td>
+											<td class="py-3 px-4 text-right text-gray-600 dark:text-gray-400">{fmtCompact(budget.planned_amount || 0)}</td>
+											<td class="py-3 px-4 text-right text-gray-800 dark:text-gray-200 font-medium">{fmtCompact(budget.actual_amount || 0)}</td>
+											<td class={cn('py-3 px-4 text-right', variance >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-red-500 dark:text-red-400')}>
+												{variance >= 0 ? '+' : ''}{fmtCompact(variance)} ({variancePercent}%)
+											</td>
+											<td class="py-3 px-4 text-center">
+												<span class={cn(
+													'px-2 py-1 text-xs rounded-full',
+													budget.status === 'adopted' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400' :
+													budget.status === 'draft' ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' :
+													'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+												)}>
+													{budget.status || 'draft'}
+												</span>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/if}
 					</div>
 				</div>
 			{/if}
@@ -1143,10 +1251,25 @@ let accessDeniedOp = $state('');
 				</select>
 			</div>
 			<button
+				type="button"
 				onclick={downloadCsv}
 				disabled={csvBusy}
-				class="px-4 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-			>{csvBusy ? csvProgress : 'Download CSV'}</button>
+				class="chrome-btn chrome-btn-primary"
+				title={csvBusy ? csvProgress : 'Download CSV'}
+				aria-label={csvBusy ? csvProgress : 'Download CSV'}
+			>
+				{#if csvBusy}
+					<svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+					</svg>
+				{:else}
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+					</svg>
+				{/if}
+				<span class="chrome-label">{csvBusy ? csvProgress : 'Download CSV'}</span>
+			</button>
 			{#if csvProgress && !csvBusy}
 				<span class="text-sm text-gray-500 dark:text-gray-400">{csvProgress}</span>
 			{/if}
@@ -1167,36 +1290,58 @@ let accessDeniedOp = $state('');
 				<p class="text-gray-700 dark:text-gray-300 font-medium">No {recEntity} records found.</p>
 			</div>
 		{:else}
-			<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-4">
-				<div class="overflow-x-auto">
-					<table class="w-full text-sm">
-						<thead>
-							<tr class="border-b border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750">
-								{#each recColumns as col (col)}
-									<th class="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">{col}</th>
+			{#if narrow}
+				<div class="divide-y divide-gray-200 dark:divide-gray-700 mb-4">
+					{#each recItems as row, i (row.id ?? i)}
+						<article class="py-3">
+							{#if recColumns[0]}
+								<div class="font-medium text-gray-900 dark:text-white truncate" title={formatRecValue(row[recColumns[0]])}>
+									{formatRecValue(row[recColumns[0]])}
+								</div>
+							{/if}
+							<dl class="mt-1 space-y-1">
+								{#each recColumns.slice(1) as col (col)}
+									<div class="flex justify-between gap-3 text-sm">
+										<dt class="text-gray-500 dark:text-gray-400 shrink-0">{col}</dt>
+										<dd class="text-gray-700 dark:text-gray-300 text-right min-w-0 truncate" title={formatRecValue(row[col])}>
+											{formatRecValue(row[col])}
+										</dd>
+									</div>
 								{/each}
-							</tr>
-						</thead>
-						<tbody>
-							{#each recItems as row, i (row.id ?? i)}
-								<tr class={cn('border-b border-gray-100 dark:border-gray-700', i % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-750')}>
+							</dl>
+						</article>
+					{/each}
+				</div>
+			{:else}
+				<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-4">
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="border-b border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-750">
 									{#each recColumns as col (col)}
-										<td class="py-2 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap max-w-xs truncate" title={typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col] ?? '')}>
-											{#if typeof row[col] === 'object' && row[col] !== null}
-												<span class="text-xs text-gray-500 dark:text-gray-400">{JSON.stringify(row[col])}</span>
-											{:else if typeof row[col] === 'number'}
-												{fmt(row[col])}
-											{:else}
-												{row[col] ?? '—'}
-											{/if}
-										</td>
+										<th class="text-left py-2.5 px-3 font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">{col}</th>
 									{/each}
 								</tr>
-							{/each}
-						</tbody>
-					</table>
+							</thead>
+							<tbody>
+								{#each recItems as row, i (row.id ?? i)}
+									<tr class={cn('border-b border-gray-100 dark:border-gray-700', i % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-750')}>
+										{#each recColumns as col (col)}
+											<td class="py-2 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap max-w-xs truncate" title={formatRecValue(row[col])}>
+												{#if typeof row[col] === 'object' && row[col] !== null}
+													<span class="text-xs text-gray-500 dark:text-gray-400">{formatRecValue(row[col])}</span>
+												{:else}
+													{formatRecValue(row[col])}
+												{/if}
+											</td>
+										{/each}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
 				</div>
-			</div>
+			{/if}
 
 			<!-- Pagination controls -->
 			<div class="flex items-center justify-center gap-2">
@@ -1232,9 +1377,9 @@ let accessDeniedOp = $state('');
 				<p class="text-gray-700 dark:text-gray-300 font-medium">No data available for visualizations.</p>
 			</div>
 		{:else}
-			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+			<div class={narrow ? 'space-y-4 mb-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6'}>
 				<!-- Tax Allocation (bar chart) -->
-				<div class="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
+				<div class={narrow ? 'py-1' : 'bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700'}>
 					<h4 class="font-semibold text-gray-700 dark:text-gray-200 mb-4">📊 Tax Allocation Breakdown</h4>
 					{#if taxAllocationData.length === 0}
 						<p class="text-gray-500 dark:text-gray-400 text-sm text-center py-4">No expense budgets with actual amounts</p>
@@ -1257,7 +1402,7 @@ let accessDeniedOp = $state('');
 				</div>
 
 				<!-- Asset Portfolio (bar chart) -->
-				<div class="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700">
+				<div class={narrow ? 'py-1' : 'bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700'}>
 					<h4 class="font-semibold text-gray-700 dark:text-gray-200 mb-4">💰 Asset Portfolio</h4>
 					{#if assetPortfolioData.length === 0}
 						<p class="text-gray-500 dark:text-gray-400 text-sm text-center py-4">No fund balance data</p>
@@ -1286,7 +1431,7 @@ let accessDeniedOp = $state('');
 			</div>
 
 			<!-- Tax Contribution (data table) -->
-			<div class="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+			<div class={narrow ? 'py-1 mb-6' : 'bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 mb-6'}>
 				<h4 class="font-semibold text-gray-700 dark:text-gray-200 mb-4">🌳 Tax Contribution Analysis</h4>
 				{#if taxContributionData.length === 0}
 					<p class="text-gray-500 dark:text-gray-400 text-sm text-center py-4">No revenue contribution data</p>
@@ -1315,10 +1460,10 @@ let accessDeniedOp = $state('');
 			</div>
 
 			<!-- Cash Flow Breakdown -->
-			<div class="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+			<div class={narrow ? 'py-1 mb-6' : 'bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 mb-6'}>
 				<h4 class="font-semibold text-gray-700 dark:text-gray-200 mb-4">💰 Cash Flow Breakdown</h4>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-					<div class="bg-white dark:bg-gray-750 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+					<div class={narrow ? 'py-2' : 'bg-white dark:bg-gray-750 rounded-lg p-4 border border-gray-200 dark:border-gray-600'}>
 						<div class="flex items-center justify-between mb-3">
 							<span class="text-sm font-medium text-blue-700 dark:text-blue-400">📈 Income</span>
 							<span class="text-lg font-bold text-blue-800 dark:text-blue-300">+{fmtCompact(cashFlowBreakdown.totalIncome)}</span>
@@ -1332,7 +1477,7 @@ let accessDeniedOp = $state('');
 							{/each}
 						</div>
 					</div>
-					<div class="bg-white dark:bg-gray-750 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+					<div class={narrow ? 'py-2' : 'bg-white dark:bg-gray-750 rounded-lg p-4 border border-gray-200 dark:border-gray-600'}>
 						<div class="flex items-center justify-between mb-3">
 							<span class="text-sm font-medium text-red-600 dark:text-red-400">📉 Expenses</span>
 							<span class="text-lg font-bold text-red-500 dark:text-red-400">-{fmtCompact(cashFlowBreakdown.totalExpenses)}</span>
@@ -1347,7 +1492,7 @@ let accessDeniedOp = $state('');
 						</div>
 					</div>
 				</div>
-				<div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+				<div class={cn('mt-4 p-3', narrow ? 'border-t border-blue-200 dark:border-blue-800' : 'bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800')}>
 					<div class="flex items-center justify-between">
 						<span class="text-sm font-medium text-blue-700 dark:text-blue-300">💰 Net Flow</span>
 						<span class={cn('text-lg font-bold', cashFlowBreakdown.net >= 0 ? 'text-blue-800 dark:text-blue-300' : 'text-red-600 dark:text-red-400')}>
@@ -1359,3 +1504,90 @@ let accessDeniedOp = $state('');
 		{/if}
 	{/if}
 </div>
+
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 6px 12px;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid #d1d5db;
+		background: #fff;
+		color: #374151;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.chrome-btn-primary {
+		background: #111827;
+		border-color: #111827;
+		color: #fff;
+	}
+
+	.chrome-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 16px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border: none;
+		border-bottom: 2px solid transparent;
+		background: transparent;
+		color: #6b7280;
+		cursor: pointer;
+	}
+
+	.chrome-tab.is-on {
+		border-bottom-color: #111827;
+		color: #111827;
+	}
+
+	:global(.dark) .chrome-btn {
+		background: #1f2937;
+		border-color: #4b5563;
+		color: #e5e7eb;
+	}
+
+	:global(.dark) .chrome-btn-primary {
+		background: #f9fafb;
+		border-color: #f9fafb;
+		color: #111827;
+	}
+
+	:global(.dark) .chrome-tab {
+		color: #9ca3af;
+	}
+
+	:global(.dark) .chrome-tab.is-on {
+		border-bottom-color: #f9fafb;
+		color: #f9fafb;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+
+		.chrome-tab {
+			width: 40px;
+			justify-content: center;
+			padding: 10px 0;
+		}
+	}
+</style>

@@ -18,7 +18,7 @@ test.describe('Vault Extension E2E Tests', () => {
 
 		await expect(page.getByRole('heading', { name: 'Vault' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Activity' })).toBeVisible();
-		await expect(page.locator('nav').getByRole('button', { name: 'Send' })).toBeVisible();
+		await expect(page.locator('nav').getByRole('button', { name: 'Send' })).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Lookup' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
 	});
@@ -125,10 +125,10 @@ test.describe('Vault Extension E2E Tests', () => {
 		).toBeVisible();
 	});
 
-	test('should show send form in send tab', async ({ page }) => {
+	test('should show send form from the balance-card Send CTA', async ({ page }) => {
 		test.setTimeout(TIMEOUT);
 
-		await page.locator('nav').getByRole('button', { name: 'Send' }).click();
+		await page.getByRole('button', { name: 'Send' }).first().click();
 
 		await expect(page.getByRole('heading', { name: 'Send tokens' })).toBeVisible();
 		await expect(page.getByText('Recipient')).toBeVisible();
@@ -178,7 +178,7 @@ test.describe('Vault Extension E2E Tests', () => {
 	test('should display user-friendly error message for insufficient funds', async ({ page }) => {
 		test.setTimeout(TIMEOUT);
 
-		await page.locator('nav').getByRole('button', { name: 'Send' }).click();
+		await page.getByRole('button', { name: 'Send' }).first().click();
 
 		const recipientInput = page.getByPlaceholder(/xxxxx-xxxxx/);
 		const amountInput = page.getByPlaceholder('0.00');
@@ -203,7 +203,7 @@ test.describe('Vault Extension E2E Tests', () => {
 	test('should validate send form inputs', async ({ page }) => {
 		test.setTimeout(TIMEOUT);
 
-		await page.locator('nav').getByRole('button', { name: 'Send' }).click();
+		await page.getByRole('button', { name: 'Send' }).first().click();
 
 		const recipientInput = page.getByPlaceholder(/xxxxx-xxxxx/);
 		const amountInput = page.getByPlaceholder('0.00');
