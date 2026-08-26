@@ -1,6 +1,11 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { tick } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import {
+		isNarrowViewport,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -51,6 +56,8 @@
 
 	let selectedDept = $state<string>('');
 	let searchQuery = $state('');
+	let narrow = $state(isNarrowViewport());
+	let unsubNarrow: (() => void) | undefined;
 	let openMenuKey = $state<string | null>(null);
 	let menuOpenUp = $state(false);
 	let docListEl = $state<HTMLUListElement | null>(null);
@@ -776,6 +783,18 @@
 		if (doc) await openDocument(doc);
 	}
 
+	async function backToList() {
+		if (!(await confirmDiscardDraft())) return;
+		composerMode = null;
+		editingDocId = null;
+		clearComposerForm();
+		saveError = '';
+		openDoc = null;
+		openContent = null;
+		openState = 'idle';
+		openMenuKey = null;
+	}
+
 	async function saveDocument() {
 		if (!selectedDept) return;
 		if (!formTitle.trim()) {
@@ -901,22 +920,63 @@
 	loadDirectory();
 	loadAll();
 	loadReshareJobs();
+	unsubNarrow = subscribeNarrowViewport((value) => {
+		narrow = value;
+	});
+	onDestroy(() => {
+		unsubNarrow?.();
+	});
 </script>
+
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 8px 12px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: none;
+		background: #2563eb;
+		color: #fff;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+	}
+</style>
 
 <svelte:window onclick={() => (openMenuKey = null)} onkeydown={handleMenuKeydown} />
 
-<div class="p-4 space-y-4">
-	<div class="flex items-center justify-between gap-4">
+<div class="p-3 sm:p-4 space-y-4">
+	<div class="flex flex-col gap-2">
 		<div>
 			<h1 class="text-xl font-semibold text-gray-900 dark:text-white">Department Documents</h1>
 			<p class="text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 		</div>
 		{#if canManageSelected}
 			<button
-				class="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+				class="chrome-btn self-start"
 				onclick={startCompose}
+				title="New document"
+				aria-label="New document"
 			>
-				+ New document
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+				</svg>
+				<span class="chrome-label">New document</span>
 			</button>
 		{/if}
 	</div>
@@ -949,7 +1009,7 @@
 	{:else}
 		<div class="flex flex-wrap items-center gap-2">
 			<select
-				class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+				class="border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white sm:rounded-lg"
 				value={selectedDept}
 				onchange={(e) => {
 					const el = e.currentTarget as HTMLSelectElement;
@@ -962,16 +1022,16 @@
 			</select>
 			{#if currentDept?.can_manage}
 				<span
-					class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+					class="hidden sm:inline text-xs text-gray-500 dark:text-gray-400"
 				>
 					You manage this department
 				</span>
 				<button
 					type="button"
-					class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+					class="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700 sm:rounded-lg"
 					onclick={openManualReshareDialog}
 				>
-					Re-share department docs
+					Re-share
 				</button>
 			{/if}
 		</div>
@@ -999,7 +1059,7 @@
 		{/if}
 
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-			<div class="lg:col-span-1">
+			<div class="lg:col-span-1" class:hidden={narrow && !!(openDoc || composerMode)}>
 				<div class="relative mb-3">
 					<svg
 						class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
@@ -1056,10 +1116,10 @@
 								<button
 									type="button"
 									class={cn(
-										'flex-1 min-w-0 rounded-lg border px-3 py-2 text-left transition-colors',
+										'flex-1 min-w-0 border-b px-3 py-2 text-left transition-colors sm:rounded-lg sm:border',
 										openDoc?.id === doc.id
 											? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/30'
-											: 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800',
+											: 'border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 sm:border-transparent',
 									)}
 									aria-current={openDoc?.id === doc.id ? 'true' : undefined}
 									onclick={() => openDocument(doc)}
@@ -1138,10 +1198,24 @@
 				{/if}
 			</div>
 
-			<div class="lg:col-span-2 min-h-[50vh]">
+			<div class="lg:col-span-2 min-h-[50vh]" class:hidden={narrow && !openDoc && !composerMode}>
 				<div
-					class="flex min-h-[50vh] flex-col rounded-lg border border-gray-200 dark:border-gray-700"
+					class="flex min-h-[50vh] flex-col border-y border-gray-200 dark:border-gray-700 sm:rounded-lg sm:border"
 				>
+					{#if narrow && (openDoc || composerMode)}
+						<div class="flex items-center border-b border-gray-200 px-3 py-2 dark:border-gray-700">
+							<button
+								type="button"
+								class="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400"
+								onclick={backToList}
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+								</svg>
+								Documents
+							</button>
+						</div>
+					{/if}
 					{#if composerMode}
 						<div class="flex flex-1 flex-col p-4">
 							<h2 class="mb-2 font-semibold text-gray-900 dark:text-white">

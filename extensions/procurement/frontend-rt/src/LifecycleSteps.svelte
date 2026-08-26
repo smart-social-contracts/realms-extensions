@@ -299,7 +299,14 @@
 		display: block;
 	}
 
-	@media (max-width: 767px) {
+	@media (max-width: 720px) {
+		.lifecycle {
+			padding: 0.75rem 0;
+			border-radius: 0;
+			border-left: none;
+			border-right: none;
+		}
+
 		.info-tip {
 			left: auto;
 			right: 0;

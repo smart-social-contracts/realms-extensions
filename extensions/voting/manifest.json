@@ -1,6 +1,6 @@
 {
   "name": "voting",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Submit proposals that change how your realm works, read what each one would do, and vote yes, no, or abstain while voting is open.",
   "author": "Smart Social Contracts",
   "permissions": [],

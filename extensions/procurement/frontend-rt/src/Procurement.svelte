@@ -1,6 +1,13 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import LifecycleSteps, { type LifecycleStep } from './LifecycleSteps.svelte';
+	import {
+		isNarrowViewport,
+		persistSessionFlag,
+		readSessionFlag,
+		subscribeNarrowViewport,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	type View = 'list' | 'create' | 'detail';
 
@@ -51,6 +58,8 @@
 	];
 
 	const DEMO_ADVANCE_KEY = 'procurement_demo_advance';
+	const LIFECYCLE_KEY = 'procurement-lifecycle-open';
+	const TEST_FLAGS_KEY = 'procurement-test-flags-open';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -75,6 +84,12 @@
 	let actionError = $state('');
 	let busy = $state(false);
 	let demoAdvanceEnabled = $state(false);
+	let narrow = $state(isNarrowViewport());
+	let lifecycleOpen = $state(readSessionFlag(LIFECYCLE_KEY) ?? !isNarrowViewport());
+	let testFlagsOpen = $state(readSessionFlag(TEST_FLAGS_KEY) === true);
+	let unsubNarrow = subscribeNarrowViewport((value) => {
+		narrow = value;
+	});
 
 	let rfps = $state<any[]>([]);
 	let selected = $state<any | null>(null);
@@ -113,9 +128,17 @@
 
 	function setDemoAdvanceEnabled(enabled: boolean) {
 		demoAdvanceEnabled = enabled;
-		if (typeof sessionStorage !== 'undefined') {
-			sessionStorage.setItem(DEMO_ADVANCE_KEY, enabled ? '1' : '0');
-		}
+		persistSessionFlag(DEMO_ADVANCE_KEY, enabled);
+	}
+
+	function toggleLifecycle() {
+		lifecycleOpen = !lifecycleOpen;
+		persistSessionFlag(LIFECYCLE_KEY, lifecycleOpen);
+	}
+
+	function toggleTestFlags() {
+		testFlagsOpen = !testFlagsOpen;
+		persistSessionFlag(TEST_FLAGS_KEY, testFlagsOpen);
 	}
 
 	function shortPrincipal(p: string) {
@@ -479,39 +502,130 @@
 	});
 
 	loadRfps();
+	onDestroy(() => {
+		unsubNarrow?.();
+	});
 </script>
 
-<div class="w-full max-w-none space-y-6 pb-8">
-	<header class="flex flex-wrap items-start justify-between gap-4">
-		<div class="min-w-0 flex-1">
+<style>
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 8px 12px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid #d1d5db;
+		background: #fff;
+		color: #374151;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-btn.chrome-primary {
+		background: #2563eb;
+		border-color: #2563eb;
+		color: #fff;
+	}
+
+	.chrome-btn.is-on {
+		background: #eef2ff;
+		border-color: #6366f1;
+		color: #4338ca;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+	}
+</style>
+
+<div class="w-full max-w-none space-y-4 px-3 pb-8 sm:space-y-6 sm:px-0">
+	<header class="flex flex-col gap-2">
+		<div class="min-w-0">
 			<h1 class="text-3xl font-bold text-gray-900 dark:text-white">Procurement</h1>
 			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 		</div>
-		<div class="flex shrink-0 flex-wrap gap-2">
+		<div class="flex flex-wrap items-center gap-2">
 			{#if view !== 'list'}
 				<button
-					class="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+					class="chrome-btn"
 					onclick={() => {
 						view = 'list';
 						selected = null;
-					}}>← All requests</button
+					}}
+					title="All requests"
+					aria-label="All requests"
 				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+					</svg>
+					<span class="chrome-label">All requests</span>
+				</button>
 			{/if}
 			{#if view === 'list'}
 				<button
-					class="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+					class="chrome-btn chrome-primary"
 					onclick={() => {
 						view = 'create';
 						actionError = '';
 						actionMsg = '';
-					}}>+ New Request For Proposal</button
+					}}
+					title="New request for proposal"
+					aria-label="New request for proposal"
 				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+					</svg>
+					<span class="chrome-label">New Request For Proposal</span>
+				</button>
+			{/if}
+			{#if rfps.length > 0 || view !== 'list'}
+				<button
+					type="button"
+					class="chrome-btn"
+					class:is-on={lifecycleOpen}
+					onclick={toggleLifecycle}
+					title={lifecycleOpen ? 'Hide lifecycle' : 'Show lifecycle'}
+					aria-label={lifecycleOpen ? 'Hide lifecycle' : 'Show lifecycle'}
+					aria-pressed={lifecycleOpen}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+					</svg>
+					<span class="chrome-label">Lifecycle</span>
+				</button>
+			{/if}
+			{#if testMode}
+				<button
+					type="button"
+					class="chrome-btn"
+					class:is-on={testFlagsOpen}
+					onclick={toggleTestFlags}
+					title={testFlagsOpen ? 'Hide test flags' : 'Test flags'}
+					aria-label={testFlagsOpen ? 'Hide test flags' : 'Test flags'}
+					aria-pressed={testFlagsOpen}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+					</svg>
+					<span class="chrome-label">Test flags</span>
+				</button>
 			{/if}
 		</div>
 	</header>
 
-	{#if testMode}
-		<div class="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+	{#if testMode && testFlagsOpen}
+		<div class="border-y border-gray-200 py-3 text-sm dark:border-gray-700">
 			<label class="flex cursor-pointer items-start gap-2">
 				<input
 					type="checkbox"
@@ -521,7 +635,7 @@
 				/>
 				<span>
 					<span class="font-medium">Demo: manual stage advance</span>
-					<span class="mt-0.5 block text-xs text-amber-800">
+					<span class="mt-0.5 block text-xs text-gray-500">
 						When enabled, the creator of a request can jump to the next lifecycle stage at any time
 						(test mode only).
 					</span>
@@ -547,52 +661,77 @@
 	{/if}
 
 	{#if view === 'list'}
-		<section>
-			<h2 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">Lifecycle overview</h2>
-			<LifecycleSteps steps={LIFECYCLE_STEPS} currentStatus="draft" compact />
-		</section>
-
 		{#if loading}
 			<p class="text-gray-500">Loading requests…</p>
 		{:else if rfps.length === 0}
-			<p class="text-gray-500">No requests yet. Create a Request For Proposal to get started.</p>
-		{:else}
-			<div class="w-full overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-				<table class="w-full table-fixed text-sm">
-					<thead class="bg-gray-50 text-left text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-						<tr>
-							<th class="w-28 px-4 py-3">Reference</th>
-							<th class="px-4 py-3">Title</th>
-							<th class="w-36 px-4 py-3">Stage</th>
-							<th class="w-48 px-4 py-3">Closes</th>
-							<th class="w-20 px-4 py-3"></th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each rfps as rfp}
-							<tr class="border-t border-gray-100 dark:border-gray-700">
-								<td class="px-4 py-3 font-mono text-xs">{rfp.rfp_id}</td>
-								<td class="truncate px-4 py-3">{rfp.title}</td>
-								<td class="px-4 py-3">
-									<span class="rounded-full px-2 py-0.5 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
-								</td>
-								<td class="px-4 py-3 text-gray-500">{new Date((rfp.closes_at || 0) * 1000).toLocaleString()}</td>
-								<td class="px-4 py-3 text-right">
-									<button class="text-blue-600 hover:underline" onclick={() => openDetail(rfp)}>Open</button>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+			<div class="empty-page py-16 text-center">
+				<p class="text-gray-500">No requests yet. Create a Request For Proposal to get started.</p>
 			</div>
+		{:else}
+			{#if lifecycleOpen}
+				<section class="mb-4">
+					<h2 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">Lifecycle overview</h2>
+					<LifecycleSteps steps={LIFECYCLE_STEPS} currentStatus="draft" compact />
+				</section>
+			{/if}
+			{#if narrow}
+				<div class="divide-y divide-gray-200 dark:divide-gray-700">
+					{#each rfps as rfp}
+						<article class="py-3">
+							<div class="flex items-start justify-between gap-2">
+								<div class="min-w-0">
+									<div class="font-medium text-gray-900 dark:text-white">{rfp.title}</div>
+									<div class="mt-0.5 font-mono text-xs text-gray-400">{rfp.rfp_id}</div>
+								</div>
+								<span class="shrink-0 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
+							</div>
+							<div class="mt-1 flex items-center justify-between text-xs text-gray-500">
+								<span>Closes {new Date((rfp.closes_at || 0) * 1000).toLocaleString()}</span>
+								<button class="text-blue-600" onclick={() => openDetail(rfp)}>Open</button>
+							</div>
+						</article>
+					{/each}
+				</div>
+			{:else}
+				<div class="w-full overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+					<table class="w-full table-fixed text-sm">
+						<thead class="bg-gray-50 text-left text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+							<tr>
+								<th class="w-28 px-4 py-3">Reference</th>
+								<th class="px-4 py-3">Title</th>
+								<th class="w-36 px-4 py-3">Stage</th>
+								<th class="w-48 px-4 py-3">Closes</th>
+								<th class="w-20 px-4 py-3"></th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each rfps as rfp}
+								<tr class="border-t border-gray-100 dark:border-gray-700">
+									<td class="px-4 py-3 font-mono text-xs">{rfp.rfp_id}</td>
+									<td class="truncate px-4 py-3">{rfp.title}</td>
+									<td class="px-4 py-3">
+										<span class="rounded-full px-2 py-0.5 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
+									</td>
+									<td class="px-4 py-3 text-gray-500">{new Date((rfp.closes_at || 0) * 1000).toLocaleString()}</td>
+									<td class="px-4 py-3 text-right">
+										<button class="text-blue-600 hover:underline" onclick={() => openDetail(rfp)}>Open</button>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
 		{/if}
 	{:else if view === 'create'}
-		<section>
-			<h2 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">Lifecycle overview</h2>
-			<LifecycleSteps steps={LIFECYCLE_STEPS} currentStatus="draft" />
-		</section>
+		{#if lifecycleOpen}
+			<section>
+				<h2 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">Lifecycle overview</h2>
+				<LifecycleSteps steps={LIFECYCLE_STEPS} currentStatus="draft" />
+			</section>
+		{/if}
 
-		<section class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 			<h2 class="mb-3 text-lg font-medium">Create Request For Proposal</h2>
 			<div class="grid gap-3 md:grid-cols-2">
 				<label class="block md:col-span-2">
@@ -624,12 +763,14 @@
 			</button>
 		</section>
 	{:else if view === 'detail' && selected}
-		<section>
-			<h2 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">Current stage</h2>
-			<LifecycleSteps steps={LIFECYCLE_STEPS} currentStatus={detailStatus} />
-		</section>
+		{#if lifecycleOpen}
+			<section>
+				<h2 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">Current stage</h2>
+				<LifecycleSteps steps={LIFECYCLE_STEPS} currentStatus={detailStatus} />
+			</section>
+		{/if}
 
-		<section class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 			<div class="flex flex-wrap items-center gap-2">
 				<h2 class="text-lg font-medium">{selected.title}</h2>
 				<span class="rounded-full px-2 py-0.5 text-xs {statusClass(selected.status)}">{statusLabel(selected.status)}</span>
@@ -670,7 +811,7 @@
 		</section>
 
 		{#if selected.status === 'open'}
-			<section class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 				<h3 class="font-medium">Submit sealed bid</h3>
 				<p class="text-xs text-gray-500">Encrypted with vetKeys — only you can read until you share after close.</p>
 				<div class="mt-3 grid gap-3 md:grid-cols-2">
@@ -693,7 +834,7 @@
 			</section>
 		{/if}
 
-		<section class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 			<h3 class="font-medium">Bids ({bids.length})</h3>
 			{#if bids.length === 0}
 				<p class="text-sm text-gray-500">No bids yet.</p>
@@ -759,7 +900,7 @@
 			{/if}
 		</section>
 
-		<section class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 			<h3 class="font-medium">Audit log</h3>
 			<ul class="mt-2 space-y-1 text-xs">
 				{#each transitions as t}

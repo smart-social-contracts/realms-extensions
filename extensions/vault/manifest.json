@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "See token balances and transfer history for your realm's treasury, send payments when allowed, and look up balances tied to members or invoices.",
   "author": "Smart Social Contracts",
   "repository": "https://github.com/smart-social-contracts/realms-extension-vault",

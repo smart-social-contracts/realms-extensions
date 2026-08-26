@@ -3,6 +3,11 @@
 	import { onMount, onDestroy } from 'svelte';
 	import MonacoPane from './MonacoPane.svelte';
 	import FederalVotes from './FederalVotes.svelte';
+	import {
+		isNarrowViewport,
+		persistSessionFlag,
+		readSessionFlag,
+	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -114,6 +119,8 @@
 	let statusFilter = $state('');
 	let typeFilter = $state('');
 	let sortBy = $state('newest');
+	const FILTERS_KEY = 'voting-filters-open';
+	let filtersOpen = $state(readSessionFlag(FILTERS_KEY) ?? !isNarrowViewport());
 	let orgOptions: string[] = $state([]);
 	const STATUS_OPTIONS = [
 		'voting',
@@ -1076,6 +1083,11 @@
 		return id.slice(0, 8) + '...' + id.slice(-6);
 	}
 
+	function toggleFilters() {
+		filtersOpen = !filtersOpen;
+		persistSessionFlag(FILTERS_KEY, filtersOpen);
+	}
+
 	onMount(() => {
 		countdownTimer = setInterval(() => {
 			nowMs = Date.now();
@@ -1104,9 +1116,46 @@
 		min-height: 28rem;
 		overflow: hidden;
 	}
+
+	.chrome-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 6px 12px;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		border-radius: 6px;
+		border: 1px solid transparent;
+		background: transparent;
+		color: #4b5563;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.chrome-btn.is-on {
+		background: #111827;
+		color: #fff;
+	}
+
+	.chrome-btn.chrome-outline {
+		border-color: #d1d5db;
+	}
+
+	@media (max-width: 720px) {
+		.chrome-label {
+			display: none;
+		}
+
+		.chrome-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+	}
 </style>
 
-<div class="w-full px-6 pt-8 max-w-none">
+<div class="voting-page w-full px-3 pt-4 sm:px-6 sm:pt-8 max-w-none">
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-3xl font-bold text-gray-900 mb-1">Voting</h1>
@@ -1225,7 +1274,7 @@
 							{/if}
 						{/if}
 					</div>
-					<div class="grid grid-cols-4 gap-4 mb-4">
+					<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
 						<div class="text-center">
 							<div class="text-2xl font-bold text-green-600">{tally.yes}</div>
 							<div class="text-xs text-gray-500">Yes</div>
@@ -1719,45 +1768,52 @@
 
 	<!-- Proposals list or realm-wide votes -->
 	{:else}
-		<div class="rounded-lg border border-gray-200 bg-white">
+		<div class="list-surface border-y border-gray-200 bg-white sm:rounded-lg sm:border">
 			<!-- Tab bar & refresh -->
-			<div class="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+			<div class="flex items-center justify-between px-3 py-2 sm:px-5 sm:py-3 border-b border-gray-200">
 				<div class="flex gap-1">
 					<button
 						onclick={() => view = 'list'}
-						class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium {view === 'list' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}"
+						class="chrome-btn {view === 'list' ? 'is-on' : ''}"
+						title="Proposals"
+						aria-label="Proposals"
 					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-						Proposals
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+						<span class="chrome-label">Proposals</span>
 					</button>
 					<button
 						onclick={openSubmitForm}
-						class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100"
+						class="chrome-btn"
+						title="Submit proposal"
+						aria-label="Submit proposal"
 					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-						Submit Proposal
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+						<span class="chrome-label">Submit Proposal</span>
 					</button>
 					<button
 						onclick={() => view = 'federal'}
-						class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium {view === 'federal' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}"
+						class="chrome-btn {view === 'federal' ? 'is-on' : ''}"
+						title="Realm-wide"
+						aria-label="Realm-wide"
 					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-						Realm-wide
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+						<span class="chrome-label">Realm-wide</span>
 					</button>
 				</div>
 				{#if view !== 'federal'}
 				<button
 					onclick={() => loadProposals()}
 					disabled={listLoading}
-					class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+					class="chrome-btn chrome-outline"
+					title={listLoading ? 'Loading' : 'Refresh'}
+					aria-label={listLoading ? 'Loading' : 'Refresh'}
 				>
 					{#if listLoading}
 						<div class="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-						Loading…
 					{:else}
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-						Refresh
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
 					{/if}
+					<span class="chrome-label">{listLoading ? 'Loading…' : 'Refresh'}</span>
 				</button>
 				{/if}
 			</div>
@@ -1765,25 +1821,42 @@
 			{#if view === 'federal'}
 				<FederalVotes {ctx} onopenleg={(id) => openProposalById(id)} />
 			{:else}
-			<!-- Filters -->
-			<div class="flex flex-wrap items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50">
-				<div class="flex items-center gap-2">
-					<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
-					<select
-						bind:value={orgFilter}
-						onchange={() => onFilterChange()}
-						class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
-					>
-						<option value="">All departments</option>
-						{#each orgOptions as org}
-							<option value={org}>{org}</option>
-						{/each}
-					</select>
-				</div>
+			<!-- Filters (toggled on narrow viewports) -->
+			<div class="flex items-center gap-2 px-3 py-2 sm:px-5 border-b border-gray-200">
+				<button
+					type="button"
+					class="chrome-btn chrome-outline"
+					class:is-on={filtersOpen}
+					onclick={toggleFilters}
+					title={filtersOpen ? 'Hide filters' : 'Show filters'}
+					aria-label={filtersOpen ? 'Hide filters' : 'Show filters'}
+					aria-pressed={filtersOpen}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+					<span class="chrome-label">Filters</span>
+				</button>
+				{#if orgFilter || statusFilter || typeFilter}
+					<span class="text-xs text-gray-400">Filtered</span>
+				{/if}
+			</div>
+			{#if filtersOpen}
+			<div class="flex flex-wrap items-center gap-2 px-3 py-2 sm:px-5 sm:gap-3 border-b border-gray-200">
+				<select
+					bind:value={orgFilter}
+					onchange={() => onFilterChange()}
+					class="text-xs border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					aria-label="Filter by department"
+				>
+					<option value="">All departments</option>
+					{#each orgOptions as org}
+						<option value={org}>{org}</option>
+					{/each}
+				</select>
 				<select
 					bind:value={statusFilter}
 					onchange={() => onFilterChange()}
-					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					class="text-xs border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					aria-label="Filter by status"
 				>
 					<option value="">All statuses</option>
 					{#each STATUS_OPTIONS as status}
@@ -1793,7 +1866,7 @@
 				<select
 					bind:value={typeFilter}
 					onchange={() => onFilterChange()}
-					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					class="text-xs border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
 					aria-label="Filter by proposal type"
 				>
 					{#each PROPOSAL_TYPE_OPTIONS as opt}
@@ -1803,7 +1876,7 @@
 				<select
 					bind:value={sortBy}
 					onchange={() => { currentPage = 1; }}
-					class="text-xs rounded-lg border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
+					class="text-xs border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
 					aria-label="Sort proposals"
 				>
 					{#each SORT_OPTIONS as opt}
@@ -1819,6 +1892,7 @@
 					</button>
 				{/if}
 			</div>
+			{/if}
 
 			<!-- Content -->
 			{#if listLoading && proposals.length === 0}
