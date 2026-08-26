@@ -1,6 +1,6 @@
 {
   "name": "justice_litigation",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "ggg_api_version": 1,
   "description": "File a private dispute with the justice department, follow it through your realm's courts, and resolve or appeal cases if you oversee justice.",
   "permissions": [],
@@ -32,7 +32,8 @@
     "get_litigations",
     "create_litigation",
     "set_litigation_content",
-    "get_justice_audience"
+    "get_justice_audience",
+    "get_directory"
   ],
   "profiles": [
     "admin",
@@ -49,6 +50,7 @@
   "show_in_sidebar": true,
   "capabilities": [
     "justice.roles",
+    "justice.directory",
     "justice.audience",
     "justice.justice_systems",
     "justice.courts",

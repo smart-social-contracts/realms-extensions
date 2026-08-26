@@ -29,6 +29,7 @@ LITIGATION_FIELDS = (
     "defendant_department",
     "defendant_department_id",
     "defendant_quarter_id",
+    "lives_in",
 )
 
 
@@ -85,6 +86,13 @@ def get_my_roles(args: str = "") -> str:
 def get_justice_audience(args: str = "") -> str:
     """Principals the client must IBE-wrap a litigation's key for."""
     return _ok(ctx.justice.audience())
+
+
+@_handle
+def get_directory(args: str = "") -> str:
+    """Local directory. Optional lives_in scopes the search; never all quarters."""
+    params = _parse_args(args)
+    return _ok(ctx.justice.directory(_text(params, "lives_in")))
 
 
 # ---------------------------------------------------------------------------
