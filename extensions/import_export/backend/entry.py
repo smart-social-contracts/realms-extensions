@@ -244,6 +244,56 @@ def import_citizens(args):
         return {"success": False, "error": str(e)}
 
 
+def letter_context(args=None):
+    """Realm name, public join path, and logo URL for the letter PDF."""
+    realm = _get_realm()
+    if not realm:
+        return {"success": False, "error": "Realm not found"}
+    base = _frontend_base_url(realm)
+    return {
+        "success": True,
+        "data": {
+            "realm_name": getattr(realm, "name", "") or "",
+            "join_path": f"{base}/join" if base else "/join",
+            "logo_url": "/custom/logo.png",
+            "frontend_url": base,
+        },
+    }
+
+
+def ensure_letter_codes(args):
+    """Mint or reuse one-use codes for postal registration letters.
+
+    Chunked host-side. Does not render PDFs or send email.
+    """
+    try:
+        args_dict = _parse_args(args)
+        records = args_dict.get("citizens")
+        if records is None:
+            return {"success": False, "error": "citizens (array) is required"}
+
+        realm = _get_realm()
+        base_url = _frontend_base_url(realm) if realm else ""
+
+        from core.citizen_import import (
+            DEFAULT_EXPIRES_HOURS,
+            ensure_letter_codes as _ensure,
+        )
+
+        result = _ensure(
+            records,
+            created_by=ic.caller().to_str(),
+            frontend_url=args_dict.get("frontend_url") or base_url,
+            expires_in_hours=int(
+                args_dict.get("expires_in_hours", DEFAULT_EXPIRES_HOURS)
+            ),
+        )
+        return result if isinstance(result, dict) else json.loads(result)
+    except Exception as e:
+        logger.error(f"ensure_letter_codes error: {e}\n{traceback.format_exc()}")
+        return {"success": False, "error": str(e)}
+
+
 def list_citizen_invites(args):
     try:
         args_dict = _parse_args(args)
@@ -293,6 +343,8 @@ def extension_sync_call(method_name: str, args: dict):
         "plan_import_batches": (plan_import_batches_api, True),
         "import_status": (import_status, False),
         "import_citizens": (import_citizens, True),
+        "ensure_letter_codes": (ensure_letter_codes, True),
+        "letter_context": (letter_context, False),
         "list_citizen_invites": (list_citizen_invites, True),
     }
 

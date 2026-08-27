@@ -6,6 +6,24 @@
 		type ImportDependencyGraph,
 		type ImportRecord,
 	} from '../../../_shared/frontend/import-order.ts';
+	import {
+		LETTER_BATCH,
+		emptyJob,
+		etaSeconds,
+		fingerprintJson,
+		formatEta,
+		nextMintBatch,
+		parseCitizenRows,
+		type LetterJobState,
+		type MintedLetter,
+	} from './letterJob.ts';
+	import { clearLetterJob, loadLetterJob, saveLetterJob } from './letterStore.ts';
+	import {
+		downloadLetterPdf,
+		loadLogoBytes,
+		renderLetterPdfInWorker,
+		type LetterBranding,
+	} from './letterPdf.ts';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -44,7 +62,7 @@
 		'[{"_type":"Organization","_id":1,"name":"Example"}]';
 
 	const citizenImportPlaceholder =
-		'[{"id":"cit-001","name":"Alice","email":"a@example.com","quarter":"Q1"}]';
+		'[{"id":"cit-001","name":"Alice","address":"1 Main Street","quarter":"Q1"}]';
 
 	let entityTypes: string[] = $state([]);
 	let selectedType = $state('');
@@ -66,6 +84,12 @@
 	let dragOver = $state(false);
 
 	let citizenFileInput: HTMLInputElement | undefined = $state();
+	let letterJob: LetterJobState | null = $state(null);
+	let letterRunning = $state(false);
+	let letterError: string | null = $state(null);
+	let letterRowErrors: { index: number; id?: string; error: string }[] = $state([]);
+	let savedLetterJob: LetterJobState | null = $state(null);
+	let letterBranding: LetterBranding = { realmName: 'Realm' };
 
 	function isCitizenCensusFormat(records: ImportRecord[]): boolean {
 		if (!records.length) return false;
@@ -370,6 +394,179 @@
 		}
 	}
 
+	async function refreshSavedLetterJob() {
+		try {
+			savedLetterJob = await loadLetterJob();
+		} catch {
+			savedLetterJob = null;
+		}
+	}
+
+	async function prepareLetterBranding() {
+		let realmName = 'Realm';
+		let logoUrl = '/custom/logo.png';
+		try {
+			const ctxInfo = ctx.realmInfo;
+			if (ctxInfo && typeof ctxInfo.subscribe === 'function') {
+				const snap = await new Promise<any>((resolve) => {
+					const unsub = ctxInfo.subscribe((v: any) => {
+						resolve(v);
+						unsub?.();
+					});
+				});
+				if (snap?.name) realmName = snap.name;
+				if (snap?.logoUrl) logoUrl = snap.logoUrl;
+			} else if (ctxInfo?.name) {
+				realmName = ctxInfo.name;
+				if (ctxInfo.logoUrl) logoUrl = ctxInfo.logoUrl;
+			}
+		} catch {
+			/* host snapshot is optional */
+		}
+		try {
+			const res = await callExt('letter_context');
+			if (res?.success && res.data?.realm_name) realmName = res.data.realm_name;
+			if (res?.data?.logo_url) logoUrl = res.data.logo_url;
+		} catch {
+			/* fallback to /custom/logo.png */
+		}
+		const logo = await loadLogoBytes(logoUrl);
+		letterBranding = {
+			realmName,
+			logoBytes: logo?.bytes ?? null,
+			logoMime: logo?.mime,
+		};
+	}
+
+	function parseLetterSource(): { rows: ReturnType<typeof parseCitizenRows>['rows']; fingerprint: string } | null {
+		let records: unknown;
+		try {
+			records = JSON.parse(citizenJson);
+		} catch {
+			addToast('Invalid JSON — expected an array of citizen records', 'error');
+			return null;
+		}
+		if (!Array.isArray(records)) {
+			addToast('Expected a JSON array of citizen records', 'error');
+			return null;
+		}
+		const parsed = parseCitizenRows(records);
+		letterRowErrors = parsed.errors;
+		if (!parsed.rows.length) {
+			addToast('No rows with a postal address — letters are for the post', 'error');
+			return null;
+		}
+		return { rows: parsed.rows, fingerprint: fingerprintJson(citizenJson) };
+	}
+
+	async function startLetterJob() {
+		const source = parseLetterSource();
+		if (!source) return;
+		const job = emptyJob(source.rows, source.fingerprint);
+		letterJob = job;
+		await saveLetterJob(job);
+		await runLetterJob(job);
+	}
+
+	async function resumeLetterJob(existing?: LetterJobState | null) {
+		const job = existing ?? (await loadLetterJob());
+		if (!job?.rows?.length) {
+			addToast('Nothing to resume — generate letters from the JSON first', 'error');
+			return;
+		}
+		if (citizenJson.trim()) {
+			const source = parseLetterSource();
+			if (source && source.fingerprint !== job.jsonFingerprint) {
+				addToast('JSON changed since the saved job. Starting a new generate would mint only missing codes.', 'error');
+			}
+		}
+		job.paused = false;
+		letterJob = job;
+		await saveLetterJob(job);
+		await runLetterJob(job);
+	}
+
+	function pauseLetterJob() {
+		if (letterJob) letterJob.paused = true;
+	}
+
+	async function runLetterJob(job: LetterJobState) {
+		letterRunning = true;
+		letterError = null;
+		await prepareLetterBranding();
+		try {
+			while (job.cursor < job.rows.length) {
+				if (job.paused) break;
+				const row = job.rows[job.cursor];
+				if (!row) {
+					job.cursor += 1;
+					continue;
+				}
+				let letter: MintedLetter | undefined = job.minted[row.id];
+				if (!letter) {
+					const batch = nextMintBatch(job.rows, Object.keys(job.minted), job.cursor);
+					if (!batch.length) {
+						job.cursor += 1;
+						continue;
+					}
+					const res = await callExt('ensure_letter_codes', {
+						citizens: batch.map((r) => r.raw),
+					});
+					if (!res?.success) {
+						letterError = res?.error || `Letter mint failed at ${row.id}`;
+						addToast(letterError, 'error');
+						break;
+					}
+					const mintedRows: MintedLetter[] = res.data?.letters ?? [];
+					for (const item of mintedRows) {
+						job.minted[item.id] = item;
+					}
+					if (res.data?.errors?.length) {
+						letterRowErrors = [...letterRowErrors, ...res.data.errors];
+					}
+					await saveLetterJob(job);
+					letter = job.minted[row.id];
+				}
+				if (!letter) {
+					letterRowErrors = [
+						...letterRowErrors,
+						{ index: job.cursor, error: `No code for ${row.id}` },
+					];
+					job.cursor += 1;
+					await saveLetterJob(job);
+					continue;
+				}
+				const bytes = await renderLetterPdfInWorker(letter, letterBranding);
+				if (job.paused) break;
+				downloadLetterPdf(letter, bytes);
+				if (!job.downloaded.includes(row.id)) job.downloaded.push(row.id);
+				job.cursor += 1;
+				await saveLetterJob(job);
+			}
+			if (!job.paused && job.cursor >= job.rows.length) {
+				job.doneAt = Date.now();
+				await saveLetterJob(job);
+				addToast(`Downloaded ${job.downloaded.length} registration letters`);
+				await loadMeta();
+			}
+		} catch (e: any) {
+			letterError = e?.message || 'Letter generate failed';
+			addToast(letterError, 'error');
+		} finally {
+			letterRunning = false;
+			await refreshSavedLetterJob();
+		}
+	}
+
+	const letterDone = $derived(letterJob ? letterJob.cursor : 0);
+	const letterTotal = $derived(letterJob?.rows.length ?? 0);
+	const letterPercent = $derived(
+		letterTotal > 0 ? Math.round((letterDone / letterTotal) * 100) : 0,
+	);
+	const letterEta = $derived(
+		letterJob ? formatEta(etaSeconds(letterDone, letterTotal, letterJob.startedAt)) : '',
+	);
+
 	const TABS: { id: TabId; label: string }[] = [
 		{ id: 'import', label: 'Entity Import' },
 		{ id: 'export', label: 'Entity Export' },
@@ -382,7 +579,7 @@
 			: 0
 	);
 
-	$effect(() => { loadMeta(); });
+	$effect(() => { loadMeta(); refreshSavedLetterJob(); });
 </script>
 
 <div class="max-w-5xl mx-auto p-4 sm:p-6">
@@ -491,7 +688,11 @@
 			{/if}
 			<div>
 				<h2 class="text-lg font-semibold mb-2">Import citizens</h2>
-				<p class="text-sm text-gray-500 mb-2">JSON array — up to {CITIZEN_BATCH_SIZE} per batch. Each citizen gets a single-use invite URL.</p>
+				<p class="text-sm text-gray-500 mb-2">
+					JSON array — up to {CITIZEN_BATCH_SIZE} per batch. Include a postal
+					<code class="bg-gray-100 px-1 rounded">address</code> on each row.
+					Registration codes are for printed letters, not email.
+				</p>
 				<div class="flex gap-2 mb-2">
 					<button
 						type="button"
@@ -510,6 +711,71 @@
 				<button onclick={runCitizenImport} disabled={citizenImporting} class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">{citizenImporting ? 'Importing…' : 'Import Citizens'}</button>
 				{#if citizenImporting && citizenProgress.total > 1}
 					<p class="text-xs text-gray-500 mt-2">Batch {citizenProgress.batch} / {citizenProgress.total}</p>
+				{/if}
+			</div>
+			<div class="border-t border-gray-100 pt-6">
+				<h2 class="text-lg font-semibold mb-2">Registration letters</h2>
+				<p class="text-sm text-gray-500 mb-3">
+					Generate one printable PDF per citizen from the JSON above. Each letter has the realm
+					logo, name, postal address, and a one-use code. The host mints codes in batches of
+					{LETTER_BATCH}; the browser renders each PDF and downloads it as its own file.
+					Pause and resume are safe — a row that already has a code is reused, never reminted.
+					No email.
+				</p>
+				<div class="flex flex-wrap gap-2">
+					<button
+						type="button"
+						onclick={startLetterJob}
+						disabled={letterRunning || !citizenJson.trim()}
+						class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg disabled:opacity-50"
+					>{letterRunning && !letterJob?.paused ? 'Generating…' : 'Generate / download letters'}</button>
+					{#if letterRunning}
+						<button
+							type="button"
+							onclick={pauseLetterJob}
+							class="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50"
+						>Pause</button>
+					{:else if (letterJob && letterJob.cursor < letterJob.rows.length) || (savedLetterJob && !savedLetterJob.doneAt && savedLetterJob.cursor < (savedLetterJob.rows?.length ?? 0))}
+						<button
+							type="button"
+							onclick={() => resumeLetterJob(letterJob ?? savedLetterJob)}
+							class="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50"
+						>Resume</button>
+					{/if}
+					{#if savedLetterJob && !letterRunning}
+						<button
+							type="button"
+							onclick={async () => { await clearLetterJob(); letterJob = null; savedLetterJob = null; }}
+							class="px-4 py-2 text-sm text-gray-500 hover:text-gray-800"
+						>Clear saved progress</button>
+					{/if}
+				</div>
+				{#if letterJob && letterTotal > 0}
+					<div class="mt-4">
+						<div class="flex justify-between text-xs text-gray-600 mb-1">
+							<span>
+								{letterDone} / {letterTotal} letters
+								{#if letterJob.paused} · paused{/if}
+							</span>
+							<span>{letterPercent}% · ETA {letterEta}</span>
+						</div>
+						<div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+							<div class="h-full bg-gray-900 transition-all" style:width="{letterPercent}%"></div>
+						</div>
+						<p class="text-xs text-gray-400 mt-2">
+							{Object.keys(letterJob.minted).length} codes on file · {letterJob.downloaded.length} downloaded
+						</p>
+					</div>
+				{/if}
+				{#if letterError}
+					<p class="mt-2 text-sm text-red-700">{letterError}</p>
+				{/if}
+				{#if letterRowErrors.length > 0}
+					<ul class="mt-2 text-xs text-red-600 space-y-0.5">
+						{#each letterRowErrors.slice(0, 8) as err, idx (idx)}
+							<li>Row {err.index}{err.id ? ` (${err.id})` : ''}: {err.error}</li>
+						{/each}
+					</ul>
 				{/if}
 			</div>
 			<div>

@@ -1,7 +1,7 @@
 {
   "name": "import_export",
-  "version": "1.0.2",
-  "description": "Back up realm data as JSON and restore it in bulk, or upload a citizen list so each person gets a one-time invite link.",
+  "version": "1.1.0",
+  "description": "Back up realm data as JSON and restore it in bulk, or upload a citizen census and print one-use registration letters for the post.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [
@@ -25,6 +25,8 @@
       "plan_import_batches": "db.manage",
       "import_status": "user.view",
       "import_citizens": "user.add",
+      "ensure_letter_codes": "user.add",
+      "letter_context": "user.view",
       "list_citizen_invites": "invite.manage"
     }
   }
