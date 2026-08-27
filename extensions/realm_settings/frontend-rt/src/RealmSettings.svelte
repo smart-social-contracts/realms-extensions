@@ -46,6 +46,9 @@ let savedEmailEnabled = $state(true);
 let adminEmail = $state('');
 let testFlagsEnabled = $state(false);
 let emailDirty = $derived(realmSettingsEmailEnabled !== savedEmailEnabled);
+let inhabitantEmails = $state('');
+let sendingJoinLink = $state(false);
+let joinLinkHref = $state('');
 
 	// Governed-action confirmation (issue #262): when the root org policy is
 	// not 1/1, update_realm_config returns requires_confirmation and the
@@ -514,6 +517,42 @@ let activeTab: SettingsTab = $state('general');
 			}
 		} catch (e: any) {
 			console.error('Failed to load email config:', e?.message || String(e));
+		}
+	}
+
+	async function sendInhabitantJoinLink() {
+		settingsMessage = '';
+		settingsError = '';
+		joinLinkHref = '';
+		const emails = inhabitantEmails
+			.split(/[\n,;]+/)
+			.map((value) => value.trim())
+			.filter(Boolean);
+		if (emails.length === 0) {
+			settingsError = 'Enter one or more inhabitant email addresses.';
+			return;
+		}
+		sendingJoinLink = true;
+		try {
+			const raw = await ctx.backend.extension_sync_call(
+				'notifications',
+				'send_join_link',
+				JSON.stringify({ emails }),
+			);
+			const res = parseExtensionEnvelope(raw);
+			if (res?.success) {
+				const data = res.data || {};
+				const queued = data.queued ?? emails.length;
+				joinLinkHref = data.href || '';
+				settingsMessage = `Join link queued to ${queued} inhabitant${queued === 1 ? '' : 's'}.`;
+				addToast(settingsMessage);
+			} else {
+				settingsError = res?.error || 'Failed to queue join-link emails';
+			}
+		} catch (e: any) {
+			settingsError = e?.message || String(e);
+		} finally {
+			sendingJoinLink = false;
 		}
 	}
 
@@ -1149,6 +1188,39 @@ let activeTab: SettingsTab = $state('general');
 						<span class="text-sm font-medium text-gray-700">Enable email notifications</span>
 						<p class="text-xs text-gray-500">When off, no emails are sent regardless of user preferences.</p>
 					</div>
+				</div>
+
+				<div class="pt-5 border-t border-gray-100">
+					<h3 class="text-sm font-semibold text-gray-900">Send join link to inhabitants</h3>
+					<p class="mt-1 text-sm text-gray-500">
+						Email the realm join URL to inhabitants (citizens), including people who are not members yet.
+						Civil servants are not the only audience — anyone you list here receives the same public join link.
+					</p>
+					<label for="rs-inhabitant-emails" class="mt-3 block text-sm font-medium text-gray-700">
+						Inhabitant email addresses
+					</label>
+					<textarea
+						id="rs-inhabitant-emails"
+						bind:value={inhabitantEmails}
+						rows="4"
+						placeholder="one@example.com&#10;two@example.com"
+						class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+					></textarea>
+					<p class="mt-1 text-xs text-gray-500">Separate addresses with commas, semicolons, or new lines.</p>
+					<button
+						type="button"
+						onclick={sendInhabitantJoinLink}
+						disabled={sendingJoinLink || !inhabitantEmails.trim()}
+						class="mt-3 px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+					>
+						{sendingJoinLink ? 'Sending…' : 'Send link'}
+					</button>
+					{#if joinLinkHref}
+						<p class="mt-2 text-xs text-gray-600">
+							Queued path: <code class="font-mono">{joinLinkHref}</code>
+							(the mail worker prefixes the public realm URL).
+						</p>
+					{/if}
 				</div>
 
 				{#if testFlagsEnabled}

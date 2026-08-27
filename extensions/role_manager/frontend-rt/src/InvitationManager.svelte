@@ -46,6 +46,13 @@
 	let listLoading = $state(false);
 	let revokingHash: string | null = $state(null);
 
+	// Inhabitant join-link email (host notification queue)
+	let inhabitantEmails = $state('');
+	let sendingJoinLink = $state(false);
+	let joinLinkHref = $state('');
+	let joinLinkMessage = $state('');
+	let joinLinkError = $state('');
+
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const level = type === 'error' ? 'error' : 'success';
 		if (typeof ctx.notify === 'function') {
@@ -67,6 +74,51 @@
 		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
 		const hashArray = Array.from(new Uint8Array(hashBuffer));
 		return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+	}
+
+	function parseExtensionEnvelope(raw: unknown) {
+		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
+		return envelope?.response
+			? typeof envelope.response === 'string'
+				? JSON.parse(envelope.response)
+				: envelope.response
+			: envelope;
+	}
+
+	async function sendInhabitantJoinLink() {
+		joinLinkMessage = '';
+		joinLinkError = '';
+		joinLinkHref = '';
+		const emails = inhabitantEmails
+			.split(/[\n,;]+/)
+			.map((value) => value.trim())
+			.filter(Boolean);
+		if (emails.length === 0) {
+			joinLinkError = 'Enter one or more inhabitant email addresses.';
+			return;
+		}
+		sendingJoinLink = true;
+		try {
+			const raw = await ctx.backend.extension_sync_call(
+				'notifications',
+				'send_join_link',
+				JSON.stringify({ emails }),
+			);
+			const res = parseExtensionEnvelope(raw);
+			if (res?.success) {
+				const data = res.data || {};
+				const queued = data.queued ?? emails.length;
+				joinLinkHref = data.href || '';
+				joinLinkMessage = `Join link queued to ${queued} inhabitant${queued === 1 ? '' : 's'}.`;
+				addToast(joinLinkMessage);
+			} else {
+				joinLinkError = res?.error || 'Failed to queue join-link emails';
+			}
+		} catch (e: any) {
+			joinLinkError = e?.message || String(e);
+		} finally {
+			sendingJoinLink = false;
+		}
 	}
 
 	async function generateInvitation() {
@@ -237,6 +289,46 @@
 </script>
 
 <div class="space-y-6">
+	<!-- Send join link to inhabitants -->
+	<div class="bg-white p-0 sm:p-6 sm:shadow-sm sm:rounded-lg sm:border sm:border-gray-200">
+		<h2 class="text-lg font-semibold text-gray-900 mb-1">Send join link to inhabitants</h2>
+		<p class="text-sm text-gray-500 mb-4">
+			Email the public realm join URL to inhabitants (citizens), including people who are not members yet.
+			This is not limited to civil servants.
+		</p>
+		<label for="inv-inhabitant-emails" class="block text-sm font-medium text-gray-700 mb-1">
+			Inhabitant email addresses
+		</label>
+		<textarea
+			id="inv-inhabitant-emails"
+			bind:value={inhabitantEmails}
+			rows="4"
+			placeholder="one@example.com&#10;two@example.com"
+			class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+		></textarea>
+		<p class="mt-1 text-xs text-gray-500">Separate addresses with commas, semicolons, or new lines.</p>
+		<button
+			type="button"
+			onclick={sendInhabitantJoinLink}
+			disabled={sendingJoinLink || !inhabitantEmails.trim()}
+			class="mt-3 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
+		>
+			{sendingJoinLink ? 'Sending…' : 'Send link'}
+		</button>
+		{#if joinLinkMessage}
+			<p class="mt-2 text-sm text-green-700">{joinLinkMessage}</p>
+		{/if}
+		{#if joinLinkError}
+			<p class="mt-2 text-sm text-red-600">{joinLinkError}</p>
+		{/if}
+		{#if joinLinkHref}
+			<p class="mt-1 text-xs text-gray-600">
+				Queued path: <code class="font-mono">{joinLinkHref}</code>
+				(the mail worker prefixes the public realm URL).
+			</p>
+		{/if}
+	</div>
+
 	<!-- Generate New Invitation -->
 	<div class="bg-white p-0 sm:p-6 sm:shadow-sm sm:rounded-lg sm:border sm:border-gray-200">
 		<h2 class="text-lg font-semibold text-gray-900 mb-4">Generate New Invitation</h2>
