@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "build": "vite build"
-  },
+	"scripts": {
+		"build": "vite build",
+		"test": "node --experimental-strip-types --test src/letterJob.test.ts"
+	},
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "svelte": "^5.19.0",
