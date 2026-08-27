@@ -1,0 +1,24 @@
+name: realm_settings Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/realm_settings/**'
+      - '.github/workflows/realm_settings-test.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/realm_settings/**'
+      - '.github/workflows/realm_settings-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Primary ∈ list and catalog tests
+        run: bash extensions/realm_settings/run_tests.sh

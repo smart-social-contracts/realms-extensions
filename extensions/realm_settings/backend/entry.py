@@ -86,6 +86,7 @@ def extension_sync_call(method_name: str, args: dict):
         "set_email_config": (set_email_config, True),
         "get_trust_policy": (get_trust_policy, False),
         "set_trust_policy": (set_trust_policy, True),
+        "get_languages": (get_languages, False),
     }
 
     if method_name not in methods:
@@ -105,6 +106,44 @@ def extension_sync_call(method_name: str, args: dict):
 def health(args=None):
     """Health check."""
     return {"success": True, "data": {"status": "ok"}}
+
+
+def _host_language_value(realm, key: str):
+    """Read a languages field from the host Realm object (#361)."""
+    if realm is None:
+        return None
+    try:
+        return getattr(realm, key, None)
+    except Exception:
+        return None
+
+
+def get_languages(args=None):
+    """Return realm ``languages`` + ``primary_language`` from the host store.
+
+    These fields are persisted by host ``update_realm_config`` (realms #361).
+    This method only reads that store — it does not keep a parallel copy.
+    Missing attributes (host not landed yet) yield empty defaults.
+    """
+    from ggg import Realm
+
+    try:
+        realm = Realm.load("1")
+        languages = _host_language_value(realm, "languages")
+        primary = _host_language_value(realm, "primary_language")
+        return {
+            "success": True,
+            "data": {
+                "languages": languages if languages is not None else [],
+                "primary_language": primary if primary is not None else "",
+            },
+        }
+    except Exception as e:
+        logger.error(f"get_languages error: {e}")
+        return {
+            "success": True,
+            "data": {"languages": [], "primary_language": ""},
+        }
 
 
 def get_realm_stage(args=None):

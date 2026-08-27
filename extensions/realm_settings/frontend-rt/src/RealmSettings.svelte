@@ -4,6 +4,12 @@
 	import QuartersPanel from './QuartersPanel.svelte';
 	import SandboxPanel from './SandboxPanel.svelte';
 	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
+	import LanguagesPanel from './LanguagesPanel.svelte';
+	import {
+		parseRealmLanguages,
+		realmLanguagesConfig,
+		validateRealmLanguages,
+	} from './languages';
 	import {
 		isNarrowViewport,
 		subscribeNarrowViewport,
@@ -35,6 +41,8 @@
 	let realmSettingsTokenCanisterId = $state('');
 let realmSettingsTokenIndexerId = $state('');
 let realmSettingsNftCanisterId = $state('');
+let realmSettingsLanguages: string[] = $state([]);
+let realmSettingsPrimaryLanguage = $state('');
 let governanceVotingWindowDays = $state<number | null>(null);
 let liveVotingWindowSeconds = $state<number | null>(null);
 let tokenResolving = $state(false);
@@ -168,6 +176,8 @@ let activeTab: SettingsTab = $state('general');
 		}
 		if (realmSettingsFileRegistryId) lines.push(`realm.file_registry_canister_id = ${JSON.stringify(realmSettingsFileRegistryId)}`);
 		if (realmSettingsMarketplaceId) lines.push(`realm.marketplace_canister_id = ${JSON.stringify(realmSettingsMarketplaceId)}`);
+		lines.push(`realm.languages = ${JSON.stringify(realmSettingsLanguages)}`);
+		lines.push(`realm.primary_language = ${JSON.stringify(realmSettingsPrimaryLanguage)}`);
 		lines.push(...buildTokenWalletProposalLines());
 		lines.push('');
 		lines.push('import json');
@@ -191,10 +201,44 @@ let activeTab: SettingsTab = $state('general');
 
 	function openProposalForSettings(deniedOp: string) {
 		proposalModalTitle = 'Update realm settings';
-		proposalModalDescription = 'This proposal updates the realm configuration (identity, branding, registration, currency, and infrastructure) as specified in the code below.';
+		proposalModalDescription = 'This proposal updates the realm configuration (identity, languages, branding, registration, currency, and infrastructure) as specified in the code below.';
 		proposalModalCode = buildRealmConfigCode();
 		proposalModalOperation = deniedOp;
 		proposalModalOpen = true;
+	}
+
+	function applyHostLanguages(source: unknown) {
+		const parsed = parseRealmLanguages(source);
+		realmSettingsLanguages = parsed.languages;
+		realmSettingsPrimaryLanguage = parsed.primary_language;
+	}
+
+	function snapshotRealmInfo(): Record<string, unknown> | null {
+		const info = ctx.realmInfo;
+		if (!info) return null;
+		if (typeof info.subscribe === 'function') {
+			let current: Record<string, unknown> | null = null;
+			const unsub = info.subscribe((value: unknown) => {
+				if (value && typeof value === 'object') current = value as Record<string, unknown>;
+			});
+			unsub?.();
+			return current;
+		}
+		return typeof info === 'object' ? info as Record<string, unknown> : null;
+	}
+
+	async function loadHostLanguages() {
+		try {
+			const res = await callExt('get_languages');
+			if (res?.success && res.data) {
+				applyHostLanguages(res.data);
+				if (realmSettingsLanguages.length || realmSettingsPrimaryLanguage) return;
+			}
+		} catch {
+			/* host fields may not exist until realms #361 lands */
+		}
+		const info = snapshotRealmInfo();
+		if (info) applyHostLanguages(info);
 	}
 
 	async function loadRealmSettings() {
@@ -232,6 +276,10 @@ let activeTab: SettingsTab = $state('general');
 				);
 				realmSettingsNftCanisterId = nft?.canister_id || '';
 				testFlagsEnabled = s.test_mode === true || ctx.realmInfo?.testMode === true;
+				applyHostLanguages(s);
+			}
+			if (!realmSettingsLanguages.length && !realmSettingsPrimaryLanguage) {
+				await loadHostLanguages();
 			}
 			const gov = await callExt('get_governance_settings');
 			if (gov?.success && gov.data) {
@@ -287,8 +335,21 @@ let activeTab: SettingsTab = $state('general');
 		settingsMessage = '';
 		settingsError = '';
 		try {
+			const languageCheck = validateRealmLanguages({
+				languages: realmSettingsLanguages,
+				primary_language: realmSettingsPrimaryLanguage,
+			});
+			if (!languageCheck.ok) {
+				settingsError = languageCheck.error;
+				return;
+			}
+			const languageConfig = realmLanguagesConfig({
+				languages: realmSettingsLanguages,
+				primary_language: realmSettingsPrimaryLanguage,
+			});
 			const config: Record<string, unknown> = {
 				...(confirmProposal ? { confirm: true } : {}),
+				...languageConfig,
 				name: realmSettingsName,
 				manifesto: realmSettingsManifesto,
 				welcome_message: realmSettingsWelcome,
@@ -389,6 +450,12 @@ let activeTab: SettingsTab = $state('general');
 			(!realmSettingsTokenCanisterId.trim() || !!realmSettingsCurrency.trim()),
 	);
 	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid && currencyValid && tokensValid);
+	let languagesValid = $derived(
+		validateRealmLanguages({
+			languages: realmSettingsLanguages,
+			primary_language: realmSettingsPrimaryLanguage,
+		}).ok,
+	);
 
 	let nextStage = $derived(
 		stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null
@@ -635,7 +702,7 @@ let activeTab: SettingsTab = $state('general');
 			onclick={() => saveRealmSettings()}
 			disabled={activeTab === 'notifications'
 				? settingsSaving || !emailDirty
-				: settingsSaving || !infraValid || governanceVotingWindowDays == null}
+				: settingsSaving || !infraValid || !languagesValid || governanceVotingWindowDays == null}
 			class="px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
 	</div>
@@ -902,6 +969,11 @@ let activeTab: SettingsTab = $state('general');
 				</div>
 			</div>
 		</section>
+
+		<LanguagesPanel
+			bind:languages={realmSettingsLanguages}
+			bind:primaryLanguage={realmSettingsPrimaryLanguage}
+		/>
 
 		<!-- Branding -->
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
