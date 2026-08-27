@@ -233,3 +233,16 @@ def send_test_email(args: str):
         return json.dumps({"success": True, "id": result["id"]})
     except Exception as e:
         return _err(e)
+
+
+def send_join_link(args: str):
+    """Queue the inhabitant join URL to one or more addresses. Admin-only."""
+    try:
+        params = _args(args)
+        result = ctx.notifications.send_join_link(
+            emails=params.get("emails"),
+            to=params.get("to", ""),
+        )
+        return json.dumps({"success": True, "data": result})
+    except Exception as e:
+        return _err(e)

@@ -1,6 +1,6 @@
 {
   "name": "notifications",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "ggg_api_version": 1,
   "capabilities": [
     "notification.list",
@@ -17,6 +17,7 @@
     "notification.pending_emails",
     "notification.mark_email_sent",
     "notification.send_test_email",
+    "notification.send_join_link",
     "log.write"
   ],
   "description": "See alerts about activity in your realm, mark them as read, and set which notifications you receive by email.",
@@ -35,7 +36,8 @@
     "verify_email_code",
     "get_pending_email_notifications",
     "mark_email_sent",
-    "send_test_email"
+    "send_test_email",
+    "send_join_link"
   ],
   "profiles": [
     "member",
@@ -62,7 +64,8 @@
       "verify_email_code": "self.data_manage",
       "get_pending_email_notifications": "notification.send",
       "mark_email_sent": "notification.send",
-      "send_test_email": "realm.admin"
+      "send_test_email": "realm.admin",
+      "send_join_link": "realm.admin"
     }
   }
 }
