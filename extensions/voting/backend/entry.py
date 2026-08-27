@@ -776,12 +776,54 @@ def submit_proposal(args: str) -> Async[str]:
     try:
         from core.access import _check_access
         from core.extension_errors import permission_denied_payload
-        from core.proposal_dispatch import (
-            freeze_action,
-            persist_code_execution_source,
-            reject_forbidden_submit_keys,
-            submit_gate,
-        )
+        try:
+            from .dispatch_compat import (
+                freeze_action,
+                persist_code_execution_source,
+                reject_forbidden_submit_keys,
+                submit_gate,
+            )
+        except ImportError:
+            # Bare leftover load has no package; resolve host names without
+            # ``from core.proposal_dispatch import freeze_action``.
+            from core import proposal_dispatch as _pd
+
+            def _pd_attr(name):
+                try:
+                    return getattr(_pd, name, None)
+                except Exception:
+                    return None
+
+            def submit_gate(proposal_type, action):
+                fn = _pd_attr("submit_gate")
+                return fn(proposal_type, action) if fn else "proposal.create"
+
+            def reject_forbidden_submit_keys(args):
+                fn = _pd_attr("reject_forbidden_submit_keys")
+                return fn(args) if fn else None
+
+            def freeze_action(proposal_type, raw_action, **kwargs):
+                fn = _pd_attr("freeze_action")
+                if fn:
+                    return fn(proposal_type, raw_action, **kwargs)
+                if proposal_type == "poll":
+                    return {}, [], None
+                return {}, [], {
+                    "error": (
+                        f"This realm host does not export freeze_action; "
+                        f"{proposal_type} proposals cannot be submitted "
+                        "until the host is updated"
+                    ),
+                    "error_code": "host_dispatch_unavailable",
+                }
+
+            def persist_code_execution_source(*a, **k):
+                fn = _pd_attr("persist_code_execution_source")
+                if fn:
+                    return fn(*a, **k)
+                raise RuntimeError(
+                    "host persist_code_execution_source is unavailable"
+                )
 
         args_dict = _parse_args(args)
         forbidden = reject_forbidden_submit_keys(args_dict)
