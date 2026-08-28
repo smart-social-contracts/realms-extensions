@@ -8,6 +8,15 @@
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import {
+		CUSTOM_TOKEN_ID,
+		SHARED_TOKEN_CATALOG,
+		isTokenChoiceSelectable,
+		matchSharedToken,
+		monetaryUnavailableLabel,
+		resolveDisableMonetaryTokens,
+		setupTokenNetwork,
+	} from './tokenCatalog';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -38,6 +47,10 @@ let realmSettingsNftCanisterId = $state('');
 let governanceVotingWindowDays = $state<number | null>(null);
 let liveVotingWindowSeconds = $state<number | null>(null);
 let tokenResolving = $state(false);
+let tokenChoice = $state('REALMS');
+let monetaryTokensDisabled = $state(false);
+let tokenPickerLocale = $state('en');
+let tokenNetwork = $state(setupTokenNetwork());
 
 // Email notification configuration (issue #266): realm-level on/off toggle.
 // Sender identity is derived from realm settings; SMTP credentials stay on the server.
@@ -227,6 +240,35 @@ let activeTab: SettingsTab = $state('general');
 				if (!realmSettingsTokenIndexerId && realmSettingsTokenCanisterId) {
 					realmSettingsTokenIndexerId = realmSettingsTokenCanisterId;
 				}
+				const matched = matchSharedToken({
+					symbol: realmSettingsCurrency,
+					token_canister_id: realmSettingsTokenCanisterId,
+				});
+				tokenChoice = matched?.id ?? (realmSettingsTokenCanisterId ? CUSTOM_TOKEN_ID : 'REALMS');
+				const network = String(s.network || tokenNetwork || '');
+				let explicitDisable: boolean | undefined;
+				if (typeof s.test_mode_disable_monetary_tokens === 'boolean') {
+					explicitDisable = s.test_mode_disable_monetary_tokens;
+				} else if (typeof ctx.realmInfo?.testModeDisableMonetaryTokens === 'boolean') {
+					explicitDisable = ctx.realmInfo.testModeDisableMonetaryTokens;
+				} else {
+					try {
+						const flagsRaw = await ctx.backend.get_runtime_flags();
+						const flags = typeof flagsRaw === 'string' ? JSON.parse(flagsRaw) : flagsRaw;
+						if (typeof flags?.test_mode_disable_monetary_tokens === 'boolean') {
+							explicitDisable = flags.test_mode_disable_monetary_tokens;
+						}
+						if (flags?.primary_language) tokenPickerLocale = String(flags.primary_language);
+						if (flags?.network) tokenNetwork = setupTokenNetwork(String(flags.network));
+					} catch {
+						// keep host default from network
+					}
+				}
+				monetaryTokensDisabled = resolveDisableMonetaryTokens(explicitDisable, network);
+				tokenPickerLocale = String(
+					s.primary_language || ctx.realmInfo?.primaryLanguage || tokenPickerLocale,
+				);
+				if (s.network) tokenNetwork = setupTokenNetwork(String(s.network));
 				const nft = (s.canisters || []).find(
 					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
 				);
@@ -246,6 +288,20 @@ let activeTab: SettingsTab = $state('general');
 		} finally {
 			settingsLoading = false;
 		}
+	}
+
+	function selectTokenChoice(id: string) {
+		if (!isTokenChoiceSelectable(id, monetaryTokensDisabled)) return;
+		tokenChoice = id;
+		if (id === CUSTOM_TOKEN_ID) return;
+		const token = SHARED_TOKEN_CATALOG.find((item) => item.id === id);
+		if (!token) return;
+		const network = tokenNetwork;
+		realmSettingsTokenCanisterId = token.ledgers[network] || Object.values(token.ledgers)[0] || '';
+		realmSettingsCurrency = token.symbol;
+		realmSettingsCurrencyDecimals = token.decimals;
+		realmSettingsTokenIndexerId =
+			token.indexers?.[network] || Object.values(token.indexers || {})[0] || realmSettingsTokenCanisterId;
 	}
 
 	async function resolveTokenLedger(opts?: { silent?: boolean }) {
@@ -1033,6 +1089,60 @@ let activeTab: SettingsTab = $state('general');
 				Fungible treasury token used for balances, invoices, and transfers in this realm.
 				Changing ledger or indexer requires <code class="bg-gray-100 px-1 rounded">realm.configure.tokens</code>.
 			</p>
+			<div class="space-y-3 mb-5">
+				{#each SHARED_TOKEN_CATALOG as token (token.id)}
+					{@const selectable = isTokenChoiceSelectable(token.id, monetaryTokensDisabled)}
+					<label
+						class={cn(
+							'flex items-start gap-3 rounded-lg border p-3',
+							tokenChoice === token.id ? 'border-gray-900 bg-gray-50' : 'border-gray-200',
+							!selectable && 'opacity-60 cursor-not-allowed bg-gray-100',
+						)}
+					>
+						<input
+							type="radio"
+							name="rs-token-choice"
+							value={token.id}
+							checked={tokenChoice === token.id}
+							disabled={!selectable}
+							onchange={() => selectTokenChoice(token.id)}
+							class="mt-1"
+						/>
+						<div>
+							<strong class="text-sm text-gray-900">{token.name}</strong>
+							<p class="text-xs text-gray-600">{token.description}</p>
+							{#if !selectable}
+								<p class="text-xs text-gray-500 mt-1">{monetaryUnavailableLabel(tokenPickerLocale)}</p>
+							{/if}
+						</div>
+					</label>
+				{/each}
+				{@const customSelectable = isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled)}
+				<label
+					class={cn(
+						'flex items-start gap-3 rounded-lg border p-3',
+						tokenChoice === CUSTOM_TOKEN_ID ? 'border-gray-900 bg-gray-50' : 'border-gray-200',
+						!customSelectable && 'opacity-60 cursor-not-allowed bg-gray-100',
+					)}
+				>
+					<input
+						type="radio"
+						name="rs-token-choice"
+						value={CUSTOM_TOKEN_ID}
+						checked={tokenChoice === CUSTOM_TOKEN_ID}
+						disabled={!customSelectable}
+						onchange={() => selectTokenChoice(CUSTOM_TOKEN_ID)}
+						class="mt-1"
+					/>
+					<div>
+						<strong class="text-sm text-gray-900">Custom token</strong>
+						<p class="text-xs text-gray-600">Your own ICRC-1 ledger canister.</p>
+						{#if !customSelectable}
+							<p class="text-xs text-gray-500 mt-1">{monetaryUnavailableLabel(tokenPickerLocale)}</p>
+						{/if}
+					</div>
+				</label>
+			</div>
 			<div class="space-y-4">
 				<div>
 					<label for="rs-token-ledger" class="block text-sm font-medium text-gray-700 mb-1">Treasury ledger canister</label>
@@ -1043,6 +1153,7 @@ let activeTab: SettingsTab = $state('general');
 							bind:value={realmSettingsTokenCanisterId}
 							onblur={resolveTokenLedger}
 							placeholder="e.g. cj65k-laaaa-aaaac-bfxqq-cai"
+							disabled={monetaryTokensDisabled && tokenChoice !== 'REALMS'}
 							class={cn(
 								'flex-1 px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
 								realmSettingsTokenCanisterId && !tokenCanisterIdValid
@@ -1053,7 +1164,7 @@ let activeTab: SettingsTab = $state('general');
 						<button
 							type="button"
 							onclick={resolveTokenLedger}
-							disabled={tokenResolving || !realmSettingsTokenCanisterId.trim()}
+							disabled={tokenResolving || !realmSettingsTokenCanisterId.trim() || (monetaryTokensDisabled && tokenChoice !== 'REALMS')}
 							class="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
 						>{tokenResolving ? 'Resolving…' : 'Resolve from ledger'}</button>
 					</div>
