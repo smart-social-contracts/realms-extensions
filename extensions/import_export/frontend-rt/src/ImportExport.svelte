@@ -17,6 +17,7 @@
 		type LetterJobState,
 		type MintedLetter,
 	} from './letterJob.ts';
+	import { letterJoinUrlFromWindow } from './letterJoinUrl.ts';
 	import { clearLetterJob, loadLetterJob, saveLetterJob } from './letterStore.ts';
 	import {
 		downloadLetterPdf,
@@ -536,7 +537,11 @@
 					await saveLetterJob(job);
 					continue;
 				}
-				const bytes = await renderLetterPdfInWorker(letter, letterBranding);
+				const printable = {
+					...letter,
+					join_url: letterJoinUrlFromWindow(letter.code),
+				};
+				const bytes = await renderLetterPdfInWorker(printable, letterBranding);
 				if (job.paused) break;
 				downloadLetterPdf(letter, bytes);
 				if (!job.downloaded.includes(row.id)) job.downloaded.push(row.id);
@@ -717,7 +722,8 @@
 				<h2 class="text-lg font-semibold mb-2">Registration letters</h2>
 				<p class="text-sm text-gray-500 mb-3">
 					Generate one printable PDF per citizen from the JSON above. Each letter has the realm
-					logo, name, postal address, and a one-use code. The host mints codes in batches of
+					logo, name, postal address, a one-use code, and a QR to the same portal join URL.
+					The host mints codes in batches of
 					{LETTER_BATCH}; the browser renders each PDF and downloads it as its own file.
 					Pause and resume are safe — a row that already has a code is reused, never reminted.
 					No email.

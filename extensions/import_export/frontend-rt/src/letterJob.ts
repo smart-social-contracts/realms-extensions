@@ -15,6 +15,8 @@ export type MintedLetter = {
 	address: string;
 	code: string;
 	join_path: string;
+	/** Portal join URL built in the browser. Overrides join_path on the letter. */
+	join_url?: string;
 	reused?: boolean;
 };
 
