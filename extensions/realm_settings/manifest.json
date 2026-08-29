@@ -1,7 +1,7 @@
 {
   "name": "realm_settings",
-  "version": "1.10.6",
-  "description": "Change your realm's name, welcome message, languages, and branding; control who can join; set voting rules, currency, notifications, and lifecycle stage.",
+  "version": "1.10.7",
+  "description": "Change your realm's name, welcome message, languages, and branding; control who can join; set voting rules, currency, notifications, lifecycle stage, and apply or destroy department-table JSON.",
   "author": "Realms Team",
   "categories": [
     "realm_management"
@@ -41,7 +41,9 @@
       "set_trust_policy": {
         "level": "realm.configure.trust_policy",
         "governed": true
-      }
+      },
+      "apply_department_table": "organization.add",
+      "delete_department": "organization.delete"
     }
   }
 }
