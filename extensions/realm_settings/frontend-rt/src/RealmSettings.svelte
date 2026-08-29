@@ -4,6 +4,7 @@
 	import QuartersPanel from './QuartersPanel.svelte';
 	import SandboxPanel from './SandboxPanel.svelte';
 	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
+	import DepartmentTablePanel from './DepartmentTablePanel.svelte';
 	import LanguagesPanel from './LanguagesPanel.svelte';
 	import {
 		parseRealmLanguages,
@@ -1426,6 +1427,7 @@ let activeTab: SettingsTab = $state('general');
 
 		{@render saveBar()}
 	{:else if activeTab === 'advanced'}
+		<DepartmentTablePanel {ctx} {addToast} />
 		<QuartersPanel {ctx} {addToast} />
 		<TrustPolicyPanel {ctx} {addToast} />
 		<SandboxPanel {ctx} {addToast} />

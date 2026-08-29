@@ -5,7 +5,7 @@
   "type": "module",
 	"scripts": {
 		"build": "vite build",
-		"test": "node --experimental-strip-types --test src/languages.test.ts"
+		"test": "node --experimental-strip-types --test src/languages.test.ts src/departmentTable.test.ts"
 	},
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

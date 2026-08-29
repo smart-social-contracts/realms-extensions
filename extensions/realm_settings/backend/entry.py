@@ -55,6 +55,34 @@ def _can_configure_trust_policy(principal: str) -> bool:
         return False
 
 
+def _has_operation(principal: str, operation: str) -> bool:
+    try:
+        from core.access import _check_access
+
+        return _check_access(principal, operation)
+    except Exception:
+        return False
+
+
+def _denied(operation: str) -> dict:
+    return {
+        "success": False,
+        "error": f"Access denied: you lack permission '{operation}'",
+        "denied_operation": operation,
+    }
+
+
+def _parse_json_args(args):
+    if isinstance(args, str):
+        try:
+            args = json.loads(args) if args.strip() else {}
+        except Exception:
+            return None, {"success": False, "error": "invalid JSON"}
+    if args is None:
+        return {}, None
+    return args, None
+
+
 def _now_seconds() -> int:
     try:
         from _cdk import ic
@@ -87,6 +115,9 @@ def extension_sync_call(method_name: str, args: dict):
         "get_trust_policy": (get_trust_policy, False),
         "set_trust_policy": (set_trust_policy, True),
         "get_languages": (get_languages, False),
+        "apply_department_table": (apply_department_table, True),
+        "delete_department": (delete_department, True),
+        "list_department_names": (list_department_names, False),
     }
 
     if method_name not in methods:
@@ -805,6 +836,90 @@ def set_trust_policy(args: dict):
         return apply_realm_config(config)
     except Exception as e:
         logger.error(f"set_trust_policy error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def list_department_names(args=None):
+    """Names from host ``Department.instances`` (realms #358 UI list)."""
+    try:
+        from core.department_admin import list_department_names as _list
+
+        return {"success": True, "data": {"names": _list()}}
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Host department-table verbs are not on this realm backend",
+        }
+    except Exception as e:
+        logger.error(f"list_department_names error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def apply_department_table(args: dict):
+    """Apply realms #358 department-table JSON (host ``apply_department_table``)."""
+    try:
+        from core.department_table import apply_department_table as _apply
+        from core.department_table import document_has_destroy
+        from ggg.system.user_profile import Operations
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Host apply_department_table is not available on this realm backend",
+        }
+
+    args, parse_error = _parse_json_args(args)
+    if parse_error:
+        return parse_error
+    if not isinstance(args, dict):
+        return {"success": False, "error": "args must be an object"}
+
+    doc = args.get("document") if "document" in args else args
+    if isinstance(doc, str):
+        try:
+            doc = json.loads(doc) if doc.strip() else {}
+        except Exception:
+            return {"success": False, "error": "invalid JSON"}
+
+    caller = _caller()
+    if not _has_operation(caller, Operations.ORGANIZATION_ADD):
+        return _denied(Operations.ORGANIZATION_ADD)
+    if document_has_destroy(doc) and not _has_operation(
+        caller, Operations.ORGANIZATION_DELETE
+    ):
+        return _denied(Operations.ORGANIZATION_DELETE)
+
+    try:
+        return _apply(doc)
+    except Exception as e:
+        logger.error(f"apply_department_table error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def delete_department(args: dict):
+    """Destroy one department via host ``destroy_department`` (realms #358)."""
+    try:
+        from core.department_admin import destroy_department
+        from ggg.system.user_profile import Operations
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Host delete_department is not available on this realm backend",
+        }
+
+    args, parse_error = _parse_json_args(args)
+    if parse_error:
+        return parse_error
+    if not isinstance(args, dict):
+        return {"success": False, "error": "args must be an object"}
+
+    caller = _caller()
+    if not _has_operation(caller, Operations.ORGANIZATION_DELETE):
+        return _denied(Operations.ORGANIZATION_DELETE)
+
+    try:
+        return destroy_department(str(args.get("name") or ""))
+    except Exception as e:
+        logger.error(f"delete_department error: {e}")
         return {"success": False, "error": str(e)}
 
 
