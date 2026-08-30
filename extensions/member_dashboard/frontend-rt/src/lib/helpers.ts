@@ -30,15 +30,71 @@ export function displayFirstName(
 	return name.split(/\s+/)[0] ?? '';
 }
 
-export function citizenshipSteps(citizenship: Record<string, unknown> | null): {
+export const PASSPORT_VERIFICATION_ID = 'passport_verification';
+export const PASSPORT_VERIFICATION_PATH = '/extensions/passport_verification';
+export const PASSPORT_ZK_REQUIREMENT = 'passport_zk';
+
+/** Runtime signals from the realm: installed extensions/packages, or codex requirements. */
+export type RealmCitizenshipContext = {
+	installed?: readonly string[];
+	identityRequirements?: readonly string[];
+};
+
+function stringList(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+}
+
+function lowerSet(values: readonly string[] | undefined): Set<string> {
+	return new Set((values ?? []).map((item) => item.toLowerCase()));
+}
+
+export function isPassportVerificationAvailable(
+	ctx: RealmCitizenshipContext = {},
+	citizenship: Record<string, unknown> | null = null,
+): boolean {
+	const installed = lowerSet([
+		...stringList(ctx.installed),
+		...stringList(citizenship?.installed_extensions),
+		...stringList(citizenship?.runtime_extensions),
+		...stringList(citizenship?.installed_packages),
+	]);
+	if (installed.has(PASSPORT_VERIFICATION_ID)) return true;
+	if (citizenship?.passport_verification_installed === true) return true;
+
+	const requirements = lowerSet([
+		...stringList(ctx.identityRequirements),
+		...stringList(citizenship?.identity_requirements),
+	]);
+	return requirements.has(PASSPORT_ZK_REQUIREMENT);
+}
+
+export function citizenshipSteps(
+	citizenship: Record<string, unknown> | null,
+	ctx: RealmCitizenshipContext = {},
+): {
+	showPassport: boolean;
 	passport: boolean;
 	invoice: boolean;
 	done: number;
 	total: number;
 } {
-	const passport = Boolean(citizenship?.passport_verified);
+	const showPassport = isPassportVerificationAvailable(ctx, citizenship);
+	const passport = showPassport && Boolean(citizenship?.passport_verified);
 	const invoice = Boolean(citizenship?.invoice_paid);
-	return { passport, invoice, done: Number(passport) + Number(invoice), total: 2 };
+	const total = Number(showPassport) + 1;
+	return { showPassport, passport, invoice, done: Number(passport) + Number(invoice), total };
+}
+
+export function citizenshipActionTarget(id: 'verify_passport' | 'invoices'): {
+	kind: 'navigate' | 'scroll';
+	path?: string;
+	elementId?: string;
+} {
+	if (id === 'verify_passport') {
+		return { kind: 'navigate', path: PASSPORT_VERIFICATION_PATH };
+	}
+	return { kind: 'scroll', elementId: 'invoices' };
 }
 
 export function mdToHtml(text: string): string {
@@ -142,10 +198,11 @@ export type CitizenshipAction = {
 
 export function citizenshipNextActions(
 	citizenship: Record<string, unknown> | null,
+	ctx: RealmCitizenshipContext = {},
 ): CitizenshipAction[] {
 	if (!citizenship || citizenship.status === 'active') return [];
 	const actions: CitizenshipAction[] = [];
-	if (!citizenship.passport_verified) {
+	if (isPassportVerificationAvailable(ctx, citizenship) && !citizenship.passport_verified) {
 		actions.push({
 			id: 'verify_passport',
 			labelKey: 'citizenship_verify_passport',

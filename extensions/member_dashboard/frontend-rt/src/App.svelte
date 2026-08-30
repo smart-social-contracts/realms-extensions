@@ -8,6 +8,7 @@
 	} from '../../../_shared/frontend/mobile-chrome';
 	import {
 		bridgeErrorFields,
+		citizenshipActionTarget,
 		citizenshipSteps,
 		displayFirstName,
 		cn,
@@ -67,7 +68,15 @@
 	let unreadCount = $derived(notifications.filter((n) => !n.read).length);
 	let firstName = $derived(displayFirstName(summary, principal));
 	let greetingLine = $derived(firstName ? `${getGreeting()}, ${firstName}` : getGreeting());
-	let steps = $derived(citizenshipSteps(citizenship));
+	let citizenshipContext = $derived({
+		installed: Array.isArray(citizenship?.installed_extensions)
+			? (citizenship.installed_extensions as string[])
+			: [],
+		identityRequirements: Array.isArray(citizenship?.identity_requirements)
+			? (citizenship.identity_requirements as string[])
+			: [],
+	});
+	let steps = $derived(citizenshipSteps(citizenship, citizenshipContext));
 
 	function applyTheme(theme: 'light' | 'dark') {
 		document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -164,11 +173,14 @@
 	}
 
 	function handleCitizenshipAction(id: 'verify_passport' | 'invoices') {
-		if (id === 'verify_passport') {
-			ctx?.navigate('/extensions/passport_verification');
+		const target = citizenshipActionTarget(id);
+		if (target.kind === 'navigate' && target.path) {
+			ctx?.navigate(target.path);
 			return;
 		}
-		document.getElementById('invoices')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		if (target.elementId) {
+			document.getElementById(target.elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
 	}
 
 	$effect(() => {
@@ -458,6 +470,7 @@
 						</div>
 					</div>
 					<ol class="divide-y divide-slate-100 dark:divide-slate-700">
+						{#if steps.showPassport}
 						<li class="flex items-start gap-3 px-4 py-3">
 							<div
 								class={cn(
@@ -489,6 +502,7 @@
 								</p>
 							</div>
 						</li>
+						{/if}
 						<li class="flex items-start gap-3 px-4 py-3">
 							<div
 								class={cn(
@@ -501,7 +515,7 @@
 								{#if steps.invoice}
 									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
 								{:else}
-									2
+									{steps.showPassport ? 2 : 1}
 								{/if}
 							</div>
 							<div class="min-w-0 flex-1">
@@ -509,7 +523,7 @@
 									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_invoice_step')}</p>
 									{#if !steps.invoice}
 										<Button
-											tone={steps.passport ? 'primary' : 'secondary'}
+											tone={steps.showPassport && !steps.passport ? 'secondary' : 'primary'}
 											size="sm"
 											onclick={() => handleCitizenshipAction('invoices')}
 										>
