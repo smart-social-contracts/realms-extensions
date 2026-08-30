@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node ../../_shared/frontend-rt/postbuild-stub.mjs",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --experimental-strip-types --test src/lib/helpers.test.ts"
   },
   "dependencies": {
     "@realmsgos/extension-bridge": "^0.2.0",

@@ -139,17 +139,34 @@ def get_public_services(args: str) -> Async[str]:
         return json.dumps({"success": False, "error": str(e)})
 
 
+def _installed_extension_names() -> list:
+    """Runtime-installed extension ids (seeded when a package is installed)."""
+    try:
+        from ggg import Extension
+
+        names = []
+        for ext in Extension.instances():
+            name = getattr(ext, "name", None)
+            if name:
+                names.append(str(name))
+        return names
+    except Exception as e:
+        logger.info(f"get_citizenship_status: installed extensions unavailable: {e}")
+        return []
+
+
 def get_citizenship_status(args: str) -> str:
     """Get membership activation status for a user.
 
-    Checks two requirements:
-    1. Registration invoice paid
-    2. Passport verified (user has 'verified' flag or passport identity)
+    Invoice payment is always a step. Passport verification is only required
+    when ``passport_verification`` is installed on the realm.
     """
     try:
         params = json.loads(args)
         user_id = _caller_id()
         logger.info(f"get_citizenship_status called for user: {user_id}")
+        installed_extensions = _installed_extension_names()
+        passport_required = "passport_verification" in installed_extensions
 
         # Check invoice payment status
         all_invoices = Invoice.instances()
@@ -192,8 +209,8 @@ def get_citizenship_status(args: str) -> str:
             import traceback as tb
             logger.error(f"get_citizenship_status: {tb.format_exc()}")
 
-        # Overall status
-        if invoice_paid and passport_verified:
+        # Overall status — passport is only a requirement when that extension is installed
+        if invoice_paid and (passport_verified or not passport_required):
             status = "active"
             status_label = "Active member"
         else:
@@ -207,6 +224,8 @@ def get_citizenship_status(args: str) -> str:
                 "status_label": status_label,
                 "invoice_paid": invoice_paid,
                 "passport_verified": passport_verified,
+                "passport_verification_installed": passport_required,
+                "installed_extensions": installed_extensions,
                 "total_invoices": len(user_invoices),
                 "paid_invoices": len([i for i in user_invoices if i.status == "Paid"]),
             }
