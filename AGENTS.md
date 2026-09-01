@@ -41,7 +41,7 @@ After testing locally, deploy with:
 cd extensions/<ext_id>/frontend-rt && npm run build && cd -
 
 # 2. Publish the bundle to file_registry, then install it on the realm
-realms files publish --network test --extensions-only --extensions <ext_id>
+realms files publish --network test --registry <file_registry_id> --extensions-only --extensions <ext_id>
 # then call install_extension_from_registry on the target realm backend
 ```
 
