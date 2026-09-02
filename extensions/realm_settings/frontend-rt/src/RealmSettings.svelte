@@ -17,8 +17,33 @@
 		resolveDisableMonetaryTokens,
 		setupTokenNetwork,
 	} from './tokenCatalog';
+	import {
+		DEFAULT_LANGUAGE,
+		LOCALE_CATALOG,
+		coerceEnabledLanguages,
+		localeLabel,
+	} from './localeCatalog';
+	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let i18nTick = $state(0);
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en').then(() => {
+				i18nTick++;
+			});
+			return;
+		}
+		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
+			void loadExtensionI18n(loc || 'en').then(() => {
+				i18nTick++;
+			});
+		});
+		return unsub;
+	});
 
 	let narrow = $state(isNarrowViewport());
 	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
@@ -51,6 +76,8 @@ let tokenChoice = $state('REALMS');
 let monetaryTokensDisabled = $state(false);
 let tokenPickerLocale = $state('en');
 let tokenNetwork = $state(setupTokenNetwork());
+let selectedLanguages = $state<string[]>([DEFAULT_LANGUAGE]);
+let realmSettingsPrimaryLanguage = $state(DEFAULT_LANGUAGE);
 
 // Email notification configuration (issue #266): realm-level on/off toggle.
 // Sender identity is derived from realm settings; SMTP credentials stay on the server.
@@ -198,13 +225,15 @@ let activeTab: SettingsTab = $state('general');
 		lines.push('_branding["colors"] = _colors');
 		lines.push('_setup["branding"] = _branding');
 		lines.push('_md["setup"] = _setup');
+		lines.push(`_md["languages"] = ${JSON.stringify(selectedLanguages)}`);
+		lines.push(`_md["primary_language"] = ${JSON.stringify(realmSettingsPrimaryLanguage)}`);
 		lines.push('realm.manifest_data = json.dumps(_md)');
 		return lines.join('\n');
 	}
 
 	function openProposalForSettings(deniedOp: string) {
 		proposalModalTitle = 'Update realm settings';
-		proposalModalDescription = 'This proposal updates the realm configuration (identity, branding, registration, currency, and infrastructure) as specified in the code below.';
+		proposalModalDescription = 'This proposal updates the realm configuration (identity, languages, branding, registration, currency, and infrastructure) as specified in the code below.';
 		proposalModalCode = buildRealmConfigCode();
 		proposalModalOperation = deniedOp;
 		proposalModalOpen = true;
@@ -246,28 +275,31 @@ let activeTab: SettingsTab = $state('general');
 				});
 				tokenChoice = matched?.id ?? (realmSettingsTokenCanisterId ? CUSTOM_TOKEN_ID : 'REALMS');
 				const network = String(s.network || tokenNetwork || '');
+				let flags: any = null;
+				try {
+					const flagsRaw = await ctx.backend.get_runtime_flags();
+					flags = typeof flagsRaw === 'string' ? JSON.parse(flagsRaw) : flagsRaw;
+				} catch {
+					// keep host defaults
+				}
 				let explicitDisable: boolean | undefined;
 				if (typeof s.test_mode_disable_monetary_tokens === 'boolean') {
 					explicitDisable = s.test_mode_disable_monetary_tokens;
 				} else if (typeof ctx.realmInfo?.testModeDisableMonetaryTokens === 'boolean') {
 					explicitDisable = ctx.realmInfo.testModeDisableMonetaryTokens;
-				} else {
-					try {
-						const flagsRaw = await ctx.backend.get_runtime_flags();
-						const flags = typeof flagsRaw === 'string' ? JSON.parse(flagsRaw) : flagsRaw;
-						if (typeof flags?.test_mode_disable_monetary_tokens === 'boolean') {
-							explicitDisable = flags.test_mode_disable_monetary_tokens;
-						}
-						if (flags?.primary_language) tokenPickerLocale = String(flags.primary_language);
-						if (flags?.network) tokenNetwork = setupTokenNetwork(String(flags.network));
-					} catch {
-						// keep host default from network
-					}
+				} else if (typeof flags?.test_mode_disable_monetary_tokens === 'boolean') {
+					explicitDisable = flags.test_mode_disable_monetary_tokens;
 				}
+				if (flags?.success && flags?.network) tokenNetwork = setupTokenNetwork(String(flags.network));
 				monetaryTokensDisabled = resolveDisableMonetaryTokens(explicitDisable, network);
-				tokenPickerLocale = String(
-					s.primary_language || ctx.realmInfo?.primaryLanguage || tokenPickerLocale,
+				const fromFlags = flags?.success ? flags : null;
+				const loadedLanguages = coerceEnabledLanguages(
+					fromFlags?.languages ?? s.languages ?? ctx.realmInfo?.languages,
+					fromFlags?.primary_language ?? s.primary_language ?? ctx.realmInfo?.primaryLanguage,
 				);
+				selectedLanguages = loadedLanguages.languages;
+				realmSettingsPrimaryLanguage = loadedLanguages.primary;
+				tokenPickerLocale = loadedLanguages.primary;
 				if (s.network) tokenNetwork = setupTokenNetwork(String(s.network));
 				const nft = (s.canisters || []).find(
 					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
@@ -339,6 +371,10 @@ let activeTab: SettingsTab = $state('general');
 	}
 
 	async function saveRealmSettings(confirmProposal = false) {
+		if (!languagesValid) {
+			settingsError = t('primary_language_error');
+			return;
+		}
 		settingsSaving = true;
 		settingsMessage = '';
 		settingsError = '';
@@ -353,6 +389,8 @@ let activeTab: SettingsTab = $state('general');
 				primary_color: realmSettingsPrimaryColor,
 				open_registration: realmSettingsOpenRegistration,
 				ai_assistant_enabled: realmSettingsAiAssistantEnabled,
+				languages: selectedLanguages,
+				primary_language: realmSettingsPrimaryLanguage,
 				token_canister_id: realmSettingsTokenCanisterId.trim(),
 				token_indexer_canister_id:
 					realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim(),
@@ -445,6 +483,24 @@ let activeTab: SettingsTab = $state('general');
 			(!realmSettingsTokenCanisterId.trim() || !!realmSettingsCurrency.trim()),
 	);
 	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid && currencyValid && tokensValid);
+	let languagesValid = $derived(
+		selectedLanguages.length > 0 && selectedLanguages.includes(realmSettingsPrimaryLanguage),
+	);
+	let customTokenSelectable = $derived(
+		isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled),
+	);
+
+	function toggleLanguage(id: string) {
+		if (selectedLanguages.includes(id)) {
+			if (selectedLanguages.length === 1) return;
+			selectedLanguages = selectedLanguages.filter((item) => item !== id);
+			if (!selectedLanguages.includes(realmSettingsPrimaryLanguage)) {
+				realmSettingsPrimaryLanguage = selectedLanguages[0];
+			}
+			return;
+		}
+		selectedLanguages = [...selectedLanguages, id];
+	}
 
 	let nextStage = $derived(
 		stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null
@@ -691,16 +747,17 @@ let activeTab: SettingsTab = $state('general');
 			onclick={() => saveRealmSettings()}
 			disabled={activeTab === 'notifications'
 				? settingsSaving || !emailDirty
-				: settingsSaving || !infraValid || governanceVotingWindowDays == null}
+				: settingsSaving || !infraValid || !languagesValid || governanceVotingWindowDays == null}
 			class="px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
+		>{settingsSaving ? t('saving_settings') : t('save_settings')}</button>
 	</div>
 {/snippet}
 
+{#key i18nTick}
 <div class="w-full px-3 sm:px-4 max-w-none">
 	<div class="flex flex-col gap-2 mb-4">
 		<div>
-			<h1 class="text-3xl font-bold text-gray-900">Settings</h1>
+			<h1 class="text-3xl font-bold text-gray-900">{t('page_title')}</h1>
 			<p class="text-gray-600 mt-1">{extensionDescription}</p>
 		</div>
 	</div>
@@ -710,61 +767,61 @@ let activeTab: SettingsTab = $state('general');
 			type="button"
 			onclick={() => (activeTab = 'general')}
 			class="chrome-tab {activeTab === 'general' ? 'is-on' : ''}"
-			title="General"
-			aria-label="General"
+			title={t('tab_general')}
+			aria-label={t('tab_general')}
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-			<span class="chrome-label">General</span>
+			<span class="chrome-label">{t('tab_general')}</span>
 		</button>
 		<button
 			type="button"
 			onclick={() => (activeTab = 'governance')}
 			class="chrome-tab {activeTab === 'governance' ? 'is-on' : ''}"
-			title="Governance"
-			aria-label="Governance"
+			title={t('tab_governance')}
+			aria-label={t('tab_governance')}
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>
-			<span class="chrome-label">Governance</span>
+			<span class="chrome-label">{t('tab_governance')}</span>
 		</button>
 		<button
 			type="button"
 			onclick={() => (activeTab = 'treasury')}
 			class="chrome-tab {activeTab === 'treasury' ? 'is-on' : ''}"
-			title="Treasury"
-			aria-label="Treasury"
+			title={t('tab_treasury')}
+			aria-label={t('tab_treasury')}
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-			<span class="chrome-label">Treasury</span>
+			<span class="chrome-label">{t('tab_treasury')}</span>
 		</button>
 		<button
 			type="button"
 			onclick={() => (activeTab = 'infrastructure')}
 			class="chrome-tab {activeTab === 'infrastructure' ? 'is-on' : ''}"
-			title="Infrastructure"
-			aria-label="Infrastructure"
+			title={t('tab_infrastructure')}
+			aria-label={t('tab_infrastructure')}
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
-			<span class="chrome-label">Infrastructure</span>
+			<span class="chrome-label">{t('tab_infrastructure')}</span>
 		</button>
 		<button
 			type="button"
 			onclick={() => (activeTab = 'notifications')}
 			class="chrome-tab {activeTab === 'notifications' ? 'is-on' : ''}"
-			title="Notifications"
-			aria-label="Notifications"
+			title={t('tab_notifications')}
+			aria-label={t('tab_notifications')}
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-			<span class="chrome-label">Notifications</span>
+			<span class="chrome-label">{t('tab_notifications')}</span>
 		</button>
 		<button
 			type="button"
 			onclick={() => (activeTab = 'advanced')}
 			class="chrome-tab {activeTab === 'advanced' ? 'is-on' : ''}"
-			title="Advanced"
-			aria-label="Advanced"
+			title={t('tab_advanced')}
+			aria-label={t('tab_advanced')}
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-			<span class="chrome-label">Advanced</span>
+			<span class="chrome-label">{t('tab_advanced')}</span>
 		</button>
 	</div>
 
@@ -938,56 +995,100 @@ let activeTab: SettingsTab = $state('general');
 
 		<!-- Identity -->
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-1">Identity</h2>
-			<p class="text-sm text-gray-500 mb-5">How this realm presents itself to members and visitors.</p>
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">{t('section_identity')}</h2>
+			<p class="text-sm text-gray-500 mb-5">{t('section_identity_desc')}</p>
 			<div class="space-y-5">
 				<div>
-					<label for="rs-name" class="block text-sm font-medium text-gray-700 mb-1">Realm Name</label>
+					<label for="rs-name" class="block text-sm font-medium text-gray-700 mb-1">{t('realm_name')}</label>
 					<input id="rs-name" type="text" bind:value={realmSettingsName}
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
 				</div>
 				<div>
-					<label for="rs-desc" class="block text-sm font-medium text-gray-700 mb-1">Manifesto</label>
+					<label for="rs-desc" class="block text-sm font-medium text-gray-700 mb-1">{t('manifesto')}</label>
 					<textarea id="rs-desc" bind:value={realmSettingsManifesto} rows="2"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"></textarea>
 				</div>
 				<div>
-					<label for="rs-welcome" class="block text-sm font-medium text-gray-700 mb-1">Welcome Message</label>
+					<label for="rs-welcome" class="block text-sm font-medium text-gray-700 mb-1">{t('welcome_message')}</label>
 					<textarea id="rs-welcome" bind:value={realmSettingsWelcome} rows="3"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"></textarea>
 				</div>
 			</div>
 		</section>
 
+		<!-- Languages -->
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">{t('section_languages')}</h2>
+			<p class="text-sm text-gray-500 mb-5">
+				{t('section_languages_desc')}
+			</p>
+			<fieldset class="mb-5">
+				<legend class="block text-sm font-medium text-gray-700 mb-2">{t('enabled_languages')}</legend>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+					{#each LOCALE_CATALOG as loc (loc.id)}
+						<label
+							class="flex items-start gap-3 rounded-lg border p-3 cursor-pointer {selectedLanguages.includes(loc.id) ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}"
+						>
+							<input
+								type="checkbox"
+								checked={selectedLanguages.includes(loc.id)}
+								onchange={() => toggleLanguage(loc.id)}
+								class="mt-1"
+							/>
+							<div>
+								<strong class="text-sm text-gray-900">{loc.name}</strong>
+								<p class="text-xs text-gray-500">{loc.id}</p>
+							</div>
+						</label>
+					{/each}
+				</div>
+			</fieldset>
+			<div>
+				<label for="rs-primary-language" class="block text-sm font-medium text-gray-700 mb-1">{t('primary_language')}</label>
+				<select
+					id="rs-primary-language"
+					bind:value={realmSettingsPrimaryLanguage}
+					class="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+				>
+					{#each selectedLanguages as loc (loc)}
+						<option value={loc}>{localeLabel(loc)}</option>
+					{/each}
+				</select>
+			</div>
+			{#if !languagesValid}
+				<p class="mt-3 text-sm text-red-700" role="alert">{t('primary_language_error')}</p>
+			{/if}
+		</section>
+
 		<!-- Branding -->
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-1">Branding</h2>
-			<p class="text-sm text-gray-500 mb-5">Logo, background imagery, and primary color used across the realm UI — including main action buttons.</p>
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">{t('section_branding')}</h2>
+			<p class="text-sm text-gray-500 mb-5">{t('section_branding_desc')}</p>
 			<div class="space-y-5">
 				<div>
-					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
+					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mb-1">{t('logo_url')}</label>
 					<input id="rs-logo" type="url" bind:value={realmSettingsLogoUrl} placeholder="https://example.com/logo.png"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
 					{#if realmSettingsLogoUrl}
 						<div class="mt-2 flex items-center gap-3">
 							<img src={realmSettingsLogoUrl} alt="Logo preview" class="h-12 w-12 object-contain rounded border border-gray-200 bg-gray-50" />
-							<span class="text-xs text-gray-500">Preview</span>
+							<span class="text-xs text-gray-500">{t('preview')}</span>
 						</div>
 					{/if}
 				</div>
 				<div>
-					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mb-1">Background Image URL</label>
+					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mb-1">{t('background_url')}</label>
 					<input id="rs-bg" type="url" bind:value={realmSettingsBackgroundUrl} placeholder="https://example.com/background.png"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
 					{#if realmSettingsBackgroundUrl}
 						<div class="mt-2">
 							<img src={realmSettingsBackgroundUrl} alt="Background preview" class="h-24 w-full object-cover rounded border border-gray-200" />
-							<span class="text-xs text-gray-500">Preview</span>
+							<span class="text-xs text-gray-500">{t('preview')}</span>
 						</div>
 					{/if}
 				</div>
 				<div>
-					<label for="rs-primary-color" class="block text-sm font-medium text-gray-700 mb-1">Primary color</label>
+					<label for="rs-primary-color" class="block text-sm font-medium text-gray-700 mb-1">{t('primary_color')}</label>
 					<div class="flex items-center gap-3">
 						<input
 							id="rs-primary-color"
@@ -1005,7 +1106,7 @@ let activeTab: SettingsTab = $state('general');
 						<div
 							class="h-10 w-10 rounded border border-gray-200 shrink-0"
 							style="background-color: {isValidHexColor(realmSettingsPrimaryColor) ? realmSettingsPrimaryColor : '#3b82f6'}"
-							title="Preview"
+							title={t('preview')}
 						></div>
 					</div>
 					<p class="mt-1 text-xs text-gray-500">Hex color for primary buttons and accents (e.g. #3b82f6).</p>
@@ -1117,12 +1218,11 @@ let activeTab: SettingsTab = $state('general');
 						</div>
 					</label>
 				{/each}
-				{@const customSelectable = isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled)}
 				<label
 					class={cn(
 						'flex items-start gap-3 rounded-lg border p-3',
 						tokenChoice === CUSTOM_TOKEN_ID ? 'border-gray-900 bg-gray-50' : 'border-gray-200',
-						!customSelectable && 'opacity-60 cursor-not-allowed bg-gray-100',
+						!customTokenSelectable && 'opacity-60 cursor-not-allowed bg-gray-100',
 					)}
 				>
 					<input
@@ -1130,14 +1230,14 @@ let activeTab: SettingsTab = $state('general');
 						name="rs-token-choice"
 						value={CUSTOM_TOKEN_ID}
 						checked={tokenChoice === CUSTOM_TOKEN_ID}
-						disabled={!customSelectable}
+						disabled={!customTokenSelectable}
 						onchange={() => selectTokenChoice(CUSTOM_TOKEN_ID)}
 						class="mt-1"
 					/>
 					<div>
 						<strong class="text-sm text-gray-900">Custom token</strong>
 						<p class="text-xs text-gray-600">Your own ICRC-1 ledger canister.</p>
-						{#if !customSelectable}
+						{#if !customTokenSelectable}
 							<p class="text-xs text-gray-500 mt-1">{monetaryUnavailableLabel(tokenPickerLocale)}</p>
 						{/if}
 					</div>
@@ -1359,6 +1459,7 @@ let activeTab: SettingsTab = $state('general');
 		<SandboxPanel {ctx} {addToast} />
 	{/if}
 </div>
+{/key}
 
 <ProposalModal
 	{ctx}

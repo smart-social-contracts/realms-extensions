@@ -16,7 +16,13 @@
   "show_in_sidebar": true,
   "icon": "activity",
   "sidebar_label": {
-    "en": "Task Monitor"
+    "en": "Task Monitor",
+    "es": "Monitor de Tareas",
+    "de": "Aufgaben-Monitor",
+    "fr": "Moniteur de Tâches",
+    "it": "Monitor Attività",
+    "zh-CN": "任务监视器",
+    "ca-valencia": "Monitor de Tasques"
   },
   "entry_access": {
     "default": "task.view",

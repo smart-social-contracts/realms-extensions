@@ -1,0 +1,22 @@
+{
+  "page_title": "Votación",
+  "proposals": "Propuestas",
+  "submit_proposal": "Enviar propuesta",
+  "realm_wide": "Todo el reino",
+  "submit_a_proposal": "Enviar una propuesta",
+  "submitting": "Enviando…",
+  "vote_yes": "Sí",
+  "vote_no": "No",
+  "vote_abstain": "Abstención",
+  "filter_all_types": "Todos los tipos",
+  "type_transaction": "Transacción",
+  "type_upgrade": "Actualización",
+  "type_poll": "Encuesta",
+  "type_code_execution": "Ejecución de código",
+  "form_subtitle_transaction": "Propón una transferencia de tesorería desde la bóveda del reino.",
+  "form_subtitle_upgrade": "Instala o actualiza un codex, extensión o acción de orquestación principal.",
+  "form_subtitle_poll": "Plantea una pregunta al reino — sin acción automática si se aprueba.",
+  "form_subtitle_code_execution": "Envía código Python para ejecutar en el backend del reino si se aprueba.",
+  "no_proposals_filtered": "No hay propuestas que coincidan con los filtros actuales",
+  "no_proposals_yet": "Aún no hay propuestas"
+}

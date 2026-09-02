@@ -21,6 +21,15 @@
     "log.write"
   ],
   "description": "See alerts about activity in your realm, mark them as read, and set which notifications you receive by email.",
+  "sidebar_label": {
+    "en": "Notifications",
+    "es": "Notificaciones",
+    "de": "Benachrichtigungen",
+    "fr": "Notifications",
+    "it": "Notifiche",
+    "zh-CN": "通知",
+    "ca-valencia": "Notificacions"
+  },
   "permissions": [],
   "entry_points": [
     "get_notifications",

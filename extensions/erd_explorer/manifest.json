@@ -26,7 +26,13 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/erd_explorer",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "ERD Explorer"
+    "en": "ERD Explorer",
+    "es": "Explorador ERD",
+    "de": "ERD-Explorer",
+    "fr": "Explorateur ERD",
+    "it": "Esploratore ERD",
+    "zh-CN": "ERD 浏览器",
+    "ca-valencia": "Explorador ERD"
   },
   "entry_access": {
     "default": "db.export"

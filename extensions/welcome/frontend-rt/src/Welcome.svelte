@@ -1,5 +1,25 @@
 <script lang="ts">
+	import { loadExtensionI18n, t } from './lib/i18n';
+
 	let { ctx }: { ctx: any } = $props();
+
+	let i18nTick = $state(0);
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en').then(() => {
+				i18nTick++;
+			});
+			return;
+		}
+		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
+			void loadExtensionI18n(loc || 'en').then(() => {
+				i18nTick++;
+			});
+		});
+		return unsub;
+	});
 
 	let realmData = $state<any>({});
 	let authenticated = $state(false);
@@ -35,12 +55,13 @@
 	}
 </script>
 
+{#key i18nTick}
 <div class="relative w-full h-screen overflow-hidden flex items-center justify-center bg-black">
 	<!-- Background image -->
 	<div class="absolute inset-0 z-0">
 		<img
 			src="/images/background.png"
-			alt={realmName ? `${realmName} background` : 'Realm background'}
+			alt={realmName ? `${realmName} background` : `${t('realm_default')} background`}
 			class="w-full h-full object-cover opacity-80 transition-opacity duration-1000"
 		/>
 		<div class="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-black/70"></div>
@@ -51,7 +72,7 @@
 		<div class="flex items-center gap-3">
 			<img
 				src="/images/logo.png"
-				alt={realmName || 'Realm'}
+				alt={realmName || t('realm_default')}
 				class="h-10 md:h-12 lg:h-14 w-auto drop-shadow-lg"
 			/>
 		</div>
@@ -71,9 +92,9 @@
 				<div class="text-center md:text-left mb-8">
 					<h1 class="text-3xl md:text-4xl lg:text-5xl font-bold mb-4 leading-tight tracking-tight drop-shadow-lg">
 						{#if realmName}
-							Welcome to {realmName}
+							{t('welcome_to', { name: realmName })}
 						{:else}
-							Welcome
+							{t('welcome')}
 						{/if}
 					</h1>
 
@@ -96,9 +117,9 @@
 						class="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-full font-semibold text-base tracking-wide transition-all duration-300 bg-blue-500/90 hover:bg-blue-500 text-white border-2 border-blue-400 hover:-translate-y-0.5 hover:shadow-[0_4px_20px_rgba(59,130,246,0.5)] cursor-pointer"
 					>
 						{#if authenticated}
-							Enter Realm
+							{t('enter_realm')}
 						{:else}
-							Join this Realm
+							{t('join_this_realm')}
 						{/if}
 						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
@@ -122,3 +143,4 @@
 		</a>
 	</div>
 </div>
+{/key}

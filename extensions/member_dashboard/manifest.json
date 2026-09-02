@@ -20,7 +20,13 @@
     "public_services"
   ],
   "sidebar_label": {
-    "en": "My Dashboard"
+    "en": "My Dashboard",
+    "es": "Mi Panel",
+    "de": "Mein Dashboard",
+    "fr": "Mon Tableau de Bord",
+    "it": "Mio Pannello",
+    "zh-CN": "我的控制台",
+    "ca-valencia": "El Meu Panell"
   },
   "icon": "layout-dashboard",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/member_dashboard",

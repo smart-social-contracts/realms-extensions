@@ -8,7 +8,13 @@
     "administration"
   ],
   "sidebar_label": {
-    "en": "Census"
+    "en": "Census",
+    "es": "Censo",
+    "de": "Volkszählung",
+    "fr": "Recensement",
+    "it": "Censimento",
+    "zh-CN": "人口普查",
+    "ca-valencia": "Cens"
   },
   "permissions": [
     "admin"

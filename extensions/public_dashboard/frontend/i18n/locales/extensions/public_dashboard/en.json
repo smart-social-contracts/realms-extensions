@@ -1,0 +1,19 @@
+{
+  "realm_default": "Realm",
+  "loading_dashboard": "Loading dashboard...",
+  "join_this_realm": "Join this Realm",
+  "realm_status": "Realm Status",
+  "stage_phase": "{label} Phase",
+  "currently": "Currently {label}",
+  "countdown_live": "Live",
+  "stage_alpha": "Alpha",
+  "stage_beta": "Beta",
+  "stage_production": "Live",
+  "stage_deprecation": "Winding Down",
+  "stage_terminated": "Archived",
+  "stage_alpha_desc": "Gathering founding members. Deposits are refundable while the community grows.",
+  "stage_beta_desc": "Critical mass reached. Infrastructure, land, and service providers are being prepared.",
+  "stage_production_desc": "Fully operational. Governance, services, and community life are active.",
+  "stage_deprecation_desc": "This realm is winding down. New members cannot join.",
+  "stage_terminated_desc": "This realm has closed. Records remain available as a read-only archive."
+}

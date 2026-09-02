@@ -1,5 +1,16 @@
 <script lang="ts">
-	let { operation = '' }: { operation?: string } = $props();
+	const DEFAULTS: Record<string, string> = {
+		title: 'Additional permissions needed',
+		body: 'You need additional permissions to view this page.',
+	};
+
+	let {
+		operation = '',
+		t = (key: string) => DEFAULTS[key] ?? key,
+	}: {
+		operation?: string;
+		t?: (key: string) => string;
+	} = $props();
 </script>
 
 <div class="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-5 py-4 dark:border-gray-700 dark:bg-gray-800/50">
@@ -7,8 +18,8 @@
 		<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" />
 	</svg>
 	<div>
-		<h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Additional permissions needed</h3>
-		<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">You need additional permissions to view this page.</p>
+		<h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">{t('title')}</h3>
+		<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('body')}</p>
 		{#if operation}
 			<p class="mt-2 text-xs text-gray-400 dark:text-gray-500 font-mono">{operation}</p>
 		{/if}

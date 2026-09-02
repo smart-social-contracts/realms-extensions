@@ -22,7 +22,13 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/test_bench",
   "show_in_sidebar": false,
   "sidebar_label": {
-    "en": "Test Bench"
+    "en": "Test Bench",
+    "es": "Banco de Pruebas",
+    "de": "Testumgebung",
+    "fr": "Banc de Test",
+    "it": "Banco di Prova",
+    "zh-CN": "测试台",
+    "ca-valencia": "Banc de Proves"
   },
   "entry_access": {
     "default": "realm.admin"

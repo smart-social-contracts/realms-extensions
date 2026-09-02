@@ -1,0 +1,19 @@
+{
+  "realm_default": "Regno",
+  "loading_dashboard": "Caricamento dashboard…",
+  "join_this_realm": "Unisciti a questo regno",
+  "realm_status": "Stato del regno",
+  "stage_phase": "Fase {label}",
+  "currently": "Attualmente {label}",
+  "countdown_live": "Attivo",
+  "stage_alpha": "Alfa",
+  "stage_beta": "Beta",
+  "stage_production": "Attivo",
+  "stage_deprecation": "In transizione",
+  "stage_terminated": "Archiviato",
+  "stage_alpha_desc": "Raccolta dei membri fondatori. I depositi sono rimborsabili mentre la comunità cresce.",
+  "stage_beta_desc": "Massa critica raggiunta. Infrastruttura, terreni e fornitori di servizi sono in preparazione.",
+  "stage_production_desc": "Pienamente operativo. Governance, servizi e vita comunitaria sono attivi.",
+  "stage_deprecation_desc": "Questo regno è in transizione. I nuovi membri non possono unirsi.",
+  "stage_terminated_desc": "Questo regno è chiuso. I registri rimangono disponibili come archivio in sola lettura."
+}

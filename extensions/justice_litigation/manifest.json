@@ -42,7 +42,13 @@
     "public_services"
   ],
   "sidebar_label": {
-    "en": "Justice"
+    "en": "Justice",
+    "es": "Justicia",
+    "de": "Justiz",
+    "fr": "Justice",
+    "it": "Giustizia",
+    "zh-CN": "司法",
+    "ca-valencia": "Justícia"
   },
   "icon": "gavel",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/justice_litigation",
@@ -81,10 +87,21 @@
     "LitigationContent": {
       "alias": "case_id",
       "fields": {
-        "case_id": { "type": "String", "max_length": 64 },
-        "ciphertext": { "type": "String" },
-        "scope": { "type": "String", "max_length": 512 },
-        "created_by": { "type": "String", "max_length": 128 }
+        "case_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "ciphertext": {
+          "type": "String"
+        },
+        "scope": {
+          "type": "String",
+          "max_length": 512
+        },
+        "created_by": {
+          "type": "String",
+          "max_length": 128
+        }
       }
     }
   },

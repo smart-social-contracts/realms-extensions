@@ -22,7 +22,13 @@
   "icon": "clipboard-check",
   "show_in_sidebar": false,
   "sidebar_label": {
-    "en": "Migration Console"
+    "en": "Migration Console",
+    "es": "Consola de Migración",
+    "de": "Migrationskonsole",
+    "fr": "Console de Migration",
+    "it": "Console di Migrazione",
+    "zh-CN": "迁移控制台",
+    "ca-valencia": "Consola de Migració"
   },
   "entry_access": {
     "default": "realm.admin",

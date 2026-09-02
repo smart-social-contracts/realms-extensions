@@ -1,13 +1,19 @@
 {
   "name": "realm_settings",
-  "version": "1.10.6",
+  "version": "1.10.8",
   "description": "Change your realm's name, welcome message, and branding; control who can join; set voting rules, currency, notifications, and lifecycle stage.",
   "author": "Realms Team",
   "categories": [
     "realm_management"
   ],
   "sidebar_label": {
-    "en": "Realm Settings"
+    "en": "Realm Settings",
+    "es": "Configuración del Reino",
+    "de": "Reichseinstellungen",
+    "fr": "Paramètres du Royaume",
+    "it": "Impostazioni del Regno",
+    "zh-CN": "领域设置",
+    "ca-valencia": "Configuració del Regne"
   },
   "permissions": [
     "admin"

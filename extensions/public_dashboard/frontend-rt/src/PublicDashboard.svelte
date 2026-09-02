@@ -1,7 +1,26 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let i18nTick = $state(0);
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en').then(() => {
+				i18nTick++;
+			});
+			return;
+		}
+		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
+			void loadExtensionI18n(loc || 'en').then(() => {
+				i18nTick++;
+			});
+		});
+		return unsub;
+	});
 
 	let statusData: any = $state(null);
 	let realmData: any = $state(null);
@@ -18,20 +37,6 @@
 	let myQuarterId = $state('');
 
 	const STAGES = ['alpha', 'beta', 'production', 'deprecation', 'terminated'] as const;
-	const STAGE_LABELS: Record<string, string> = {
-		alpha: 'Alpha',
-		beta: 'Beta',
-		production: 'Live',
-		deprecation: 'Winding Down',
-		terminated: 'Archived',
-	};
-	const STAGE_DESCRIPTIONS: Record<string, string> = {
-		alpha: 'Gathering founding members. Deposits are refundable while the community grows.',
-		beta: 'Critical mass reached. Infrastructure, land, and service providers are being prepared.',
-		production: 'Fully operational. Governance, services, and community life are active.',
-		deprecation: 'This realm is winding down. New members cannot join.',
-		terminated: 'This realm has closed. Records remain available as a read-only archive.',
-	};
 	const STAGE_THEMES: Record<string, { bg: string; border: string; accent: string; dot: string; text: string }> = {
 		alpha: { bg: '#eff6ff', border: '#bfdbfe', accent: '#2563eb', dot: '#3b82f6', text: '#1e40af' },
 		beta: { bg: '#fffbeb', border: '#fde68a', accent: '#d97706', dot: '#f59e0b', text: '#92400e' },
@@ -247,10 +252,24 @@
 			: [],
 	);
 
+	function localizedStageLabel(stage: string): string {
+		void i18nTick;
+		const key = `stage_${stage}`;
+		const label = t(key);
+		return label !== key ? label : stage;
+	}
+
+	function localizedStageDescription(stage: string): string {
+		void i18nTick;
+		const key = `stage_${stage}_desc`;
+		const desc = t(key);
+		return desc !== key ? desc : '';
+	}
+
 	let realmStage = $derived(statusData?.realm_stage || realmData?.status || 'alpha');
 	let stageTheme = $derived(STAGE_THEMES[realmStage] || STAGE_THEMES.alpha);
-	let stageLabel = $derived(STAGE_LABELS[realmStage] || realmStage);
-	let stageDescription = $derived(STAGE_DESCRIPTIONS[realmStage] || '');
+	let stageLabel = $derived(localizedStageLabel(realmStage));
+	let stageDescription = $derived(localizedStageDescription(realmStage));
 	let stageProgressPct = $derived(
 		lifecycleData.critical_mass
 			? Math.min(100, Math.round((Number(lifecycleData.registered_users || statusData?.users_count || 0) / lifecycleData.critical_mass) * 100))
@@ -326,6 +345,7 @@
 
 
 <div>
+	{#key i18nTick}
 	{#if loading}
 		<div class="flex items-center justify-center py-12 mt-20">
 			<svg
@@ -348,7 +368,7 @@
 					d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
 				></path>
 			</svg>
-			<span class="ml-3 text-gray-500">Loading dashboard...</span>
+			<span class="ml-3 text-gray-500">{t('loading_dashboard')}</span>
 		</div>
 	{:else}
 		<!-- Hero: pane-bleed background image with content inside -->
@@ -370,11 +390,11 @@
 						<div class="hero-brand-row">
 							<img
 								src="/custom/logo.png"
-								alt={realmData.name || 'Realm'}
+								alt={realmData.name || t('realm_default')}
 								class="hero-logo"
 								onerror={(e) => { e.currentTarget.src = '/images/logo_sphere_only.svg'; }}
 							/>
-							<h1 class="hero-title">{realmData.name || 'Realm'}</h1>
+							<h1 class="hero-title">{realmData.name || t('realm_default')}</h1>
 						</div>
 						{#if realmData.welcome_message}
 							<p class="hero-welcome">{realmData.welcome_message}</p>
@@ -690,7 +710,7 @@
 					href="/join"
 					class="join-btn"
 				>
-					Join this Realm
+					{t('join_this_realm')}
 					<svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
 					</svg>
@@ -735,7 +755,7 @@
 										{goLiveRemaining.days}d {goLiveRemaining.hours}h {goLiveRemaining.minutes}m {goLiveRemaining.seconds}s
 									</div>
 								{:else}
-									<div class="text-3xl font-bold text-green-600">Live</div>
+									<div class="text-3xl font-bold text-green-600">{t('countdown_live')}</div>
 								{/if}
 							</div>
 						{/if}
@@ -769,8 +789,8 @@
 					<div class="realm-status-card max-w-5xl mx-auto">
 						<div class="realm-status-header">
 							<div style="flex: 1; min-width: 240px;">
-								<p style="font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px;">Realm Status</p>
-								<h2 style="font-size: 1.5rem; font-weight: 700; color: #111827; margin: 0 0 8px;">{stageLabel} Phase</h2>
+								<p style="font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px;">{t('realm_status')}</p>
+								<h2 style="font-size: 1.5rem; font-weight: 700; color: #111827; margin: 0 0 8px;">{t('stage_phase', { label: stageLabel })}</h2>
 								<p style="font-size: 0.95rem; color: #4b5563; line-height: 1.6; margin: 0; max-width: 640px;">{stageDescription}</p>
 							</div>
 							<span
@@ -778,7 +798,7 @@
 								style="background: {stageTheme.bg}; border-color: {stageTheme.border}; color: {stageTheme.text};"
 							>
 								<span class="realm-status-dot" style="background: {stageTheme.dot};"></span>
-								Currently {stageLabel}
+								{t('currently', { label: stageLabel })}
 							</span>
 						</div>
 
@@ -810,7 +830,7 @@
 										<span
 											style="font-size: 0.72rem; font-weight: {isCurrent ? '700' : '500'}; margin-top: 8px; text-align: center; color: {isCurrent ? stageTheme.text : isPast ? '#059669' : '#9ca3af'};"
 										>
-											{STAGE_LABELS[stage]}
+											{localizedStageLabel(stage)}
 										</span>
 									</div>
 								{/each}
@@ -1022,4 +1042,5 @@
 			{/if}
 		</div>
 	{/if}
+	{/key}
 </div>

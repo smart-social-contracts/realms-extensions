@@ -1,0 +1,19 @@
+{
+  "realm_default": "领域",
+  "loading_dashboard": "正在加载仪表板…",
+  "join_this_realm": "加入此领域",
+  "realm_status": "领域状态",
+  "stage_phase": "{label}阶段",
+  "currently": "当前{label}",
+  "countdown_live": "已上线",
+  "stage_alpha": "Alpha",
+  "stage_beta": "Beta",
+  "stage_production": "已上线",
+  "stage_deprecation": "逐步停用",
+  "stage_terminated": "已归档",
+  "stage_alpha_desc": "正在招募创始成员。随着社区成长，押金可退还。",
+  "stage_beta_desc": "已达到临界规模。正在准备基础设施、土地和服务提供商。",
+  "stage_production_desc": "全面运行。治理、服务和社区生活均已激活。",
+  "stage_deprecation_desc": "此领域正在逐步停用。新成员无法加入。",
+  "stage_terminated_desc": "此领域已关闭。记录仍以只读归档形式保留。"
+}

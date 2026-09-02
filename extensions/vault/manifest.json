@@ -39,7 +39,13 @@
   ],
   "entity_method_overrides": [],
   "sidebar_label": {
-    "en": "Vault"
+    "en": "Vault",
+    "es": "Bóveda",
+    "de": "Tresor",
+    "fr": "Coffre",
+    "it": "Caveau",
+    "zh-CN": "金库",
+    "ca-valencia": "Cofre"
   },
   "entry_access": {
     "default": "realm.admin",

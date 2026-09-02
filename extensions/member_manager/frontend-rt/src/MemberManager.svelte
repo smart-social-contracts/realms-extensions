@@ -1,7 +1,33 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
+	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let i18nTick = $state(0);
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en').then(() => {
+				i18nTick++;
+			});
+			return;
+		}
+		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
+			void loadExtensionI18n(loc || 'en').then(() => {
+				i18nTick++;
+			});
+		});
+		return unsub;
+	});
+
+	const TAB_KEYS = ['profile', 'status', 'messages'] as const;
+
+	function tabLabel(tabKey: typeof TAB_KEYS[number]): string {
+		void i18nTick;
+		return t(`tab_${tabKey}`);
+	}
 
 	interface MemberSummary {
 		principal: string;
@@ -206,8 +232,9 @@
 </script>
 
 <div class="p-4">
+	{#key i18nTick}
 	<div class="mb-4">
-		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Members</h1>
+		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">{t('page_title')}</h1>
 		<p class="text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 	</div>
 
@@ -217,27 +244,27 @@
 			<div class="mb-3 space-y-2">
 				<input
 					class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
-					placeholder="Search by name or principal…"
+					placeholder={t('search_placeholder')}
 					bind:value={search}
 				/>
 				<select
 					class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
 					bind:value={statusFilter}
 				>
-					<option value="all">All members</option>
-					<option value="active">Active</option>
-					<option value="inactive">Inactive</option>
-					<option value="verified">Identity verified</option>
-					<option value="unverified">Not verified</option>
+					<option value="all">{t('filter_all')}</option>
+					<option value="active">{t('filter_active')}</option>
+					<option value="inactive">{t('filter_inactive')}</option>
+					<option value="verified">{t('filter_verified')}</option>
+					<option value="unverified">{t('filter_unverified')}</option>
 				</select>
 			</div>
 
 			{#if loadingList}
-				<p class="text-sm text-gray-500">Loading members…</p>
+				<p class="text-sm text-gray-500">{t('loading_members')}</p>
 			{:else if listError}
 				<p class="text-sm text-red-600">{listError}</p>
 			{:else if filtered.length === 0}
-				<p class="text-sm text-gray-500">No members match.</p>
+				<p class="text-sm text-gray-500">{t('no_members_match')}</p>
 			{:else}
 				<ul class="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
 					{#each filtered as m (m.principal)}
@@ -280,24 +307,24 @@
 				<div
 					class="flex items-center justify-center h-64 rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 text-gray-400"
 				>
-					Select a member to view their profile.
+					{t('select_member')}
 				</div>
 			{:else if loadingProfile}
-				<p class="text-sm text-gray-500">Loading profile…</p>
+				<p class="text-sm text-gray-500">{t('loading_profile')}</p>
 			{:else if profileError}
 				<p class="text-sm text-red-600">{profileError}</p>
 			{:else if profile}
 				<div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
 					<!-- Tabs -->
 					<div class="flex border-b border-gray-200 dark:border-gray-700">
-						{#each ['profile', 'status', 'messages'] as t}
+						{#each TAB_KEYS as tabKey}
 							<button
-								class="px-4 py-2 text-sm font-medium capitalize {tab === t
+								class="px-4 py-2 text-sm font-medium capitalize {tab === tabKey
 									? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400'
 									: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
-								onclick={() => (tab = t as typeof tab)}
+								onclick={() => (tab = tabKey)}
 							>
-								{t}
+								{tabLabel(tabKey)}
 							</button>
 						{/each}
 					</div>
@@ -401,7 +428,7 @@
 										: 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700'}"
 								>
 									<p class="text-sm font-medium {profile.member.is_active ? 'text-green-800 dark:text-green-200' : 'text-gray-600 dark:text-gray-300'}">
-										{profile.member.is_active ? 'Active member' : 'Inactive member'}
+										{profile.member.is_active ? t('active_member') : t('inactive_member')}
 									</p>
 								</div>
 								<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -415,19 +442,19 @@
 									{/each}
 								</dl>
 							{:else}
-								<p class="text-sm text-gray-500">This user is not a realm member.</p>
+								<p class="text-sm text-gray-500">{t('not_member')}</p>
 							{/if}
 						{:else if tab === 'messages'}
 							<div class="mb-4 space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
 								<input
 									class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
-									placeholder="Notification title"
+									placeholder={t('notif_title_placeholder')}
 									bind:value={notifTitle}
 								/>
 								<textarea
 									class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
 									rows="2"
-									placeholder="Message…"
+									placeholder={t('notif_message_placeholder')}
 									bind:value={notifMessage}
 								></textarea>
 								<div class="flex items-center gap-3">
@@ -436,7 +463,7 @@
 										onclick={sendNotification}
 										disabled={sending || !notifTitle.trim() || !notifMessage.trim()}
 									>
-										{sending ? 'Sending…' : 'Send notification'}
+										{sending ? t('sending') : t('send_notification')}
 									</button>
 									{#if sendResult}
 										<span class="text-sm text-gray-500">{sendResult}</span>
@@ -445,9 +472,9 @@
 							</div>
 
 							{#if loadingNotifs}
-								<p class="text-sm text-gray-500">Loading messages…</p>
+								<p class="text-sm text-gray-500">{t('loading_messages')}</p>
 							{:else if notifications.length === 0}
-								<p class="text-sm text-gray-500">No messages yet.</p>
+								<p class="text-sm text-gray-500">{t('no_messages')}</p>
 							{:else}
 								<ul class="space-y-2">
 									{#each notifications as n (n.id)}
@@ -467,4 +494,5 @@
 			{/if}
 		</div>
 	</div>
+	{/key}
 </div>

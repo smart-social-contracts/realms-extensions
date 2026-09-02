@@ -9,6 +9,15 @@
     "schema.entities"
   ],
   "description": "Ask questions about your realm — its governance, proposals, rules, and more — and get answers from an AI assistant in chat.",
+  "sidebar_label": {
+    "en": "AI Assistant",
+    "es": "Asistente IA",
+    "de": "KI-Assistent",
+    "fr": "Assistant IA",
+    "it": "Assistente AI",
+    "zh-CN": "AI 助手",
+    "ca-valencia": "Assistent IA"
+  },
   "author": "Smart Social Contracts Team",
   "permissions": [],
   "profiles": [],

@@ -19,6 +19,9 @@
     "en": "Package Manager",
     "es": "Gestor de Paquetes",
     "de": "Paketverwaltung",
-    "zh-CN": "包管理器"
+    "zh-CN": "包管理器",
+    "fr": "Gestionnaire de Paquets",
+    "it": "Gestore Pacchetti",
+    "ca-valencia": "Gestor de Paquets"
   }
 }

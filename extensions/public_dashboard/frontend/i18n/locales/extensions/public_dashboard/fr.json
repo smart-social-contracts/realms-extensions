@@ -1,0 +1,19 @@
+{
+  "realm_default": "Royaume",
+  "loading_dashboard": "Chargement du tableau de bord…",
+  "join_this_realm": "Rejoindre ce royaume",
+  "realm_status": "État du royaume",
+  "stage_phase": "Phase {label}",
+  "currently": "Actuellement {label}",
+  "countdown_live": "Actif",
+  "stage_alpha": "Alpha",
+  "stage_beta": "Bêta",
+  "stage_production": "Actif",
+  "stage_deprecation": "En transition",
+  "stage_terminated": "Archivé",
+  "stage_alpha_desc": "Rassemblement des membres fondateurs. Les dépôts sont remboursables pendant la croissance de la communauté.",
+  "stage_beta_desc": "Masse critique atteinte. L'infrastructure, les terres et les prestataires de services sont en préparation.",
+  "stage_production_desc": "Pleinement opérationnel. La gouvernance, les services et la vie communautaire sont actifs.",
+  "stage_deprecation_desc": "Ce royaume est en transition. Les nouveaux membres ne peuvent pas rejoindre.",
+  "stage_terminated_desc": "Ce royaume est fermé. Les archives restent disponibles en lecture seule."
+}

@@ -19,7 +19,13 @@
     "public_services"
   ],
   "sidebar_label": {
-    "en": "Passport Verification"
+    "en": "Passport Verification",
+    "es": "Verificación de Pasaporte",
+    "de": "Pass-Verifizierung",
+    "fr": "Vérification du Passeport",
+    "it": "Verifica Passaporto",
+    "zh-CN": "护照验证",
+    "ca-valencia": "Verificació de Passaport"
   },
   "icon": "id-badge",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/passport_verification",

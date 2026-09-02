@@ -18,7 +18,13 @@
     "mundus"
   ],
   "sidebar_label": {
-    "en": "Realms Network"
+    "en": "Realms Network",
+    "es": "Red de Realms",
+    "de": "Realms-Netzwerk",
+    "fr": "Réseau Realms",
+    "it": "Rete Realms",
+    "zh-CN": "Realms 网络",
+    "ca-valencia": "Xarxa de Realms"
   },
   "icon": "world",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/mundus_explorer",

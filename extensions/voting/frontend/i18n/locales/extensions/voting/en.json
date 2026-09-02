@@ -1,0 +1,22 @@
+{
+  "page_title": "Voting",
+  "proposals": "Proposals",
+  "submit_proposal": "Submit Proposal",
+  "realm_wide": "Realm-wide",
+  "submit_a_proposal": "Submit a Proposal",
+  "submitting": "Submitting…",
+  "vote_yes": "Yes",
+  "vote_no": "No",
+  "vote_abstain": "Abstain",
+  "filter_all_types": "All types",
+  "type_transaction": "Transaction",
+  "type_upgrade": "Upgrade",
+  "type_poll": "Poll",
+  "type_code_execution": "Code execution",
+  "form_subtitle_transaction": "Propose a treasury transfer from the realm vault.",
+  "form_subtitle_upgrade": "Install or upgrade a codex, extension, or core orchestration action.",
+  "form_subtitle_poll": "Ask the realm a question — no automated action if approved.",
+  "form_subtitle_code_execution": "Submit Python code to run on the realm backend if approved.",
+  "no_proposals_filtered": "No proposals match the current filters",
+  "no_proposals_yet": "No proposals yet"
+}

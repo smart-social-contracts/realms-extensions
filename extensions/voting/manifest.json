@@ -1,6 +1,6 @@
 {
   "name": "voting",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Submit proposals that change how your realm works, read what each one would do, and vote yes, no, or abstain while voting is open.",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -15,7 +15,13 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/voting",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Voting"
+    "en": "Voting",
+    "es": "Votación",
+    "de": "Abstimmung",
+    "fr": "Vote",
+    "it": "Voto",
+    "zh-CN": "投票",
+    "ca-valencia": "Votació"
   },
   "entry_access": {
     "default": "realm.data_view",
