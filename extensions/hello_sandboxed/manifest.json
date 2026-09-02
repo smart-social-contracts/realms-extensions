@@ -22,7 +22,13 @@
   "icon": "wand",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Hello (Sandboxed)"
+    "en": "Hello (Sandboxed)",
+    "es": "Hola (Aislado)",
+    "de": "Hallo (Sandboxed)",
+    "fr": "Bonjour (Sandboxé)",
+    "it": "Ciao (Sandboxed)",
+    "zh-CN": "你好（沙盒）",
+    "ca-valencia": "Hola (Aïllat)"
   },
   "entry_access": {
     "functions": {

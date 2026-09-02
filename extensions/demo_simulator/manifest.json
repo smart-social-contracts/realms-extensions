@@ -16,7 +16,13 @@
   "icon": "flask",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Demo Simulator"
+    "en": "Demo Simulator",
+    "es": "Simulador de Demo",
+    "de": "Demo-Simulator",
+    "fr": "Simulateur de Démo",
+    "it": "Simulatore Demo",
+    "zh-CN": "演示模拟器",
+    "ca-valencia": "Simulador de Demo"
   },
   "entry_access": {
     "default": "demo.manage"

@@ -1,0 +1,22 @@
+{
+  "page_title": "投票",
+  "proposals": "提案",
+  "submit_proposal": "提交提案",
+  "realm_wide": "全领域",
+  "submit_a_proposal": "提交提案",
+  "submitting": "提交中…",
+  "vote_yes": "赞成",
+  "vote_no": "反对",
+  "vote_abstain": "弃权",
+  "filter_all_types": "所有类型",
+  "type_transaction": "交易",
+  "type_upgrade": "升级",
+  "type_poll": "投票调查",
+  "type_code_execution": "代码执行",
+  "form_subtitle_transaction": "提议从领域金库进行资金转移。",
+  "form_subtitle_upgrade": "安装或升级 codex、扩展或核心编排操作。",
+  "form_subtitle_poll": "向领域提出问题——通过后不执行自动操作。",
+  "form_subtitle_code_execution": "提交在通过后于领域后端运行的 Python 代码。",
+  "no_proposals_filtered": "没有符合当前筛选条件的提案",
+  "no_proposals_yet": "尚无提案"
+}

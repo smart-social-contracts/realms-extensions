@@ -18,6 +18,12 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/market_place",
   "path": "extensions",
   "sidebar_label": {
-    "en": "Marketplace"
+    "en": "Marketplace",
+    "es": "Mercado",
+    "de": "Marktplatz",
+    "fr": "Marché",
+    "it": "Mercato",
+    "zh-CN": "市场",
+    "ca-valencia": "Mercat"
   }
 }

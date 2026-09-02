@@ -1,0 +1,19 @@
+{
+  "realm_default": "Realm",
+  "loading_dashboard": "Dashboard wird geladen…",
+  "join_this_realm": "Diesem Realm beitreten",
+  "realm_status": "Realm-Status",
+  "stage_phase": "Phase {label}",
+  "currently": "Derzeit {label}",
+  "countdown_live": "Live",
+  "stage_alpha": "Alpha",
+  "stage_beta": "Beta",
+  "stage_production": "Live",
+  "stage_deprecation": "Auslaufend",
+  "stage_terminated": "Archiviert",
+  "stage_alpha_desc": "Gründungsmitglieder werden gesammelt. Einlagen sind erstattungsfähig, während die Gemeinschaft wächst.",
+  "stage_beta_desc": "Kritische Masse erreicht. Infrastruktur, Land und Dienstleister werden vorbereitet.",
+  "stage_production_desc": "Voll betriebsbereit. Governance, Dienste und Gemeinschaftsleben sind aktiv.",
+  "stage_deprecation_desc": "Dieser Realm wird auslaufen. Neue Mitglieder können nicht beitreten.",
+  "stage_terminated_desc": "Dieser Realm wurde geschlossen. Aufzeichnungen bleiben als schreibgeschütztes Archiv verfügbar."
+}

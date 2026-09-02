@@ -28,7 +28,13 @@
     "land_territory"
   ],
   "sidebar_label": {
-    "en": "Zones"
+    "en": "Zones",
+    "es": "Zonas",
+    "de": "Zonen",
+    "fr": "Zones",
+    "it": "Zone",
+    "zh-CN": "区域",
+    "ca-valencia": "Zones"
   },
   "icon": "layers-subtract",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/zone_selector",

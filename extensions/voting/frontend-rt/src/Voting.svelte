@@ -8,8 +8,27 @@
 		persistSessionFlag,
 		readSessionFlag,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
+
+	let i18nTick = $state(0);
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en').then(() => {
+				i18nTick++;
+			});
+			return;
+		}
+		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
+			void loadExtensionI18n(loc || 'en').then(() => {
+				i18nTick++;
+			});
+		});
+		return unsub;
+	});
 
 	const EXTENSION_ID = 'voting';
 
@@ -17,35 +36,45 @@
 	type ProposalType = 'transaction' | 'upgrade' | 'poll' | 'code_execution';
 	type UpgradeTarget = 'codex' | 'extension' | 'core';
 
-	const PROPOSAL_TYPE_OPTIONS: { value: ProposalType | ''; label: string }[] = [
-		{ value: '', label: 'All types' },
-		{ value: 'transaction', label: 'Transaction' },
-		{ value: 'upgrade', label: 'Upgrade' },
-		{ value: 'poll', label: 'Poll' },
-		{ value: 'code_execution', label: 'Code execution' },
-	];
-	const FORM_TYPE_OPTIONS: { value: ProposalType; label: string; subtitle: string }[] = [
-		{
-			value: 'transaction',
-			label: 'Transaction',
-			subtitle: 'Propose a treasury transfer from the realm vault.',
-		},
-		{
-			value: 'upgrade',
-			label: 'Upgrade',
-			subtitle: 'Install or upgrade a codex, extension, or core orchestration action.',
-		},
-		{
-			value: 'poll',
-			label: 'Poll',
-			subtitle: 'Ask the realm a question — no automated action if approved.',
-		},
-		{
-			value: 'code_execution',
-			label: 'Code execution',
-			subtitle: 'Submit Python code to run on the realm backend if approved.',
-		},
-	];
+	function buildProposalTypeOptions(): { value: ProposalType | ''; label: string }[] {
+		void i18nTick;
+		return [
+			{ value: '', label: t('filter_all_types') },
+			{ value: 'transaction', label: t('type_transaction') },
+			{ value: 'upgrade', label: t('type_upgrade') },
+			{ value: 'poll', label: t('type_poll') },
+			{ value: 'code_execution', label: t('type_code_execution') },
+		];
+	}
+
+	function buildFormTypeOptions(): { value: ProposalType; label: string; subtitle: string }[] {
+		void i18nTick;
+		return [
+			{
+				value: 'transaction',
+				label: t('type_transaction'),
+				subtitle: t('form_subtitle_transaction'),
+			},
+			{
+				value: 'upgrade',
+				label: t('type_upgrade'),
+				subtitle: t('form_subtitle_upgrade'),
+			},
+			{
+				value: 'poll',
+				label: t('type_poll'),
+				subtitle: t('form_subtitle_poll'),
+			},
+			{
+				value: 'code_execution',
+				label: t('type_code_execution'),
+				subtitle: t('form_subtitle_code_execution'),
+			},
+		];
+	}
+
+	let proposalTypeOptions = $derived(buildProposalTypeOptions());
+	let formTypeOptions = $derived(buildFormTypeOptions());
 
 	function getExtensionBasePath(): string {
 		if (typeof window === 'undefined') return '/extensions/voting';
@@ -239,9 +268,10 @@
 	let selectedProposalPermissions = $derived(
 		selectedProposal ? parseProposalPermissions(selectedProposal) : [],
 	);
-	let formSubtitle = $derived(
-		FORM_TYPE_OPTIONS.find((o) => o.value === formProposalType)?.subtitle ?? '',
-	);
+	let formSubtitle = $derived.by(() => {
+		void i18nTick;
+		return t(`form_subtitle_${formProposalType}`);
+	});
 	let showCoreUpgrade = $derived(!!submitContext?.baton_configured);
 
 	function parseProposalMetadata(proposal: any): Record<string, any> {
@@ -1156,9 +1186,10 @@
 </style>
 
 <div class="voting-page w-full px-3 pt-4 sm:px-6 sm:pt-8 max-w-none">
+	{#key i18nTick}
 	<!-- Header -->
 	<div class="mb-6">
-		<h1 class="text-3xl font-bold text-gray-900 mb-1">Voting</h1>
+		<h1 class="text-3xl font-bold text-gray-900 mb-1">{t('page_title')}</h1>
 		<p class="text-gray-500 text-sm">{extensionDescription}</p>
 		{#if votingSettings}
 			<p class="text-xs text-gray-400 mt-2">
@@ -1335,7 +1366,7 @@
 								{:else}
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
 								{/if}
-								Yes
+								{t('vote_yes')}
 							</button>
 							<button
 								onclick={() => castVote(selectedProposal.id, 'no')}
@@ -1347,7 +1378,7 @@
 								{:else}
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
 								{/if}
-								No
+								{t('vote_no')}
 							</button>
 							<button
 								onclick={() => castVote(selectedProposal.id, 'abstain')}
@@ -1359,7 +1390,7 @@
 								{:else}
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
 								{/if}
-								Abstain
+								{t('vote_abstain')}
 							</button>
 						</div>
 					{:else if selectedProposal.status === 'voting' || selectedProposal.status === 'pending_vote'}
@@ -1494,7 +1525,7 @@
 	{:else if view === 'form'}
 		<div class="rounded-lg border border-gray-200 bg-white p-6">
 			<div class="mb-5">
-				<h2 class="text-xl font-semibold text-gray-900 mb-1">Submit a Proposal</h2>
+				<h2 class="text-xl font-semibold text-gray-900 mb-1">{t('submit_a_proposal')}</h2>
 				<p class="text-sm text-gray-500">{formSubtitle}</p>
 			</div>
 
@@ -1507,7 +1538,7 @@
 						disabled={submitting}
 						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
 					>
-						{#each FORM_TYPE_OPTIONS as opt}
+						{#each formTypeOptions as opt}
 							<option value={opt.value}>{opt.label}</option>
 						{/each}
 					</select>
@@ -1756,10 +1787,10 @@
 					>
 						{#if submitting}
 							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-							Submitting…
+							{t('submitting')}
 						{:else}
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-							Submit Proposal
+							{t('submit_proposal')}
 						{/if}
 					</button>
 				</div>
@@ -1775,29 +1806,29 @@
 					<button
 						onclick={() => view = 'list'}
 						class="chrome-btn {view === 'list' ? 'is-on' : ''}"
-						title="Proposals"
-						aria-label="Proposals"
+						title={t('proposals')}
+						aria-label={t('proposals')}
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-						<span class="chrome-label">Proposals</span>
+						<span class="chrome-label">{t('proposals')}</span>
 					</button>
 					<button
 						onclick={openSubmitForm}
 						class="chrome-btn"
-						title="Submit proposal"
-						aria-label="Submit proposal"
+						title={t('submit_proposal')}
+						aria-label={t('submit_proposal')}
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-						<span class="chrome-label">Submit Proposal</span>
+						<span class="chrome-label">{t('submit_proposal')}</span>
 					</button>
 					<button
 						onclick={() => view = 'federal'}
 						class="chrome-btn {view === 'federal' ? 'is-on' : ''}"
-						title="Realm-wide"
-						aria-label="Realm-wide"
+						title={t('realm_wide')}
+						aria-label={t('realm_wide')}
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-						<span class="chrome-label">Realm-wide</span>
+						<span class="chrome-label">{t('realm_wide')}</span>
 					</button>
 				</div>
 				{#if view !== 'federal'}
@@ -1869,7 +1900,7 @@
 					class="text-xs border-gray-300 py-1.5 pl-2.5 pr-8 text-gray-700 focus:border-indigo-500 focus:ring-indigo-500"
 					aria-label="Filter by proposal type"
 				>
-					{#each PROPOSAL_TYPE_OPTIONS as opt}
+					{#each proposalTypeOptions as opt}
 						<option value={opt.value}>{opt.label}</option>
 					{/each}
 				</select>
@@ -1904,10 +1935,10 @@
 				<div class="text-center py-12">
 					<svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
 					{#if orgFilter || statusFilter || typeFilter}
-						<p class="text-gray-500 text-sm">No proposals match the current filters</p>
+						<p class="text-gray-500 text-sm">{t('no_proposals_filtered')}</p>
 						<p class="text-gray-400 text-xs mt-1">Try clearing the filters.</p>
 					{:else}
-						<p class="text-gray-500 text-sm">No proposals yet</p>
+						<p class="text-gray-500 text-sm">{t('no_proposals_yet')}</p>
 						<p class="text-gray-400 text-xs mt-1">Be the first to submit a proposal for this realm.</p>
 					{/if}
 				</div>
@@ -1971,9 +2002,9 @@
 									</div>
 									{#if votingOpen}
 										<div class="flex gap-1">
-											<button onclick={() => castVote(proposal.id, 'yes')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-green-300 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">Yes</button>
-											<button onclick={() => castVote(proposal.id, 'no')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">No</button>
-											<button onclick={() => castVote(proposal.id, 'abstain')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">Abstain</button>
+											<button onclick={() => castVote(proposal.id, 'yes')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-green-300 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">{t('vote_yes')}</button>
+											<button onclick={() => castVote(proposal.id, 'no')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">{t('vote_no')}</button>
+											<button onclick={() => castVote(proposal.id, 'abstain')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">{t('vote_abstain')}</button>
 										</div>
 									{/if}
 								</div>
@@ -2030,4 +2061,5 @@
 			{/if}
 		</div>
 	{/if}
+	{/key}
 </div>

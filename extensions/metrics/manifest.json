@@ -25,7 +25,13 @@
     "finances"
   ],
   "sidebar_label": {
-    "en": "Financial Reports"
+    "en": "Financial Reports",
+    "es": "Informes Financieros",
+    "de": "Finanzberichte",
+    "fr": "Rapports Financiers",
+    "it": "Report Finanziari",
+    "zh-CN": "财务报告",
+    "ca-valencia": "Informes Financers"
   },
   "icon": "chart-bar",
   "doc_url": null,

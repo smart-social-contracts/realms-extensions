@@ -1,0 +1,19 @@
+{
+  "realm_default": "Reino",
+  "loading_dashboard": "Cargando el panel…",
+  "join_this_realm": "Unirse a este reino",
+  "realm_status": "Estado del reino",
+  "stage_phase": "Fase {label}",
+  "currently": "Actualmente {label}",
+  "countdown_live": "Activo",
+  "stage_alpha": "Alfa",
+  "stage_beta": "Beta",
+  "stage_production": "Activo",
+  "stage_deprecation": "En transición",
+  "stage_terminated": "Archivado",
+  "stage_alpha_desc": "Reuniendo miembros fundadores. Los depósitos son reembolsables mientras crece la comunidad.",
+  "stage_beta_desc": "Masa crítica alcanzada. Se preparan infraestructura, tierras y proveedores de servicios.",
+  "stage_production_desc": "Plenamente operativo. La gobernanza, los servicios y la vida comunitaria están activos.",
+  "stage_deprecation_desc": "Este reino está en transición. Los nuevos miembros no pueden unirse.",
+  "stage_terminated_desc": "Este reino ha cerrado. Los registros permanecen disponibles como archivo de solo lectura."
+}

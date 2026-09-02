@@ -15,7 +15,13 @@
     "settings"
   ],
   "sidebar_label": {
-    "en": "Menus"
+    "en": "Menus",
+    "es": "Menús",
+    "de": "Menüs",
+    "fr": "Menus",
+    "it": "Menu",
+    "zh-CN": "菜单",
+    "ca-valencia": "Menús"
   },
   "permissions": [
     "admin"

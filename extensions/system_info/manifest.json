@@ -25,7 +25,13 @@
     "realm_management"
   ],
   "sidebar_label": {
-    "en": "System Info"
+    "en": "System Info",
+    "es": "Información del Sistema",
+    "de": "Systeminformationen",
+    "fr": "Infos Système",
+    "it": "Info Sistema",
+    "zh-CN": "系统信息",
+    "ca-valencia": "Informació del Sistema"
   },
   "icon": "server",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/system_info",

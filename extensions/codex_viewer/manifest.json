@@ -18,7 +18,13 @@
   "show_in_sidebar": true,
   "icon": "file-code",
   "sidebar_label": {
-    "en": "Codices"
+    "en": "Codices",
+    "es": "Códices",
+    "de": "Codices",
+    "fr": "Codices",
+    "it": "Codici",
+    "zh-CN": "法典",
+    "ca-valencia": "Còdex"
   },
   "entry_access": {
     "default": "realm.data_view"

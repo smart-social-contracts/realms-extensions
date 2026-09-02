@@ -1,0 +1,19 @@
+{
+  "realm_default": "Regne",
+  "loading_dashboard": "Carregant el tauler…",
+  "join_this_realm": "Unir-se a este regne",
+  "realm_status": "Estat del regne",
+  "stage_phase": "Fase {label}",
+  "currently": "Actualment {label}",
+  "countdown_live": "Actiu",
+  "stage_alpha": "Alfa",
+  "stage_beta": "Beta",
+  "stage_production": "Actiu",
+  "stage_deprecation": "En transició",
+  "stage_terminated": "Arxivat",
+  "stage_alpha_desc": "Reunint membres fundadors. Els dipòsits són reemborsables mentre creix la comunitat.",
+  "stage_beta_desc": "Massa crítica assolida. S'està preparant infraestructura, terres i proveïdors de serveis.",
+  "stage_production_desc": "Plenament operatiu. La governança, els serveis i la vida comunitària estan actius.",
+  "stage_deprecation_desc": "Este regne està en transició. Els nous membres no poden unir-se.",
+  "stage_terminated_desc": "Este regne ha tancat. Els registres romanen disponibles com arxiu de només lectura."
+}

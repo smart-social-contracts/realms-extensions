@@ -1,0 +1,22 @@
+{
+  "page_title": "Vote",
+  "proposals": "Propositions",
+  "submit_proposal": "Soumettre une proposition",
+  "realm_wide": "À l'échelle du royaume",
+  "submit_a_proposal": "Soumettre une proposition",
+  "submitting": "Envoi…",
+  "vote_yes": "Oui",
+  "vote_no": "Non",
+  "vote_abstain": "Abstention",
+  "filter_all_types": "Tous les types",
+  "type_transaction": "Transaction",
+  "type_upgrade": "Mise à niveau",
+  "type_poll": "Sondage",
+  "type_code_execution": "Exécution de code",
+  "form_subtitle_transaction": "Proposer un transfert de trésorerie depuis le coffre du royaume.",
+  "form_subtitle_upgrade": "Installer ou mettre à niveau un codex, une extension ou une action d'orchestration centrale.",
+  "form_subtitle_poll": "Poser une question au royaume — aucune action automatique si approuvé.",
+  "form_subtitle_code_execution": "Soumettre du code Python à exécuter sur le backend du royaume si approuvé.",
+  "no_proposals_filtered": "Aucune proposition correspond aux filtres actuels",
+  "no_proposals_yet": "Aucune proposition pour le moment"
+}

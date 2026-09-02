@@ -7,7 +7,13 @@
     "realm_management"
   ],
   "sidebar_label": {
-    "en": "Data Explorer"
+    "en": "Data Explorer",
+    "es": "Explorador de Datos",
+    "de": "Daten-Explorer",
+    "fr": "Explorateur de Données",
+    "it": "Esploratore Dati",
+    "zh-CN": "数据浏览器",
+    "ca-valencia": "Explorador de Dades"
   },
   "permissions": [
     "admin"

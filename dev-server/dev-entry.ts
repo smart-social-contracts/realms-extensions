@@ -13,6 +13,13 @@ import { idlFactory } from './realm_backend.did.js';
 declare const __EXT_ID__: string;
 declare const __BACKEND_CANISTER_ID__: string;
 declare const __FILE_REGISTRY_CANISTER_ID__: string;
+declare const __DEV_LOCALE__: string;
+
+function resolveDevLocale(): string {
+	const fromQuery = new URLSearchParams(window.location.search).get('locale');
+	if (fromQuery && fromQuery.trim()) return fromQuery.trim();
+	return (typeof __DEV_LOCALE__ === 'string' && __DEV_LOCALE__.trim()) || 'en';
+}
 
 type ModalAction = { id: string; label: string; tone?: string };
 type ModalPayload = { title: string; body: string; actions: ModalAction[] };
@@ -165,7 +172,7 @@ async function main() {
 		},
 
 		t: readableOf((key: string) => key),
-		locale: readableOf('en'),
+		locale: readableOf(resolveDevLocale()),
 
 		notifications: {
 			items: readableOf([]),

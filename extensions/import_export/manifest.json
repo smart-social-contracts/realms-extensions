@@ -13,7 +13,13 @@
   "icon": "arrow-down-up",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Import & Export"
+    "en": "Import & Export",
+    "es": "Importar y Exportar",
+    "de": "Import & Export",
+    "fr": "Import et Export",
+    "it": "Importa ed Esporta",
+    "zh-CN": "导入导出",
+    "ca-valencia": "Importació i Exportació"
   },
   "entry_access": {
     "default": "realm.admin",

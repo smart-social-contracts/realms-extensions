@@ -1,0 +1,22 @@
+{
+  "page_title": "Votació",
+  "proposals": "Propostes",
+  "submit_proposal": "Enviar proposta",
+  "realm_wide": "Tot el regne",
+  "submit_a_proposal": "Enviar una proposta",
+  "submitting": "Enviant…",
+  "vote_yes": "Sí",
+  "vote_no": "No",
+  "vote_abstain": "Abstenció",
+  "filter_all_types": "Tots els tipus",
+  "type_transaction": "Transacció",
+  "type_upgrade": "Actualització",
+  "type_poll": "Enquesta",
+  "type_code_execution": "Execució de codi",
+  "form_subtitle_transaction": "Proposa una transferència de tresor des de la volta del regne.",
+  "form_subtitle_upgrade": "Instala o actualitza un codex, extensió o acció d'orquestració principal.",
+  "form_subtitle_poll": "Planteja una pregunta al regne — sense acció automàtica si s'aprova.",
+  "form_subtitle_code_execution": "Envia codi Python per executar al backend del regne si s'aprova.",
+  "no_proposals_filtered": "No hi ha propostes que coincide amb els filtres actuals",
+  "no_proposals_yet": "Encara no hi ha propostes"
+}

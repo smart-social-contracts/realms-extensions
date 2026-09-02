@@ -1,0 +1,22 @@
+{
+  "page_title": "Abstimmung",
+  "proposals": "Vorschläge",
+  "submit_proposal": "Vorschlag einreichen",
+  "realm_wide": "Realm-weit",
+  "submit_a_proposal": "Vorschlag einreichen",
+  "submitting": "Wird eingereicht…",
+  "vote_yes": "Ja",
+  "vote_no": "Nein",
+  "vote_abstain": "Enthaltung",
+  "filter_all_types": "Alle Typen",
+  "type_transaction": "Transaktion",
+  "type_upgrade": "Upgrade",
+  "type_poll": "Umfrage",
+  "type_code_execution": "Codeausführung",
+  "form_subtitle_transaction": "Schlage eine Treasury-Überweisung aus der Realm-Tresor vorschlagen.",
+  "form_subtitle_upgrade": "Codex, Erweiterung oder zentrale Orchestrierungsaktion installieren oder aktualisieren.",
+  "form_subtitle_poll": "Stelle dem Realm eine Frage — keine automatische Aktion bei Annahme.",
+  "form_subtitle_code_execution": "Python-Code einreichen, der bei Annahme im Realm-Backend ausgeführt wird.",
+  "no_proposals_filtered": "Keine Vorschläge entsprechen den aktuellen Filtern",
+  "no_proposals_yet": "Noch keine Vorschläge"
+}

@@ -1,6 +1,6 @@
 {
   "name": "member_manager",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "ggg_api_version": 1,
   "capabilities": [
     "member.list",
@@ -16,7 +16,13 @@
     "people_access"
   ],
   "sidebar_label": {
-    "en": "Members"
+    "en": "Members",
+    "es": "Miembros",
+    "de": "Mitglieder",
+    "fr": "Membres",
+    "it": "Membri",
+    "zh-CN": "成员",
+    "ca-valencia": "Membres"
   },
   "permissions": [],
   "profiles": [

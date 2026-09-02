@@ -15,7 +15,13 @@
   "icon": "users",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "User Management"
+    "en": "User Management",
+    "es": "Gestión de Usuarios",
+    "de": "Benutzerverwaltung",
+    "fr": "Gestion des Utilisateurs",
+    "it": "Gestione Utenti",
+    "zh-CN": "用户管理",
+    "ca-valencia": "Gestió d'Usuaris"
   },
   "entry_access": {
     "default": "realm.data_view",

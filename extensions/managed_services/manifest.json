@@ -42,7 +42,13 @@
     "realm_management"
   ],
   "sidebar_label": {
-    "en": "Managed Services"
+    "en": "Managed Services",
+    "es": "Servicios Gestionados",
+    "de": "Verwaltete Dienste",
+    "fr": "Services Gérés",
+    "it": "Servizi Gestiti",
+    "zh-CN": "托管服务",
+    "ca-valencia": "Serveis Gestionats"
   },
   "icon": "cloud_upload",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/managed_services",

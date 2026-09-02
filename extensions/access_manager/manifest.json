@@ -15,7 +15,13 @@
   "icon": "building",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Department Management"
+    "en": "Department Management",
+    "es": "Gestión de Departamentos",
+    "de": "Abteilungsverwaltung",
+    "fr": "Gestion des Départements",
+    "it": "Gestione Dipartimenti",
+    "zh-CN": "部门管理",
+    "ca-valencia": "Gestió de Departaments"
   },
   "entry_access": {
     "default": "realm.data_view",

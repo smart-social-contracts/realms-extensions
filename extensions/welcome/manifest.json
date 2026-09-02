@@ -1,6 +1,6 @@
 {
   "name": "welcome",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "The first page visitors see when they arrive: your realm's welcome message and a button to join or enter.",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -15,6 +15,12 @@
   "doc_url": null,
   "show_in_sidebar": false,
   "sidebar_label": {
-    "en": "Welcome"
+    "en": "Welcome",
+    "es": "Bienvenida",
+    "de": "Willkommen",
+    "fr": "Bienvenue",
+    "it": "Benvenuto",
+    "zh-CN": "欢迎",
+    "ca-valencia": "Benvinguda"
   }
 }

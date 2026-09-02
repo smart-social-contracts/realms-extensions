@@ -16,7 +16,13 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/procurement",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Procurement"
+    "en": "Procurement",
+    "es": "Adquisiciones",
+    "de": "Beschaffung",
+    "fr": "Achats",
+    "it": "Approvvigionamento",
+    "zh-CN": "采购",
+    "ca-valencia": "Compres"
   },
   "capabilities": [
     "procurement.roles",
@@ -47,78 +53,199 @@
     "Rfp": {
       "alias": "rfp_id",
       "fields": {
-        "rfp_id": { "type": "String", "max_length": 64 },
-        "title": { "type": "String", "max_length": 512 },
-        "description": { "type": "String", "max_length": 4096 },
-        "requester_id": { "type": "String", "max_length": 128 },
-        "status": { "type": "String", "max_length": 32 },
-        "opens_at": { "type": "Integer" },
-        "closes_at": { "type": "Integer" },
-        "opened_at": { "type": "Integer" },
-        "closed_at": { "type": "Integer" },
-        "revealed_at": { "type": "Integer" },
-        "awarded_at": { "type": "Integer" },
-        "executed_at": { "type": "Integer" },
-        "rubric_json": { "type": "String" },
-        "winning_bid_id": { "type": "String", "max_length": 64 },
-        "metadata_json": { "type": "String" }
+        "rfp_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "title": {
+          "type": "String",
+          "max_length": 512
+        },
+        "description": {
+          "type": "String",
+          "max_length": 4096
+        },
+        "requester_id": {
+          "type": "String",
+          "max_length": 128
+        },
+        "status": {
+          "type": "String",
+          "max_length": 32
+        },
+        "opens_at": {
+          "type": "Integer"
+        },
+        "closes_at": {
+          "type": "Integer"
+        },
+        "opened_at": {
+          "type": "Integer"
+        },
+        "closed_at": {
+          "type": "Integer"
+        },
+        "revealed_at": {
+          "type": "Integer"
+        },
+        "awarded_at": {
+          "type": "Integer"
+        },
+        "executed_at": {
+          "type": "Integer"
+        },
+        "rubric_json": {
+          "type": "String"
+        },
+        "winning_bid_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "metadata_json": {
+          "type": "String"
+        }
       }
     },
     "RfpTransition": {
       "alias": "transition_id",
       "fields": {
-        "transition_id": { "type": "String", "max_length": 128 },
-        "rfp_id": { "type": "String", "max_length": 64 },
-        "from_status": { "type": "String", "max_length": 32 },
-        "to_status": { "type": "String", "max_length": 32 },
-        "actor_id": { "type": "String", "max_length": 128 },
-        "timestamp": { "type": "Integer" },
-        "note": { "type": "String", "max_length": 1024 },
-        "metadata_json": { "type": "String" }
+        "transition_id": {
+          "type": "String",
+          "max_length": 128
+        },
+        "rfp_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "from_status": {
+          "type": "String",
+          "max_length": 32
+        },
+        "to_status": {
+          "type": "String",
+          "max_length": 32
+        },
+        "actor_id": {
+          "type": "String",
+          "max_length": 128
+        },
+        "timestamp": {
+          "type": "Integer"
+        },
+        "note": {
+          "type": "String",
+          "max_length": 1024
+        },
+        "metadata_json": {
+          "type": "String"
+        }
       }
     },
     "Bid": {
       "alias": "bid_id",
       "fields": {
-        "bid_id": { "type": "String", "max_length": 64 },
-        "rfp_id": { "type": "String", "max_length": 64 },
-        "vendor_id": { "type": "String", "max_length": 128 },
-        "submitted_at": { "type": "Integer" },
-        "seal_status": { "type": "String", "max_length": 16 },
-        "total_score": { "type": "Float" },
-        "score_breakdown_json": { "type": "String" }
+        "bid_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "rfp_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "vendor_id": {
+          "type": "String",
+          "max_length": 128
+        },
+        "submitted_at": {
+          "type": "Integer"
+        },
+        "seal_status": {
+          "type": "String",
+          "max_length": 16
+        },
+        "total_score": {
+          "type": "Float"
+        },
+        "score_breakdown_json": {
+          "type": "String"
+        }
       }
     },
     "BidPayload": {
       "alias": "bid_id",
       "fields": {
-        "bid_id": { "type": "String", "max_length": 64 },
-        "ciphertext": { "type": "String" },
-        "scope": { "type": "String", "max_length": 512 },
-        "encryption_mode": { "type": "String", "max_length": 16 },
-        "created_by": { "type": "String", "max_length": 128 }
+        "bid_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "ciphertext": {
+          "type": "String"
+        },
+        "scope": {
+          "type": "String",
+          "max_length": 512
+        },
+        "encryption_mode": {
+          "type": "String",
+          "max_length": 16
+        },
+        "created_by": {
+          "type": "String",
+          "max_length": 128
+        }
       }
     },
     "BidScore": {
       "alias": "score_id",
       "fields": {
-        "score_id": { "type": "String", "max_length": 192 },
-        "bid_id": { "type": "String", "max_length": 64 },
-        "rfp_id": { "type": "String", "max_length": 64 },
-        "evaluator_id": { "type": "String", "max_length": 128 },
-        "criterion_id": { "type": "String", "max_length": 64 },
-        "score": { "type": "Float" },
-        "scored_at": { "type": "Integer" }
+        "score_id": {
+          "type": "String",
+          "max_length": 192
+        },
+        "bid_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "rfp_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "evaluator_id": {
+          "type": "String",
+          "max_length": 128
+        },
+        "criterion_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "score": {
+          "type": "Float"
+        },
+        "scored_at": {
+          "type": "Integer"
+        }
       }
     },
     "VendorRecord": {
       "alias": "vendor_id",
       "fields": {
-        "vendor_id": { "type": "String", "max_length": 128 },
-        "awards_count": { "type": "Integer" },
-        "last_award_at": { "type": "Integer" },
-        "last_rfp_id": { "type": "String", "max_length": 64 },
-        "flags_json": { "type": "String" }
+        "vendor_id": {
+          "type": "String",
+          "max_length": 128
+        },
+        "awards_count": {
+          "type": "Integer"
+        },
+        "last_award_at": {
+          "type": "Integer"
+        },
+        "last_rfp_id": {
+          "type": "String",
+          "max_length": 64
+        },
+        "flags_json": {
+          "type": "String"
+        }
       }
     }
   },

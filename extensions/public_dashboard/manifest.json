@@ -1,6 +1,6 @@
 {
   "name": "public_dashboard",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "description": "See your realm's welcome message, lifecycle stage, member activity, departments, and key statistics on one home page.",
   "author": "Smart Social Contracts",
   "system": true,
@@ -10,7 +10,13 @@
     "home"
   ],
   "sidebar_label": {
-    "en": "My Realm"
+    "en": "My Realm",
+    "es": "Mi Reino",
+    "de": "Mein Reich",
+    "fr": "Mon Royaume",
+    "it": "Il Mio Regno",
+    "zh-CN": "我的领域",
+    "ca-valencia": "El Meu Regne"
   },
   "icon": "world",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/public_dashboard",

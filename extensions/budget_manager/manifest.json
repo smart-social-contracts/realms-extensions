@@ -33,7 +33,13 @@
     "finances"
   ],
   "sidebar_label": {
-    "en": "Budget"
+    "en": "Budget",
+    "es": "Presupuesto",
+    "de": "Haushalt",
+    "fr": "Budget",
+    "it": "Bilancio",
+    "zh-CN": "预算",
+    "ca-valencia": "Pressupost"
   },
   "icon": "cash",
   "doc_url": null,

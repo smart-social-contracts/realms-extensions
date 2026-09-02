@@ -14,6 +14,13 @@ declare const __MANIFEST__: {
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
 };
+declare const __DEV_LOCALE__: string;
+
+function resolveDevLocale(): string {
+	const fromQuery = new URLSearchParams(window.location.search).get('locale');
+	if (fromQuery && fromQuery.trim()) return fromQuery.trim();
+	return (typeof __DEV_LOCALE__ === 'string' && __DEV_LOCALE__.trim()) || 'en';
+}
 
 const iframe = document.getElementById('ext-iframe') as HTMLIFrameElement;
 const devLabel = document.getElementById('dev-label')!;
@@ -42,7 +49,7 @@ let modalOpen = false;
 
 const mockState = (): HostState => ({
 	principal: 'aaaaa-aa-dev-mock-principal',
-	locale: 'en',
+	locale: resolveDevLocale(),
 	theme: hostTheme,
 	realmInfo: {
 		name: 'Dev Realm (mock)',

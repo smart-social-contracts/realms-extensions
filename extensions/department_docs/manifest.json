@@ -8,7 +8,13 @@
     "people_access"
   ],
   "sidebar_label": {
-    "en": "Department Docs"
+    "en": "Department Docs",
+    "es": "Documentos del Departamento",
+    "de": "Abteilungsdokumente",
+    "fr": "Documents du Département",
+    "it": "Documenti di Dipartimento",
+    "zh-CN": "部门文档",
+    "ca-valencia": "Documents del Departament"
   },
   "permissions": [],
   "functions": [

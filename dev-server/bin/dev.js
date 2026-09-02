@@ -111,7 +111,8 @@ if (isSandboxed) {
 						code: code
 							.replaceAll('__EXT_ID__', JSON.stringify(extId))
 							.replaceAll('__EXT_IFRAME_URL__', JSON.stringify(iframeUrl))
-							.replaceAll('__MANIFEST__', JSON.stringify(sandboxManifest)),
+							.replaceAll('__MANIFEST__', JSON.stringify(sandboxManifest))
+							.replaceAll('__DEV_LOCALE__', JSON.stringify(config.locale || 'en')),
 						map: null,
 					};
 				},
@@ -159,6 +160,7 @@ if (isSandboxed) {
 			__EXT_ID__: JSON.stringify(extId),
 			__BACKEND_CANISTER_ID__: JSON.stringify(config.backendCanisterId),
 			__FILE_REGISTRY_CANISTER_ID__: JSON.stringify(config.fileRegistryCanisterId),
+			__DEV_LOCALE__: JSON.stringify(config.locale || 'en'),
 		},
 		resolve: {
 			alias: {

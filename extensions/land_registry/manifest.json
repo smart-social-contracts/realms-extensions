@@ -36,7 +36,13 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/land_registry",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Land Registry"
+    "en": "Land Registry",
+    "es": "Registro de Tierras",
+    "de": "Grundbuch",
+    "fr": "Cadastre",
+    "it": "Catasto",
+    "zh-CN": "土地登记",
+    "ca-valencia": "Registre de Terres"
   },
   "entry_access": {
     "default": "realm.data_view",

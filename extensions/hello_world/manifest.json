@@ -19,7 +19,13 @@
   "icon": "wand",
   "show_in_sidebar": true,
   "sidebar_label": {
-    "en": "Hello World"
+    "en": "Hello World",
+    "es": "Hola Mundo",
+    "de": "Hallo Welt",
+    "fr": "Bonjour le Monde",
+    "it": "Ciao Mondo",
+    "zh-CN": "你好世界",
+    "ca-valencia": "Hola Món"
   },
   "entry_access": {
     "functions": {
