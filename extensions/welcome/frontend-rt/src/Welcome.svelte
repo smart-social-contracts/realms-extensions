@@ -71,7 +71,7 @@
 	<div class="absolute top-0 left-0 w-full h-20 bg-black/50 backdrop-blur-md z-20 flex items-center px-6 md:px-10">
 		<div class="flex items-center gap-3">
 			<img
-				src="/images/logo.png"
+				src="/custom/logo.png"
 				alt={realmName || t('realm_default')}
 				class="h-10 md:h-12 lg:h-14 w-auto drop-shadow-lg"
 			/>
