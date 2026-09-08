@@ -21,9 +21,9 @@ Exercises all notification audience types and visibility rules.
   | member_a | member_b | user          | public     | all registered users        |
   | admin_a  | realm    | realm         | public     | all registered users        |
 
-Note: The test realm runs with test_mode_skip_authentication=True, so permission
-      checks (such as admin-only realm broadcasts) are bypassed. Scenario assertions
-      reflect the actual test-mode behaviour rather than production access rules.
+Permission checks are enforced here exactly as in production — the test realm
+seeds real admin/member profiles rather than disabling authorization — so the
+assertions below describe production access rules.
 
 Requirements:
   - Realm must have test_mode_user_self_registration enabled.
@@ -72,6 +72,17 @@ def _send(sender: "TestIdentity", params: dict) -> str:
     result = call_extension("notifications", "create_notification", params)
     assert result and result.get("success"), f"create_notification failed: {result}"
     return str(result.get("id", ""))
+
+
+def _send_expecting_denial(sender: "TestIdentity", params: dict) -> bool:
+    """Attempt to send as *sender*; True when the realm refused the call."""
+    sender.use()
+    try:
+        result = call_extension("notifications", "create_notification", params)
+    except Exception:
+        # A denied call surfaces as a raised AccessDenied from the host.
+        return True
+    return not (result and result.get("success"))
 
 
 def run_messaging_privacy():
@@ -227,10 +238,7 @@ else:
 
                     # ----------------------------------------------------------
                     # Case 5: realm-wide broadcast (public)
-                    # Visible to ALL registered users.
-                    # Note: In test mode (test_mode_skip_authentication=True) any
-                    # registered user can send realm-wide messages; in production
-                    # only admins can.
+                    # Visible to ALL registered users. Only admins may send one.
                     # ----------------------------------------------------------
                     sc.step("Case 5: realm-wide public broadcast")
                     n5_id = _send(admin_a, {
@@ -249,6 +257,21 @@ else:
 
                     out_ids5 = _notif_ids(outsider)
                     sc.check(n5_id in out_ids5, "outsider sees realm-wide notification")
+
+                    # ----------------------------------------------------------
+                    # Case 6: realm-wide broadcast is admin-only.
+                    # This is the check that the old skip_authentication flag
+                    # made impossible to write: with authorization disabled a
+                    # plain member could broadcast to the whole realm.
+                    # ----------------------------------------------------------
+                    sc.step("Case 6: non-admin realm-wide broadcast is refused")
+                    denied = _send_expecting_denial(member_a, {
+                        "title": "Unauthorized broadcast",
+                        "message": f"member_a should not be able to send this [{run_id}]",
+                        "audience_type": "realm",
+                        "visibility": "public",
+                    })
+                    sc.check(denied, "member_a (non-admin) cannot send a realm-wide broadcast")
 
     return sc.finish()
 

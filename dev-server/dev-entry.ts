@@ -8,12 +8,32 @@
  * injected by the CLI launcher.
  */
 import { Actor, HttpAgent } from '@dfinity/agent';
+import { Ed25519KeyIdentity } from '@dfinity/identity';
 import { idlFactory } from './realm_backend.did.js';
 
 declare const __EXT_ID__: string;
 declare const __BACKEND_CANISTER_ID__: string;
 declare const __FILE_REGISTRY_CANISTER_ID__: string;
 declare const __DEV_LOCALE__: string;
+declare const __TEST_IDENTITY_INDEX__: number;
+
+/** Matches src/realm_frontend/src/lib/test-identities.js seed layout. */
+function testIdentitySeed(index: number): Uint8Array {
+	const seed = new Uint8Array(32);
+	seed[0] = 0xed;
+	seed[1] = 0x57;
+	seed[2] = index & 0xff;
+	seed[3] = (index >>> 8) & 0xff;
+	seed[4] = (index >>> 16) & 0xff;
+	seed[5] = (index >>> 24) & 0xff;
+	return seed;
+}
+
+function normalizeTestIdentityIndex(index: number): number {
+	const parsed = Math.floor(Number(index));
+	if (!Number.isFinite(parsed)) return 0;
+	return Math.max(0, Math.min(0xffffffff, parsed));
+}
 
 function resolveDevLocale(): string {
 	const fromQuery = new URLSearchParams(window.location.search).get('locale');
@@ -101,7 +121,11 @@ function readableOf<T>(value: T) {
 }
 
 async function main() {
-	const agent = new HttpAgent({ verifyQuerySignatures: false });
+	const identityIndex = normalizeTestIdentityIndex(__TEST_IDENTITY_INDEX__);
+	const identity = Ed25519KeyIdentity.generate(testIdentitySeed(identityIndex));
+	const principalText = identity.getPrincipal().toText();
+
+	const agent = new HttpAgent({ identity, verifyQuerySignatures: false });
 	const backend = Actor.createActor(idlFactory, {
 		agent,
 		canisterId: __BACKEND_CANISTER_ID__,
@@ -131,8 +155,8 @@ async function main() {
 			try { return JSON.parse(res.response); } catch { return res.response; }
 		},
 
-		principal: readableOf(''),
-		isAuthenticated: readableOf(false),
+		principal: readableOf(principalText),
+		isAuthenticated: readableOf(true),
 		userProfiles: readableOf([] as string[]),
 
 		realmInfo: readableOf({

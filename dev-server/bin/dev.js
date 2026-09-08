@@ -161,6 +161,9 @@ if (isSandboxed) {
 			__BACKEND_CANISTER_ID__: JSON.stringify(config.backendCanisterId),
 			__FILE_REGISTRY_CANISTER_ID__: JSON.stringify(config.fileRegistryCanisterId),
 			__DEV_LOCALE__: JSON.stringify(config.locale || 'en'),
+			__TEST_IDENTITY_INDEX__: JSON.stringify(
+				Number.isFinite(Number(config.testIdentityIndex)) ? Number(config.testIdentityIndex) : 0,
+			),
 		},
 		resolve: {
 			alias: {

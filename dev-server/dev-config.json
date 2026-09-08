@@ -1,6 +1,7 @@
 {
     "locale": "en",
     "network": "test",
+    "testIdentityIndex": 0,
   "host": "https://icp0.io",
   "canisterUrl": "https://pqwsi-vyaaa-aaaau-agrbq-cai.icp0.io",
   "backendCanisterId": "rnghe-haaaa-aaaak-qyxyq-cai",

@@ -26,7 +26,7 @@ Then open `http://localhost:5555/`.
 - Proxies `/api` to the test canister, so backend calls are real (not mocked)
 - Proxies `/custom` and `/images` to the test canister, so realm assets (logo, background) load correctly
 - Provides a real `RealmExtensionContext` (backend actor, `callSync`, `callAsync`, realm info, etc.)
-- Authentication is bypassed on the test canister (`TEST_MODE_SKIP_AUTHENTICATION: true`), so anonymous local calls are allowed
+- Signs canister calls as the deterministic test identity (index 0 by default — Identity 1 / Creator; override via `testIdentityIndex` in `dev-config.json`). That principal must already be a member/admin of the target realm
 
 **No changes to extension code are needed** — extensions run in the dev server exactly as they would in production.
 
