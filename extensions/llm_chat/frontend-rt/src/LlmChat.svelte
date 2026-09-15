@@ -4,23 +4,13 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	const FILE_REGISTRY_NETWORK: Record<string, string> = {
-		'vi64l-3aaaa-aaaae-qj4va-cai': 'demo',
-		'uq2mu-kaaaa-aaaah-avqcq-cai': 'test',
-		'iebdk-kqaaa-aaaau-agoxq-cai': 'staging',
-	};
-
+	// The realm declares its own network (host config / canister_ids.js); no
+	// id→network table here to go stale when an environment is rebuilt.
 	function resolveGeisterNetwork(): string {
 		const fromConfig = ctx.config?.network;
 		if (fromConfig && fromConfig !== 'ic') return fromConfig;
-		const ids = (globalThis as { __CANISTER_IDS?: { network?: string; file_registry?: string } })
-			.__CANISTER_IDS;
+		const ids = (globalThis as { __CANISTER_IDS?: { network?: string } }).__CANISTER_IDS;
 		if (ids?.network && ids.network !== 'ic') return ids.network;
-		const fileRegistry =
-			ctx.config?.fileRegistryCanisterId || ids?.file_registry || '';
-		if (fileRegistry && FILE_REGISTRY_NETWORK[fileRegistry]) {
-			return FILE_REGISTRY_NETWORK[fileRegistry];
-		}
 		return window.location.hostname.includes('icp0.io') ? 'test' : 'staging';
 	}
 

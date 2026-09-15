@@ -1,9 +1,10 @@
 {
-    "locale": "en",
-    "network": "test",
-    "testIdentityIndex": 0,
-  "host": "https://icp0.io",
-  "canisterUrl": "https://pqwsi-vyaaa-aaaau-agrbq-cai.icp0.io",
-  "backendCanisterId": "rnghe-haaaa-aaaak-qyxyq-cai",
-  "fileRegistryCanisterId": "uq2mu-kaaaa-aaaah-avqcq-cai"
+  "_comment": "Point the extension dev server at a realm you run. Fill the ids from `casals export` (or `dfx canister id` for a local replica); no environment ids are committed here.",
+  "locale": "en",
+  "network": "local",
+  "testIdentityIndex": 0,
+  "host": "http://127.0.0.1:8000",
+  "canisterUrl": "",
+  "backendCanisterId": "",
+  "fileRegistryCanisterId": ""
 }

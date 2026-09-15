@@ -1,7 +1,20 @@
-export type SetupTokenNetwork = 'test' | 'staging' | 'demo';
+/**
+ * Treasury token picker for realm settings.
+ *
+ * The catalog — which shared ledgers exist, with indexer and decimals — is
+ * whatever the realm backend reports in `status().shared_tokens` (it came from
+ * the environment's casals.json via the installer). This module holds no
+ * canister ids: only card descriptions and the test-mode selectability rules.
+ */
 
 export const CUSTOM_TOKEN_ID = 'custom';
-export const REALMS_TOKEN_ID = 'REALMS';
+
+export interface SharedTokenCatalogEntry {
+	ledger: string;
+	indexer?: string;
+	decimals?: number;
+	name?: string;
+}
 
 export interface SharedTokenOption {
 	id: string;
@@ -9,94 +22,64 @@ export interface SharedTokenOption {
 	symbol: string;
 	description: string;
 	decimals: number;
-	ledgers: Record<SetupTokenNetwork, string>;
-	indexers?: Partial<Record<SetupTokenNetwork, string>>;
+	ledger: string;
+	indexer?: string;
 }
 
-export const SHARED_TOKEN_CATALOG: SharedTokenOption[] = [
-	{
-		id: 'REALMS',
-		name: 'REALMS Token',
-		symbol: 'REALMS',
-		description: 'The shared mundus-wide token, common to all realms',
-		decimals: 8,
-		ledgers: {
-			staging: 'cj65k-laaaa-aaaac-bfxqq-cai',
-			demo: 'xbkkh-syaaa-aaaah-qq3ya-cai',
-			test: 'nusyl-jiaaa-aaaae-qj6mq-cai'
-		}
-	},
-	{
-		id: 'ckBTC',
-		name: 'ckBTC',
-		symbol: 'ckBTC',
-		description: 'Chain-Key Bitcoin — IC-native Bitcoin twin',
-		decimals: 8,
-		ledgers: {
-			staging: 'mxzaz-hqaaa-aaaar-qaada-cai',
-			demo: 'mxzaz-hqaaa-aaaar-qaada-cai',
-			test: 'mxzaz-hqaaa-aaaar-qaada-cai'
-		},
-		indexers: {
-			staging: 'n5wcd-faaaa-aaaar-qaaea-cai',
-			demo: 'n5wcd-faaaa-aaaar-qaaea-cai',
-			test: 'n5wcd-faaaa-aaaar-qaaea-cai'
-		}
-	},
-	{
-		id: 'ckUSDC',
-		name: 'ckUSDC',
-		symbol: 'ckUSDC',
-		description: 'Chain-Key USDC — IC-native USD stablecoin',
-		decimals: 6,
-		ledgers: {
-			staging: 'xevnm-gaaaa-aaaar-qafnq-cai',
-			demo: 'xevnm-gaaaa-aaaar-qafnq-cai',
-			test: 'xevnm-gaaaa-aaaar-qafnq-cai'
-		}
-	},
-	{
-		id: 'ckEURC',
+const TOKEN_INFO: Record<string, { name: string; description: string }> = {
+	RLM: { name: 'Realms Token', description: 'The shared mundus-wide token, common to all realms' },
+	REALMS: { name: 'REALMS Token', description: 'The shared mundus-wide token, common to all realms' },
+	CKBTC: { name: 'ckBTC', description: 'Chain-Key Bitcoin — IC-native Bitcoin twin' },
+	CKUSDC: { name: 'ckUSDC', description: 'Chain-Key USDC — IC-native USD stablecoin' },
+	CKEURC: {
 		name: 'ckEURC',
-		symbol: 'ckEURC',
-		description: 'Circle EURC on Ethereum, chain-key — IC-native euro stablecoin',
-		decimals: 6,
-		ledgers: {
-			staging: 'pe5t5-diaaa-aaaar-qahwa-cai',
-			demo: 'pe5t5-diaaa-aaaar-qahwa-cai',
-			test: 'pe5t5-diaaa-aaaar-qahwa-cai'
-		}
+		description: 'Circle EURC on Ethereum, chain-key — IC-native euro stablecoin'
 	}
-];
+};
 
-export function setupTokenNetwork(hint = ''): SetupTokenNetwork {
-	const value = (hint || '').toLowerCase();
-	if (value === 'staging' || value.includes('staging.')) return 'staging';
-	if (value === 'demo' || value.includes('demo.')) return 'demo';
-	return 'test';
+/** Symbols that are not real money and stay selectable when monetary tokens are disabled. */
+const NON_MONETARY = new Set(['RLM', 'REALMS']);
+
+export function sharedTokenOptions(
+	catalog: Record<string, SharedTokenCatalogEntry> | null | undefined
+): SharedTokenOption[] {
+	const out: SharedTokenOption[] = [];
+	for (const [symbol, entry] of Object.entries(catalog || {})) {
+		const ledger = String(entry?.ledger || '').trim();
+		if (!symbol.trim() || !ledger) continue;
+		const info = TOKEN_INFO[symbol.toUpperCase()];
+		out.push({
+			id: symbol,
+			symbol,
+			name: entry.name || info?.name || symbol,
+			description: info?.description || `Shared ${symbol} ledger`,
+			decimals: entry.decimals ?? 8,
+			ledger,
+			indexer: String(entry.indexer || '').trim() || undefined
+		});
+	}
+	return out;
 }
 
-export function matchSharedToken(input: {
-	symbol?: string;
-	token_canister_id?: string;
-}): SharedTokenOption | undefined {
+export function matchSharedToken(
+	options: SharedTokenOption[],
+	input: { symbol?: string; token_canister_id?: string }
+): SharedTokenOption | undefined {
 	const canister = (input.token_canister_id || '').trim();
 	if (canister) {
-		const byLedger = SHARED_TOKEN_CATALOG.find((token) =>
-			Object.values(token.ledgers).includes(canister)
-		);
+		const byLedger = options.find((token) => token.ledger === canister);
 		if (byLedger) return byLedger;
 	}
 	const symbol = (input.symbol || '').trim().toUpperCase();
 	if (!symbol) return undefined;
-	return SHARED_TOKEN_CATALOG.find(
+	return options.find(
 		(token) => token.id.toUpperCase() === symbol || token.symbol.toUpperCase() === symbol
 	);
 }
 
 export function isTokenChoiceSelectable(choiceId: string, monetaryDisabled: boolean): boolean {
 	if (!monetaryDisabled) return true;
-	return (choiceId || '').trim().toUpperCase() === REALMS_TOKEN_ID;
+	return NON_MONETARY.has((choiceId || '').trim().toUpperCase());
 }
 
 export function monetaryUnavailableLabel(locale: string): string {

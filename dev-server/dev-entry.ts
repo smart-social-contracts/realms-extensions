@@ -172,9 +172,6 @@ async function main() {
 		}),
 
 		config: {
-			ckbtc_ledger_canister_id: '',
-			ckbtc_indexer_canister_id: '',
-			token_backend_canister_id: '',
 			canisterId: __BACKEND_CANISTER_ID__,
 			fileRegistryCanisterId: __FILE_REGISTRY_CANISTER_ID__,
 		},

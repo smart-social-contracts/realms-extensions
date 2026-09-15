@@ -17,12 +17,12 @@
 	} from '../../../_shared/frontend/mobile-chrome';
 	import {
 		CUSTOM_TOKEN_ID,
-		SHARED_TOKEN_CATALOG,
 		isTokenChoiceSelectable,
 		matchSharedToken,
 		monetaryUnavailableLabel,
 		resolveDisableMonetaryTokens,
-		setupTokenNetwork,
+		sharedTokenOptions,
+		type SharedTokenOption,
 	} from './tokenCatalog';
 
 	let { ctx }: { ctx: any } = $props();
@@ -56,10 +56,12 @@ let realmSettingsPrimaryLanguage = $state('');
 let governanceVotingWindowDays = $state<number | null>(null);
 let liveVotingWindowSeconds = $state<number | null>(null);
 let tokenResolving = $state(false);
-let tokenChoice = $state('REALMS');
+let tokenChoice = $state('');
 let monetaryTokensDisabled = $state(false);
 let tokenPickerLocale = $state('en');
-let tokenNetwork = $state(setupTokenNetwork());
+// The shared-ledger catalog comes from status().shared_tokens; nothing is baked in.
+let tokenOptions = $state<SharedTokenOption[]>([]);
+const customSelectable = $derived(isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled));
 
 // Email notification configuration (issue #266): realm-level on/off toggle.
 // Sender identity is derived from realm settings; SMTP credentials stay on the server.
@@ -285,12 +287,15 @@ let activeTab: SettingsTab = $state('general');
 				if (!realmSettingsTokenIndexerId && realmSettingsTokenCanisterId) {
 					realmSettingsTokenIndexerId = realmSettingsTokenCanisterId;
 				}
-				const matched = matchSharedToken({
+				tokenOptions = sharedTokenOptions(s.shared_tokens);
+				const matched = matchSharedToken(tokenOptions, {
 					symbol: realmSettingsCurrency,
 					token_canister_id: realmSettingsTokenCanisterId,
 				});
-				tokenChoice = matched?.id ?? (realmSettingsTokenCanisterId ? CUSTOM_TOKEN_ID : 'REALMS');
-				const network = String(s.network || tokenNetwork || '');
+				tokenChoice =
+					matched?.id ??
+					(realmSettingsTokenCanisterId ? CUSTOM_TOKEN_ID : tokenOptions[0]?.id ?? CUSTOM_TOKEN_ID);
+				const network = String(s.network || '');
 				let explicitDisable: boolean | undefined;
 				if (typeof s.test_mode_disable_monetary_tokens === 'boolean') {
 					explicitDisable = s.test_mode_disable_monetary_tokens;
@@ -304,7 +309,6 @@ let activeTab: SettingsTab = $state('general');
 							explicitDisable = flags.test_mode_disable_monetary_tokens;
 						}
 						if (flags?.primary_language) tokenPickerLocale = String(flags.primary_language);
-						if (flags?.network) tokenNetwork = setupTokenNetwork(String(flags.network));
 					} catch {
 						// keep host default from network
 					}
@@ -313,7 +317,6 @@ let activeTab: SettingsTab = $state('general');
 				tokenPickerLocale = String(
 					s.primary_language || ctx.realmInfo?.primaryLanguage || tokenPickerLocale,
 				);
-				if (s.network) tokenNetwork = setupTokenNetwork(String(s.network));
 				const nft = (s.canisters || []).find(
 					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
 				);
@@ -343,14 +346,12 @@ let activeTab: SettingsTab = $state('general');
 		if (!isTokenChoiceSelectable(id, monetaryTokensDisabled)) return;
 		tokenChoice = id;
 		if (id === CUSTOM_TOKEN_ID) return;
-		const token = SHARED_TOKEN_CATALOG.find((item) => item.id === id);
+		const token = tokenOptions.find((item) => item.id === id);
 		if (!token) return;
-		const network = tokenNetwork;
-		realmSettingsTokenCanisterId = token.ledgers[network] || Object.values(token.ledgers)[0] || '';
+		realmSettingsTokenCanisterId = token.ledger;
 		realmSettingsCurrency = token.symbol;
 		realmSettingsCurrencyDecimals = token.decimals;
-		realmSettingsTokenIndexerId =
-			token.indexers?.[network] || Object.values(token.indexers || {})[0] || realmSettingsTokenCanisterId;
+		realmSettingsTokenIndexerId = token.indexer || token.ledger;
 	}
 
 	async function resolveTokenLedger(opts?: { silent?: boolean }) {
@@ -1163,7 +1164,7 @@ let activeTab: SettingsTab = $state('general');
 				Changing ledger or indexer requires <code class="bg-gray-100 px-1 rounded">realm.configure.tokens</code>.
 			</p>
 			<div class="space-y-3 mb-5">
-				{#each SHARED_TOKEN_CATALOG as token (token.id)}
+				{#each tokenOptions as token (token.id)}
 					{@const selectable = isTokenChoiceSelectable(token.id, monetaryTokensDisabled)}
 					<label
 						class={cn(
@@ -1190,7 +1191,6 @@ let activeTab: SettingsTab = $state('general');
 						</div>
 					</label>
 				{/each}
-				{@const customSelectable = isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled)}
 				<label
 					class={cn(
 						'flex items-start gap-3 rounded-lg border p-3',
@@ -1225,7 +1225,7 @@ let activeTab: SettingsTab = $state('general');
 							type="text"
 							bind:value={realmSettingsTokenCanisterId}
 							onblur={resolveTokenLedger}
-							placeholder="e.g. cj65k-laaaa-aaaac-bfxqq-cai"
+							placeholder="xxxxx-xxxxx-xxxxx-xxxxx-cai"
 							disabled={monetaryTokensDisabled && tokenChoice !== 'REALMS'}
 							class={cn(
 								'flex-1 px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
@@ -1297,7 +1297,7 @@ let activeTab: SettingsTab = $state('general');
 					id="rs-nft-canister"
 					type="text"
 					bind:value={realmSettingsNftCanisterId}
-					placeholder="e.g. 27sff-mqaaa-aaaah-quntq-cai"
+					placeholder="xxxxx-xxxxx-xxxxx-xxxxx-cai"
 					class={cn(
 						'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
 						realmSettingsNftCanisterId && !nftCanisterIdValid
@@ -1322,7 +1322,7 @@ let activeTab: SettingsTab = $state('general');
 				<div>
 					<label for="rs-file-registry" class="block text-sm font-medium text-gray-700 mb-1">File Registry Canister ID</label>
 					<input id="rs-file-registry" type="text" bind:value={realmSettingsFileRegistryId}
-						placeholder="e.g. uq2mu-kaaaa-aaaah-avqcq-cai"
+						placeholder="xxxxx-xxxxx-xxxxx-xxxxx-cai"
 						class={cn(
 							'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
 							realmSettingsFileRegistryId && !fileRegistryIdValid
@@ -1337,7 +1337,7 @@ let activeTab: SettingsTab = $state('general');
 				<div>
 					<label for="rs-marketplace" class="block text-sm font-medium text-gray-700 mb-1">Marketplace Canister ID</label>
 					<input id="rs-marketplace" type="text" bind:value={realmSettingsMarketplaceId}
-						placeholder="e.g. u4hsn-kaaaa-aaaah-avqda-cai"
+						placeholder="xxxxx-xxxxx-xxxxx-xxxxx-cai"
 						class={cn(
 							'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
 							realmSettingsMarketplaceId && !marketplaceIdValid
