@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.10.7",
+  "version": "1.10.8",
   "description": "Change your realm's name, welcome message, languages, and branding; control who can join; set voting rules, currency, notifications, lifecycle stage, and apply or destroy department-table JSON.",
   "author": "Realms Team",
   "categories": [
@@ -21,6 +21,8 @@
     "default": "realm.configure",
     "functions": {
       "health": "public",
+      "get_governance_settings": "public",
+      "get_languages": "public",
       "request_quarter_scale": "quarter.register",
       "set_realm_stage": {
         "level": "realm.configure",

@@ -16,6 +16,14 @@
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
 	import {
+		BRANDING_FILE_MAX_BYTES,
+		CUSTOM_BACKGROUND,
+		CUSTOM_LOGO,
+		isValidHexColor,
+		resolvePublicAssetUrl,
+		snapshotEquals,
+	} from '../../../_shared/frontend/branding';
+	import {
 		CUSTOM_TOKEN_ID,
 		isTokenChoiceSelectable,
 		matchSharedToken,
@@ -80,6 +88,15 @@ let joinLinkHref = $state('');
 	let governedConfirm = $state<any>(null);
 	let governedSubmitting = $state(false);
 	let governedRetry = $state<(() => Promise<void>) | null>(null);
+	let savePreview = $state<null | { appliesDirectly: boolean; policy: string; governedBy: string }>(null);
+	let governanceAppliesDirectly = $state(true);
+	let governancePolicyLabel = $state('1/1');
+	let governanceGovernedBy = $state('root');
+	let savedSnapshot: Record<string, unknown> | null = $state(null);
+	let pendingLogoDataUrl = $state('');
+	let pendingBackgroundDataUrl = $state('');
+	let brandingUploadError = $state('');
+	let showPublicPreviewLink = $state(false);
 
 type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'notifications' | 'advanced';
 let activeTab: SettingsTab = $state('general');
@@ -171,8 +188,108 @@ let activeTab: SettingsTab = $state('general');
 		return lines;
 	}
 
-	function isValidHexColor(value: string): boolean {
-		return /^#[0-9A-Fa-f]{6}$/.test(value);
+	function currentSettingsSnapshot(): Record<string, unknown> {
+		return {
+			name: realmSettingsName,
+			manifesto: realmSettingsManifesto,
+			welcome_message: realmSettingsWelcome,
+			languages: [...realmSettingsLanguages],
+			primary_language: realmSettingsPrimaryLanguage,
+			logo_url: realmSettingsLogoUrl,
+			background_image_url: realmSettingsBackgroundUrl,
+			primary_color: realmSettingsPrimaryColor,
+			open_registration: realmSettingsOpenRegistration,
+			ai_assistant_enabled: realmSettingsAiAssistantEnabled,
+			token_canister_id: realmSettingsTokenCanisterId.trim(),
+			token_indexer_canister_id:
+				realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim(),
+			nft_canister_id: realmSettingsNftCanisterId.trim(),
+			file_registry_canister_id: realmSettingsFileRegistryId,
+			marketplace_canister_id: realmSettingsMarketplaceId,
+			email_enabled: realmSettingsEmailEnabled,
+			voting_window_days: governanceVotingWindowDays,
+		};
+	}
+
+	function rememberSettingsSnapshot() {
+		savedSnapshot = currentSettingsSnapshot();
+	}
+
+	function buildDirtyConfig(confirmProposal: boolean): Record<string, unknown> {
+		const next = currentSettingsSnapshot();
+		const prev = savedSnapshot || {};
+		const config: Record<string, unknown> = {};
+		if (confirmProposal) config.confirm = true;
+		const simpleKeys = [
+			'name',
+			'manifesto',
+			'welcome_message',
+			'primary_language',
+			'logo_url',
+			'background_image_url',
+			'primary_color',
+			'open_registration',
+			'ai_assistant_enabled',
+			'token_canister_id',
+			'token_indexer_canister_id',
+			'nft_canister_id',
+			'file_registry_canister_id',
+			'marketplace_canister_id',
+		] as const;
+		for (const key of simpleKeys) {
+			if (!snapshotEquals(prev[key], next[key])) config[key] = next[key];
+		}
+		if (!snapshotEquals(prev.languages, next.languages)) {
+			config.languages = next.languages;
+			config.primary_language = next.primary_language;
+		}
+		if (prev.email_enabled !== next.email_enabled) {
+			config.email_service_config = { enabled: realmSettingsEmailEnabled };
+		}
+		if (prev.voting_window_days !== next.voting_window_days) {
+			config.config_overrides = {
+				governance: {
+					voting_window_days: Number(
+						governanceVotingWindowDays ??
+							(liveVotingWindowSeconds != null ? liveVotingWindowSeconds / 86400 : 7),
+					),
+				},
+			};
+		}
+		if (pendingLogoDataUrl) {
+			config.logo_data_url = pendingLogoDataUrl;
+			config.logo_url = CUSTOM_LOGO;
+		}
+		if (pendingBackgroundDataUrl) {
+			config.background_data_url = pendingBackgroundDataUrl;
+			config.background_image_url = CUSTOM_BACKGROUND;
+		}
+		return config;
+	}
+
+	async function onBrandingFile(kind: 'logo' | 'background', event: Event) {
+		brandingUploadError = '';
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		if (file.size > BRANDING_FILE_MAX_BYTES) {
+			brandingUploadError = `Image is too large (max ${Math.round(BRANDING_FILE_MAX_BYTES / 1024)} KB). Upload a smaller file or use a URL.`;
+			input.value = '';
+			return;
+		}
+		const dataUrl = await new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(String(reader.result || ''));
+			reader.onerror = () => reject(new Error('Could not read file'));
+			reader.readAsDataURL(file);
+		});
+		if (kind === 'logo') {
+			pendingLogoDataUrl = dataUrl;
+			realmSettingsLogoUrl = CUSTOM_LOGO;
+		} else {
+			pendingBackgroundDataUrl = dataUrl;
+			realmSettingsBackgroundUrl = CUSTOM_BACKGROUND;
+		}
 	}
 
 	function buildRealmConfigCode(): string {
@@ -331,10 +448,16 @@ let activeTab: SettingsTab = $state('general');
 			if (gov?.success && gov.data) {
 				liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
 				governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
+				if (typeof gov.data.applies_directly === 'boolean') {
+					governanceAppliesDirectly = gov.data.applies_directly;
+				}
+				if (gov.data.governed_policy) governancePolicyLabel = String(gov.data.governed_policy);
+				if (gov.data.governed_by) governanceGovernedBy = String(gov.data.governed_by);
 			}
 			if (realmSettingsTokenCanisterId && isValidCanisterId(realmSettingsTokenCanisterId)) {
 				await resolveTokenLedger({ silent: true });
 			}
+			rememberSettingsSnapshot();
 		} catch (e: any) {
 			settingsError = e?.message || String(e);
 		} finally {
@@ -401,38 +524,12 @@ let activeTab: SettingsTab = $state('general');
 				settingsError = languageCheck.error;
 				return;
 			}
-			const languageConfig = realmLanguagesConfig({
-				languages: realmSettingsLanguages,
-				primary_language: realmSettingsPrimaryLanguage,
-			});
-			const config: Record<string, unknown> = {
-				...(confirmProposal ? { confirm: true } : {}),
-				...languageConfig,
-				name: realmSettingsName,
-				manifesto: realmSettingsManifesto,
-				welcome_message: realmSettingsWelcome,
-				logo_url: realmSettingsLogoUrl,
-				background_image_url: realmSettingsBackgroundUrl,
-				primary_color: realmSettingsPrimaryColor,
-				open_registration: realmSettingsOpenRegistration,
-				ai_assistant_enabled: realmSettingsAiAssistantEnabled,
-				token_canister_id: realmSettingsTokenCanisterId.trim(),
-				token_indexer_canister_id:
-					realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim(),
-				nft_canister_id: realmSettingsNftCanisterId.trim(),
-				file_registry_canister_id: realmSettingsFileRegistryId,
-				marketplace_canister_id: realmSettingsMarketplaceId,
-				email_service_config: {
-					enabled: realmSettingsEmailEnabled,
-				},
-				config_overrides: {
-					governance: {
-						voting_window_days: Number(
-							governanceVotingWindowDays ?? (liveVotingWindowSeconds != null ? liveVotingWindowSeconds / 86400 : 7),
-						),
-					},
-				},
-			};
+			const config = buildDirtyConfig(confirmProposal);
+			const payloadKeys = Object.keys(config).filter((key) => key !== 'confirm');
+			if (payloadKeys.length === 0) {
+				settingsError = 'No changes to save.';
+				return;
+			}
 			const raw = await ctx.backend.update_realm_config(JSON.stringify(config));
 			const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
 			if (result?.applied === 'proposal') {
@@ -446,11 +543,20 @@ let activeTab: SettingsTab = $state('general');
 				settingsMessage = 'Realm settings saved successfully.';
 				addToast('Realm settings updated');
 				savedEmailEnabled = realmSettingsEmailEnabled;
+				pendingLogoDataUrl = '';
+				pendingBackgroundDataUrl = '';
+				showPublicPreviewLink = true;
 				const gov = await callExt('get_governance_settings');
 				if (gov?.success && gov.data) {
 					liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
 					governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
+					if (typeof gov.data.applies_directly === 'boolean') {
+						governanceAppliesDirectly = gov.data.applies_directly;
+					}
+					if (gov.data.governed_policy) governancePolicyLabel = String(gov.data.governed_policy);
+					if (gov.data.governed_by) governanceGovernedBy = String(gov.data.governed_by);
 				}
+				rememberSettingsSnapshot();
 				await ctx.realmInfo?.fetch?.();
 			} else if (result?.denied_operation) {
 				openProposalForSettings(result.denied_operation);
@@ -464,13 +570,41 @@ let activeTab: SettingsTab = $state('general');
 			const msg = e?.message || String(e);
 			if (msg.includes('Access denied') && msg.includes("lacks permission")) {
 				const match = msg.match(/lacks permission '([^']+)'/);
-				openProposalForSettings(match?.[1] || 'realm.configure');
+				openProposalForSettings(match?.[1] || 'realm.configure.branding');
 			} else {
 				settingsError = msg;
 			}
 		} finally {
 			settingsSaving = false;
 		}
+	}
+
+	async function requestSavePreview() {
+		settingsError = '';
+		settingsMessage = '';
+		const languageCheck = validateRealmLanguages({
+			languages: realmSettingsLanguages,
+			primary_language: realmSettingsPrimaryLanguage,
+		});
+		if (!languageCheck.ok) {
+			settingsError = languageCheck.error;
+			return;
+		}
+		const preview = buildDirtyConfig(false);
+		if (Object.keys(preview).length === 0) {
+			settingsError = 'No changes to save.';
+			return;
+		}
+		savePreview = {
+			appliesDirectly: governanceAppliesDirectly,
+			policy: governancePolicyLabel,
+			governedBy: governanceGovernedBy,
+		};
+	}
+
+	async function confirmSavePreview() {
+		savePreview = null;
+		await saveRealmSettings(false);
 	}
 
 	async function submitGovernedProposal() {
@@ -750,14 +884,23 @@ let activeTab: SettingsTab = $state('general');
 {#snippet saveBar()}
 	<div class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 		{#if settingsMessage}
-			<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{settingsMessage}</div>
+			<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+				{settingsMessage}
+				{#if showPublicPreviewLink}
+					<button
+						type="button"
+						class="ml-2 text-green-800 underline font-medium"
+						onclick={() => ctx.navigate?.('/extensions/public_dashboard')}
+					>View public page</button>
+				{/if}
+			</div>
 		{/if}
 		{#if settingsError}
 			<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{settingsError}</div>
 		{/if}
 		<button
 			type="button"
-			onclick={() => saveRealmSettings()}
+			onclick={() => requestSavePreview()}
 			disabled={activeTab === 'notifications'
 				? settingsSaving || !emailDirty
 				: settingsSaving || !infraValid || !languagesValid || governanceVotingWindowDays == null}
@@ -1036,30 +1179,45 @@ let activeTab: SettingsTab = $state('general');
 		<!-- Branding -->
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Branding</h2>
-			<p class="text-sm text-gray-500 mb-5">Logo, background imagery, and primary color used across the realm UI — including main action buttons.</p>
+			<p class="text-sm text-gray-500 mb-5">
+				Logo, background, and primary color for the public hero, join page, and primary buttons.
+				Upload a file to store it on this realm (recommended), or paste an external URL.
+				Requires <code class="bg-gray-100 px-1 rounded">realm.configure.branding</code>.
+			</p>
 			<div class="space-y-5">
 				<div>
-					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
-					<input id="rs-logo" type="url" bind:value={realmSettingsLogoUrl} placeholder="https://example.com/logo.png"
+					<label for="rs-logo-file" class="block text-sm font-medium text-gray-700 mb-1">Logo file</label>
+					<input id="rs-logo-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+						onchange={(event) => onBrandingFile('logo', event)}
+						class="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-800" />
+					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Logo URL</label>
+					<input id="rs-logo" type="url" bind:value={realmSettingsLogoUrl} placeholder="https://example.com/logo.png or /custom/logo.png"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					{#if realmSettingsLogoUrl}
+					{#if pendingLogoDataUrl || realmSettingsLogoUrl}
 						<div class="mt-2 flex items-center gap-3">
-							<img src={realmSettingsLogoUrl} alt="Logo preview" class="h-12 w-12 object-contain rounded border border-gray-200 bg-gray-50" />
-							<span class="text-xs text-gray-500">Preview</span>
+							<img src={pendingLogoDataUrl || resolvePublicAssetUrl(realmSettingsLogoUrl, CUSTOM_LOGO)} alt="Logo preview" class="h-12 w-12 object-contain rounded border border-gray-200 bg-gray-50" />
+							<span class="text-xs text-gray-500">{pendingLogoDataUrl ? 'Will upload to /custom/logo.png on save' : 'Preview'}</span>
 						</div>
 					{/if}
 				</div>
 				<div>
-					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mb-1">Background Image URL</label>
-					<input id="rs-bg" type="url" bind:value={realmSettingsBackgroundUrl} placeholder="https://example.com/background.png"
+					<label for="rs-bg-file" class="block text-sm font-medium text-gray-700 mb-1">Background image file</label>
+					<input id="rs-bg-file" type="file" accept="image/png,image/jpeg,image/webp"
+						onchange={(event) => onBrandingFile('background', event)}
+						class="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-800" />
+					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Background Image URL</label>
+					<input id="rs-bg" type="url" bind:value={realmSettingsBackgroundUrl} placeholder="https://example.com/background.png or /custom/background.png"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					{#if realmSettingsBackgroundUrl}
+					{#if pendingBackgroundDataUrl || realmSettingsBackgroundUrl}
 						<div class="mt-2">
-							<img src={realmSettingsBackgroundUrl} alt="Background preview" class="h-24 w-full object-cover rounded border border-gray-200" />
-							<span class="text-xs text-gray-500">Preview</span>
+							<img src={pendingBackgroundDataUrl || resolvePublicAssetUrl(realmSettingsBackgroundUrl, CUSTOM_BACKGROUND)} alt="Background preview" class="h-24 w-full object-cover rounded border border-gray-200" />
+							<span class="text-xs text-gray-500">{pendingBackgroundDataUrl ? 'Will upload to /custom/background.png on save' : 'Preview'}</span>
 						</div>
 					{/if}
 				</div>
+				{#if brandingUploadError}
+					<p class="text-xs text-red-600">{brandingUploadError}</p>
+				{/if}
 				<div>
 					<label for="rs-primary-color" class="block text-sm font-medium text-gray-700 mb-1">Primary color</label>
 					<div class="flex items-center gap-3">
@@ -1443,6 +1601,37 @@ let activeTab: SettingsTab = $state('general');
 	deniedOperation={proposalModalOperation}
 	onclose={() => proposalModalOpen = false}
 />
+
+{#if savePreview}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+		<div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6">
+			<h3 class="text-lg font-semibold text-gray-900 mb-2">
+				{savePreview.appliesDirectly ? 'Applies immediately' : `Needs a root vote (policy ${savePreview.policy})`}
+			</h3>
+			<p class="text-sm text-gray-600 mb-5">
+				{#if savePreview.appliesDirectly}
+					Root policy is {savePreview.policy}, so this save will take effect as soon as you continue.
+				{:else}
+					Root department <span class="font-medium">{savePreview.governedBy}</span> uses
+					policy {savePreview.policy}. Continuing opens a confirmation to create that proposal.
+					The change applies only after the vote passes.
+				{/if}
+			</p>
+			<div class="flex justify-end gap-3">
+				<button
+					type="button"
+					onclick={() => { savePreview = null; }}
+					class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+				>Cancel</button>
+				<button
+					type="button"
+					onclick={confirmSavePreview}
+					class="px-4 py-2 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] transition-colors"
+				>Continue</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if governedConfirm}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">

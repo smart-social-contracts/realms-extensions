@@ -1,4 +1,9 @@
 <script lang="ts">
+	import {
+		CUSTOM_BACKGROUND,
+		CUSTOM_LOGO,
+		resolvePublicAssetUrl,
+	} from '../../../_shared/frontend/branding';
 	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
@@ -28,6 +33,15 @@
 	let realmName = $derived(realmData?.realm_name || realmData?.name || '');
 	let realmManifesto = $derived(realmData?.realm_manifesto || realmData?.manifesto || '');
 	let welcomeMessage = $derived(realmData?.realm_welcome_message || realmData?.welcome_message || '');
+	let brandingLogo = $derived(resolvePublicAssetUrl(realmData?.logoUrl, CUSTOM_LOGO));
+	let brandingBackground = $derived(
+		resolvePublicAssetUrl(realmData?.backgroundImageUrl, CUSTOM_BACKGROUND),
+	);
+	let brandingPrimary = $derived(
+		typeof realmData?.primaryColor === 'string' && realmData.primaryColor
+			? realmData.primaryColor
+			: '#3b82f6',
+	);
 
 	$effect(() => {
 		const unsub = ctx.realmInfo?.subscribe?.((v: any) => {
@@ -60,9 +74,10 @@
 	<!-- Background image -->
 	<div class="absolute inset-0 z-0">
 		<img
-			src="/images/background.png"
+			src={brandingBackground}
 			alt={realmName ? `${realmName} background` : `${t('realm_default')} background`}
 			class="w-full h-full object-cover opacity-80 transition-opacity duration-1000"
+			onerror={(e) => { e.currentTarget.src = '/images/background.png'; }}
 		/>
 		<div class="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-black/70"></div>
 	</div>
@@ -71,9 +86,10 @@
 	<div class="absolute top-0 left-0 w-full h-20 bg-black/50 backdrop-blur-md z-20 flex items-center px-6 md:px-10">
 		<div class="flex items-center gap-3">
 			<img
-				src="/custom/logo.png"
+				src={brandingLogo}
 				alt={realmName || t('realm_default')}
 				class="h-10 md:h-12 lg:h-14 w-auto drop-shadow-lg"
+				onerror={(e) => { e.currentTarget.src = '/images/logo_sphere_only.svg'; }}
 			/>
 		</div>
 	</div>
@@ -114,7 +130,8 @@
 				<div class="flex flex-col items-center md:items-center gap-3">
 					<button
 						onclick={handleCTA}
-						class="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-full font-semibold text-base tracking-wide transition-all duration-300 bg-blue-500/90 hover:bg-blue-500 text-white border-2 border-blue-400 hover:-translate-y-0.5 hover:shadow-[0_4px_20px_rgba(59,130,246,0.5)] cursor-pointer"
+						class="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-full font-semibold text-base tracking-wide transition-all duration-300 text-white border-2 hover:-translate-y-0.5 cursor-pointer"
+						style="background:{brandingPrimary};border-color:{brandingPrimary}"
 					>
 						{#if authenticated}
 							{t('enter_realm')}

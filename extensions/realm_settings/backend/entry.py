@@ -982,20 +982,31 @@ def patch_manifest_data(args: dict):
         return {"success": False, "error": str(e)}
 
 
-def get_governance_settings(args: str) -> str:
-    """Return calendar governance settings editable from Realm Settings."""
+def get_governance_settings(args=None) -> str:
+    """Return calendar governance settings plus whether a root vote is required."""
     try:
+        from core.governed_action import (
+            format_org_policy,
+            governing_org,
+            policy_is_direct,
+        )
         from ggg import Realm
 
         window_s = 604_800
         realm = Realm[1]
         if realm and realm.calendar and realm.calendar.voting_window:
             window_s = max(1, int(realm.calendar.voting_window))
+        root = governing_org()
+        applies_directly = root is None or policy_is_direct(root)
+        policy = format_org_policy(root) if root else "1/1"
         return json.dumps({
             "success": True,
             "data": {
                 "voting_window_seconds": window_s,
                 "voting_window_days": window_s / 86400.0,
+                "applies_directly": applies_directly,
+                "governed_by": getattr(root, "name", None) or "root",
+                "governed_policy": policy,
             },
         })
     except Exception as e:

@@ -96,6 +96,17 @@ describe('formatApplyResult', () => {
 });
 
 describe('Settings wiring', () => {
+	it('shows a governance preview modal before the confirmation modal', () => {
+		const settings = readFileSync(new URL('./RealmSettings.svelte', import.meta.url), 'utf8');
+		assert.match(settings, /requestSavePreview/);
+		assert.match(settings, /Applies immediately/);
+		assert.match(settings, /Needs a root vote/);
+		assert.match(settings, /realm\.configure\.branding/);
+		const previewAt = settings.indexOf('if savePreview');
+		const confirmAt = settings.indexOf('if governedConfirm');
+		assert.ok(previewAt > 0 && confirmAt > previewAt);
+	});
+
 	it('mounts apply/destroy on the Advanced tab, not Department Management', () => {
 		const settings = readFileSync(new URL('./RealmSettings.svelte', import.meta.url), 'utf8');
 		const panel = readFileSync(new URL('./DepartmentTablePanel.svelte', import.meta.url), 'utf8');

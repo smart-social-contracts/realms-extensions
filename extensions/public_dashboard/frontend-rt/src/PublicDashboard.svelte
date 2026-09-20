@@ -1,5 +1,10 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import {
+		CUSTOM_BACKGROUND,
+		CUSTOM_LOGO,
+		resolvePublicAssetUrl,
+	} from '../../../_shared/frontend/branding';
 	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
@@ -24,6 +29,9 @@
 
 	let statusData: any = $state(null);
 	let realmData: any = $state(null);
+	let brandingLogo = $state(CUSTOM_LOGO);
+	let brandingBackground = $state(CUSTOM_BACKGROUND);
+	let brandingPrimary = $state('#111827');
 	let lifecycleData: any = $state({});
 	let lifecycleStageIndex = $state(0);
 	let dashboardConfig: any = $state({});
@@ -65,6 +73,14 @@
 
 		if (statusResp?.success && statusResp?.data?.status) {
 			statusData = statusResp.data.status;
+			brandingLogo = resolvePublicAssetUrl(statusData.logo_url, brandingLogo);
+			brandingBackground = resolvePublicAssetUrl(
+				statusData.background_image_url,
+				brandingBackground,
+			);
+			if (typeof statusData.primary_color === 'string' && statusData.primary_color) {
+				brandingPrimary = statusData.primary_color;
+			}
 		}
 
 		const realms = parseEntities(realmResp);
@@ -329,6 +345,18 @@
 
 	let showOverlay = $state(false);
 
+	$effect(() => {
+		const unsub = ctx.realmInfo?.subscribe?.((info: any) => {
+			if (!info || typeof info !== 'object') return;
+			brandingLogo = resolvePublicAssetUrl(info.logoUrl, brandingLogo);
+			brandingBackground = resolvePublicAssetUrl(info.backgroundImageUrl, brandingBackground);
+			if (typeof info.primaryColor === 'string' && info.primaryColor) {
+				brandingPrimary = info.primaryColor;
+			}
+		});
+		return () => unsub?.();
+	});
+
 	onMount(async () => {
 		await loadData();
 		await tick();
@@ -375,7 +403,7 @@
 		{#if realmData}
 			<div
 				class="hero-screen"
-				style="background-image: url('/custom/background.png');"
+				style="background-image: url('{brandingBackground}');"
 			>
 				<div
 					class="hero-gradient"
@@ -389,7 +417,7 @@
 					<div class="hero-identity">
 						<div class="hero-brand-row">
 							<img
-								src="/custom/logo.png"
+								src={brandingLogo}
 								alt={realmData.name || t('realm_default')}
 								class="hero-logo"
 								onerror={(e) => { e.currentTarget.src = '/images/logo_sphere_only.svg'; }}
@@ -506,17 +534,17 @@
 				gap: 10px;
 				padding: 16px 48px;
 				border-radius: 12px;
-				background: #111827;
+				background: var(--realm-primary, #111827);
 				color: #fff;
 				font-size: 1.15rem;
 				font-weight: 600;
 				text-decoration: none;
 				box-shadow: 0 4px 14px rgba(0,0,0,0.15);
-				transition: background 0.2s, transform 0.2s;
+				transition: filter 0.2s, transform 0.2s;
 				letter-spacing: 0.02em;
 			}
 			.join-btn:hover {
-				background: #000;
+				filter: brightness(0.9);
 				transform: translateY(-1px);
 			}
 			.kpi-card {
@@ -709,6 +737,7 @@
 				<a
 					href="/join"
 					class="join-btn"
+					style="--realm-primary: {brandingPrimary}"
 				>
 					{t('join_this_realm')}
 					<svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">

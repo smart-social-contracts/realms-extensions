@@ -24,6 +24,7 @@ class DepartmentTableEntryTests(unittest.TestCase):
         self.assertIn("apply_department_table", names)
         self.assertIn("delete_department", names)
         self.assertIn("list_department_names", names)
+        self.assertIn("get_governance_settings", names)
 
     def test_gates_match_host_organization_permissions(self):
         src = _source()
@@ -31,6 +32,7 @@ class DepartmentTableEntryTests(unittest.TestCase):
         self.assertIn("ORGANIZATION_DELETE", src)
         self.assertIn("core.department_table", src)
         self.assertIn("core.department_admin", src)
+        self.assertIn("applies_directly", src)
         self.assertIn("document_has_destroy", src)
 
     def test_parse_json_args_accepts_object_and_rejects_junk(self):
