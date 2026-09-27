@@ -1,6 +1,6 @@
 {
   "name": "land_registry",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "ggg_api_version": 1,
   "capabilities": [
     "land.list",
