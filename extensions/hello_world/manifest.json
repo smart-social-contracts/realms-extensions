@@ -1,6 +1,6 @@
 {
   "name": "hello_world",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Simple example extension: enter your name and receive a greeting back from the realm.",
   "author": "Realms Team",
   "runtime": "sandboxed",
