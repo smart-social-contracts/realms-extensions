@@ -352,7 +352,7 @@
 	});
 </script>
 
-<div class="dashboard mx-auto max-w-3xl space-y-6 px-4 pb-12 font-sans">
+<div class="dashboard w-full space-y-6 pb-12 font-sans">
 	{#if bridgeError}
 		<Card title="Bridge error">
 			{#snippet children()}

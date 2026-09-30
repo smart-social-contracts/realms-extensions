@@ -421,7 +421,7 @@
 	);
 </script>
 
-<div class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+<div class="w-full py-6 space-y-6">
 	<!-- Header -->
 	<div>
 		<h1 class="text-3xl font-bold text-gray-900 dark:text-white">Marketplace</h1>

@@ -120,7 +120,7 @@
 	});
 </script>
 
-<div class="mx-auto max-w-4xl space-y-6 px-4 pb-8">
+<div class="w-full space-y-6 pb-8">
 	<PageHeader title="System Info" subtitle={extensionDescription}>
 		{#snippet actions()}
 			<Button tone="secondary" size="sm" disabled={!bridgeReady || loading} onclick={fetchSystemInfo}>

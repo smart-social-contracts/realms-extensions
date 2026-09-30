@@ -609,7 +609,7 @@
 	}
 </style>
 
-<div class="w-full max-w-5xl mx-auto px-3 py-4 sm:px-4 sm:py-6">
+<div class="w-full py-4 sm:py-6">
 	<!-- Header: title on its own row -->
 	<div class="flex flex-col gap-2 mb-4 sm:mb-6">
 		<div>

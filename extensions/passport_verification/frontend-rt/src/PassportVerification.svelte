@@ -200,7 +200,7 @@
 	}
 </script>
 
-<div class="p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
+<div class="w-full py-4 sm:py-6 space-y-5">
 	<!-- Header -->
 	<div>
 		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Passport Verification</h1>

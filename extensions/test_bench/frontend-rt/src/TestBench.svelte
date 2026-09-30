@@ -76,7 +76,7 @@
 	}
 </script>
 
-<div class="max-w-2xl mx-auto p-6 space-y-4">
+<div class="w-full py-6 space-y-4">
 	<div class="mb-2">
 		<div class="flex items-center gap-3">
 			<h2 class="text-2xl font-bold text-gray-900">Test Bench</h2>

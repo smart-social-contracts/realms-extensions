@@ -747,7 +747,7 @@
 	}
 </style>
 
-<div class={cn('max-w-7xl mx-auto px-3 py-4 md:p-6')}>
+<div class={cn('w-full py-4 md:py-6')}>
 	{#if !authState}
 		<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center max-w-lg mx-auto mt-8')}>
 			<h1 class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2')}>Package Manager</h1>

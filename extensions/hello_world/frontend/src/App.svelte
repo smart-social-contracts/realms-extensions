@@ -91,7 +91,7 @@
 	});
 </script>
 
-<div class="mx-auto max-w-md space-y-6 px-4 pb-8">
+<div class="w-full space-y-6 pb-8">
 	<PageHeader
 		title="Hello World"
 		subtitle={extensionDescription}

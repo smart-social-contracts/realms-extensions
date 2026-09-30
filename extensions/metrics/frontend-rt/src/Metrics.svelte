@@ -789,7 +789,7 @@ let accessDeniedOp = $state('');
 	let panelBodyClass = $derived(narrow ? 'p-3' : 'p-6');
 </script>
 
-<div class={cn('w-full max-w-5xl mx-auto font-sans', narrow ? 'px-3 py-4' : 'px-4 py-6')}>
+<div class={cn('w-full font-sans', narrow ? 'py-4' : 'py-6')}>
 	<div class={narrow ? 'mb-4' : 'mb-6'}>
 		<h1 class="text-2xl font-bold text-gray-900 dark:text-white">Financial Reports</h1>
 		<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{extensionDescription}</p>

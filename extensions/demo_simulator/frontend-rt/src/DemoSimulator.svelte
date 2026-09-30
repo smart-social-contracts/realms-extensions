@@ -360,7 +360,7 @@
 	</div>
 {/snippet}
 
-<div class="max-w-3xl mx-auto p-6">
+<div class="w-full py-6">
 	<div class="flex items-center justify-between mb-6">
 		<div>
 			<h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Demo Simulator</h2>

@@ -181,7 +181,7 @@
 	});
 </script>
 
-<div class="max-w-6xl mx-auto p-4">
+<div class="w-full py-4">
 	<!-- Header -->
 	<div class="mb-6">
 		<div class="flex items-center gap-3 flex-wrap">

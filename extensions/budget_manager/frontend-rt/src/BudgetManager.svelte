@@ -376,7 +376,7 @@
 	}
 </style>
 
-<div class={cn('max-w-6xl mx-auto', narrow ? 'p-3' : 'p-6')}>
+<div class={cn('w-full', narrow ? 'py-3' : 'py-6')}>
 	<!-- Header: title on its own row -->
 	<div class="flex flex-col gap-2 mb-4">
 		<div>

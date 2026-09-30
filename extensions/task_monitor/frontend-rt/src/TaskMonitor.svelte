@@ -352,7 +352,7 @@
 	});
 </script>
 
-<div class="p-6 max-w-7xl mx-auto">
+<div class="w-full py-6">
 	<!-- Code Modal -->
 	{#if showCodeModal && codeModalContent}
 		<div class="fixed inset-0 z-50 flex items-center justify-center p-4">

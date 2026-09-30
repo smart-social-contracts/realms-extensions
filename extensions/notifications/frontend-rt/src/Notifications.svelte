@@ -97,7 +97,7 @@
 	}
 </script>
 
-<div class="p-6 w-full max-w-3xl mx-auto">
+<div class="w-full py-6">
 	<!-- Header -->
 	<div class="flex flex-wrap justify-between items-center mb-6 gap-3">
 		<div>

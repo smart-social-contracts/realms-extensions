@@ -128,7 +128,7 @@
 	});
 </script>
 
-<div class="mx-auto max-w-3xl space-y-6 px-4 pb-8">
+<div class="w-full space-y-6 pb-8">
 	<PageHeader
 		title="Hello (Sandboxed)"
 		subtitle={extensionDescription}

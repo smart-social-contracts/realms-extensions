@@ -735,7 +735,7 @@
 	</svg>
 {/snippet}
 
-<div class={cn('max-w-4xl mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6')}>
+<div class={cn('w-full py-3 sm:py-6 space-y-4 sm:space-y-6')}>
 	<!-- Header: title on its own row -->
 	<div class={cn('flex flex-col gap-2')}>
 		<div class={cn('flex justify-between items-start gap-4')}>

@@ -749,7 +749,7 @@
 			<!-- Codex-driven dashboard blocks -->
 			{#if dashboardSections.length > 0}
 				{@const registered = Number(lifecycleData.registered_users ?? statusData?.users_count ?? 0)}
-				<div class="max-w-5xl mx-auto px-4 pb-6">
+				<div class="px-4 pb-6 lg:px-6">
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						{#if dashboardSections.includes('migration_progress')}
 							{@const target = Number(lifecycleData.population_target || lifecycleData.critical_mass || 0)}
@@ -814,8 +814,8 @@
 
 			<!-- Realm lifecycle status -->
 			{#if statusData}
-				<div class="px-4 pb-8">
-					<div class="realm-status-card max-w-5xl mx-auto">
+				<div class="px-4 pb-8 lg:px-6">
+					<div class="realm-status-card">
 						<div class="realm-status-header">
 							<div style="flex: 1; min-width: 240px;">
 								<p style="font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px;">{t('realm_status')}</p>
@@ -936,8 +936,8 @@
 
 			<!-- KPI stats -->
 			{#if kpiCards.length > 0}
-				<div class="px-4 pb-6">
-					<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 max-w-5xl mx-auto">
+				<div class="px-4 pb-6 lg:px-6">
+					<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
 						{#each kpiCards as card, i}
 							<div
 								class="kpi-card"
@@ -971,10 +971,10 @@
 			{/if}
 		{/if}
 
-		<div class="space-y-4 px-4 pb-8">
+		<div class="space-y-4 px-4 pb-8 lg:px-6">
 			<!-- Quarters (read-only) -->
 			{#if showQuartersCard}
-				<div class="rounded-lg border border-gray-200 shadow-md bg-white p-6 max-w-5xl mx-auto">
+				<div class="rounded-lg border border-gray-200 shadow-md bg-white p-6">
 					<h3 class="text-lg font-semibold text-gray-900 mb-1">Quarters</h3>
 					<p class="text-sm text-gray-500 mb-4">
 						This realm scales horizontally: members are spread across autonomous quarters.

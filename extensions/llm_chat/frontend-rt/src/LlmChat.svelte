@@ -1714,9 +1714,10 @@
 
 	/* ══════════════════════ Settings page ══════════════════════ */
 	.settings-page {
-		max-width: 680px;
-		margin: 0 auto;
-		padding: 36px 24px 60px;
+		max-width: none;
+		width: 100%;
+		margin: 0;
+		padding: 36px 0 60px;
 		font-family: inherit;
 		color: #111;
 	}
