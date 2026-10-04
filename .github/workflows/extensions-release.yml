@@ -204,7 +204,7 @@ jobs:
 
     - name: Clone realms framework
       run: |
-        git clone https://github.com/smart-social-contracts/realms.git .realms
+        git clone https://github.com/smart-social-contracts/realms-gos.git .realms
         
     - name: Install realms CLI
       run: |

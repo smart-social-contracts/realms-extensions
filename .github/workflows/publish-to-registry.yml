@@ -7,7 +7,7 @@
 #   - FILE_REGISTRY_CANISTER_ID (repository variable)
 #   - DFX_IDENTITY_PEM (repository secret — controller/publisher PEM key)
 #
-# Refs: https://github.com/smart-social-contracts/realms/issues/168
+# Refs: https://github.com/smart-social-contracts/realms-gos/issues/168
 
 name: Publish to Registry
 

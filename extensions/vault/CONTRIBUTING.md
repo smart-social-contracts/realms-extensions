@@ -13,7 +13,7 @@ Thank you for your interest in contributing to the Vault Manager extension for R
 
 1. **Clone Realms Repository**
    ```bash
-   git clone https://github.com/smart-social-contracts/realms.git
+   git clone https://github.com/smart-social-contracts/realms-gos.git
    cd realms
    git checkout v1.2.3  # Use specific version for compatibility
    ```
