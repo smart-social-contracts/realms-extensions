@@ -298,7 +298,7 @@ F --> G[All Extensions Released]
 
 - [Semantic Versioning Specification](https://semver.org/)
 - [GitHub Releases Documentation](https://docs.github.com/en/repositories/releasing-projects-on-github)
-- [Realms CLI Documentation](https://github.com/smart-social-contracts/realms)
+- [Realms CLI Documentation](https://github.com/smart-social-contracts/realms-gos)
 
 ## Support
 

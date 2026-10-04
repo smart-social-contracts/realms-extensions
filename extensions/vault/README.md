@@ -35,7 +35,7 @@ realm_backend canister
 
 ```bash
 # Clone realms repo at specific version
-git clone https://github.com/smart-social-contracts/realms.git
+git clone https://github.com/smart-social-contracts/realms-gos.git
 cd realms
 git checkout v1.2.3  # or specific commit
 

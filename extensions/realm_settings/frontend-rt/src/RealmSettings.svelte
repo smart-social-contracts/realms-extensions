@@ -992,7 +992,7 @@ let activeTab: SettingsTab = $state('general');
 		<p class="text-sm text-gray-500 mb-5">
 			Current operational stage of this realm.
 			<a
-				href="https://github.com/smart-social-contracts/realms/blob/main/docs/reference/REALM_LIFECYCLE.md"
+				href="https://github.com/smart-social-contracts/realms-gos/blob/main/docs/reference/REALM_LIFECYCLE.md"
 				target="_blank"
 				rel="noopener noreferrer"
 				class="ml-1 text-blue-600 hover:underline"
