@@ -50,7 +50,7 @@
     "zh-CN": "托管服务",
     "ca-valencia": "Serveis Gestionats"
   },
-  "icon": "cloud_upload",
+  "icon": "cloud-upload",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/managed_services",
   "show_in_sidebar": true,
   "entry_access": {

@@ -28,7 +28,7 @@
   "categories": [
     "finances"
   ],
-  "icon": "safe",
+  "icon": "shield-dollar",
   "doc_url": "https://github.com/smart-social-contracts/realms-extension-vault",
   "show_in_sidebar": true,
   "python_dependencies": [

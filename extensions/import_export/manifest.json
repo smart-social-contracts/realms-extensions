@@ -10,7 +10,7 @@
   "categories": [
     "realm_management"
   ],
-  "icon": "arrow-down-up",
+  "icon": "arrows-down-up",
   "show_in_sidebar": true,
   "sidebar_label": {
     "en": "Import & Export",
