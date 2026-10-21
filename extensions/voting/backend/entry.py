@@ -841,26 +841,36 @@ def submit_proposal(args: str) -> Async[str]:
         proposal_type = str(args_dict["proposal_type"]).strip()
         raw_action = args_dict.get("action") if isinstance(args_dict.get("action"), dict) else {}
 
-        proposer_id = ic.caller().to_str()
-        proposer = _find_user(proposer_id)
-        if not proposer:
-            return json.dumps({
-                "success": False,
-                "error": f"User {proposer_id} not found",
-                "error_code": "unauthenticated",
-            })
-
         gate = submit_gate(proposal_type, raw_action)
-        if not _check_access(proposer_id, gate):
-            return json.dumps(permission_denied_payload(
-                f"Submitting a {proposal_type} proposal requires '{gate}'",
-                gate,
-            ))
+        submitted_by = {}
+        if str(args_dict.get("on_behalf_of") or "").strip():
+            from core.delegation import AccessDenied, resolve_acting_context
+
+            try:
+                ctx = resolve_acting_context(args_dict, gate)
+            except AccessDenied as e:
+                return json.dumps(permission_denied_payload(str(e), gate))
+            proposer_id = ctx.subject
+            proposer = ctx.subject_user
+            submitted_by = {"delegated_by": ctx.actor, "delegation_id": ctx.delegation_id}
+        else:
+            proposer_id = ic.caller().to_str()
+            proposer = _find_user(proposer_id)
+            if not proposer:
+                return json.dumps({
+                    "success": False,
+                    "error": f"User {proposer_id} not found",
+                    "error_code": "unauthenticated",
+                })
+            if not _check_access(proposer_id, gate):
+                return json.dumps(permission_denied_payload(
+                    f"Submitting a {proposal_type} proposal requires '{gate}'",
+                    gate,
+                ))
 
         org_scope = str(args_dict.get("org_scope") or "").strip()
 
-        existing = Proposal.instances()
-        proposal_id = f"prop_{len(existing) + 1:03d}"
+        proposal_id = f"prop_{Proposal.max_id() + 1:03d}"
 
         source = args_dict.get("source") or ""
         source_url = str(args_dict.get("source_url") or "").strip()
@@ -900,6 +910,8 @@ def submit_proposal(args: str) -> Async[str]:
             metadata["requested_permissions"] = permissions
         if org_scope:
             metadata["org_scope"] = org_scope
+        if submitted_by:
+            metadata.update(submitted_by)
 
         requested_threshold = args_dict.get("required_threshold", 0.6)
         voting_window = 604_800

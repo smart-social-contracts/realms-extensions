@@ -100,7 +100,8 @@ def test_entry_does_not_name_import_freeze_action():
     assert "import freeze_action" not in code
 
 
-def test_submit_proposal_poll_persists_when_host_lacks_freeze_action(monkeypatch):
+def _submit(monkeypatch, extra_args=None, delegation=None):
+    """Run submit_proposal for a poll against stub host modules; return (result, created)."""
     leftover = types.ModuleType("core.proposal_dispatch")
     leftover.DispatchError = type("DispatchError", (Exception,), {})
     leftover.uses_timelock = lambda *a, **k: False
@@ -135,6 +136,10 @@ def test_submit_proposal_poll_persists_when_host_lacks_freeze_action(monkeypatch
         @staticmethod
         def instances():
             return []
+
+        @staticmethod
+        def max_id():
+            return 0
 
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
@@ -216,6 +221,9 @@ def test_submit_proposal_poll_persists_when_host_lacks_freeze_action(monkeypatch
     core.access = access
     core.extension_errors = errors
     core.codex_hooks = hooks
+    if delegation is not None:
+        monkeypatch.setitem(sys.modules, "core.delegation", delegation)
+        core.delegation = delegation
 
     pkg_name = "_runtime_ext_voting_test"
     package = types.ModuleType(pkg_name)
@@ -243,14 +251,58 @@ def test_submit_proposal_poll_persists_when_host_lacks_freeze_action(monkeypatch
         "description": "Does poll submit persist?",
         "proposal_type": "poll",
         "action": {},
+        **(extra_args or {}),
     })
     gen = entry.submit_proposal(args)
     try:
         next(gen)
         raise AssertionError("poll submit should not suspend")
     except StopIteration as done:
-        result = json.loads(done.value)
+        return json.loads(done.value), created
 
+
+def _delegation_module(grants):
+    """core.delegation stub: ``grants`` maps (grantor, operation) to a delegation id."""
+    mod = types.ModuleType("core.delegation")
+
+    class AccessDenied(Exception):
+        pass
+
+    def resolve_acting_context(args, operation):
+        grantor = args["on_behalf_of"]
+        if (grantor, operation) not in grants:
+            raise AccessDenied(f"No active delegation from {grantor} to 2eqns")
+        return types.SimpleNamespace(
+            actor="2eqns",
+            subject=grantor,
+            subject_user=types.SimpleNamespace(id=grantor),
+            delegation_id=grants[(grantor, operation)],
+            is_delegated=True,
+        )
+
+    mod.AccessDenied = AccessDenied
+    mod.resolve_acting_context = resolve_acting_context
+    return mod
+
+
+def test_submit_proposal_on_behalf_records_grantor_and_delegate(monkeypatch):
+    delegation = _delegation_module({("alice", "proposal.create"): "d1"})
+    result, created = _submit(monkeypatch, {"on_behalf_of": "alice"}, delegation)
+    assert result.get("success") is True, result
+    assert created[0].proposer.id == "alice"
+    meta = json.loads(created[0].metadata)
+    assert meta["delegated_by"] == "2eqns" and meta["delegation_id"] == "d1"
+
+
+def test_submit_proposal_on_behalf_without_grant_is_refused(monkeypatch):
+    result, created = _submit(monkeypatch, {"on_behalf_of": "alice"}, _delegation_module({}))
+    assert result["error_code"] == "permission_denied"
+    assert "No active delegation" in result["error"]
+    assert not created
+
+
+def test_submit_proposal_poll_persists_when_host_lacks_freeze_action(monkeypatch):
+    result, created = _submit(monkeypatch)
     assert result.get("success") is True, result
     assert created, "Proposal was not persisted"
     assert created[0].title == "QA poll"
