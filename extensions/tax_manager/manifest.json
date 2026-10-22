@@ -1,0 +1,53 @@
+{
+  "name": "tax_manager",
+  "version": "0.1.0",
+  "description": "Set the realm's taxes (what is taxed, brackets, thresholds and rates) and adopt them as the tax policy the codex uses to calculate and issue invoices.",
+  "author": "Smart Social Contracts",
+  "ggg_api_version": 1,
+  "functions": [
+    "get_tax_overview",
+    "get_tax_history",
+    "preview_tax",
+    "save_tax_draft",
+    "discard_tax_draft",
+    "adopt_tax_policy",
+    "run_tax_assessment"
+  ],
+  "capabilities": [
+    "tax.overview",
+    "tax.history",
+    "tax.save_draft",
+    "tax.discard_draft",
+    "tax.adopt",
+    "tax.assess"
+  ],
+  "permissions": [],
+  "profiles": [
+    "member",
+    "admin"
+  ],
+  "categories": [
+    "finances"
+  ],
+  "sidebar_label": {
+    "en": "Taxes",
+    "es": "Impuestos",
+    "de": "Steuern",
+    "fr": "Impôts",
+    "it": "Tasse",
+    "zh-CN": "税务",
+    "ca-valencia": "Impostos"
+  },
+  "icon": "receipt",
+  "doc_url": null,
+  "show_in_sidebar": true,
+  "entry_access": {
+    "default": "realm.data_view",
+    "functions": {
+      "save_tax_draft": "org.manage_budget",
+      "discard_tax_draft": "org.manage_budget",
+      "adopt_tax_policy": "org.manage_budget",
+      "run_tax_assessment": "org.manage_budget"
+    }
+  }
+}
