@@ -197,6 +197,13 @@
 	let verdictError = $state('');
 	let verdictSuccess = $state(false);
 
+	// Case detail (List tab). Title/description always come from the list row:
+	// get_case returns them blank for private cases, the row holds the decrypted text.
+	let selectedCase: any = $state(null);
+	let caseDetail: any = $state(null);
+	let detailLoading = $state(false);
+	let detailError = $state('');
+
 	// Derived statistics
 	let pendingCount = $derived(litigations.filter((l) => l.status === 'pending').length);
 	let inReviewCount = $derived(
@@ -342,6 +349,10 @@
 			if (data?.user_profile) userProfile = data.user_profile;
 			hasMore = !!data?.has_more;
 			nextFromId = data?.next_from_id ?? null;
+			if (!append && selectedCase) {
+				const fresh = decrypted.find((r: any) => r.id === selectedCase.id);
+				void openCase(fresh ?? selectedCase);
+			}
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
@@ -432,6 +443,36 @@
 		}
 	}
 
+	async function openCase(lit: any) {
+		selectedCase = lit;
+		caseDetail = null;
+		detailError = '';
+		detailLoading = true;
+		const isCurrent = () => selectedCase?.id === lit.id;
+		try {
+			const res: any = await callExt('get_case', { case_id: lit.id });
+			if (!isCurrent()) return;
+			const data = res?.data ?? res;
+			if (res?.success === false || data?.success === false) {
+				throw new Error(data?.error || res?.error || 'Failed to load case');
+			}
+			const detail = data?.case;
+			if (!detail) throw new Error('Case not found');
+			caseDetail = detail;
+		} catch (e: any) {
+			if (isCurrent()) detailError = e?.message || String(e);
+		} finally {
+			if (isCurrent()) detailLoading = false;
+		}
+	}
+
+	function closeCase() {
+		selectedCase = null;
+		caseDetail = null;
+		detailLoading = false;
+		detailError = '';
+	}
+
 	function openVerdict(litigation: any) {
 		verdictCase = litigation;
 		verdictDecision = '';
@@ -490,15 +531,41 @@
 
 	function statusColor(status: string) {
 		switch (status) {
+			case 'filed':
 			case 'pending':
 				return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
+			case 'in_progress':
 			case 'in_review':
 				return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
 			case 'resolved':
+			case 'closed':
+			case 'executed':
+			case 'paid':
 				return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300';
+			case 'verdict_issued':
+			case 'appealed':
+				return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300';
 			default:
 				return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
 		}
+	}
+
+	function statusLabel(s: string) {
+		return s ? s.replaceAll('_', ' ') : 'unknown';
+	}
+
+	function capitalize(s: string) {
+		return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+	}
+
+	// "community_service" -> "Community service"
+	function humanize(s: string) {
+		return capitalize((s || '').replaceAll('_', ' '));
+	}
+
+	function formatAmount(amount: unknown, currency: string) {
+		const n = Number(amount).toLocaleString('en-US', { maximumFractionDigits: 2 });
+		return currency ? `${n} ${currency}` : n;
 	}
 
 	function levelColor(level: string) {
@@ -526,6 +593,16 @@
 			day: 'numeric',
 			hour: '2-digit',
 			minute: '2-digit',
+		});
+	}
+
+	function formatDay(dateString: string) {
+		if (!dateString) return '';
+		return new Date(dateString).toLocaleDateString('en-US', {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			timeZone: 'UTC',
 		});
 	}
 
@@ -588,6 +665,121 @@
 	.chrome-tab.is-on {
 		border-bottom-color: #4f46e5;
 		color: #4f46e5;
+	}
+
+	.case-row {
+		cursor: pointer;
+	}
+
+	.case-open {
+		display: block;
+		width: 100%;
+		padding: 0;
+		border: 0;
+		background: none;
+		font: inherit;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.case-open:focus-visible {
+		outline: 2px solid #6366f1;
+		outline-offset: 2px;
+		border-radius: 4px;
+	}
+
+	.case-detail {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.case-header {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.case-card {
+		background: #fff;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		padding: 16px;
+	}
+
+	:global(.dark) .case-card {
+		background: #1f2937;
+		border-color: #374151;
+	}
+
+	.case-section-title {
+		margin: 0 0 8px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: #6b7280;
+	}
+
+	:global(.dark) .case-section-title {
+		color: #9ca3af;
+	}
+
+	.case-subsection {
+		margin-top: 12px;
+		padding-top: 12px;
+		border-top: 1px solid #e5e7eb;
+	}
+
+	:global(.dark) .case-subsection {
+		border-top-color: #374151;
+	}
+
+	.case-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 4px 8px;
+	}
+
+	.case-list {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.case-facts {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 8px 16px;
+		margin: 0;
+		font-size: 0.875rem;
+	}
+
+	.case-facts dt {
+		color: #6b7280;
+	}
+
+	.case-facts dd {
+		margin: 0;
+		min-width: 0;
+		color: #111827;
+		overflow-wrap: anywhere;
+	}
+
+	:global(.dark) .case-facts dt {
+		color: #9ca3af;
+	}
+
+	:global(.dark) .case-facts dd {
+		color: #fff;
+	}
+
+	.pre-line {
+		white-space: pre-line;
+		overflow-wrap: anywhere;
 	}
 
 	@media (max-width: 720px) {
@@ -700,7 +892,10 @@
 		<div class="flex border-b border-gray-200 dark:border-gray-700 mb-4">
 			<button
 				class="chrome-tab {tab === 'list' ? 'is-on' : ''}"
-				onclick={() => (tab = 'list')}
+				onclick={() => {
+					tab = 'list';
+					closeCase();
+				}}
 				title={userProfile === 'admin' ? 'All litigations' : 'My litigations'}
 				aria-label={userProfile === 'admin' ? 'All litigations' : 'My litigations'}
 			>
@@ -770,7 +965,247 @@
 		<div class="sm:bg-gray-50 sm:dark:bg-gray-800/50 sm:rounded-lg sm:p-4 sm:border sm:border-gray-200 sm:dark:border-gray-700">
 			<!-- LIST TAB -->
 			{#if tab === 'list'}
-				{#if litigations.length === 0}
+				{#if selectedCase}
+					{@const c = selectedCase}
+					{@const d = caseDetail}
+					{@const backLabel = userProfile === 'admin' ? 'All litigations' : 'My litigations'}
+					<div class="case-detail">
+						<div>
+							<button
+								type="button"
+								class="chrome-btn"
+								onclick={closeCase}
+								title={backLabel}
+								aria-label={backLabel}
+							>
+								<span aria-hidden="true">←</span>
+								<span class="chrome-label">{backLabel}</span>
+							</button>
+						</div>
+
+						<div>
+							<div class="case-header">
+								<span class="font-mono text-xs text-indigo-600 dark:text-indigo-400">
+									{c.case_number || d?.case_number || c.id}
+								</span>
+								<span
+									class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColor(c.status)}"
+								>
+									{statusLabel(c.status)}
+								</span>
+							</div>
+							{#if c.locked}
+								<p class="mt-1 flex items-center gap-1.5 text-lg font-semibold text-gray-400 dark:text-gray-500 italic">
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+									</svg>
+									Encrypted — no access
+								</p>
+							{:else}
+								<h3 class="mt-1 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+									{#if c.is_private}
+										<svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Private">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+										</svg>
+									{/if}
+									{c.case_title || '(untitled)'}
+								</h3>
+								{#if c.description}
+									<p class="pre-line mt-2 text-sm text-gray-700 dark:text-gray-300">{c.description}</p>
+								{/if}
+							{/if}
+						</div>
+
+						<div class="case-card">
+							<dl class="case-facts">
+								<dt>Court</dt>
+								<dd>{c.court_name || d?.court_name || '—'}</dd>
+								<dt>Filed</dt>
+								<dd>{formatDate(c.requested_at || d?.filed_date) || '—'}</dd>
+								{#if d?.closed_date}
+									<dt>Closed</dt>
+									<dd>{formatDate(d.closed_date)}</dd>
+								{/if}
+								<dt>Requester</dt>
+								<dd class="font-mono text-xs" title={c.requester_principal}>
+									{truncatePrincipal(c.requester_principal)}
+								</dd>
+								<dt>Defendant</dt>
+								<dd>
+									{#if c.defendant_kind === 'department'}
+										<span
+											class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 mr-1"
+										>
+											dept
+										</span>
+										{c.defendant_label}
+									{:else}
+										<span class="font-mono text-xs" title={c.defendant_principal || c.defendant_label}>
+											{truncatePrincipal(c.defendant_label || c.defendant_principal)}
+										</span>
+									{/if}
+								</dd>
+								{#if d?.judges?.length}
+									{@const specs = d.judges.map((j: any) => humanize(j.specialization)).filter(Boolean)}
+									<dt>Judges</dt>
+									<dd>{d.judges.length}{specs.length ? ` · ${specs.join(', ')}` : ''}</dd>
+								{/if}
+							</dl>
+						</div>
+
+						{#if detailLoading}
+							<div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+								<svg class="animate-spin w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+									<circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+									></circle>
+									<path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									></path>
+								</svg>
+								Loading case…
+							</div>
+						{:else if detailError}
+							<div
+								class="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg text-sm"
+							>
+								<span class="font-medium">Error:</span>
+								{detailError}
+							</div>
+						{:else if d}
+							<section>
+								<h4 class="case-section-title">Verdict</h4>
+								{#if d.verdicts?.length}
+									<div class="case-list">
+										{#each d.verdicts as v, i (v.id ?? i)}
+											<div class="case-card">
+												<div class="case-meta">
+													<span class="font-semibold text-gray-900 dark:text-white">
+														{capitalize(v.decision) || '—'}
+													</span>
+													{#if v.issued_date}
+														<span class="text-xs text-gray-500 dark:text-gray-400">
+															{formatDate(v.issued_date)}
+														</span>
+													{/if}
+												</div>
+												{#if v.reasoning}
+													<p class="pre-line mt-2 text-sm text-gray-700 dark:text-gray-300">{v.reasoning}</p>
+												{/if}
+												{#if v.penalties?.length}
+													<div class="case-subsection">
+														<h5 class="case-section-title">Penalties</h5>
+														<div class="case-list">
+															{#each v.penalties as p, j (p.id ?? j)}
+																<div>
+																	<div class="case-meta">
+																		<span class="font-medium text-gray-900 dark:text-white">
+																			{humanize(p.penalty_type) || 'Penalty'}
+																		</span>
+																		{#if Number(p.amount) > 0}
+																			<span class="text-sm text-gray-700 dark:text-gray-300">
+																				{formatAmount(p.amount, p.currency)}
+																			</span>
+																		{/if}
+																		<span
+																			class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColor(p.status)}"
+																		>
+																			{statusLabel(p.status)}
+																		</span>
+																	</div>
+																	{#if p.description}
+																		<p class="pre-line mt-1 text-sm text-gray-600 dark:text-gray-400">{p.description}</p>
+																	{/if}
+																	{#if p.due_date || p.executed_date}
+																		<div class="case-meta mt-1 text-xs text-gray-500 dark:text-gray-400">
+																			{#if p.due_date}
+																				<span>Due {formatDay(p.due_date)}</span>
+																			{/if}
+																			{#if p.executed_date}
+																				<span>Executed {formatDate(p.executed_date)}</span>
+																			{/if}
+																		</div>
+																	{/if}
+																</div>
+															{/each}
+														</div>
+													</div>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								{:else}
+									<p class="text-sm text-gray-500 dark:text-gray-400">No verdict yet.</p>
+								{/if}
+							</section>
+
+							<section>
+								<h4 class="case-section-title">Appeals</h4>
+								{#if d.appeals?.length}
+									<div class="case-list">
+										{#each d.appeals as a, i (a.id ?? i)}
+											<div class="case-card">
+												<div class="case-meta">
+													<span
+														class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColor(a.status)}"
+													>
+														{statusLabel(a.status)}
+													</span>
+													{#if a.filed_date}
+														<span class="text-xs text-gray-500 dark:text-gray-400">
+															Filed {formatDate(a.filed_date)}
+														</span>
+													{/if}
+												</div>
+												{#if a.appellate_court_name}
+													<p class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+														{a.appellate_court_name}
+													</p>
+												{/if}
+												{#if a.grounds}
+													<p class="pre-line mt-2 text-sm text-gray-700 dark:text-gray-300">{a.grounds}</p>
+												{/if}
+												{#if a.decision}
+													<div class="case-subsection">
+														<div class="case-meta">
+															<span class="text-sm font-medium text-gray-900 dark:text-white">Decision</span>
+															{#if a.decision_date}
+																<span class="text-xs text-gray-500 dark:text-gray-400">
+																	{formatDate(a.decision_date)}
+																</span>
+															{/if}
+														</div>
+														<p class="pre-line mt-1 text-sm text-gray-700 dark:text-gray-300">{capitalize(a.decision)}</p>
+													</div>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								{:else}
+									<p class="text-sm text-gray-500 dark:text-gray-400">No appeals.</p>
+								{/if}
+							</section>
+						{/if}
+
+						{#if userProfile === 'admin' && c.status !== 'resolved'}
+							<div>
+								<button
+									class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
+									onclick={() => openVerdict(selectedCase)}
+								>
+									Execute Verdict
+								</button>
+							</div>
+						{/if}
+					</div>
+				{:else if litigations.length === 0}
 					<div class="text-center py-12">
 						<svg
 							class="w-12 h-12 mx-auto text-gray-400 mb-4"
@@ -796,20 +1231,20 @@
 						{#each litigations as lit (lit.id)}
 							<article class="py-3">
 								<div class="flex items-start justify-between gap-2">
-									<div class="min-w-0">
-										<div class="font-mono text-xs text-indigo-600 dark:text-indigo-400">
+									<button type="button" class="case-open min-w-0" onclick={() => openCase(lit)}>
+										<span class="block font-mono text-xs text-indigo-600 dark:text-indigo-400">
 											{lit.case_number || lit.id}
-										</div>
+										</span>
 										{#if lit.locked}
-											<div class="mt-0.5 text-sm text-gray-400 italic">Encrypted — no access</div>
+											<span class="block mt-0.5 text-sm text-gray-400 italic">Encrypted — no access</span>
 										{:else}
-											<div class="mt-0.5 text-sm font-medium text-gray-900 dark:text-white">
+											<span class="block mt-0.5 text-sm font-medium text-gray-900 dark:text-white">
 												{lit.case_title || '(untitled)'}
-											</div>
+											</span>
 										{/if}
-									</div>
+									</button>
 									<span class="shrink-0 text-xs font-medium {statusColor(lit.status)} px-2 py-0.5">
-										{lit.status?.replace('_', ' ') || 'unknown'}
+										{statusLabel(lit.status)}
 									</span>
 								</div>
 								<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -863,34 +1298,44 @@
 							<tbody>
 								{#each litigations as lit (lit.id)}
 									<tr
-										class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+										class="case-row bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+										onclick={() => openCase(lit)}
 									>
 									<td class="px-4 py-3 font-mono text-xs text-indigo-600 dark:text-indigo-400">
 										{lit.case_number || lit.id}
 									</td>
 										<td class="px-4 py-3">
-											{#if lit.locked}
-												<div class="flex items-center gap-1.5 font-medium text-gray-400 dark:text-gray-500 italic">
-													<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-													</svg>
-													Encrypted — no access
-												</div>
-											{:else}
-												<div class="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
-													{#if lit.is_private}
-														<svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Private">
+											<button
+												type="button"
+												class="case-open"
+												onclick={(e) => {
+													e.stopPropagation();
+													openCase(lit);
+												}}
+											>
+												{#if lit.locked}
+													<span class="flex items-center gap-1.5 font-medium text-gray-400 dark:text-gray-500 italic">
+														<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 															<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
 														</svg>
+														Encrypted — no access
+													</span>
+												{:else}
+													<span class="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
+														{#if lit.is_private}
+															<svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Private">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+															</svg>
+														{/if}
+														{lit.case_title || '(untitled)'}
+													</span>
+													{#if lit.description}
+														<span class="block text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">
+															{lit.description}
+														</span>
 													{/if}
-													{lit.case_title || '(untitled)'}
-												</div>
-												{#if lit.description}
-													<div class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">
-														{lit.description}
-													</div>
 												{/if}
-											{/if}
+											</button>
 										</td>
 										<td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
 											{lit.court_name || '—'}
@@ -899,7 +1344,7 @@
 											<span
 												class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {statusColor(lit.status)}"
 											>
-												{lit.status?.replace('_', ' ') || 'unknown'}
+												{statusLabel(lit.status)}
 											</span>
 										</td>
 										<td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
