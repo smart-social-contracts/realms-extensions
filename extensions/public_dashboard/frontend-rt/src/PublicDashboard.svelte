@@ -164,43 +164,46 @@
 		return (window as any)[globalName];
 	}
 
+	async function loadStylesheet(url: string) {
+		if (document.querySelector(`link[href="${url}"]`)) return;
+		const link = document.createElement('link');
+		link.rel = 'stylesheet';
+		link.href = url;
+		document.head.appendChild(link);
+		await new Promise((r) => { link.onload = r; link.onerror = r; });
+	}
+
+	async function addBasemap(L: any, map: any) {
+		try {
+			// maplibre-gl 6 ships ES modules only; 5.x is the last UMD build loadScript can eval.
+			await loadStylesheet('https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css');
+			await loadScript('https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js', 'maplibregl');
+			await loadScript(
+				'https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js',
+				'MaplibreGLLeaflet',
+			);
+			L.maplibreGL({ style: 'https://tiles.openfreemap.org/styles/positron' }).addTo(map);
+		} catch (e) {
+			console.warn('OpenFreeMap basemap failed, using OpenStreetMap tiles:', e);
+			L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+				attribution:
+					'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+				maxZoom: 19,
+			}).addTo(map);
+		}
+	}
+
 	async function initMap() {
 		if (!mapContainer || zones.length === 0) return;
 
-		if (!document.querySelector('link[href*="leaflet"]')) {
-			const link = document.createElement('link');
-			link.rel = 'stylesheet';
-			link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-			document.head.appendChild(link);
-			await new Promise((r) => { link.onload = r; link.onerror = r; });
-		}
+		await loadStylesheet('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
 
 		const L = await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', 'L');
 		const h3 = await loadScript('https://unpkg.com/h3-js@4.2.1/dist/h3-js.umd.js', 'h3');
 		const { cellToBoundary, gridDisk } = h3;
 
 		const map = L.map(mapContainer).setView([20, 0], 2);
-
-		const cartoLayer = L.tileLayer(
-			'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-			{
-				attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
-				subdomains: 'abcd',
-				maxZoom: 19,
-			},
-		);
-		cartoLayer.on('tileerror', function () {
-			if (!(map as any)._fallbackTiles) {
-				(map as any)._fallbackTiles = true;
-				map.removeLayer(cartoLayer);
-				L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-					attribution:
-						'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-					maxZoom: 19,
-				}).addTo(map);
-			}
-		});
-		cartoLayer.addTo(map);
+		await addBasemap(L, map);
 
 		const allLatLngs: [number, number][] = [];
 		const renderedHexes = new Set<string>();
