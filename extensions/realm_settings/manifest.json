@@ -47,5 +47,15 @@
       "apply_department_table": "organization.add",
       "delete_department": "organization.delete"
     }
-  }
+  },
+  "query_functions": [
+    "health",
+    "get_realm_stage",
+    "get_languages",
+    "get_governance_settings",
+    "get_sandbox_config",
+    "get_trust_policy",
+    "get_email_config",
+    "list_department_names"
+  ]
 }

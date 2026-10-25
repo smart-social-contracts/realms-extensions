@@ -66,5 +66,12 @@
         "governed": true
       }
     }
-  }
+  },
+  "query_functions": [
+    "get_status",
+    "get_balance",
+    "get_transactions",
+    "get_active_tokens",
+    "list_subaccounts"
+  ]
 }

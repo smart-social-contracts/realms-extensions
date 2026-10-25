@@ -33,5 +33,14 @@
       "finalize_proposal": "proposal.manage",
       "execute_proposal": "proposal.manage"
     }
-  }
+  },
+  "query_functions": [
+    "get_proposals",
+    "get_proposal",
+    "get_user_vote",
+    "get_org_scopes",
+    "get_voting_settings",
+    "get_submit_context",
+    "get_bridge_verbs"
+  ]
 }

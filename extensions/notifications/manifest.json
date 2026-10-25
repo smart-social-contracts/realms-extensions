@@ -76,5 +76,11 @@
       "send_test_email": "realm.admin",
       "send_join_link": "realm.admin"
     }
-  }
+  },
+  "query_functions": [
+    "get_notifications",
+    "get_user_email",
+    "get_user_email_preferences",
+    "list_departments"
+  ]
 }
