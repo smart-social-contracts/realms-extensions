@@ -53,67 +53,64 @@
 		terminated: { bg: '#f9fafb', border: '#e5e7eb', accent: '#6b7280', dot: '#9ca3af', text: '#374151' },
 	};
 
-	function parseEntities(response: any): any[] {
-		if (response?.success && response?.data?.objectsListPaginated) {
-			return (response.data.objectsListPaginated.objects || []).map((s: string) => JSON.parse(s));
+	/** A realm read operation's reply, or null when it fails or is not available to the caller. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		try {
+			const reply = await ctx.backend.read(name, args);
+			if (reply?.ok) return reply;
+			console.warn(`${name}:`, reply?.error);
+		} catch (e) {
+			console.warn(`${name} failed:`, e);
 		}
-		return [];
+		return null;
 	}
 
 	async function loadData() {
 		loading = true;
-		const backend = ctx.backend;
-
-		const [statusResp, realmResp, zonesResp, latestResp] = await Promise.all([
-			backend.status().catch((e: any) => { console.warn('status() failed:', e); return null; }),
-			backend.get_objects_paginated('Realm', 0, 1, 'asc').catch((e: any) => { console.warn('Realm fetch failed:', e); return null; }),
-			backend.get_objects_paginated('Zone', 0, 200, 'asc').catch((e: any) => { console.warn('Zone fetch failed:', e); return null; }),
-			backend.get_objects_paginated('User', 0, 50, 'desc').catch((e: any) => { console.warn('User fetch failed:', e); return null; }),
-		]);
-
-		if (statusResp?.success && statusResp?.data?.status) {
-			statusData = statusResp.data.status;
-			brandingLogo = resolvePublicAssetUrl(statusData.logo_url, brandingLogo);
-			brandingBackground = resolvePublicAssetUrl(
-				statusData.background_image_url,
-				brandingBackground,
-			);
-			if (typeof statusData.primary_color === 'string' && statusData.primary_color) {
-				brandingPrimary = statusData.primary_color;
-			}
-		}
-
-		const realms = parseEntities(realmResp);
-		if (realms.length > 0) {
-			realmData = realms[0];
-		}
-
-		const allZones = parseEntities(zonesResp);
-		zones = allZones.filter((z: any) => z.h3_index);
-		latestUsers = parseEntities(latestResp);
-
-		await loadLifecycleData(backend);
-		await loadQuartersInfo(backend);
-
-		loading = false;
-	}
-
-	async function loadQuartersInfo(backend: any) {
-		// Expansion policy is a public query; member's home quarter requires auth.
 		try {
-			const raw = await backend.get_scale_status();
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success) scaleStatus = res;
-		} catch (e) {
-			console.warn('get_scale_status failed:', e);
-		}
-		try {
-			const resp = await backend.get_my_user_status();
-			if (resp?.success && resp?.data?.userGet) {
-				myQuarterId = resp.data.userGet.assigned_quarter || '';
+			// realm_info, quarter_directory and scale_status are public; user_list and land_map need
+			// the viewer's data rights, so visitors just don't see members and zones.
+			const [info, directory, scale, users, map] = await Promise.all([
+				read('realm_info'),
+				read('quarter_directory'),
+				read('scale_status'),
+				read('user_list', { from: 1, count: 50 }),
+				read('land_map', { from: 1, count: 200 }),
+			]);
+
+			if (info?.realm) {
+				realmData = info.realm;
+				brandingLogo = resolvePublicAssetUrl(realmData.logo_url, brandingLogo);
+				brandingBackground = resolvePublicAssetUrl(realmData.background_image_url, brandingBackground);
+				if (typeof realmData.primary_color === 'string' && realmData.primary_color) {
+					brandingPrimary = realmData.primary_color;
+				}
 			}
-		} catch {
-			// Unauthenticated or not a member — no "your quarter" line.
+			const quarters = ((directory?.quarters || []) as any[]).map((q) => ({
+				canister_id: q.id,
+				name: q.name,
+				index: q.index,
+				population: q.population,
+				status: q.status,
+				is_capital: Boolean(q.capital),
+			}));
+			statusData = {
+				realm_stage: realmData?.status,
+				open_registration: realmData?.open_registration,
+				users_count: quarters.reduce((sum, q) => sum + Number(q.population || 0), 0),
+				quarters,
+			};
+			if (scale) {
+				scaleStatus = { auto_scale_enabled: scale.enabled, threshold: scale.scale_at, n: scale.capacity };
+			}
+			latestUsers = ((users?.users || []) as any[]).map((u) => ({ id: u.id, name: u.nickname }));
+			zones = ((map?.zones || []) as any[]).filter((z) => z.h3_index);
+
+			await loadLifecycleData(ctx.backend);
+			const self = await read('me');
+			myQuarterId = self?.user?.home_quarter || '';
+		} finally {
+			loading = false;
 		}
 	}
 
@@ -267,7 +264,7 @@
 					{ label: 'Votes', value: Number(statusData.votes_count), color: '#10b981', icon: 'vote' },
 					{ label: 'Transfers', value: Number(statusData.transfers_count), color: '#f43f5e', icon: 'transfer' },
 					{ label: 'Zones', value: zones.length, color: '#06b6d4', icon: 'zone' },
-				]
+				].filter((card) => Number.isFinite(card.value))
 			: [],
 	);
 
