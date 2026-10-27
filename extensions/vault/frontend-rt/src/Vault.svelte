@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
 	import {
 		isNarrowViewport,
 		subscribeNarrowViewport,
@@ -21,24 +22,32 @@
 		fee: number;
 	}
 
-	interface VaultSettings {
-		maxRefreshAgeMs: number;
-	}
-
-	interface DirectoryEntry {
+	interface LedgerRow {
+		id: string;
+		transaction: string;
 		kind: string;
-		principal: string;
-		label: string;
+		category: string;
+		debit: number;
+		credit: number;
+		symbol: string;
+		at: number;
+		description: string;
+		user: string;
+		fund: string;
 	}
 
-	const DEFAULT_MAX_REFRESH_AGE_MS = 60 * 60 * 1000;
-	const SETTINGS_KEY = 'vault_settings';
-	const LAST_REFRESH_KEY = 'vault_last_refresh';
+	type Reply = { ok: boolean; error?: string; [key: string]: any };
+	type Outcome = { tone: 'success' | 'info' | 'warning'; text: string };
+
+	const PAGE_COUNT = 500;
+	const LEDGER_MAX = 10_000;
+	const DIRECTORY_MAX = 2_000;
+	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
 	const PRINCIPAL_RE = /^[a-z0-9]{5}(-[a-z0-9]{3,5})+$/;
-	const SUBACCOUNT_RE = /^[0-9a-fA-F]{64}$/;
 
 	let activeTab = $state<TabId>('activity');
-	let loading = $state(false);
+	let loading = $state(true);
+	let sending = $state(false);
 	let error = $state('');
 	let accessDeniedOp = $state('');
 
@@ -47,79 +56,80 @@
 
 	let vaultPrincipal = $state('');
 
+	let treasuryState = $state<'ok' | 'denied' | 'unavailable'>('ok');
+	let treasuryPermission = $state('');
+
 	let ledgerCanisters = $state<Record<string, TokenInfo>>({});
-	let tokenBalances = $state<Record<string, number>>({});
+	let fundBalances = $state<Record<string, Record<string, number>>>({});
 	let tokensLoaded = $state(false);
 
-	let allBalances = $state<any[]>([]);
-
-	let transactions = $state<any[]>([]);
-	let transferPagination = $state<any>(null);
+	let entries = $state<LedgerRow[]>([]);
+	let ledgerTruncated = $state(false);
+	let txCategory = $state<Record<string, string>>({});
 	let currentPage = $state(0);
 	const pageSize = 10;
 
 	let lastRefreshTime = $state<Date | null>(null);
 	let copiedText = $state('');
 
-	let settings = $state<VaultSettings>(loadVaultSettings());
-	let settingsInputMinutes = $state(Math.round(loadVaultSettings().maxRefreshAgeMs / 60000));
-
 	let transferToken = $state('');
+	let transferFund = $state('');
 	let transferTo = $state('');
 	let transferAmountHuman = $state('');
-	let transferToSubaccount = $state('');
-	let transferFromSubaccount = $state('');
+	let sendOutcome = $state<Outcome | null>(null);
 
-	let lookupMode = $state<'user' | 'invoice' | 'raw'>('user');
-	let lookupPrincipal = $state('');
 	let lookupInvoiceId = $state('');
-	let lookupRawHex = $state('');
-	let lookupResult = $state<{ label: string; subaccount_hex: string; balances: Record<string, number> } | null>(null);
+	let lookupResult = $state<{ invoice: string; status: string } | null>(null);
+	let lookupNote = $state('');
 	let lookupLoading = $state(false);
 
+	let invoiceCheckBusy = $state(false);
+	let invoiceCheckNote = $state('');
+
 	let directoryLabels = $state<Record<string, string>>({});
-	let directoryEntries = $state<DirectoryEntry[]>([]);
+	let directoryUsers = $state<{ principal: string; label: string }[]>([]);
 
 	let tokenSymbols = $derived(Object.keys(ledgerCanisters));
-	let directoryUsers = $derived(directoryEntries.filter((e) => e.kind === 'user'));
+	let fundIds = $derived(Object.keys(fundBalances));
+	// The treasury's books: each token's balance summed over every fund.
+	let tokenBalances = $derived.by(() => {
+		const totals: Record<string, number> = {};
+		for (const symbol of tokenSymbols) totals[symbol] = 0;
+		for (const held of Object.values(fundBalances)) {
+			for (const [symbol, amount] of Object.entries(held ?? {})) {
+				if (symbol in totals) totals[symbol] += num(amount);
+			}
+		}
+		return totals;
+	});
+	let totalPages = $derived(Math.max(1, Math.ceil(entries.length / pageSize)));
+	let pageEntries = $derived(entries.slice(currentPage * pageSize, (currentPage + 1) * pageSize));
 
 	let selectedTokenInfo = $derived(transferToken ? ledgerCanisters[transferToken] : undefined);
-	let availableBalance = $derived(transferToken ? tokenBalances[transferToken] || 0 : 0);
+	let availableBalance = $derived(
+		transferToken && transferFund ? num(fundBalances[transferFund]?.[transferToken]) : 0,
+	);
 	let transferFee = $derived(selectedTokenInfo?.fee ?? 0);
 	let parsedTransferAmount = $derived(
 		toBaseUnits(transferAmountHuman, selectedTokenInfo?.decimals ?? 8),
 	);
 	let recipientTrimmed = $derived(transferTo.trim());
-	let recipientValid = $derived(recipientTrimmed !== '' && PRINCIPAL_RE.test(recipientTrimmed));
 	let recipientLabel = $derived(directoryLabels[recipientTrimmed] || '');
-	let toSubaccountValid = $derived(
-		transferToSubaccount.trim() === '' || SUBACCOUNT_RE.test(transferToSubaccount.trim()),
-	);
-	let fromSubaccountValid = $derived(
-		transferFromSubaccount.trim() === '' || SUBACCOUNT_RE.test(transferFromSubaccount.trim()),
+	let recipientValid = $derived(
+		recipientTrimmed !== '' && (PRINCIPAL_RE.test(recipientTrimmed) || recipientLabel !== ''),
 	);
 	let canSubmitTransfer = $derived(
 		recipientValid &&
 			parsedTransferAmount != null &&
 			parsedTransferAmount > 0 &&
-			toSubaccountValid &&
-			fromSubaccountValid &&
-			!loading,
+			!!selectedTokenInfo &&
+			transferFund !== '' &&
+			!sending,
 	);
 
-	function parseRaw(raw: any): any {
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
-	}
-
-	function unwrapExtensionPayload(raw: any): any {
-		if (raw && typeof raw === 'object' && raw.success === true && raw.data != null) {
-			return raw.data;
-		}
-		return raw;
-	}
-
-	function walletTokenName(displayKey: string): string {
-		return ledgerCanisters[displayKey]?.name ?? displayKey;
+	function num(value: unknown): number {
+		const n = Number(value);
+		return Number.isFinite(n) ? n : 0;
 	}
 
 	function formatAmount(raw: number, decimals: number): string {
@@ -160,62 +170,10 @@
 		return frac ? `${whole}.${frac}` : whole;
 	}
 
-	function tokenInfoByName(name: string): TokenInfo {
-		const key = tokenSymbols.find((s) => ledgerCanisters[s]?.name === name);
-		if (key && ledgerCanisters[key]) return ledgerCanisters[key];
-		return { ledger: '', indexer: '', decimals: 8, symbol: name, name, fee: 0 };
-	}
-
-	function loadVaultSettings(): VaultSettings {
-		try {
-			const raw = localStorage.getItem(SETTINGS_KEY);
-			if (raw) {
-				const parsed = JSON.parse(raw);
-				if (typeof parsed.maxRefreshAgeMs === 'number' && parsed.maxRefreshAgeMs > 0) {
-					return { maxRefreshAgeMs: parsed.maxRefreshAgeMs };
-				}
-			}
-		} catch {
-			// ignore
-		}
-		return { maxRefreshAgeMs: DEFAULT_MAX_REFRESH_AGE_MS };
-	}
-
-	function saveVaultSettings(s: VaultSettings) {
-		try {
-			localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-		} catch {
-			// ignore
-		}
-	}
-
-	function updateSettingsFromInput() {
-		const minutes = Math.max(1, Math.round(settingsInputMinutes || 1));
-		settings = { maxRefreshAgeMs: minutes * 60000 };
-		saveVaultSettings(settings);
-	}
-
-	function loadLastRefresh(): { timestamp: number; balances: Record<string, number> } | null {
-		try {
-			const raw = localStorage.getItem(LAST_REFRESH_KEY);
-			if (raw) {
-				const parsed = JSON.parse(raw);
-				if (parsed && typeof parsed.timestamp === 'number' && parsed.balances) {
-					return { timestamp: parsed.timestamp, balances: parsed.balances };
-				}
-			}
-		} catch {
-			// ignore
-		}
-		return null;
-	}
-
-	function saveLastRefresh(timestamp: number, balances: Record<string, number>) {
-		try {
-			localStorage.setItem(LAST_REFRESH_KEY, JSON.stringify({ timestamp, balances }));
-		} catch {
-			// ignore
-		}
+	function tokenInfo(symbol: string): TokenInfo {
+		return (
+			ledgerCanisters[symbol] ?? { ledger: '', indexer: '', decimals: 8, symbol, name: symbol, fee: 0 }
+		);
 	}
 
 	async function copyToClipboard(text: string) {
@@ -236,14 +194,8 @@
 		return `${Math.floor(hours / 24)}d ago`;
 	}
 
-	function parseTimestamp(timestamp: string | number): Date {
-		const ts = String(timestamp);
-		if (ts.includes('T') || ts.includes('-') || ts.includes(':')) return new Date(ts);
-		try {
-			return new Date(Number(BigInt(ts) / BigInt(1000000)));
-		} catch {
-			return new Date();
-		}
+	function entryDate(e: LedgerRow): Date | null {
+		return e.at > 0 ? new Date(e.at * 1000) : null;
 	}
 
 	function shortPrincipalMiddle(p: string, total = 20): string {
@@ -254,50 +206,43 @@
 
 	function partyLabel(p: string | undefined | null): { display: string; title: string; copyable: boolean } {
 		if (!p) return { display: '—', title: '', copyable: false };
-		if (p === 'minting_account') return { display: 'Mint', title: p, copyable: false };
-		if (p === 'burn') return { display: 'Burned', title: p, copyable: false };
 		if (p === vaultPrincipal) return { display: 'This vault', title: p, copyable: false };
 		if (directoryLabels[p]) return { display: directoryLabels[p], title: p, copyable: false };
 		return { display: shortPrincipalMiddle(p), title: p, copyable: true };
 	}
 
+	// A cash entry's type: the other side of its transaction (transfer, payroll, tax, …).
+	function entryKind(e: LedgerRow): string {
+		if (e.description.startsWith('reversal of ')) return 'reversal';
+		return txCategory[e.transaction] || (e.category === 'cash' ? 'allocation' : e.category) || 'cash';
+	}
+
 	function typeLabel(kind: string): string {
-		const k = kind || 'unknown';
+		const k = (kind || 'cash').replace(/_/g, ' ');
 		return k.charAt(0).toUpperCase() + k.slice(1);
 	}
 
-	function typeBadgeClass(kind: string): string {
-		switch (kind) {
-			case 'mint':
-				return 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300';
-			case 'burn':
-				return 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300';
-			case 'transfer':
-				return 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-300';
-			default:
-				return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
+	function typeBadgeClass(e: LedgerRow): string {
+		if (entryKind(e) === 'reversal') {
+			return 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300';
 		}
+		const net = e.debit - e.credit;
+		if (net > 0) return 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300';
+		if (net < 0) return 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-300';
+		return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
 	}
 
-	function txAmountDisplay(tx: any): { text: string; className: string; title: string } {
-		const info = tokenInfoByName(tx.token);
-		const amount = tx.amount || 0;
-		const fee = tx.fee || 0;
-		const formatted = formatWithSymbol(amount, info.decimals, info.symbol);
-		const isIncoming = tx.principal_to === vaultPrincipal || tx.kind === 'mint';
-		const isOutgoing = tx.principal_from === vaultPrincipal || tx.kind === 'burn';
-		let text = formatted;
-		let className = 'text-gray-600 dark:text-gray-400';
-		if (isIncoming) {
-			text = `+${formatted}`;
-			className = 'text-emerald-600 dark:text-emerald-400';
-		} else if (isOutgoing) {
-			text = `−${formatted}`;
-			className = 'text-rose-600 dark:text-rose-400';
+	function entryAmountDisplay(e: LedgerRow): { text: string; className: string; title: string } {
+		const info = tokenInfo(e.symbol);
+		const net = e.debit - e.credit;
+		const formatted = formatWithSymbol(Math.abs(net), info.decimals, info.symbol);
+		if (net > 0) {
+			return { text: `+${formatted}`, className: 'text-emerald-600 dark:text-emerald-400', title: rawUnitsLabel(net) };
 		}
-		const title =
-			fee > 0 ? `${rawUnitsLabel(amount)} · Fee: ${rawUnitsLabel(fee)}` : rawUnitsLabel(amount);
-		return { text, className, title };
+		if (net < 0) {
+			return { text: `−${formatted}`, className: 'text-rose-600 dark:text-rose-400', title: rawUnitsLabel(-net) };
+		}
+		return { text: formatted, className: 'text-gray-600 dark:text-gray-400', title: rawUnitsLabel(0) };
 	}
 
 	function errorSummary(msg: string): string {
@@ -311,18 +256,6 @@
 		if (rejected) return rejected[1].trim();
 		const firstLine = msg.split('\n')[0].trim();
 		return firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine;
-	}
-
-	function lookupResultHeading(): string {
-		if (!lookupResult) return '';
-		if (lookupMode === 'user') {
-			const label =
-				directoryLabels[lookupPrincipal.trim()] || shortPrincipalMiddle(lookupPrincipal.trim());
-			return `Member ${label}`;
-		}
-		if (lookupMode === 'invoice') return `Invoice ${lookupInvoiceId.trim()}`;
-		const hex = lookupRawHex.trim();
-		return `Subaccount ${hex.substring(0, 16)}…`;
 	}
 
 	async function confirmModal(opts: {
@@ -353,6 +286,13 @@
 
 	function openSendWithToken(symbol: string) {
 		transferToken = symbol;
+		if (!transferFund || !(transferFund in fundBalances)) {
+			const richest = [...fundIds].sort(
+				(a, b) => num(fundBalances[b]?.[symbol]) - num(fundBalances[a]?.[symbol]),
+			)[0];
+			transferFund = richest ?? '';
+		}
+		sendOutcome = null;
 		activeTab = 'send';
 	}
 
@@ -364,187 +304,197 @@
 
 	// ── Data loading ─────────────────────────────────────────
 
+	/** A realm operation's reply; a thrown call becomes `{ ok: false }` like a refusal. */
+	async function call(kind: 'read' | 'run', name: string, args: Record<string, unknown> = {}): Promise<Reply> {
+		try {
+			const reply = await ctx[kind](name, args);
+			if (reply && typeof reply === 'object') return reply;
+			return { ok: false, error: `${name} gave no reply` };
+		} catch (e: any) {
+			console.warn(`${name} failed:`, e);
+			return { ok: false, error: e?.message ?? String(e) };
+		}
+	}
+
+	/** The permission an access refusal names ('' when signing in is needed), or null for other failures. */
+	function refusedPermission(message: unknown): string | null {
+		const text = String(message ?? '');
+		if (text === 'sign in first') return '';
+		return text.match(ACCESS_REFUSAL)?.[1] ?? null;
+	}
+
+	function showActionFailure(message: unknown) {
+		const permission = refusedPermission(message);
+		accessDeniedOp = permission ?? '';
+		error = permission == null ? String(message ?? '') || 'The realm refused the request.' : '';
+	}
+
+	/** Every page of a paginated read (following `next`) up to `max` rows; null if the first page is refused. */
+	async function readAll(name: string, key: string, max: number, args: Record<string, unknown> = {}) {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		let more = false;
+		while (from != null) {
+			if (rows.length >= max) {
+				more = true;
+				break;
+			}
+			const reply = await call('read', name, { ...args, from, count: PAGE_COUNT });
+			if (!reply.ok) {
+				if (from === 1) return { reply, rows: null, more: false };
+				break;
+			}
+			if (Array.isArray(reply[key])) rows.push(...reply[key]);
+			from = reply.next ?? null;
+		}
+		return { reply: null, rows, more };
+	}
+
 	async function loadDirectory() {
-		if (typeof ctx.backend?.directory_list !== 'function') return;
-		try {
-			const raw = await ctx.backend.directory_list();
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.message) {
-				const parsed = JSON.parse(resp.data.message);
-				const entries: DirectoryEntry[] = parsed.entries || [];
-				const map: Record<string, string> = {};
-				for (const entry of entries) {
-					if (entry.principal && entry.label) map[entry.principal] = entry.label;
-				}
-				directoryEntries = entries;
-				directoryLabels = map;
-			}
-		} catch {
-			// fail silently
+		const { rows } = await readAll('user_list', 'users', DIRECTORY_MAX);
+		const labels: Record<string, string> = {};
+		const users: { principal: string; label: string }[] = [];
+		for (const u of rows ?? []) {
+			const id = String(u?.id ?? '');
+			if (!id) continue;
+			const nickname = String(u?.nickname ?? '').trim();
+			if (nickname) labels[id] = nickname;
+			users.push({ principal: id, label: nickname || id });
 		}
+		directoryLabels = labels;
+		directoryUsers = users;
 	}
 
-	async function loadTokens() {
+	async function loadTreasury(): Promise<Reply> {
+		const funds: Record<string, Record<string, number>> = {};
+		let tokens: any[] = [];
+		let from: number | null = 1;
+		while (from != null) {
+			const reply = await call('read', 'treasury_view', { from, count: PAGE_COUNT });
+			if (!reply.ok) {
+				if (from === 1) return reply;
+				break;
+			}
+			Object.assign(funds, reply.funds ?? {});
+			if (Array.isArray(reply.tokens)) tokens = reply.tokens;
+			from = reply.next ?? null;
+		}
+		return { ok: true, funds, tokens };
+	}
+
+	async function loadLedger() {
+		const { rows, more } = await readAll('ledger_view', 'entries', LEDGER_MAX);
+		const categories: Record<string, string> = {};
+		const cash: LedgerRow[] = [];
+		for (const raw of rows ?? []) {
+			const e: LedgerRow = {
+				id: String(raw?.id ?? ''),
+				transaction: String(raw?.transaction ?? ''),
+				kind: String(raw?.kind ?? ''),
+				category: String(raw?.category ?? ''),
+				debit: num(raw?.debit),
+				credit: num(raw?.credit),
+				symbol: String(raw?.symbol ?? ''),
+				at: num(raw?.at),
+				description: String(raw?.description ?? ''),
+				user: String(raw?.user ?? ''),
+				fund: String(raw?.fund ?? ''),
+			};
+			if (e.kind === 'asset') cash.push(e);
+			else if (e.category && e.category !== 'ledger_fee' && !categories[e.transaction]) {
+				categories[e.transaction] = e.category;
+			}
+		}
+		txCategory = categories;
+		entries = cash.reverse();
+		ledgerTruncated = more;
+		if (currentPage >= totalPages) currentPage = 0;
+	}
+
+	async function loadAll() {
+		loading = true;
+		error = '';
+		accessDeniedOp = '';
 		try {
-			const resp = unwrapExtensionPayload(await ctx.callSync('get_active_tokens', {}));
-			const tokens = resp?.ActiveTokens || [];
+			const [status, catalog, treasury] = await Promise.all([
+				call('read', 'status'),
+				call('read', 'token_catalog'),
+				loadTreasury(),
+				loadDirectory(),
+			]);
+			vaultPrincipal = String((status.ok && status.canister) || ctx.config?.canisterId || '');
+
+			const names: Record<string, string> = {};
+			for (const t of catalog.ok && Array.isArray(catalog.tokens) ? catalog.tokens : []) {
+				if (t?.symbol && t?.name) names[String(t.symbol)] = String(t.name);
+			}
+
+			if (!treasury.ok) {
+				const permission = refusedPermission(treasury.error);
+				treasuryState = permission == null ? 'unavailable' : 'denied';
+				treasuryPermission = permission ?? '';
+				ledgerCanisters = {};
+				fundBalances = {};
+				entries = [];
+				return;
+			}
+
+			treasuryState = 'ok';
 			const canisters: Record<string, TokenInfo> = {};
-			const bals: Record<string, number> = {};
-
-			for (const token of tokens) {
-				const symbol = token.symbol || token.name;
-				const ledger = token.ledger_canister_id ?? token.ledger ?? '';
-				const indexer = token.indexer_canister_id ?? token.indexer ?? '';
-				if (symbol) {
-					canisters[symbol] = {
-						ledger,
-						indexer,
-						decimals: token.decimals || 8,
-						symbol,
-						name: token.name,
-						fee: token.fee || 0,
-					};
-					bals[symbol] = 0;
-				}
+			for (const t of treasury.tokens ?? []) {
+				const symbol = String(t?.id ?? '');
+				if (!symbol) continue;
+				const decimals = Number(t?.decimals);
+				canisters[symbol] = {
+					ledger: String(t?.ledger ?? ''),
+					indexer: String(t?.indexer ?? ''),
+					decimals: Number.isInteger(decimals) && decimals >= 0 ? decimals : 8,
+					symbol,
+					name: names[symbol] || symbol,
+					fee: num(t?.fee),
+				};
 			}
-
 			ledgerCanisters = canisters;
-			tokenBalances = bals;
+			fundBalances = treasury.funds ?? {};
+			if (!transferToken || !(transferToken in canisters)) transferToken = Object.keys(canisters)[0] ?? '';
+			if (!transferFund || !(transferFund in fundBalances)) transferFund = Object.keys(fundBalances)[0] ?? '';
 
-			const last = loadLastRefresh();
-			if (last?.balances) {
-				for (const key of Object.keys(canisters)) {
-					if (key in last.balances) bals[key] = last.balances[key];
-				}
-				tokenBalances = bals;
-				lastRefreshTime = new Date(last.timestamp);
-			}
-
-			const syms = Object.keys(canisters);
-			if (syms.length > 0 && !transferToken) transferToken = syms[0];
+			await loadLedger();
+		} finally {
 			tokensLoaded = true;
-		} catch (e: any) {
-			console.error('Failed to load tokens:', e);
-		}
-	}
-
-	async function loadBalance() {
-		loading = true;
-		error = '';
-		accessDeniedOp = '';
-		try {
-			const raw = await ctx.backend.get_objects_paginated('WalletBalance', 0, 100, 'asc');
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.objectsListPaginated) {
-				const data = resp.data.objectsListPaginated;
-				allBalances = data.objects.map((s: string) => JSON.parse(s));
-			} else {
-				allBalances = [];
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
+			lastRefreshTime = new Date();
 			loading = false;
-		}
-	}
-
-	async function loadTransactions(page: number = currentPage) {
-		loading = true;
-		error = '';
-		accessDeniedOp = '';
-		try {
-			if (!vaultPrincipal) {
-				try {
-					if (typeof ctx.backend.get_canister_id === 'function') {
-						const r = await ctx.backend.get_canister_id();
-						vaultPrincipal = r || '';
-					}
-				} catch {
-					vaultPrincipal = '';
-				}
-			}
-			const raw = await ctx.backend.get_objects_paginated('WalletTransfer', page, pageSize, 'desc');
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.objectsListPaginated) {
-				const data = resp.data.objectsListPaginated;
-				transferPagination = data.pagination;
-				transactions = data.objects.map((s: string) => JSON.parse(s));
-			} else {
-				transactions = [];
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			loading = false;
-		}
-	}
-
-	function displayKeyForTokenName(tokenName: string): string | undefined {
-		return tokenSymbols.find((s) => ledgerCanisters[s]?.name === tokenName);
-	}
-
-	function applyRefreshBalances(perToken: Record<string, any>) {
-		for (const [tokenName, tokenData] of Object.entries(perToken)) {
-			const key = displayKeyForTokenName(tokenName) || tokenName;
-			if (ledgerCanisters[key]) {
-				tokenBalances[key] = (tokenData as any)?.balance || 0;
-			}
-		}
-		tokenBalances = { ...tokenBalances };
-	}
-
-	async function loadVaultPrincipal() {
-		try {
-			if (typeof ctx.backend.get_canister_id === 'function') {
-				vaultPrincipal = (await ctx.backend.get_canister_id()) || vaultPrincipal;
-			}
-		} catch {
-			// keep existing value
 		}
 	}
 
 	// ── Mutations ────────────────────────────────────────────
 
-	async function refreshVault() {
-		loading = true;
-		error = '';
-		accessDeniedOp = '';
+	function invoiceRefusal(message: unknown): string {
+		const permission = refusedPermission(message);
+		if (permission == null) return errorSummary(String(message ?? ''));
+		return permission ? `Checking invoices needs the ${permission} permission.` : 'Sign in to check invoices.';
+	}
+
+	/** Ask the ledgers whether open invoices were paid (one batch); paid ones are booked into the treasury. */
+	async function checkInvoicePayments() {
+		invoiceCheckBusy = true;
+		invoiceCheckNote = '';
 		try {
-			const refreshData = unwrapExtensionPayload(await ctx.callAsync('refresh', {}));
-			if (refreshData?.TransactionSummary == null) {
-				error = 'Failed to sync vault transactions';
+			const reply = await call('run', 'invoice_refresh');
+			if (!reply.ok) {
+				invoiceCheckNote = invoiceRefusal(reply.error);
 				return;
 			}
-			applyRefreshBalances(refreshData.TransactionSummary.per_token || {});
-			await loadVaultPrincipal();
-			lastRefreshTime = new Date();
-			saveLastRefresh(lastRefreshTime.getTime(), tokenBalances);
-			await Promise.all([loadBalance(), loadTransactions(0)]);
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			const checked = num(reply.checked);
+			const paid = num(reply.paid);
+			invoiceCheckNote =
+				checked === 0
+					? 'No open invoices to check.'
+					: `Checked ${checked} open invoice${checked === 1 ? '' : 's'}; ${paid} newly paid.` +
+						(reply.next != null ? ' More remain: run it again.' : '');
+			if (paid > 0) await loadAll();
 		} finally {
-			loading = false;
+			invoiceCheckBusy = false;
 		}
 	}
 
@@ -557,84 +507,78 @@
 
 		const ok = await confirmModal({
 			title: 'Confirm send',
-			body: `Send ${humanDisplay} to ${recipientDisplay}? This cannot be undone.`,
+			body: `Send ${humanDisplay} from fund ${transferFund} to ${recipientDisplay}? This cannot be undone.`,
 			confirmLabel: 'Send',
 			danger: true,
 		});
 		if (!ok) return;
 
-		loading = true;
+		sending = true;
 		error = '';
 		accessDeniedOp = '';
+		sendOutcome = null;
 		try {
-			const args: any = {
-				to_principal: recipientTrimmed,
+			const reply = await call('run', 'transfer_create', {
+				fund: transferFund,
+				to: recipientTrimmed,
 				amount: parsedTransferAmount,
-				token: walletTokenName(transferToken),
-			};
-			if (transferToSubaccount.trim()) args.to_subaccount = transferToSubaccount.trim();
-			if (transferFromSubaccount.trim()) args.from_subaccount = transferFromSubaccount.trim();
-
-			unwrapExtensionPayload(await ctx.callAsync('transfer', args));
-
-			if (typeof ctx.notify === 'function') {
-				ctx.notify('success', `Sent ${humanDisplay}`);
+				symbol,
+			});
+			if (!reply.ok) {
+				showActionFailure(reply.error);
+				return;
 			}
-
-			transferTo = '';
-			transferAmountHuman = '';
-			transferToSubaccount = '';
-			transferFromSubaccount = '';
-			await loadBalance();
-			await loadTransactions();
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
+			const id = String(reply.transfer ?? '');
+			if (reply.proposal) {
+				sendOutcome = {
+					tone: 'info',
+					text: `Submitted for a vote as proposal ${reply.proposal}. The payment is made once it is approved.`,
+				};
+			} else if (reply.status === 'completed') {
+				sendOutcome = { tone: 'success', text: `Sent ${humanDisplay} to ${recipientDisplay}.` };
+			} else if (reply.status === 'pending') {
+				sendOutcome = {
+					tone: 'warning',
+					text: `Transfer ${id} is pending: the ledger call did not go through, so the amount stays reserved.`,
+				};
 			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
+				sendOutcome = {
+					tone: 'warning',
+					text: `The ledger did not accept transfer ${id}; the fund was refunded.`,
+				};
 			}
+			if (typeof ctx.notify === 'function') {
+				ctx.notify(sendOutcome.tone, sendOutcome.text);
+			}
+			if (reply.proposal || reply.status === 'completed') {
+				transferTo = '';
+				transferAmountHuman = '';
+			}
+			await loadAll();
 		} finally {
-			loading = false;
+			sending = false;
 		}
 	}
 
-	async function lookupSubaccountBalance() {
-		lookupLoading = true;
+	async function lookupInvoice() {
+		const invoice = lookupInvoiceId.trim();
 		lookupResult = null;
-		error = '';
-		accessDeniedOp = '';
+		lookupNote = '';
+		if (!invoice) {
+			lookupNote = 'Enter an invoice ID to check.';
+			return;
+		}
+		lookupLoading = true;
 		try {
-			const lookupArgs: any = {};
-			if (lookupMode === 'user' && lookupPrincipal.trim()) {
-				lookupArgs.principal = lookupPrincipal.trim();
-			} else if (lookupMode === 'invoice' && lookupInvoiceId.trim()) {
-				lookupArgs.invoice_id = lookupInvoiceId.trim();
-			} else if (lookupMode === 'raw' && lookupRawHex.trim()) {
-				lookupArgs.subaccount_hex = lookupRawHex.trim();
-			} else {
-				error = 'Please enter a value to look up';
-				lookupLoading = false;
+			const reply = await call('run', 'invoice_refresh', { invoice });
+			if (!reply.ok) {
+				lookupNote = invoiceRefusal(reply.error);
 				return;
 			}
-
-			const data = unwrapExtensionPayload(await ctx.callAsync('lookup_balance', lookupArgs));
-			if (data?.LookupBalance) {
-				lookupResult = data.LookupBalance;
-			} else {
-				error = 'Lookup failed';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			const statuses = reply.invoices && typeof reply.invoices === 'object' ? reply.invoices : {};
+			const status = statuses[invoice] ?? Object.values(statuses)[0];
+			lookupResult = { invoice, status: String(status ?? 'unknown') };
+			if (num(reply.paid) > 0) await loadAll();
 		} finally {
 			lookupLoading = false;
 		}
@@ -642,9 +586,8 @@
 
 	// ── Pagination ───────────────────────────────────────────
 
-	async function goToPage(page: number) {
-		currentPage = page;
-		await loadTransactions(page);
+	function goToPage(page: number) {
+		currentPage = Math.max(0, Math.min(page, totalPages - 1));
 	}
 
 	function paginationPages(total: number, current: number): (number | '...')[] {
@@ -678,19 +621,7 @@
 			);
 		}
 
-		(async () => {
-			await Promise.all([loadTokens(), loadDirectory()]);
-			const vaultSettings = loadVaultSettings();
-			const last = loadLastRefresh();
-			const now = Date.now();
-			const shouldRefresh = !last || now - last.timestamp > vaultSettings.maxRefreshAgeMs;
-
-			if (shouldRefresh) {
-				await refreshVault();
-			} else {
-				await Promise.all([loadBalance(), loadTransactions(0)]);
-			}
-		})();
+		void loadAll();
 
 		return () => {
 			for (const unsub of unsubs) unsub();
@@ -745,7 +676,7 @@
 		</div>
 		<button
 			type="button"
-			onclick={refreshVault}
+			onclick={loadAll}
 			disabled={loading}
 			aria-label="Refresh"
 			title="Refresh"
@@ -763,7 +694,31 @@
 	</div>
 
 	<!-- Hero balance card -->
-	{#if tokensLoaded && tokenSymbols.length > 0}
+	{#if treasuryState === 'denied'}
+		<div
+			class={cn(
+				'border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center',
+				'bg-gray-50 dark:bg-gray-800/50',
+			)}
+		>
+			<p class={cn('text-sm font-medium text-gray-600 dark:text-gray-300')}>Treasury not visible to you</p>
+			<p class={cn('text-xs text-gray-500 dark:text-gray-400 mt-1')}>
+				Viewing the vault needs the {treasuryPermission || 'signed-in'} permission.
+			</p>
+		</div>
+	{:else if treasuryState === 'unavailable'}
+		<div
+			class={cn(
+				'border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center',
+				'bg-gray-50 dark:bg-gray-800/50',
+			)}
+		>
+			<p class={cn('text-sm font-medium text-gray-600 dark:text-gray-300')}>Treasury unavailable</p>
+			<p class={cn('text-xs text-gray-500 dark:text-gray-400 mt-1')}>
+				The realm did not return its treasury just now. Use refresh to try again.
+			</p>
+		</div>
+	{:else if tokensLoaded && tokenSymbols.length > 0}
 		<div
 			class={cn(
 				'bg-gradient-to-br from-indigo-50 to-blue-100 dark:from-indigo-900/30 dark:to-blue-900/20',
@@ -808,7 +763,7 @@
 				{/each}
 			</div>
 			<p class={cn('mt-3 text-xs text-indigo-600 dark:text-indigo-400 font-medium')}>
-				On-chain ledger balance for this realm's vault
+				Booked balance across the treasury's {fundIds.length} fund{fundIds.length === 1 ? '' : 's'}
 			</p>
 		</div>
 	{:else if tokensLoaded}
@@ -843,7 +798,7 @@
 					class={cn('font-mono text-xs text-indigo-600 dark:text-indigo-400 hover:underline')}
 					title={vaultPrincipal}
 				>
-					{vaultPrincipal || 'Loading…'}
+					{vaultPrincipal || '—'}
 				</button>
 				{#if copiedText === vaultPrincipal && vaultPrincipal}
 					<span class={cn('text-xs text-green-600 dark:text-green-400')}>Copied!</span>
@@ -851,7 +806,7 @@
 			</div>
 			{#if lastRefreshTime}
 				<div class={cn('text-xs text-gray-600 dark:text-gray-400')}>
-					<span class={cn('font-medium')}>Last refresh:</span>
+					<span class={cn('font-medium')}>Last loaded:</span>
 					<span class={cn('ml-1')}>
 						{lastRefreshTime.toLocaleString()} ({timeAgo(lastRefreshTime)})
 					</span>
@@ -875,7 +830,7 @@
 							onclick={() => copyToClipboard(info.ledger)}
 							class={cn('font-mono text-indigo-600 dark:text-indigo-400 hover:underline')}
 						>
-							{info.ledger}
+							{info.ledger || '—'}
 						</button>
 						{#if copiedText === info.ledger}
 							<span class={cn('text-green-600 dark:text-green-400')}>Copied!</span>
@@ -888,7 +843,7 @@
 							onclick={() => copyToClipboard(info.indexer)}
 							class={cn('font-mono text-indigo-600 dark:text-indigo-400 hover:underline')}
 						>
-							{info.indexer}
+							{info.indexer || '—'}
 						</button>
 						{#if copiedText === info.indexer}
 							<span class={cn('text-green-600 dark:text-green-400')}>Copied!</span>
@@ -901,12 +856,7 @@
 
 	<!-- Error -->
 	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			{@const AccessDenied = ctx.ui.AccessDenied}
-			<AccessDenied operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
+		<AccessDenied operation={accessDeniedOp} />
 	{:else if error}
 		<div
 			class={cn(
@@ -981,7 +931,7 @@
 					Activity
 				</h2>
 
-				{#if loading && transactions.length === 0}
+				{#if loading && entries.length === 0}
 					<div class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
 						{#each Array(4) as _, i (i)}
 							<div class={cn('px-4 py-4 animate-pulse flex gap-4')}>
@@ -993,7 +943,14 @@
 							</div>
 						{/each}
 					</div>
-				{:else if transactions.length === 0}
+				{:else if treasuryState !== 'ok'}
+					<div class={cn('px-6 py-12 text-center')}>
+						<p class={cn('text-sm font-medium text-gray-500 dark:text-gray-400')}>No activity to show</p>
+						<p class={cn('text-xs text-gray-400 dark:text-gray-500 mt-1')}>
+							Treasury activity is shown to members who may view the treasury.
+						</p>
+					</div>
+				{:else if entries.length === 0}
 					<div class={cn('px-6 py-12 text-center')}>
 						<svg
 							class={cn('w-10 h-10 mx-auto text-gray-300 dark:text-gray-600 mb-3')}
@@ -1011,50 +968,40 @@
 						</svg>
 						<p class={cn('text-sm font-medium text-gray-500 dark:text-gray-400')}>No activity yet</p>
 						<p class={cn('text-xs text-gray-400 dark:text-gray-500 mt-1')}>
-							Transfers and ledger events will appear here after the vault syncs.
+							Payments into and out of the treasury's funds will appear here.
 						</p>
 					</div>
 				{:else if narrow}
 					<div class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
-						{#each transactions as tx (tx._id || tx.tx_id)}
-							{@const txDate = tx.timestamp ? parseTimestamp(tx.timestamp) : null}
-							{@const from = partyLabel(tx.principal_from)}
-							{@const to = partyLabel(tx.principal_to)}
-							{@const amt = txAmountDisplay(tx)}
+						{#each pageEntries as e (e.id)}
+							{@const txDate = entryDate(e)}
+							{@const who = partyLabel(e.user)}
+							{@const amt = entryAmountDisplay(e)}
 							<article class={cn('px-4 py-3')}>
 								<div class={cn('flex items-start justify-between gap-3')}>
 									<div class={cn('min-w-0')}>
-										<div class={cn('text-xs font-medium', typeBadgeClass(tx.kind))}>
-											{typeLabel(tx.kind)}
+										<div class={cn('inline-block px-1.5 rounded text-xs font-medium', typeBadgeClass(e))}>
+											{typeLabel(entryKind(e))}
 										</div>
-										<div class={cn('mt-1 text-xs text-gray-500 dark:text-gray-400')}>
-											To
-											{#if to.copyable}
-												<button
-													type="button"
-													onclick={() => copyToClipboard(tx.principal_to)}
-													class={cn('text-indigo-600 dark:text-indigo-400 hover:underline')}
-													title={to.title}
-												>
-													{to.display}
-												</button>
-											{:else}
-												<span title={to.title}>{to.display}</span>
-											{/if}
+										<div class={cn('mt-1 text-xs text-gray-500 dark:text-gray-400 break-words')}>
+											{e.description || '—'}
 										</div>
 										<div class={cn('mt-0.5 text-xs text-gray-400')}>
-											From
-											{#if from.copyable}
-												<button
-													type="button"
-													onclick={() => copyToClipboard(tx.principal_from)}
-													class={cn('text-indigo-600 dark:text-indigo-400 hover:underline')}
-													title={from.title}
-												>
-													{from.display}
-												</button>
-											{:else}
-												<span title={from.title}>{from.display}</span>
+											Fund {e.fund || '—'}
+											{#if e.user}
+												·
+												{#if who.copyable}
+													<button
+														type="button"
+														onclick={() => copyToClipboard(e.user)}
+														class={cn('text-indigo-600 dark:text-indigo-400 hover:underline')}
+														title={who.title}
+													>
+														{who.display}
+													</button>
+												{:else}
+													<span title={who.title}>{who.display}</span>
+												{/if}
 											{/if}
 										</div>
 									</div>
@@ -1101,14 +1048,14 @@
 											'px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase',
 										)}
 									>
-										From
+										Fund
 									</th>
 									<th
 										class={cn(
 											'px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase',
 										)}
 									>
-										To
+										Details
 									</th>
 									<th
 										class={cn(
@@ -1120,11 +1067,10 @@
 								</tr>
 							</thead>
 							<tbody class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
-								{#each transactions as tx (tx._id || tx.tx_id)}
-									{@const txDate = tx.timestamp ? parseTimestamp(tx.timestamp) : null}
-									{@const from = partyLabel(tx.principal_from)}
-									{@const to = partyLabel(tx.principal_to)}
-									{@const amt = txAmountDisplay(tx)}
+								{#each pageEntries as e (e.id)}
+									{@const txDate = entryDate(e)}
+									{@const who = partyLabel(e.user)}
+									{@const amt = entryAmountDisplay(e)}
 									<tr class={cn('hover:bg-gray-50 dark:hover:bg-gray-700/30')}>
 										<td class={cn('px-4 py-3')}>
 											{#if txDate}
@@ -1145,54 +1091,39 @@
 												<span class={cn('text-gray-400')}>—</span>
 											{/if}
 											<div class={cn('text-xs text-gray-400 dark:text-gray-500 mt-0.5')}>
-												#{tx.tx_id || tx._id}
+												{e.transaction || e.id}
 											</div>
 										</td>
 										<td class={cn('px-4 py-3')}>
-											<span class={cn('px-2 py-0.5 rounded text-xs font-medium', typeBadgeClass(tx.kind))}>
-												{typeLabel(tx.kind)}
+											<span class={cn('px-2 py-0.5 rounded text-xs font-medium', typeBadgeClass(e))}>
+												{typeLabel(entryKind(e))}
 											</span>
 										</td>
 										<td class={cn('px-4 py-3')}>
-											{#if from.copyable}
-												<button
-													type="button"
-													onclick={() => copyToClipboard(tx.principal_from)}
-													class={cn(
-														'text-indigo-600 dark:text-indigo-400 hover:underline text-left text-xs',
-													)}
-													title={from.title}
-												>
-													{from.display}
-												</button>
-												{#if copiedText === tx.principal_from}
-													<span class={cn('ml-1 text-xs text-green-600 dark:text-green-400')}>✓</span>
-												{/if}
-											{:else}
-												<span class={cn('text-xs text-gray-700 dark:text-gray-300')} title={from.title}>
-													{from.display}
-												</span>
-											{/if}
+											<span class={cn('text-xs text-gray-700 dark:text-gray-300')}>{e.fund || '—'}</span>
 										</td>
 										<td class={cn('px-4 py-3')}>
-											{#if to.copyable}
-												<button
-													type="button"
-													onclick={() => copyToClipboard(tx.principal_to)}
-													class={cn(
-														'text-indigo-600 dark:text-indigo-400 hover:underline text-left text-xs',
-													)}
-													title={to.title}
-												>
-													{to.display}
-												</button>
-												{#if copiedText === tx.principal_to}
-													<span class={cn('ml-1 text-xs text-green-600 dark:text-green-400')}>✓</span>
+											<div class={cn('text-xs text-gray-700 dark:text-gray-300')}>{e.description || '—'}</div>
+											{#if e.user}
+												{#if who.copyable}
+													<button
+														type="button"
+														onclick={() => copyToClipboard(e.user)}
+														class={cn(
+															'text-indigo-600 dark:text-indigo-400 hover:underline text-left text-xs',
+														)}
+														title={who.title}
+													>
+														{who.display}
+													</button>
+													{#if copiedText === e.user}
+														<span class={cn('ml-1 text-xs text-green-600 dark:text-green-400')}>✓</span>
+													{/if}
+												{:else}
+													<span class={cn('text-xs text-gray-500 dark:text-gray-400')} title={who.title}>
+														{who.display}
+													</span>
 												{/if}
-											{:else}
-												<span class={cn('text-xs text-gray-700 dark:text-gray-300')} title={to.title}>
-													{to.display}
-												</span>
 											{/if}
 										</td>
 										<td class={cn('px-4 py-3 text-right')}>
@@ -1207,11 +1138,11 @@
 					</div>
 				{/if}
 
-				{#if transferPagination && transactions.length > 0}
-					{@const total = Number(transferPagination.total_items_count)}
-					{@const start = total > 0 ? currentPage * pageSize + 1 : 0}
+				{#if treasuryState === 'ok' && entries.length > 0}
+					{@const total = entries.length}
+					{@const start = currentPage * pageSize + 1}
 					{@const end = Math.min((currentPage + 1) * pageSize, total)}
-					{@const multiPage = Number(transferPagination.total_pages) > 1}
+					{@const multiPage = totalPages > 1}
 					<div
 						class={cn(
 							'p-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3',
@@ -1221,8 +1152,11 @@
 							Showing {start}–{end} of {total}
 							{#if multiPage}
 								<span class={cn('ml-1')}
-									>(Page {currentPage + 1} of {transferPagination.total_pages})</span
+									>(Page {currentPage + 1} of {totalPages})</span
 								>
+							{/if}
+							{#if ledgerTruncated}
+								<span class={cn('ml-1')}>· from the first {LEDGER_MAX.toLocaleString()} ledger entries</span>
 							{/if}
 						</span>
 						{#if multiPage}
@@ -1237,7 +1171,7 @@
 								>
 									Prev
 								</button>
-								{#each paginationPages(Number(transferPagination.total_pages), currentPage) as p, i (i)}
+								{#each paginationPages(totalPages, currentPage) as p, i (i)}
 									{#if p === '...'}
 										<span class={cn('px-1.5 text-xs text-gray-400')}>…</span>
 									{:else}
@@ -1258,7 +1192,7 @@
 								<button
 									type="button"
 									onclick={() => goToPage(currentPage + 1)}
-									disabled={currentPage >= Number(transferPagination.total_pages) - 1}
+									disabled={currentPage >= totalPages - 1}
 									class={cn(
 										'px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed',
 									)}
@@ -1322,18 +1256,49 @@
 					</div>
 
 					<div>
+						<span class={cn('block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5')}>
+							From fund
+						</span>
+						{#if fundIds.length === 0}
+							<p class={cn('text-sm text-gray-500 dark:text-gray-400')}>
+								The treasury has no fund yet, so nothing can be sent.
+							</p>
+						{:else if fundIds.length === 1}
+							<p class={cn('text-sm text-gray-900 dark:text-gray-100')}>Paying from fund {fundIds[0]}</p>
+						{:else}
+							<select
+								id="v-fund"
+								bind:value={transferFund}
+								class={cn(
+									'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
+								)}
+							>
+								{#each fundIds as fund (fund)}
+									<option value={fund}>{fund}</option>
+								{/each}
+							</select>
+						{/if}
+					</div>
+
+					<div>
 						<label for="v-to" class={cn('block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5')}>
 							Recipient
 						</label>
 						<input
 							id="v-to"
 							type="text"
+							list="v-member-list"
 							bind:value={transferTo}
 							placeholder="xxxxx-xxxxx-xxxxx-xxxxx-xxx"
 							class={cn(
 								'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
 							)}
 						/>
+						<datalist id="v-member-list">
+							{#each directoryUsers as entry (entry.principal)}
+								<option value={entry.principal}>{entry.label}</option>
+							{/each}
+						</datalist>
 						{#if recipientTrimmed && !recipientValid}
 							<p class={cn('text-xs text-red-600 dark:text-red-400 mt-1')}>
 								Enter a valid principal ID (e.g. xxxxx-xxxxx-xxxxx-xxxxx-xxx).
@@ -1342,7 +1307,7 @@
 							<p class={cn('text-xs text-gray-600 dark:text-gray-400 mt-1')}>{recipientLabel}</p>
 						{:else}
 							<p class={cn('text-xs text-gray-500 dark:text-gray-400 mt-1')}>
-								Principal ID of the recipient.
+								Principal ID of the recipient, or pick a member.
 							</p>
 						{/if}
 					</div>
@@ -1376,9 +1341,9 @@
 								'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
 							)}
 						/>
-						{#if selectedTokenInfo}
+						{#if selectedTokenInfo && transferFund}
 							<p class={cn('text-xs text-gray-500 dark:text-gray-400 mt-1')}>
-								Available {formatWithSymbol(availableBalance, selectedTokenInfo.decimals, selectedTokenInfo.symbol)}
+								Available in {transferFund}: {formatWithSymbol(availableBalance, selectedTokenInfo.decimals, selectedTokenInfo.symbol)}
 								· Network fee {formatWithSymbol(transferFee, selectedTokenInfo.decimals, selectedTokenInfo.symbol)}
 							</p>
 						{/if}
@@ -1389,70 +1354,10 @@
 						{/if}
 					</div>
 
-					<details class={cn('rounded-lg border border-gray-200 dark:border-gray-700')}>
-						<summary
-							class={cn(
-								'px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 cursor-pointer select-none',
-							)}
-						>
-							Advanced (subaccounts)
-						</summary>
-						<div class={cn('px-3 pb-3 space-y-3 border-t border-gray-200 dark:border-gray-700 pt-3')}>
-							<p class={cn('text-xs text-gray-500 dark:text-gray-400')}>
-								Optional 64-character hex subaccount values for source or destination.
-							</p>
-							<div>
-								<label
-									for="v-to-sub"
-									class={cn('block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1')}
-								>
-									To subaccount
-								</label>
-								<input
-									id="v-to-sub"
-									type="text"
-									bind:value={transferToSubaccount}
-									placeholder="64-character hex"
-									class={cn(
-										'w-full px-3 py-2 text-sm font-mono border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-										toSubaccountValid
-											? 'border-gray-300 dark:border-gray-600'
-											: 'border-red-400 dark:border-red-600',
-									)}
-								/>
-								{#if !toSubaccountValid}
-									<p class={cn('text-xs text-red-600 dark:text-red-400 mt-1')}>
-										Must be exactly 64 hex characters.
-									</p>
-								{/if}
-							</div>
-							<div>
-								<label
-									for="v-from-sub"
-									class={cn('block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1')}
-								>
-									From subaccount
-								</label>
-								<input
-									id="v-from-sub"
-									type="text"
-									bind:value={transferFromSubaccount}
-									placeholder="64-character hex"
-									class={cn(
-										'w-full px-3 py-2 text-sm font-mono border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-										fromSubaccountValid
-											? 'border-gray-300 dark:border-gray-600'
-											: 'border-red-400 dark:border-red-600',
-									)}
-								/>
-								{#if !fromSubaccountValid}
-									<p class={cn('text-xs text-red-600 dark:text-red-400 mt-1')}>
-										Must be exactly 64 hex characters.
-									</p>
-								{/if}
-							</div>
-						</div>
-					</details>
+					<p class={cn('text-xs text-gray-400 dark:text-gray-500')}>
+						Payments go to the recipient's main account; subaccount transfers are not offered by this realm.
+						A governed fund files the payment as a proposal for a vote.
+					</p>
 
 					<button
 						type="submit"
@@ -1462,9 +1367,23 @@
 							'hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
 						)}
 					>
-						{loading ? 'Sending…' : 'Send'}
+						{sending ? 'Sending…' : 'Send'}
 					</button>
 				</form>
+				{#if sendOutcome}
+					<div
+						class={cn(
+							'mt-4 p-3 rounded-lg border text-sm',
+							sendOutcome.tone === 'success'
+								? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+								: sendOutcome.tone === 'info'
+									? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-800 dark:text-indigo-300'
+									: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300',
+						)}
+					>
+						{sendOutcome.text}
+					</div>
+				{/if}
 			</div>
 
 		{:else if activeTab === 'lookup'}
@@ -1474,98 +1393,28 @@
 				)}
 			>
 				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2')}>
-					Look up a balance
+					Check an invoice
 				</h2>
 				<p class={cn('text-sm text-gray-500 dark:text-gray-400 mb-4')}>
-					The vault holds funds in separate compartments for each member and each invoice. Look up
-					the balance in one of them.
+					Each invoice has its own account on the token ledger. Checking asks the ledger whether it was
+					paid and books the payment into the treasury if so.
 				</p>
-
-				<div class={cn('flex flex-wrap gap-2 mb-4')}>
-					{#if narrow}
-						<select
-							bind:value={lookupMode}
-							onchange={() => {
-								lookupResult = null;
-							}}
-							class={cn(
-								'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100',
-							)}
-							aria-label="Lookup mode"
-						>
-							<option value="user">Member</option>
-							<option value="invoice">Invoice</option>
-							<option value="raw">Advanced</option>
-						</select>
-					{:else}
-						{#each [{ id: 'user', label: 'Member' }, { id: 'invoice', label: 'Invoice' }, { id: 'raw', label: 'Advanced' }] as mode (mode.id)}
-							<button
-								type="button"
-								onclick={() => {
-									lookupMode = mode.id as 'user' | 'invoice' | 'raw';
-									lookupResult = null;
-								}}
-								class={cn(
-									'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-									lookupMode === mode.id
-										? 'bg-indigo-600 text-white'
-										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
-								)}
-							>
-								{mode.label}
-							</button>
-						{/each}
-					{/if}
-				</div>
-
-				{#if lookupMode === 'raw'}
-					<p class={cn('text-xs text-gray-500 dark:text-gray-400 mb-3')}>
-						Enter a raw 64-character hex subaccount. Member and invoice compartments are derived
-						from principal or invoice ID using internal prefixes.
-					</p>
-				{/if}
 
 				<form
 					onsubmit={(e) => {
 						e.preventDefault();
-						lookupSubaccountBalance();
+						lookupInvoice();
 					}}
 					class={cn('flex gap-2 mb-4')}
 				>
-					{#if lookupMode === 'user'}
-						<input
-							type="text"
-							list="member-list"
-							bind:value={lookupPrincipal}
-							placeholder="Member principal or pick from list"
-							class={cn(
-								'flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-							)}
-						/>
-						<datalist id="member-list">
-							{#each directoryUsers as entry (entry.principal)}
-								<option value={entry.principal}>{entry.label}</option>
-							{/each}
-						</datalist>
-					{:else if lookupMode === 'invoice'}
-						<input
-							type="text"
-							bind:value={lookupInvoiceId}
-							placeholder="Invoice ID"
-							class={cn(
-								'flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-							)}
-						/>
-					{:else}
-						<input
-							type="text"
-							bind:value={lookupRawHex}
-							placeholder="64-character hex subaccount"
-							class={cn(
-								'flex-1 px-3 py-2 text-sm font-mono border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-							)}
-						/>
-					{/if}
+					<input
+						type="text"
+						bind:value={lookupInvoiceId}
+						placeholder="Invoice ID (e.g. INV-1)"
+						class={cn(
+							'flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
+						)}
+					/>
 					<button
 						type="submit"
 						disabled={lookupLoading}
@@ -1574,66 +1423,41 @@
 						)}
 					>
 						{#if lookupLoading}{@render spinner()}{/if}
-						{lookupLoading ? 'Looking up…' : 'Look up'}
+						{lookupLoading ? 'Checking…' : 'Check'}
 					</button>
 				</form>
+
+				{#if lookupNote}
+					<p class={cn('text-sm text-gray-600 dark:text-gray-400 mb-4')}>{lookupNote}</p>
+				{/if}
 
 				{#if lookupResult}
 					<div
 						class={cn(
-							'bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4 space-y-3',
+							'bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4 flex items-center justify-between gap-3',
 						)}
 					>
-						<div class={cn('flex items-center justify-between gap-3')}>
-							<div>
-								<div class={cn('text-sm font-semibold text-gray-800 dark:text-gray-200')}>
-									{lookupResultHeading()}
-								</div>
-								{#if lookupMode === 'user' && directoryLabels[lookupPrincipal.trim()]}
-									<div class={cn('text-xs text-gray-500 dark:text-gray-400 mt-0.5')}>
-										{directoryLabels[lookupPrincipal.trim()]}
-									</div>
-								{/if}
-							</div>
-							<button
-								type="button"
-								onclick={() => copyToClipboard(lookupResult?.subaccount_hex || '')}
-								class={cn('text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-mono')}
-								title={lookupResult.subaccount_hex}
-							>
-								{lookupResult.subaccount_hex.substring(0, 16)}…
-							</button>
+						<div class={cn('text-sm font-semibold text-gray-800 dark:text-gray-200')}>
+							Invoice {lookupResult.invoice}
 						</div>
-						<div class={cn('space-y-2')}>
-							{#each Object.entries(lookupResult.balances) as [tokenName, bal] (tokenName)}
-								{@const info = tokenInfoByName(tokenName)}
-								<div
-									class={cn(
-										'flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg p-3',
-									)}
-									title={rawUnitsLabel(Number(bal))}
-								>
-									<span class={cn('text-sm font-semibold text-gray-700 dark:text-gray-300')}>
-										{info.symbol}
-									</span>
-									<div
-										class={cn(
-											'text-lg font-bold tabular-nums',
-											Number(bal) > 0
-												? 'text-green-700 dark:text-green-400'
-												: 'text-gray-400 dark:text-gray-500',
-										)}
-									>
-										{formatWithSymbol(Number(bal), info.decimals, info.symbol)}
-									</div>
-								</div>
-							{/each}
-						</div>
-						{#if Object.values(lookupResult.balances).every((b) => Number(b) === 0)}
-							<p class={cn('text-sm text-gray-500 italic')}>No balances found for this subaccount.</p>
-						{/if}
+						<span
+							class={cn(
+								'px-2 py-0.5 rounded text-xs font-medium',
+								lookupResult.status === 'paid'
+									? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300'
+									: lookupResult.status === 'overdue'
+										? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300'
+										: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+							)}
+						>
+							{typeLabel(lookupResult.status)}
+						</span>
 					</div>
 				{/if}
+
+				<p class={cn('mt-4 text-xs text-gray-400 dark:text-gray-500')}>
+					Per-member and raw subaccount balances are not kept by this realm, so they cannot be looked up here.
+				</p>
 			</div>
 
 		{:else if activeTab === 'admin'}
@@ -1644,98 +1468,61 @@
 			>
 				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4')}>Vault Admin</h2>
 
-				<div class={cn('mb-4')}>
+				<div class={cn('mb-6')}>
 					<button
 						type="button"
-						onclick={refreshVault}
-						disabled={loading}
+						onclick={checkInvoicePayments}
+						disabled={invoiceCheckBusy}
 						class={cn(
 							'px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2',
 						)}
 					>
-						{#if loading}{@render spinner()}{/if}
-						{loading ? 'Refreshing…' : 'Full Vault Refresh'}
+						{#if invoiceCheckBusy}{@render spinner()}{/if}
+						{invoiceCheckBusy ? 'Checking…' : 'Check invoice payments'}
 					</button>
-				</div>
-
-				<div
-					class={cn(
-						'mb-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700',
-					)}
-				>
-					<h3 class={cn('text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2')}>
-						Auto-refresh settings
-					</h3>
-					<p class={cn('text-xs text-gray-500 dark:text-gray-400 mb-3')}>
-						The Vault will only run an expensive full refresh on load if the last refresh is older
-						than this threshold.
+					<p class={cn('mt-2 text-xs text-gray-500 dark:text-gray-400')}>
+						{invoiceCheckNote ||
+							'Asks the token ledgers whether open invoices were paid, a batch at a time, and books the payments.'}
 					</p>
-					<div class={cn('flex items-center gap-3')}>
-						<label for="v-refresh-age" class={cn('text-sm text-gray-700 dark:text-gray-300')}>
-							Max refresh age:
-						</label>
-						<input
-							id="v-refresh-age"
-							type="number"
-							min="1"
-							bind:value={settingsInputMinutes}
-							class={cn(
-								'w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
-							)}
-						/>
-						<span class={cn('text-sm text-gray-500 dark:text-gray-400')}>minutes</span>
-						<button
-							type="button"
-							onclick={updateSettingsFromInput}
-							class={cn(
-								'px-3 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/40 rounded hover:bg-indigo-200 dark:hover:bg-indigo-900/60',
-							)}
-						>
-							Save
-						</button>
-					</div>
 				</div>
 
 				<div class={cn('space-y-6')}>
 					<div>
 						<h3 class={cn('font-semibold text-gray-700 dark:text-gray-300 mb-2')}>
-							All Balances in System ({allBalances.length})
+							Balances by fund ({fundIds.length})
 						</h3>
-						{#if allBalances.length > 0}
+						{#if fundIds.length > 0}
 							<div class={cn('space-y-2 max-h-80 overflow-auto')}>
-								{#each allBalances as bal, i (bal._id ?? bal.principal ?? bal.id ?? i)}
-									{@const info = tokenInfoByName(bal.token)}
-									{@const principal = bal.principal || bal._id || bal.id}
-									{@const pl = partyLabel(principal)}
+								{#each fundIds as fund (fund)}
+									{@const held = Object.entries(fundBalances[fund] ?? {})}
 									<div class={cn('p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg')}>
-										<div class={cn('text-xs text-gray-600 dark:text-gray-400 mb-1')} title={pl.title}>
-											{pl.display}
-										</div>
-										<div
-											class={cn('text-sm font-semibold text-gray-800 dark:text-gray-200 tabular-nums')}
-											title={rawUnitsLabel(bal.amount || 0)}
-										>
-											{formatWithSymbol(bal.amount || 0, info.decimals, info.symbol)}
-										</div>
+										<div class={cn('text-xs text-gray-600 dark:text-gray-400 mb-1')}>{fund}</div>
+										{#each held as [symbol, amount] (symbol)}
+											{@const info = tokenInfo(symbol)}
+											<div
+												class={cn('text-sm font-semibold text-gray-800 dark:text-gray-200 tabular-nums')}
+												title={rawUnitsLabel(num(amount))}
+											>
+												{formatWithSymbol(num(amount), info.decimals, info.symbol)}
+											</div>
+										{:else}
+											<div class={cn('text-sm text-gray-400 dark:text-gray-500')}>Empty</div>
+										{/each}
 									</div>
 								{/each}
 							</div>
 						{:else}
-							<p class={cn('text-gray-500 dark:text-gray-400 text-sm')}>No balances found in system</p>
+							<p class={cn('text-gray-500 dark:text-gray-400 text-sm')}>No funds in the treasury yet</p>
 						{/if}
 					</div>
 
 					<div>
 						<h3 class={cn('font-semibold text-gray-700 dark:text-gray-300 mb-2')}>
-							All Transfers in System
+							Cash movements on the books
 						</h3>
-						{#if transferPagination}
-							<p class={cn('text-sm text-gray-600 dark:text-gray-400')}>
-								Total transfers: {transferPagination.total_items_count}
-							</p>
-						{:else}
-							<p class={cn('text-gray-500 dark:text-gray-400 text-sm')}>No transfer data available</p>
-						{/if}
+						<p class={cn('text-sm text-gray-600 dark:text-gray-400')}>
+							Total: {entries.length.toLocaleString()}{ledgerTruncated ? '+' : ''}
+						</p>
 					</div>
 				</div>
 			</div>
