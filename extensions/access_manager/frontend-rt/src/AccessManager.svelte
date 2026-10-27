@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import {
 		isNarrowViewport,
@@ -10,29 +10,27 @@
 
 	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
-	let loading = $state(false);
+	const PAGE = 500;
+	const MAX_PAGES = 20;
 
 	// Departments
 	let departments: any[] = $state([]);
-	let deptLoading = $state(false);
+	let deptLoading = $state(true);
 	let departmentsBlockedMessage: string | null = $state(null);
-	let authoritiesBlockedMessage: string | null = $state(null);
-	let deptPermissionsBlocked: Record<string, string | null> = $state({});
 	let showNewDept = $state(false);
 	let newDeptName = $state('');
 	let newDeptDesc = $state('');
-	let newDeptHead = $state('');
 	let newDeptFund = $state('');
 	let newThresholdM = $state('1');
 	let newThresholdN = $state('1');
 	let selectedDeptName = $state('');
 	let addMemberPrincipal = $state('');
+	let addMemberPosition = $state('');
 	let addingMember = $state(false);
 	let copiedMemberPrincipal: string | null = $state(null);
-	// Member principal autocomplete — realm directory from host `directory_list`.
-	let directory: any[] = $state([]);
-	let directoryLoaded = $state(false);
-	let directoryLoading = $state(false);
+	// The realm's users from `user_list`: member autocomplete and nicknames.
+	let directory: { principal: string; nickname: string; label: string }[] = $state([]);
+	const nicknames = $derived(new Map(directory.map((e) => [e.principal, e.nickname])));
 	let showMemberSuggestions = $state(false);
 	let memberSuggestionIndex = $state(0);
 	let memberSuggestions = $derived.by(() => {
@@ -41,9 +39,8 @@
 		return directory
 			.filter(
 				(e) =>
-					e.kind === 'user' &&
-					((e.label || '').toLowerCase().includes(q) ||
-						(e.principal || '').toLowerCase().includes(q)),
+					(e.label || '').toLowerCase().includes(q) ||
+					(e.principal || '').toLowerCase().includes(q),
 			)
 			.slice(0, 8);
 	});
@@ -51,14 +48,10 @@
 		const raw = addMemberPrincipal.trim();
 		if (!raw) return null;
 
-		const exact = directory.find(
-			(e) => e.kind === 'user' && (e.principal || '').toLowerCase() === raw.toLowerCase(),
-		);
+		const exact = directory.find((e) => (e.principal || '').toLowerCase() === raw.toLowerCase());
 		if (exact?.principal) return exact.principal;
 
-		const labelMatches = directory.filter(
-			(e) => e.kind === 'user' && (e.label || '').toLowerCase() === raw.toLowerCase(),
-		);
+		const labelMatches = directory.filter((e) => (e.label || '').toLowerCase() === raw.toLowerCase());
 		if (labelMatches.length === 1 && labelMatches[0].principal) return labelMatches[0].principal;
 
 		if (isValidIcPrincipal(raw)) return raw.toLowerCase();
@@ -68,21 +61,11 @@
 	let memberPrincipalUnresolved = $derived(
 		addMemberPrincipal.trim() !== '' && resolvedMemberPrincipal === null,
 	);
-	let deptPermissions: Record<string, string[]> = $state({});
-	let deptPermLoading: string | null = $state(null);
-	let deptPermFilter = $state('');
-	// Collapsed/expanded state of permission categories, keyed "<dept>/<category>".
-	let openPermCats: Record<string, boolean> = $state({});
-	let deptPendingGrants: Set<string> = $state(new Set());
-	let deptPendingRevokes: Set<string> = $state(new Set());
-	let deptPermApplying = $state(false);
-	let allOperations: any[] = $state([]);
-	let policyDraft: Record<string, { m: string; n: string; quorum: string; veto: string; fund: string }> = $state({});
-	let authorities: any[] = $state([]);
+	let policyDraft: Record<string, { m: string; n: string; quorum: string; veto: string }> = $state({});
 	let authTarget = $state('');
 	let authPerms = $state('org.appoint,org.expel,org.set_policy');
-	let authRemoteCanister = $state('');
-	let authRemoteOrg = $state('');
+	let authRemoteQuarter = $state('');
+	let revokeAuthorityId = $state('');
 
 	const sortedDepartments = $derived(
 		[...departments].sort((a, b) => {
@@ -128,15 +111,10 @@
 			? 'p-3 bg-white border border-gray-200'
 			: 'p-3 bg-white border border-gray-200 rounded-lg',
 	);
-	let showPermPicker = $state(false);
-	let authFilter = $state('');
-	let expandedAuthRows: Set<string> = $state(new Set());
-	let fundLoading = $state(false);
-	let fundData: any = $state.raw(null);
-	let payrollData: any = $state.raw(null);
+	let newFundCode = $state('');
+	let fundBusy = $state(false);
 	let payrollBusy = $state(false);
-	let scheduleBusy = $state(false);
-	let schedulePayday = $state(1);
+	const payrollPeriod = new Date().toISOString().slice(0, 7);
 
 	function selectDepartment(name: string) {
 		selectedDeptName = name;
@@ -144,24 +122,17 @@
 		editingPosition = null;
 		assigningPosition = null;
 		assignPrincipal = '';
-		deptPermFilter = '';
-		deptPendingGrants = new Set();
-		deptPendingRevokes = new Set();
-		showPermPicker = false;
-		fundData = null;
-		payrollData = null;
-		void loadDeptPermissions(name);
-		if (activeTab === 'fund') void loadFund(name);
+		addMemberPosition = '';
 	}
 
-	function notify(message: string, type: 'success' | 'error' = 'success') {
+	function notify(message: string, type: 'success' | 'info' | 'error' = 'success') {
 		const friendly = message.includes('Invalid delegation expiry') ||
 			message.includes('delegation has expired') ||
 			message.includes('Specified sender delegation has expired')
 			? 'Your session expired. Please refresh the page to continue.'
 			: message;
 		if (typeof ctx.notify === 'function') {
-			ctx.notify(type === 'error' ? 'error' : 'success', friendly);
+			ctx.notify(type, friendly);
 			return;
 		}
 		console.warn('[access_manager]', type, friendly);
@@ -193,99 +164,149 @@
 		}
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
-
-	function isAccessPermissionError(res: { error_code?: string } | undefined | null): boolean {
-		const code = res?.error_code;
-		return code === 'permission_denied' || code === 'unauthenticated';
-	}
-
-	function permissionDeniedMessage(resource: string): string {
-		return `You don't have permission to view ${resource}.`;
-	}
-
-	async function callGated(
-		fn: string,
-		params: Record<string, unknown>,
-		handle: (res: any) => void | Promise<void>,
-	) {
-		const res = await callExt(fn, params);
-		if (res?.success && res.data?.requires_confirmation) {
-			const summary = res.data.summary || '';
-			const governedBy = res.data.governed_by || '';
-			const governedPolicy = res.data.governed_policy || res.data.policy || '';
-			const targetDepartment = res.data.target_department || '';
-			const targetPolicy = res.data.target_policy || '';
-			const policyReason = res.data.policy_reason || '';
-			const votersOrg = res.data.voters_org || res.data.governed_by || '';
-
-			const body = [
-				`This action cannot be applied directly — it needs approval under ${governedBy} policy (${governedPolicy}).`,
-				'',
-				'Why this policy applies:',
-				policyReason || '—',
-				'',
-				`Target department: ${targetDepartment || '—'} (${targetPolicy || '—'})`,
-				`Deciding org: ${governedBy} (${governedPolicy})`,
-				'',
-				summary,
-				'',
-				`Create a proposal? Members of ${votersOrg} will vote on it in Voting.`,
-			].join('\n');
-
-			const ok = await confirmModal({
-				title: 'Governance vote required',
-				body,
-				confirmLabel: 'Create proposal',
-			});
-			if (!ok) return;
-			const confirmed = await callExt(fn, { ...params, confirm: true });
-			await handle(confirmed);
-			return;
+	async function call(kind: 'read' | 'run', name: string, args: Record<string, unknown> = {}): Promise<any> {
+		if (typeof ctx[kind] !== 'function') return { ok: false, error: 'This realm cannot run it here.' };
+		try {
+			const reply = await ctx[kind](name, args);
+			return reply && typeof reply === 'object' ? reply : { ok: false, error: 'No reply.' };
+		} catch (e: any) {
+			return { ok: false, error: String(e?.message ?? e) };
 		}
-		await handle(res);
 	}
 
-	// --- Departments ---
+	/** A realm read operation's reply, or null when it fails or is not available to the caller. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		const reply = await call('read', name, args);
+		if (reply.ok) return reply;
+		console.warn(`[access_manager] ${name}:`, reply.error);
+		return null;
+	}
+
+	/** Every row of a paginated read (``from`` / ``count`` / ``next``), and the refusal that stopped it, if any. */
+	async function readAll(name: string, key: string): Promise<{ rows: any[]; error: string }> {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		for (let i = 0; i < MAX_PAGES && from != null; i++) {
+			const reply = await call('read', name, { from, count: PAGE });
+			if (!reply.ok) {
+				console.warn(`[access_manager] ${name}:`, reply.error);
+				return { rows, error: String(reply.error || `${name} is not available`) };
+			}
+			if (Array.isArray(reply[key])) rows.push(...reply[key]);
+			from = typeof reply.next === 'number' ? reply.next : null;
+		}
+		return { rows, error: '' };
+	}
+
+	/** Run ``name`` without telling the user; the reply, ok or not. */
+	async function attempt(name: string, args: Record<string, unknown>): Promise<any> {
+		return await call('run', name, args);
+	}
+
+	/** Run ``name`` and report it; a governed call files a proposal instead of acting, which still counts as done. */
+	async function change(
+		name: string,
+		args: Record<string, unknown>,
+		done: (reply: any) => string,
+	): Promise<any | null> {
+		const reply = await attempt(name, args);
+		if (!reply.ok) {
+			notify(String(reply.error || `${name} was refused.`), 'error');
+			return null;
+		}
+		if (reply.proposal) notify(proposalNotice(reply), 'info');
+		else notify(done(reply));
+		return reply;
+	}
+
+	function proposalNotice(reply: any): string {
+		return `Submitted for a vote as proposal ${reply.proposal} (see Voting).`;
+	}
+
+	function unavailableMessage(error: string, what: string): string {
+		return /needs \S+|sign in|denied|not allowed|permission/i.test(error)
+			? `You don't have permission to view ${what}.`
+			: `The realm could not list ${what} just now.`;
+	}
+
+	function int(value: string, fallback: number): number {
+		const n = parseInt(String(value ?? '').trim(), 10);
+		return Number.isFinite(n) ? n : fallback;
+	}
+
+	function person(principal: string): { principal: string; nickname: string } {
+		return { principal, nickname: nicknames.get(principal) || '' };
+	}
+
+	// --- Departments: department_list rows, with policy and seats from department_chart ---
+	function flattenChart(node: any, out: Map<string, any>) {
+		if (!node || typeof node !== 'object') return;
+		if (node.department) out.set(String(node.department), node);
+		for (const child of Array.isArray(node.children) ? node.children : []) flattenChart(child, out);
+	}
+
+	function toPosition(p: any) {
+		const holders = (Array.isArray(p?.holders) ? p.holders : []).map((h: any) => ({
+			id: String(h.id ?? ''),
+			principal: String(h.user ?? ''),
+			kind: h.kind || 'substantive',
+			agent: !!h.agent,
+		}));
+		return {
+			key: String(p?.id ?? ''),
+			title: p?.title || String(p?.id ?? ''),
+			profile: p?.profile || '',
+			headcount: Number(p?.headcount) || 1,
+			salary_amount: Number(p?.salary) || 0,
+			salary_period: p?.salary_period || 'monthly',
+			status: p?.status || 'open',
+			filled: holders.length,
+			holders,
+		};
+	}
+
+	function toDepartment(row: any, node: any) {
+		const policy = node?.policy ?? {};
+		const positions = (Array.isArray(node?.positions) ? node.positions : []).map(toPosition);
+		const members: string[] = [
+			...new Set<string>(positions.flatMap((p: any) => p.holders.map((h: any) => h.principal))),
+		];
+		return {
+			name: String(row.id ?? ''),
+			description: row.description || '',
+			is_root: !!row.is_root,
+			head: row.head || node?.head || '',
+			policy: {
+				threshold_m: Number(policy.m) || 1,
+				threshold_n: Number(policy.n) || 1,
+				quorum_percent: Number(policy.quorum_percent) || 0,
+				veto_principals: Array.isArray(policy.veto) ? policy.veto.map(String) : [],
+			},
+			positions,
+			members,
+			member_count: members.length,
+		};
+	}
+
 	async function loadDepartments() {
 		deptLoading = true;
 		departmentsBlockedMessage = null;
-		authoritiesBlockedMessage = null;
 		try {
-			const res = await callExt('list_departments');
-			if (!res?.success) {
-				const err = res?.error || '';
+			const listed = await readAll('department_list', 'departments');
+			if (listed.error && listed.rows.length === 0) {
 				departments = [];
 				selectedDeptName = '';
-				authorities = [];
-				if (isAccessPermissionError(res)) {
-					departmentsBlockedMessage = permissionDeniedMessage('departments');
-				} else {
-					notify(err || 'Failed to load departments', 'error');
-				}
+				departmentsBlockedMessage = unavailableMessage(listed.error, 'departments');
 				return;
 			}
-
-			departments = res.data?.departments ?? [];
+			const chart = await read('department_chart');
+			const nodes = new Map<string, any>();
+			flattenChart(chart?.chart, nodes);
+			departments = listed.rows.map((row) => toDepartment(row, nodes.get(String(row.id))));
 			for (const d of departments) {
 				policyDraft[d.name] = serverPolicyValues(d);
 			}
 			policyDraft = { ...policyDraft };
-
-			const authRes = await callExt('list_authorities');
-			if (!authRes?.success) {
-				const err = authRes?.error || '';
-				authorities = [];
-				if (isAccessPermissionError(authRes)) {
-					authoritiesBlockedMessage = permissionDeniedMessage('authority grants');
-				} else {
-					notify(err || 'Failed to load authorities', 'error');
-				}
-			} else {
-				authorities = authRes.data?.authorities ?? [];
-			}
 
 			// Keep selection when reloading; otherwise pick the first department.
 			if (departments.length === 0) {
@@ -298,38 +319,53 @@
 				})[0];
 				if (first) selectDepartment(first.name);
 			}
-		} catch (e: any) {
-			notify(e?.message || 'Failed to load departments', 'error');
 		} finally {
 			deptLoading = false;
 		}
 	}
 
 	async function createDepartment() {
-		if (!newDeptName.trim()) return;
-		try {
-			const res = await callExt('create_department', {
-				name: newDeptName.trim(),
-				description: newDeptDesc.trim(),
-				head_principal: newDeptHead.trim() || undefined,
-				fund_code: newDeptFund.trim() || undefined,
-				threshold_m: parseInt(newThresholdM || '1', 10),
-				threshold_n: parseInt(newThresholdN || '1', 10),
-			});
-			if (res?.success) {
-				notify(`Department "${newDeptName}" created`);
-				const createdName = newDeptName.trim();
-				newDeptName = ''; newDeptDesc = ''; newDeptHead = ''; newDeptFund = '';
-				newThresholdM = '1'; newThresholdN = '1';
-				showNewDept = false;
-				await loadDepartments();
-				selectDepartment(createdName);
-			} else {
-				notify(res?.error || 'Failed to create', 'error');
-			}
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		const name = newDeptName.trim();
+		if (!name) return;
+		const m = int(newThresholdM, 1);
+		const n = int(newThresholdN, 1);
+		if (m < 1 || n < m) {
+			notify('Approvals need 1 ≤ M ≤ N.', 'error');
+			return;
 		}
+		const fund = newDeptFund.trim();
+		const created = await attempt('department_create', { department: name, description: newDeptDesc.trim() });
+		if (!created.ok) {
+			notify(String(created.error || 'The department was not created.'), 'error');
+			return;
+		}
+		newDeptName = ''; newDeptDesc = ''; newDeptFund = '';
+		newThresholdM = '1'; newThresholdN = '1';
+		showNewDept = false;
+		if (created.proposal) {
+			notify(proposalNotice(created), 'info');
+			return;
+		}
+		const notes = [`Department "${name}" created.`];
+		let refused = false;
+		const follow = async (label: string, op: string, args: Record<string, unknown>) => {
+			const reply = await attempt(op, args);
+			if (!reply.ok) {
+				refused = true;
+				notes.push(`${label}: ${reply.error || 'refused'}`);
+			} else if (reply.proposal) {
+				notes.push(`${label}: submitted for a vote as proposal ${reply.proposal}.`);
+			} else {
+				notes.push(`${label}: done.`);
+			}
+		};
+		if (m !== 1 || n !== 1) {
+			await follow(`Policy ${m}/${n}`, 'department_set_policy', { department: name, m, n, quorum_percent: 0, veto: [] });
+		}
+		if (fund) await follow(`Fund ${fund}`, 'fund_create', { fund, name: fund, department: name });
+		notify(notes.join(' '), refused ? 'info' : 'success');
+		await loadDepartments();
+		if (departments.some((d) => d.name === name)) selectDepartment(name);
 	}
 
 	// --- Positions (issue #241) ---
@@ -343,57 +379,25 @@
 	let assignPrincipal = $state('');
 	let posDraft: { title: string; headcount: string; salary: string } = $state({ title: '', headcount: '1', salary: '0' });
 
-	function proposalCreatedNotice(res: any) {
-		const org = res.data?.org_scope || res.data?.voters_org || res.data?.governed_by || 'the governing org';
-		notify(`Proposal ${res.data.proposal_id} created — members of ${org} must vote (see Voting)`);
-	}
-
-	function handlePositionResult(res: any, successMsg: string): boolean {
-		if (!res?.success) {
-			notify(res?.error || 'Position action failed', 'error');
-			return false;
-		}
-		if (res.data?.applied === 'proposal') {
-			proposalCreatedNotice(res);
-		} else {
-			notify(successMsg);
-		}
-		return true;
-	}
-
-	function handleMemberResult(res: any, successMsg: string): boolean {
-		if (!res?.success) {
-			notify(res?.error || 'Member action failed', 'error');
-			return false;
-		}
-		if (res.data?.applied === 'proposal') {
-			proposalCreatedNotice(res);
-		} else {
-			notify(successMsg);
-		}
-		return true;
+	function slug(text: string): string {
+		return text.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 	}
 
 	async function createPosition(deptName: string) {
-		if (!newPosTitle.trim()) return;
 		const title = newPosTitle.trim();
-		try {
-			await callGated('manage_position', {
-				action: 'create',
-				department: deptName,
-				title,
-				profile: newPosProfile.trim() || title,
-				headcount: parseInt(newPosHeadcount || '1', 10),
-				salary_amount: parseInt(newPosSalary || '0', 10),
-			}, async (res) => {
-				if (handlePositionResult(res, `Position "${title}" created`)) {
-					showNewPosition = null;
-					newPosTitle = ''; newPosProfile = ''; newPosHeadcount = '1'; newPosSalary = '0';
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		if (!title) return;
+		const args: Record<string, unknown> = {
+			department: deptName,
+			position: `${slug(deptName) || 'department'}.${slug(title) || Date.now().toString(36)}`,
+			title,
+			headcount: int(newPosHeadcount, 1),
+			salary: int(newPosSalary, 0),
+		};
+		if (newPosProfile.trim()) args.profile = newPosProfile.trim();
+		if (await change('position_create', args, () => `Position "${title}" created`)) {
+			showNewPosition = null;
+			newPosTitle = ''; newPosProfile = ''; newPosHeadcount = '1'; newPosSalary = '0';
+			await loadDepartments();
 		}
 	}
 
@@ -407,85 +411,58 @@
 	}
 
 	async function saveEditPosition(pos: any) {
-		try {
-			await callGated('manage_position', {
-				action: 'update',
-				key: pos.key,
-				new_title: posDraft.title.trim(),
-				headcount: parseInt(posDraft.headcount || '1', 10),
-				salary_amount: parseInt(posDraft.salary || '0', 10),
-			}, async (res) => {
-				if (handlePositionResult(res, `Position "${pos.title}" updated`)) {
-					editingPosition = null;
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		const reply = await change('position_edit', {
+			position: pos.key,
+			title: posDraft.title.trim(),
+			headcount: int(posDraft.headcount, pos.headcount),
+			salary: int(posDraft.salary, pos.salary_amount),
+		}, () => `Position "${pos.title}" updated`);
+		if (reply) {
+			editingPosition = null;
+			await loadDepartments();
 		}
 	}
 
+	/** Close an open or frozen seat (final, it must be empty), or reopen a frozen one. */
 	async function togglePositionStatus(pos: any) {
-		const action = pos.status === 'closed' ? 'reopen' : 'close';
-		try {
-			await callGated('manage_position', { action, key: pos.key }, async (res) => {
-				if (handlePositionResult(res, `Position "${pos.title}" ${action}${action === 'close' ? 'd' : 'ed'}`)) {
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
-		}
+		const reply = pos.status === 'frozen'
+			? await change('position_edit', { position: pos.key, status: 'open' }, () => `Position "${pos.title}" reopened`)
+			: await change('position_close', { position: pos.key }, () => `Position "${pos.title}" closed`);
+		if (reply) await loadDepartments();
 	}
 
-	async function endAppointment(pos: any, principal: string) {
-		try {
-			await callGated('manage_position', {
-				action: 'end_appointment',
-				key: pos.key,
-				principal,
-			}, async (res) => {
-				if (handlePositionResult(res, 'Appointment ended')) {
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+	async function endAppointment(holder: { id: string }) {
+		if (await change('appointment_end', { appointment: holder.id }, () => 'Appointment ended')) {
+			await loadDepartments();
 		}
 	}
 
 	async function appointMember(pos: any, principal: string) {
 		if (!principal.trim()) return;
-		try {
-			await callGated('manage_position', {
-				action: 'appoint',
-				key: pos.key,
-				principal: principal.trim(),
-			}, async (res) => {
-				if (handlePositionResult(res, `Appointed to "${pos.title}"`)) {
-					assigningPosition = null;
-					assignPrincipal = '';
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		if (await change('appoint', { position: pos.key, user: principal.trim() }, () => `Appointed to "${pos.title}"`)) {
+			assigningPosition = null;
+			assignPrincipal = '';
+			await loadDepartments();
 		}
 	}
 
-	function eligibleAppointees(pos: any, members: any[]) {
+	function eligibleAppointees(pos: any) {
 		const holders = new Set((pos.holders ?? []).map((h: any) => h.principal));
-		return members.filter((m) => m.principal && !holders.has(m.principal));
+		return directory.filter((m) => m.principal && !holders.has(m.principal));
 	}
 
-	function startAssignPosition(pos: any, dept: any) {
+	function startAssignPosition(pos: any) {
 		assigningPosition = pos.key;
 		editingPosition = null;
-		const eligible = eligibleAppointees(pos, dept.members ?? []);
+		const eligible = eligibleAppointees(pos);
 		assignPrincipal = eligible[0]?.principal ?? '';
 	}
 
-	type PolicyDraft = { m: string; n: string; quorum: string; veto: string; fund: string };
+	function openSeats(dept: any): any[] {
+		return (dept.positions ?? []).filter((p: any) => p.status === 'open' && p.filled < p.headcount);
+	}
+
+	type PolicyDraft = { m: string; n: string; quorum: string; veto: string };
 
 	function serverPolicyValues(dept: any): PolicyDraft {
 		return {
@@ -493,7 +470,6 @@
 			n: String(dept.policy?.threshold_n ?? 1),
 			quorum: String(dept.policy?.quorum_percent ?? 0),
 			veto: (dept.policy?.veto_principals ?? []).join(', '),
-			fund: dept.fund?.code ?? '',
 		};
 	}
 
@@ -506,8 +482,7 @@
 			draft.m !== server.m ||
 			draft.n !== server.n ||
 			draft.quorum !== server.quorum ||
-			draft.veto !== server.veto ||
-			draft.fund !== server.fund
+			draft.veto !== server.veto
 		);
 	}
 
@@ -547,76 +522,51 @@
 		const draft = policyDraft[name];
 		if (!draft) return;
 		if (!policyValidation(name).valid) return;
-		try {
-			const res = await callExt('update_department', {
-				name,
-				threshold_m: parseInt(draft.m || '1', 10),
-				threshold_n: parseInt(draft.n || '1', 10),
-				quorum_percent: parseInt(draft.quorum || '0', 10),
-				veto_principals: draft.veto,
-				fund_code: draft.fund.trim(),
-			});
-			if (res?.success) {
-				notify(`Policy saved for ${name}`);
-				await loadDepartments();
-			} else {
-				notify(res?.error || 'Failed to save policy', 'error');
-			}
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
-		}
+		const reply = await change('department_set_policy', {
+			department: name,
+			m: int(draft.m, 1),
+			n: int(draft.n, 1),
+			quorum_percent: int(draft.quorum, 0),
+			veto: draft.veto.split(',').map((p) => p.trim()).filter(Boolean),
+		}, () => `Policy saved for ${name}`);
+		if (reply) await loadDepartments();
 	}
 
-	async function grantAuthorityFromRoot() {
-		if (!authTarget.trim() && !(authRemoteCanister.trim() && authRemoteOrg.trim())) {
-			notify('Set a local target or remote quarter + department', 'error');
+	async function grantAuthority(deptName: string) {
+		const quarter = authRemoteQuarter.trim();
+		const local = authTarget.trim();
+		if (!quarter && !local) {
+			notify('Set a target department or a quarter canister id', 'error');
 			return;
 		}
-		try {
-			const args: Record<string, unknown> = {
-				grantor: 'root',
-				permissions: authPerms.split(',').map((p) => p.trim()).filter(Boolean),
-			};
-			if (authRemoteCanister.trim()) {
-				args.target_quarter_canister_id = authRemoteCanister.trim();
-				args.target_org_name = authRemoteOrg.trim();
-			} else {
-				args.target = authTarget.trim();
-			}
-			const res = await callExt('grant_authority', args);
-			if (res?.success) {
-				notify('Authority granted');
-				authTarget = ''; authRemoteCanister = ''; authRemoteOrg = '';
-				await loadDepartments();
-			} else {
-				notify(res?.error || 'Failed', 'error');
-			}
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		const operations = authPerms.split(',').map((p) => p.trim()).filter(Boolean);
+		if (operations.length === 0) {
+			notify('Name at least one permission to pass on', 'error');
+			return;
+		}
+		const reply = await change('authority_grant', {
+			department: deptName,
+			target: quarter ? `Quarter:${quarter}` : `Department:${local}`,
+			operations,
+		}, (r) => (r.authority ? `Authority ${r.authority} granted` : 'Authority granted'));
+		if (reply) {
+			authTarget = '';
+			authRemoteQuarter = '';
 		}
 	}
 
-	async function revokeAuthority(id: string) {
-		const auth = authorities.find((a) => a.id === id);
-		if (!auth) return;
-		const permCount = (auth.permissions ?? []).length;
+	async function revokeAuthority() {
+		const id = revokeAuthorityId.trim();
+		if (!id) return;
 		const ok = await confirmModal({
 			title: 'Revoke authority',
-			body: `Revoke authority from ${auth.grantor} → ${authTargetLabel(auth)} (${permCount} permission${permCount === 1 ? '' : 's'})?`,
+			body: `Revoke authority ${id}?`,
 			confirmLabel: 'Revoke',
 			danger: true,
 		});
 		if (!ok) return;
-		try {
-			const res = await callExt('revoke_authority', { id });
-			if (res?.success) {
-				notify('Authority revoked');
-				await loadDepartments();
-			} else {
-				notify(res?.error || 'Failed', 'error');
-			}
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		if (await change('authority_revoke', { authority: id }, () => `Authority ${id} revoked`)) {
+			revokeAuthorityId = '';
 		}
 	}
 
@@ -628,35 +578,22 @@
 			danger: true,
 		});
 		if (!ok) return;
-		try {
-			const res = await callExt('delete_department', { name });
-			if (res?.success) {
-				notify(`Department "${name}" deleted`);
-				if (selectedDeptName === name) selectedDeptName = '';
-				await loadDepartments();
-			} else {
-				notify(res?.error || 'Failed', 'error');
-			}
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		const reply = await change('department_delete', { department: name }, () => `Department "${name}" deleted`);
+		if (reply) {
+			if (!reply.proposal && selectedDeptName === name) selectedDeptName = '';
+			await loadDepartments();
 		}
 	}
 
 	async function loadDirectory() {
-		if (directoryLoaded || directoryLoading || !ctx.backend?.directory_list) return;
-		directoryLoading = true;
-		try {
-			const resp: any = await ctx.backend.directory_list();
-			if (resp?.success && resp?.data?.message) {
-				const parsed = JSON.parse(resp.data.message);
-				directory = Array.isArray(parsed?.entries) ? parsed.entries : [];
-			}
-			directoryLoaded = true;
-		} catch (e) {
-			console.warn('[access_manager] directory load failed', e);
-		} finally {
-			directoryLoading = false;
-		}
+		const { rows } = await readAll('user_list', 'users');
+		directory = rows
+			.filter((u) => u?.id)
+			.map((u) => {
+				const principal = String(u.id);
+				const nickname = String(u.nickname || '').trim();
+				return { principal, nickname, label: nickname || principal };
+			});
 	}
 
 	function isValidIcPrincipal(s: string): boolean {
@@ -668,7 +605,6 @@
 	}
 
 	function openMemberSuggestionsIfMatches() {
-		void loadDirectory();
 		const q = addMemberPrincipal.trim();
 		if (q && memberSuggestions.length > 0) {
 			showMemberSuggestions = true;
@@ -692,7 +628,6 @@
 			if (!q) return;
 
 			e.preventDefault();
-			void loadDirectory();
 
 			if (!showMemberSuggestions || memberSuggestions.length === 0) {
 				showMemberSuggestions = true;
@@ -723,22 +658,18 @@
 		}
 	}
 
-	async function addMember(deptName: string) {
+	/** People belong to a department by holding one of its seats: adding someone appoints them to an open seat. */
+	async function addMember(dept: any) {
 		const principal = resolvedMemberPrincipal;
-		if (!principal || addingMember) return;
+		const seat = openSeats(dept).find((p) => p.key === addMemberPosition) ?? openSeats(dept)[0];
+		if (!principal || !seat || addingMember) return;
 		addingMember = true;
 		try {
-			await callGated('add_department_member', {
-				department: deptName,
-				user_principal: principal,
-			}, async (res) => {
-				if (handleMemberResult(res, 'Member added')) {
-					addMemberPrincipal = '';
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+			const reply = await change('appoint', { position: seat.key, user: principal }, () => `Member added as ${seat.title}`);
+			if (reply) {
+				addMemberPrincipal = '';
+				await loadDepartments();
+			}
 		} finally {
 			addingMember = false;
 		}
@@ -781,277 +712,50 @@
 			danger: true,
 		});
 		if (!ok) return;
-		try {
-			await callGated('remove_department_member', {
-				department: deptName,
-				user_principal: principal,
-			}, async (res) => {
-				if (handleMemberResult(res, 'Member removed')) {
-					await loadDepartments();
-				}
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+		if (await change('department_expel', { department: deptName, user: principal }, () => 'Member removed')) {
+			await loadDepartments();
 		}
 	}
 
-	async function loadDeptPermissions(deptName: string) {
-		deptPermLoading = deptName;
-		try {
-			const res = await callExt('get_department_permissions', { department: deptName });
-			if (res?.success) {
-				deptPermissions = { ...deptPermissions, [deptName]: (res.data?.permissions ?? []).map((p: any) => p.name) };
-				deptPermissionsBlocked = { ...deptPermissionsBlocked, [deptName]: null };
-			} else {
-				const err = res?.error || '';
-				if (isAccessPermissionError(res)) {
-					deptPermissionsBlocked = { ...deptPermissionsBlocked, [deptName]: permissionDeniedMessage('department permissions') };
-				} else {
-					notify(err || 'Failed to load permissions', 'error');
-				}
-			}
-		} catch (e: any) {
-			notify(e?.message || 'Failed to load permissions', 'error');
-		} finally {
-			deptPermLoading = null;
-		}
-	}
-
-	async function loadAllOperations() {
-		// The permission catalog lives in role_manager, not in this extension —
-		// ctx.callSync scopes to access_manager, so call the host backend directly.
-		try {
-			const raw = await ctx.backend.extension_sync_call('role_manager', 'get_all_operations', '{}');
-			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const inner = envelope?.response ?? envelope;
-			const res = typeof inner === 'string' ? JSON.parse(inner) : inner;
-			if (res?.success) {
-				allOperations = res.data?.operations ?? [];
-			}
-		} catch {
-			// Catalog stays empty; the UI shows a hint instead of the browser.
-		}
-	}
-
-	async function applyDeptPermChanges(deptName: string) {
-		deptPermApplying = true;
-		try {
-			const toGrant = [...deptPendingGrants];
-			const toRevoke = [...deptPendingRevokes];
-			if (toGrant.length > 0) {
-				const res = await callExt('batch_grant_department_permissions', {
-					department: deptName,
-					permission_names: toGrant,
-				});
-				if (!res?.success) {
-					notify(res?.error || 'Failed to grant', 'error');
-					deptPermApplying = false;
-					return;
-				}
-			}
-			if (toRevoke.length > 0) {
-				const res = await callExt('batch_revoke_department_permissions', {
-					department: deptName,
-					permission_names: toRevoke,
-				});
-				if (!res?.success) {
-					notify(res?.error || 'Failed to revoke', 'error');
-					deptPermApplying = false;
-					return;
-				}
-			}
-			notify(`${toGrant.length} granted, ${toRevoke.length} revoked`);
-			deptPendingGrants = new Set();
-			deptPendingRevokes = new Set();
-			await loadDeptPermissions(deptName);
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
-		} finally {
-			deptPermApplying = false;
-		}
-	}
-
-	function toggleDeptPerm(opName: string, deptName: string) {
-		const current = deptPermissions[deptName] ?? [];
-		const isGranted = current.includes(opName);
-		if (isGranted) {
-			if (deptPendingRevokes.has(opName)) {
-				deptPendingRevokes = new Set([...deptPendingRevokes].filter(n => n !== opName));
-			} else {
-				deptPendingRevokes = new Set([...deptPendingRevokes, opName]);
-				deptPendingGrants = new Set([...deptPendingGrants].filter(n => n !== opName));
-			}
-		} else {
-			if (deptPendingGrants.has(opName)) {
-				deptPendingGrants = new Set([...deptPendingGrants].filter(n => n !== opName));
-			} else {
-				deptPendingGrants = new Set([...deptPendingGrants, opName]);
-				deptPendingRevokes = new Set([...deptPendingRevokes].filter(n => n !== opName));
-			}
-		}
-	}
-
-	function isDeptPermChecked(opName: string, deptName: string): boolean {
-		const current = deptPermissions[deptName] ?? [];
-		if (deptPendingGrants.has(opName)) return true;
-		if (deptPendingRevokes.has(opName)) return false;
-		return current.includes(opName);
-	}
-
-	function discardDeptPermChanges() {
-		deptPendingGrants = new Set();
-		deptPendingRevokes = new Set();
-	}
-
-	function openPermPicker() {
-		showPermPicker = true;
-	}
-
-	function closePermPicker(discard = false) {
-		if (discard) discardDeptPermChanges();
-		deptPermFilter = '';
-		showPermPicker = false;
-	}
-
-	async function applyDeptPermChangesAndClose(deptName: string) {
-		await applyDeptPermChanges(deptName);
-		if (deptPendingGrants.size === 0 && deptPendingRevokes.size === 0) {
-			deptPermFilter = '';
-			showPermPicker = false;
-		}
-	}
-
-	function authTargetLabel(auth: any): string {
-		return auth.target || `${auth.target_org_name}@${shortPrincipal(auth.target_quarter_canister_id)}`;
-	}
-
-	function authorityMatchesFilter(auth: any, filter: string): boolean {
-		const q = filter.trim().toLowerCase();
-		if (!q) return true;
-		const from = (auth.grantor || '').toLowerCase();
-		const to = (auth.target || auth.target_org_name || '').toLowerCase();
-		const remote = (auth.target_quarter_canister_id || '').toLowerCase();
-		const perms = (auth.permissions || []).join(' ').toLowerCase();
-		return from.includes(q) || to.includes(q) || remote.includes(q) || perms.includes(q);
-	}
-
-	function toggleAuthRowExpanded(id: string) {
-		if (expandedAuthRows.has(id)) {
-			expandedAuthRows = new Set([...expandedAuthRows].filter((rowId) => rowId !== id));
-		} else {
-			expandedAuthRows = new Set([...expandedAuthRows, id]);
-		}
-	}
-
-	/** Permission catalog grouped by category, optionally narrowed by a filter. */
-	function groupedOps(filter: string): { category: string; ops: any[] }[] {
-		const q = filter.trim().toLowerCase();
-		const ops = q
-			? allOperations.filter((op: any) =>
-				op.name.toLowerCase().includes(q) ||
-				(op.category || '').toLowerCase().includes(q) ||
-				(op.description || '').toLowerCase().includes(q))
-			: allOperations;
-		const byCat: Record<string, any[]> = {};
-		for (const op of ops) (byCat[op.category || 'Other'] ??= []).push(op);
-		return Object.keys(byCat).sort().map((category) => ({
-			category,
-			ops: [...byCat[category]].sort((a: any, b: any) => a.name.localeCompare(b.name)),
-		}));
-	}
-
-	// --- Fund & payroll (issue #260) ---
-	async function loadFund(deptName: string) {
-		fundLoading = true;
-		try {
-			const [ledgerRes, payrollRes] = await Promise.all([
-				callExt('get_fund_ledger', { department: deptName }),
-				callExt('get_payroll_status', { department: deptName }),
-			]);
-			if (ledgerRes?.success) {
-				fundData = ledgerRes.data;
-			} else {
-				fundData = null;
-				notify(ledgerRes?.error || 'Failed to load fund ledger', 'error');
-			}
-			payrollData = payrollRes?.success ? payrollRes.data : null;
-			if (payrollData?.schedule_payday) schedulePayday = payrollData.schedule_payday;
-		} catch (e: any) {
-			notify(e?.message || 'Failed to load fund data', 'error');
-		} finally {
-			fundLoading = false;
-		}
-	}
-
-	function openFundTab() {
-		activeTab = 'fund';
-		if (selectedDeptName) void loadFund(selectedDeptName);
+	function positionProfiles(dept: any): string[] {
+		return [...new Set<string>((dept.positions ?? []).map((p: any) => p.profile).filter(Boolean))].sort();
 	}
 
 	function selectTab(id: DeptTab) {
-		if (id === 'fund') openFundTab();
-		else activeTab = id;
+		activeTab = id;
 	}
 
 	async function runPayroll(deptName: string) {
+		if (payrollBusy) return;
 		payrollBusy = true;
+		const period = payrollPeriod;
 		try {
-			await callGated('run_department_payroll', { department: deptName }, async (res) => {
-				if (!res?.success) {
-					notify(res?.error || 'Payroll run failed', 'error');
-					return;
-				}
-				if (res.data?.applied === 'proposal') {
-					proposalCreatedNotice(res);
-				} else if ((res.data?.scheduled ?? 0) === 0) {
-					notify(res.data?.message || 'All salaries for this period are already settled');
-				} else {
-					notify(`Payroll started — ${res.data.scheduled} payment(s) scheduled for ${res.data.period}`);
-				}
-				await loadFund(deptName);
+			await change('payroll_run', { department: deptName, period }, (r) => {
+				const seats = Number(r.seats) || 0;
+				return seats
+					? `Payroll ${period}: ${seats} payment(s), ${formatAmount(Number(r.total) || 0)} in total`
+					: `No salaried seats to pay for ${period}`;
 			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
 		} finally {
 			payrollBusy = false;
 		}
 	}
 
-	async function setPayrollSchedule(deptName: string, enabled: boolean) {
-		scheduleBusy = true;
+	async function createFund(deptName: string) {
+		const code = newFundCode.trim();
+		if (!code || fundBusy) return;
+		fundBusy = true;
 		try {
-			const payday = Math.min(Math.max(Math.round(schedulePayday || 1), 1), 28);
-			await callGated('set_payroll_schedule', { department: deptName, enabled, payday }, async (res) => {
-				if (!res?.success) {
-					notify(res?.error || 'Automatic payroll change failed', 'error');
-					return;
-				}
-				if (res.data?.applied === 'proposal') {
-					proposalCreatedNotice(res);
-				} else if (enabled) {
-					notify(`Automatic payroll enabled — runs monthly on day ${res.data?.payday ?? payday}`);
-				} else {
-					notify('Automatic payroll disabled');
-				}
-				await loadFund(deptName);
-			});
-		} catch (e: any) {
-			notify(e?.message || 'Error', 'error');
+			const reply = await change('fund_create', { fund: code, name: code, department: deptName }, () => `Fund "${code}" created`);
+			if (reply) newFundCode = '';
 		} finally {
-			scheduleBusy = false;
+			fundBusy = false;
 		}
 	}
 
 	function formatAmount(n: number): string {
 		return (n ?? 0).toLocaleString('en-US');
 	}
-
-	const payrollStatusStyles: Record<string, string> = {
-		completed: 'bg-green-50 text-green-700',
-		pending: 'bg-amber-50 text-amber-700',
-		failed: 'bg-red-50 text-red-700',
-		not_started: 'bg-gray-100 text-gray-600',
-	};
 
 	function shortPrincipal(p: string): string {
 		if (!p || p.length < 12) return p;
@@ -1064,10 +768,9 @@
 		return shortPrincipal(m.principal);
 	}
 
-	$effect(() => {
-		loadDepartments();
-		loadAllOperations();
-		loadDirectory();
+	onMount(() => {
+		void loadDepartments();
+		void loadDirectory();
 	});
 </script>
 
@@ -1211,13 +914,13 @@
 			<div class={nestedBoxClass}>
 				<input bind:value={newDeptName} placeholder="Department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptDesc} placeholder="Description (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-				<input bind:value={newDeptHead} placeholder="Head principal (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<input bind:value={newDeptFund} placeholder="Fund code (optional budget)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				<div class="flex gap-2">
 					<input bind:value={newThresholdM} placeholder="M" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 					<span class="self-center text-sm text-gray-500">of</span>
 					<input bind:value={newThresholdN} placeholder="N" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				</div>
+				<p class="text-xs text-gray-500">The head is chosen later, among the people holding a seat in the department.</p>
 				<button onclick={createDepartment} disabled={!newDeptName.trim()} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50">
 					Create
 				</button>
@@ -1293,11 +996,8 @@
 					{#if dept.head}
 						<div class="text-sm">
 							<span class="font-medium text-gray-700">Head:</span>
-							{@render identityLabel(dept.head)}
+							{@render identityLabel(person(dept.head))}
 						</div>
-					{/if}
-					{#if dept.extensions?.length > 0}
-						<div class="text-sm"><span class="font-medium text-gray-700">Extensions:</span> {dept.extensions.join(', ')}</div>
 					{/if}
 
 					{#if narrow}
@@ -1305,9 +1005,6 @@
 							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
 							{#if (dept.policy?.quorum_percent ?? 0) > 0}
 								· Quorum {dept.policy?.quorum_percent}%
-							{/if}
-							{#if dept.fund}
-								· Fund {dept.fund.code}
 							{/if}
 						</div>
 					{:else}
@@ -1320,21 +1017,16 @@
 									Quorum {dept.policy?.quorum_percent}%
 								</span>
 							{/if}
-							{#if dept.fund}
-								<span class="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded-full font-medium">
-									Fund {dept.fund.code}
-								</span>
-							{/if}
 						</div>
 					{/if}
 
-					<!-- Policy + budget -->
+					<!-- Policy -->
 					{#if policyDraft[dept.name]}
 						{@const pv = policyValidation(dept.name)}
 						<div class="pt-2 border-t border-gray-200 space-y-2">
 							<div class="flex flex-wrap items-center justify-between gap-2">
 								<div class="flex items-center gap-2">
-									<div class="text-sm font-medium text-gray-700">Policy & budget</div>
+									<div class="text-sm font-medium text-gray-700">Policy</div>
 									{#if policyDraftDirty(dept.name)}
 										<span class="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded-full font-medium">Unsaved changes</span>
 									{/if}
@@ -1349,7 +1041,7 @@
 									</button>
 								{/if}
 							</div>
-							<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+							<div class="grid grid-cols-3 gap-2">
 								<label class="text-xs text-gray-500">M
 									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
 									{#if pv.errors.m}
@@ -1368,11 +1060,8 @@
 										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.quorum}</span>
 									{/if}
 								</label>
-								<label class="text-xs text-gray-500 sm:col-span-2 lg:col-span-2">Fund code
-									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].fund} />
-								</label>
 							</div>
-							<label class="block text-xs text-gray-500">Veto principals (comma-separated)
+							<label class="block text-xs text-gray-500">Veto (seat holders, comma-separated)
 								<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].veto} />
 							</label>
 							<button
@@ -1387,7 +1076,6 @@
 					{/if}
 
 					<!-- Positions -->
-					{#if !dept.is_root}
 						<div class="pt-2 border-t border-gray-200">
 							<div class="flex items-center justify-between mb-2">
 								<div class="text-sm font-medium text-gray-700">Positions ({dept.positions?.length ?? 0})</div>
@@ -1406,7 +1094,7 @@
 											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosTitle} placeholder="e.g. inspector" />
 										</label>
 										<label class="text-xs text-gray-500">Profile (role)
-											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosProfile} placeholder="defaults to title" />
+											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosProfile} placeholder="existing profile (optional)" />
 										</label>
 										<label class="text-xs text-gray-500">Headcount
 											<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={newPosHeadcount} />
@@ -1453,9 +1141,11 @@
 														<span class="font-medium text-gray-800">{pos.title}</span>
 														{#if pos.status === 'closed'}
 															<span class="ml-2 text-xs text-red-500">closed</span>
+														{:else if pos.status === 'frozen'}
+															<span class="ml-2 text-xs text-amber-600">frozen</span>
 														{/if}
 														<div class="text-xs text-gray-400 mt-0.5">
-															profile: {pos.profile}
+															{#if pos.profile}profile: {pos.profile}{:else}no profile{/if}
 															{#if pos.salary_amount > 0}
 																· {pos.salary_amount}/{pos.salary_period}
 															{/if}
@@ -1465,35 +1155,41 @@
 														<span class={`text-xs font-medium ${pos.filled >= pos.headcount ? 'text-green-600' : 'text-amber-600'}`}>
 															{pos.filled}/{pos.headcount} filled
 														</span>
+														{#if pos.status !== 'closed'}
 														<div class="flex gap-1">
-															{#if pos.status !== 'closed' && pos.filled < pos.headcount}
-																<button onclick={() => startAssignPosition(pos, dept)} class="px-1.5 py-0.5 text-xs border border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50">Assign</button>
+															{#if pos.status === 'open' && pos.filled < pos.headcount}
+																<button onclick={() => startAssignPosition(pos)} class="px-1.5 py-0.5 text-xs border border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50">Assign</button>
 															{/if}
 															<button onclick={() => startEditPosition(pos)} class="px-1.5 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100">Edit</button>
-															<button onclick={() => togglePositionStatus(pos)} class="px-1.5 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100">
-																{pos.status === 'closed' ? 'Reopen' : 'Close'}
+															<button
+																onclick={() => togglePositionStatus(pos)}
+																class="px-1.5 py-0.5 text-xs border border-gray-300 text-gray-600 rounded hover:bg-gray-100"
+																title={pos.status === 'frozen' ? 'Reopen this seat' : 'Close this seat for good (it must be empty)'}
+															>
+																{pos.status === 'frozen' ? 'Reopen' : 'Close'}
 															</button>
 														</div>
+														{/if}
 													</div>
 												</div>
 												{#if pos.holders?.length > 0}
 													<div class="mt-2 flex flex-wrap gap-1">
-														{#each pos.holders as h (h.principal)}
+														{#each pos.holders as h (h.id || h.principal)}
 															<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-gray-100 border border-gray-200 rounded-full text-gray-600" title={h.principal}>
-																{@render identityLabel(h)}
+																{@render identityLabel(person(h.principal))}
 																{#if h.kind === 'acting'}
 																	<span class="text-[10px] text-gray-400">acting</span>
 																{/if}
-																<button onclick={() => endAppointment(pos, h.principal)} class="text-gray-400 hover:text-red-600" title="End appointment">&times;</button>
+																<button onclick={() => endAppointment(h)} class="text-gray-400 hover:text-red-600" title="End appointment">&times;</button>
 															</span>
 														{/each}
 													</div>
 												{/if}
 												{#if assigningPosition === pos.key}
-													{@const eligible = eligibleAppointees(pos, dept.members ?? [])}
+													{@const eligible = eligibleAppointees(pos)}
 													<div class="mt-2 p-2 bg-indigo-50 border border-indigo-100 rounded-lg space-y-2">
 														{#if eligible.length === 0}
-															<p class="text-xs text-gray-500">Add department members first, then assign them to this position.</p>
+															<p class="text-xs text-gray-500">No other registered people to appoint.</p>
 														{:else}
 															<div class="flex flex-wrap items-end gap-2">
 																<label class="text-xs text-gray-600 flex-1 min-w-[10rem]">
@@ -1530,7 +1226,6 @@
 								<p class="text-xs text-gray-400">No positions defined for this department.</p>
 							{/if}
 						</div>
-					{/if}
 				</div>
 				{:else if activeTab === 'members'}
 				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
@@ -1545,18 +1240,18 @@
 						<p class="text-sm text-gray-400">No members</p>
 					{:else}
 						<div class="flex flex-col gap-1">
-							{#each dept.members as m (m.principal)}
+							{#each dept.members as m (m)}
 								<div class={cn('flex items-center justify-between text-sm bg-white px-3 py-1.5 border border-gray-200', narrow ? '' : 'rounded-lg')}>
-									<div class="min-w-0 flex-1">{@render identityLabel(m)}</div>
+									<div class="min-w-0 flex-1">{@render identityLabel(person(m))}</div>
 									<div class="flex items-center gap-0.5 shrink-0 ml-2">
 										<button
 											type="button"
-											onclick={() => copyMemberPrincipal(m.principal)}
+											onclick={() => copyMemberPrincipal(m)}
 											class="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
 											aria-label="Copy principal"
 											title="Copy principal"
 										>
-											{#if copiedMemberPrincipal === m.principal}
+											{#if copiedMemberPrincipal === m}
 												<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
 													<path d="M3 8l3.5 3.5L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
 												</svg>
@@ -1569,7 +1264,7 @@
 										</button>
 										<button
 											type="button"
-											onclick={() => removeMember(dept.name, m.principal, m)}
+											onclick={() => removeMember(dept.name, m, person(m))}
 											class="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors"
 											aria-label="Remove member"
 											title="Remove member"
@@ -1585,7 +1280,13 @@
 						</div>
 					{/if}
 
-					<div class="flex gap-2 max-w-2xl">
+					{#if openSeats(dept).length === 0}
+						<p class="text-xs text-gray-500">
+							People join a department by holding one of its seats. Open a position with a free seat in the Overview tab to add someone.
+						</p>
+					{:else}
+					{@const seats = openSeats(dept)}
+					<div class={cn('flex gap-2 max-w-2xl', narrow ? 'flex-col' : '')}>
 						<div class="relative flex-1">
 							<input
 								bind:value={addMemberPrincipal}
@@ -1616,9 +1317,19 @@
 								</ul>
 							{/if}
 						</div>
+						<select
+							aria-label="Seat"
+							value={seats.some((p) => p.key === addMemberPosition) ? addMemberPosition : seats[0].key}
+							onchange={(e) => (addMemberPosition = e.currentTarget.value)}
+							class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white"
+						>
+							{#each seats as seat (seat.key)}
+								<option value={seat.key}>{seat.title} ({seat.filled}/{seat.headcount})</option>
+							{/each}
+						</select>
 						<button
 							type="button"
-							onclick={() => addMember(dept.name)}
+							onclick={() => addMember(dept)}
 							disabled={!resolvedMemberPrincipal || addingMember}
 							class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
 						>
@@ -1631,8 +1342,9 @@
 						</p>
 					{/if}
 					<p id="am-member-hint" class="text-xs text-gray-500">
-						Type a name or principal to see matches. Use arrow keys and Enter to pick; Tab also selects the highlighted match.
+						Type a name or principal to see matches, then pick the seat they take. Use arrow keys and Enter to pick; Tab also selects the highlighted match.
 					</p>
+					{/if}
 
 					{#if !dept.is_root}
 						<button
@@ -1645,524 +1357,95 @@
 					{/if}
 				</div>
 				{:else if activeTab === 'permissions'}
+				{@const profiles = positionProfiles(dept)}
 				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<div class="text-sm font-medium text-gray-700">Permissions ({(deptPermissions[dept.name] ?? []).length})</div>
-						{#if !deptPermissionsBlocked[dept.name]}
-							<button
-								type="button"
-								onclick={openPermPicker}
-								class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800"
-							>
-								Manage permissions
-							</button>
-						{/if}
-					</div>
-
-					{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
-						<div class="flex flex-wrap items-center justify-between gap-2 p-3 bg-white border border-gray-200 rounded-lg">
-							<span class="text-sm text-gray-600">
-								{deptPendingGrants.size + deptPendingRevokes.size} pending change{deptPendingGrants.size + deptPendingRevokes.size === 1 ? '' : 's'}
-								<span class="ml-2 text-xs text-gray-500">
-									{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
-									{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
-									{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
-								</span>
-							</span>
-							<div class="flex items-center gap-2">
-								<button onclick={() => discardDeptPermChanges()} class="text-xs text-gray-500 hover:text-gray-700">Discard</button>
-								<button onclick={() => applyDeptPermChanges(dept.name)} disabled={deptPermApplying} class="px-2 py-1 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">Apply</button>
-							</div>
-						</div>
-					{/if}
-
-					{#if deptPermissionsBlocked[dept.name]}
-						<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-							{deptPermissionsBlocked[dept.name]}
-						</p>
-					{:else if (deptPermissions[dept.name] ?? []).length > 0}
+					<div class="text-sm font-medium text-gray-700">Profiles held through positions ({profiles.length})</div>
+					{#if profiles.length > 0}
 						<div class="flex flex-wrap gap-1">
-							{#each deptPermissions[dept.name] ?? [] as perm (perm)}
-								<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">
-									{perm}
-									<button onclick={() => toggleDeptPerm(perm, dept.name)} class="text-amber-400 hover:text-red-600" title="Revoke">&times;</button>
-								</span>
+							{#each profiles as profile (profile)}
+								<span class="px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium">{profile}</span>
 							{/each}
 						</div>
 					{:else}
-						<p class="text-sm text-gray-400">No permissions granted to this department yet.</p>
+						<p class="text-sm text-gray-400">None of this department's positions carries a profile yet.</p>
 					{/if}
+					<p class="text-xs text-gray-500">
+						What a department may do comes from the profiles of its positions and from authority granted to it.
+						Granting permissions to a department directly is not available here.
+					</p>
 				</div>
 				{:else if activeTab === 'authority'}
 				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
 					<div>
 						<h3 class="text-sm font-semibold text-gray-800">Authority (department over department)</h3>
-						<p class="text-sm text-gray-500 mt-1">Grant permissions from root (or another department) over a local or remote-quarter department.</p>
+						<p class="text-sm text-gray-500 mt-1">Let {dept.name} pass on permissions over another department, or over a remote quarter.</p>
 					</div>
 					<div class={boxClass}>
-						<input bind:value={authTarget} placeholder="Local target department name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-						<input bind:value={authRemoteCanister} placeholder="Remote quarter canister id (optional)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-						<input bind:value={authRemoteOrg} placeholder="Remote department name (if cross-quarter)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+						<input bind:value={authTarget} placeholder="Target department" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+						<input bind:value={authRemoteQuarter} placeholder="Or a remote quarter canister id" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 						<input bind:value={authPerms} placeholder="Permissions (comma-separated)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-						<button onclick={grantAuthorityFromRoot} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant from root</button>
+						<button
+							onclick={() => grantAuthority(dept.name)}
+							disabled={!authTarget.trim() && !authRemoteQuarter.trim()}
+							class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+						>
+							Grant from {dept.name}
+						</button>
 					</div>
-					{#if authoritiesBlockedMessage}
-						<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-							{authoritiesBlockedMessage}
-						</p>
-					{:else if authorities.length === 0}
-						<p class="text-sm text-gray-400">No authority grants yet.</p>
-					{:else}
-						{@const filteredAuthorities = authorities.filter((auth) => authorityMatchesFilter(auth, authFilter))}
-						<input
-							type="text"
-							bind:value={authFilter}
-							placeholder="Filter by source, target, remote quarter, or permission…"
-							class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-						/>
-						{#if filteredAuthorities.length === 0}
-							<p class="text-sm text-gray-400">No authority grants match your filter.</p>
-						{:else if narrow}
-							<div class="divide-y divide-gray-200 border-y border-gray-200 bg-white">
-								{#each filteredAuthorities as auth (auth.id)}
-									{@const perms = auth.permissions ?? []}
-									{@const expanded = expandedAuthRows.has(auth.id)}
-									{@const visiblePerms = expanded ? perms : perms.slice(0, 3)}
-									<article class="py-3">
-										<div class="flex items-start justify-between gap-3">
-											<div class="min-w-0">
-												<div class="text-xs text-gray-500">From {auth.grantor}</div>
-												<div class="font-medium text-gray-900">{authTargetLabel(auth)}</div>
-												{#if auth.target_quarter_canister_id}
-													<div class="text-xs text-gray-400 font-mono">{shortPrincipal(auth.target_quarter_canister_id)}</div>
-												{/if}
-											</div>
-											<button type="button" onclick={() => revokeAuthority(auth.id)} class="shrink-0 text-red-500 hover:text-red-700 text-xs">Revoke</button>
-										</div>
-										<div class="mt-1 text-xs text-gray-600 break-words">
-											{visiblePerms.join(', ')}
-											{#if perms.length > 3}
-												<button
-													type="button"
-													onclick={() => toggleAuthRowExpanded(auth.id)}
-													class="ml-1 text-indigo-600 hover:text-indigo-800"
-												>
-													{expanded ? 'Show less' : `+${perms.length - 3} more`}
-												</button>
-											{/if}
-										</div>
-									</article>
-								{/each}
-							</div>
-						{:else}
-							<div class="overflow-x-auto border border-gray-200 rounded-lg bg-white">
-								<table class="w-full text-sm min-w-[36rem]">
-									<thead class="bg-gray-50 text-gray-500 text-xs">
-										<tr>
-											<th class="px-3 py-2 text-left font-medium">From</th>
-											<th class="px-3 py-2 text-left font-medium">To</th>
-											<th class="px-3 py-2 text-left font-medium">Permissions</th>
-											<th class="px-3 py-2 text-right font-medium">Actions</th>
-										</tr>
-									</thead>
-									<tbody class="divide-y divide-gray-100">
-										{#each filteredAuthorities as auth (auth.id)}
-											{@const perms = auth.permissions ?? []}
-											{@const expanded = expandedAuthRows.has(auth.id)}
-											{@const visiblePerms = expanded ? perms : perms.slice(0, 3)}
-											<tr>
-												<td class="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{auth.grantor}</td>
-												<td class="px-3 py-2 text-gray-700">
-													<div class="font-medium">{authTargetLabel(auth)}</div>
-													{#if auth.target_quarter_canister_id}
-														<div class="text-xs text-gray-400 font-mono">{shortPrincipal(auth.target_quarter_canister_id)}</div>
-													{/if}
-												</td>
-												<td class="px-3 py-2">
-													<div class="flex flex-wrap gap-1">
-														{#each visiblePerms as perm (perm)}
-															<span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">{perm}</span>
-														{/each}
-														{#if perms.length > 3}
-															<button
-																type="button"
-																onclick={() => toggleAuthRowExpanded(auth.id)}
-																class="px-1.5 py-0.5 text-xs text-indigo-600 hover:text-indigo-800"
-															>
-																{expanded ? 'Show less' : `+${perms.length - 3} more`}
-															</button>
-														{/if}
-													</div>
-												</td>
-												<td class="px-3 py-2 text-right whitespace-nowrap">
-													<button onclick={() => revokeAuthority(auth.id)} class="text-red-500 hover:text-red-700 text-xs">Revoke</button>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{/if}
-					{/if}
+					<p class="text-xs text-gray-500">Existing grants are not listed here. To withdraw one, enter the authority id you received when it was granted.</p>
+					<div class={cn('flex gap-2 max-w-xl', narrow ? 'flex-col' : '')}>
+						<input bind:value={revokeAuthorityId} placeholder="Authority id" class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm" />
+						<button
+							type="button"
+							onclick={revokeAuthority}
+							disabled={!revokeAuthorityId.trim()}
+							class="px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50"
+						>
+							Revoke
+						</button>
+					</div>
 				</div>
 				{:else if activeTab === 'fund'}
-				<!-- Fund tab: inflows, outflows, balance, payroll (issue #260) -->
 				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
-					{#if fundLoading}
-						<div class="flex justify-center py-8">
-							<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
-						</div>
-					{:else if !fundData?.fund}
-						<p class="text-sm text-gray-500 py-4">
-							No fund linked to this department yet. Set a <strong>Fund code</strong> under
-							Policy &amp; budget in the Overview tab — all department inflows and outflows
-							are then recorded against it.
+					<div class={boxClass}>
+						<div class="text-sm font-medium text-gray-700">Budget fund</div>
+						<p class="text-xs text-gray-500">
+							A department owns at most one fund. Create it here; balances and ledger entries are kept in the realm's treasury.
 						</p>
-					{:else}
+						<div class={cn('flex gap-2 max-w-xl', narrow ? 'flex-col' : '')}>
+							<input bind:value={newFundCode} placeholder="Fund code" class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm" />
+							<button
+								type="button"
+								onclick={() => createFund(dept.name)}
+								disabled={!newFundCode.trim() || fundBusy}
+								class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+							>
+								{fundBusy ? 'Creating…' : 'Create fund'}
+							</button>
+						</div>
+					</div>
+					<div class={boxClass}>
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<div class="text-sm text-gray-600">
-								<span class="font-medium text-gray-800">{fundData.fund.name || fundData.fund.code}</span>
-								<span class="ml-2 font-mono text-xs text-gray-400">{fundData.fund.code}</span>
-								{#if fundData.fund.fund_type}
-									<span class={narrow ? 'ml-2 text-xs text-indigo-600' : 'ml-2 px-1.5 py-0.5 text-xs bg-indigo-50 text-indigo-600 rounded-full'}>{fundData.fund.fund_type}</span>
-								{/if}
+								<span class="font-medium text-gray-700">Payroll — {payrollPeriod}</span>
+								<p class="text-xs text-gray-500 mt-0.5">Pays every salaried, non-agent seat holder from the department's fund, once per month.</p>
 							</div>
 							<button
 								type="button"
-								onclick={() => loadFund(dept.name)}
-								class="px-2 py-1 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100"
-								title="Refresh"
-								aria-label="Refresh"
+								onclick={() => runPayroll(dept.name)}
+								disabled={payrollBusy}
+								class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
 							>
-								{#if narrow}
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-									</svg>
-								{:else}
-									Refresh
-								{/if}
+								{payrollBusy ? 'Running…' : 'Run payroll'}
 							</button>
 						</div>
-
-						<!-- Totals -->
-						<div class={cn('grid gap-2', narrow ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-3')}>
-							<div class={metricClass}>
-								<div class="text-xs text-gray-500">Inflows</div>
-								<div class="text-lg font-semibold text-green-700">+{formatAmount(fundData.totals?.inflows)}</div>
-							</div>
-							<div class={metricClass}>
-								<div class="text-xs text-gray-500">Outflows</div>
-								<div class="text-lg font-semibold text-red-700">-{formatAmount(fundData.totals?.outflows)}</div>
-							</div>
-							<div class={metricClass}>
-								<div class="text-xs text-gray-500">Cash balance</div>
-								<div class={`text-lg font-semibold ${(fundData.totals?.cash_balance ?? 0) >= 0 ? 'text-gray-900' : 'text-red-700'}`}>
-									{formatAmount(fundData.totals?.cash_balance)}
-								</div>
-							</div>
-						</div>
-
-						{#if Object.keys(fundData.inflows_by_category ?? {}).length > 0 || Object.keys(fundData.outflows_by_category ?? {}).length > 0}
-							<div class="flex flex-wrap gap-1 text-xs">
-								{#each Object.entries(fundData.inflows_by_category ?? {}) as [cat, amt] (cat)}
-									<span class="px-2 py-0.5 bg-green-50 text-green-700 rounded-full">{cat} +{formatAmount(amt as number)}</span>
-								{/each}
-								{#each Object.entries(fundData.outflows_by_category ?? {}) as [cat, amt] (cat)}
-									<span class="px-2 py-0.5 bg-red-50 text-red-700 rounded-full">{cat} -{formatAmount(amt as number)}</span>
-								{/each}
-							</div>
+						{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
+							<p class="text-xs text-gray-500">
+								Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1} — running payroll requires a vote.
+							</p>
 						{/if}
-
-						<!-- Payroll -->
-						{#if payrollData}
-							<div class="pt-2 border-t border-gray-200 space-y-2">
-								<div class="flex flex-wrap items-center justify-between gap-2">
-									<div class="text-sm font-medium text-gray-700">
-										Payroll — {payrollData.period}
-										{#if payrollData.run_active}
-											<span class="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full">
-												<span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-												run in progress
-											</span>
-										{/if}
-									</div>
-									<button
-										onclick={() => runPayroll(dept.name)}
-										disabled={payrollBusy || payrollData.run_active || payrollData.total_seats === 0}
-										class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
-									>
-										{#if payrollBusy}
-											<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-										{/if}
-										Run payroll
-									</button>
-								</div>
-								<div class="text-xs text-gray-500">
-									{payrollData.total_seats} salaried seat{payrollData.total_seats === 1 ? '' : 's'}
-									· settled {formatAmount(payrollData.settled_amount)} / {formatAmount(payrollData.total_amount)} {payrollData.currency}
-									{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
-										· policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1} — running payroll requires a vote
-									{/if}
-								</div>
-								<div class="flex flex-wrap gap-1 text-xs">
-									{#each Object.entries(payrollData.counts ?? {}) as [status, count] (status)}
-										{#if (count as number) > 0}
-											<span class={cn('px-2 py-0.5 rounded-full', payrollStatusStyles[status] ?? 'bg-gray-100 text-gray-600')}>
-												{status.replace('_', ' ')}: {count}
-											</span>
-										{/if}
-									{/each}
-								</div>
-								<!-- Automatic payroll (standing schedule) -->
-								<div class={cn('flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200', narrow ? '' : 'rounded-lg')}>
-									<div class="text-xs text-gray-600">
-										<span class="font-medium text-gray-700">Automatic payroll</span>
-										{#if payrollData.schedule_active}
-											<span class="ml-2 px-2 py-0.5 bg-green-50 text-green-700 rounded-full">on — monthly on day {payrollData.schedule_payday ?? 1}</span>
-										{:else}
-											<span class="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">off</span>
-										{/if}
-									</div>
-									<div class="flex items-center gap-2">
-										{#if !payrollData.schedule_active}
-											<label class="flex items-center gap-1 text-xs text-gray-500">
-												payday
-												<input
-													type="number"
-													min="1"
-													max="28"
-													bind:value={schedulePayday}
-													class="w-14 px-1.5 py-1 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-gray-400 focus:border-gray-400"
-												/>
-											</label>
-										{/if}
-										<button
-											onclick={() => setPayrollSchedule(dept.name, !payrollData.schedule_active)}
-											disabled={scheduleBusy}
-											class={cn(
-												'inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg disabled:opacity-50',
-												payrollData.schedule_active
-													? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
-													: 'bg-gray-900 text-white hover:bg-gray-800'
-											)}
-										>
-											{#if scheduleBusy}
-												<div class={cn('w-3 h-3 border-2 border-t-transparent rounded-full animate-spin', payrollData.schedule_active ? 'border-gray-400' : 'border-white')}></div>
-											{/if}
-											{payrollData.schedule_active ? 'Disable' : 'Enable'}
-										</button>
-									</div>
-								</div>
-								{#if (payrollData.payments ?? []).length > 0}
-									<div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-50">
-										{#each payrollData.payments as p (p.position + p.principal)}
-											<div class="flex items-center justify-between px-3 py-1.5 text-xs">
-												<div class="min-w-0 truncate">
-													<span class="font-medium text-gray-700">{p.position}</span>
-													<span class="ml-2 font-mono text-gray-400">{shortPrincipal(p.principal)}</span>
-												</div>
-												<div class="flex items-center gap-2 shrink-0">
-													<span class="text-gray-600">{formatAmount(p.amount)}</span>
-													<span class={cn('px-1.5 py-0.5 rounded-full', payrollStatusStyles[p.status] ?? 'bg-gray-100 text-gray-600')}>
-														{p.status.replace('_', ' ')}
-													</span>
-												</div>
-											</div>
-										{/each}
-									</div>
-									{#if payrollData.payments_truncated}
-										<p class="text-xs text-gray-400">Showing the first {payrollData.payments.length} of {payrollData.total_seats} seats.</p>
-									{/if}
-								{/if}
-							</div>
-						{/if}
-
-						<!-- Ledger entries -->
-						<div class="pt-2 border-t border-gray-200 space-y-2">
-							<div class="text-sm font-medium text-gray-700">
-								Ledger entries ({fundData.entries_total ?? fundData.entries.length})
-							</div>
-							{#if fundData.entries.length === 0}
-								<p class="text-xs text-gray-400">
-									No ledger entries yet. Inflows (e.g. litigation fines) and outflows
-									(e.g. salaries) appear here once recorded against this fund.
-								</p>
-							{:else if narrow}
-								<div class="max-h-72 overflow-y-auto divide-y divide-gray-200 border-y border-gray-200 bg-white">
-									{#each fundData.entries as entry (entry.id)}
-										<article class="py-2.5">
-											<div class="flex items-start justify-between gap-3">
-												<div class="min-w-0">
-													<div class="text-xs text-gray-500">{(entry.entry_date || '').slice(0, 10)}</div>
-													<div class="text-sm text-gray-900">
-														{entry.entry_type} · {entry.category}
-													</div>
-													{#if entry.description}
-														<div class="text-xs text-gray-500 break-words">{entry.description}</div>
-													{/if}
-												</div>
-												<div class="shrink-0 text-right font-mono text-xs text-gray-700">
-													{#if entry.debit}
-														<div>Dr {formatAmount(entry.debit)}</div>
-													{/if}
-													{#if entry.credit}
-														<div>Cr {formatAmount(entry.credit)}</div>
-													{/if}
-												</div>
-											</div>
-										</article>
-									{/each}
-								</div>
-							{:else}
-								<div class="max-h-72 overflow-y-auto border border-gray-200 rounded-lg bg-white">
-									<table class="w-full text-xs">
-										<thead class="sticky top-0 bg-gray-50 text-gray-500">
-											<tr>
-												<th class="px-3 py-2 text-left font-medium">Date</th>
-												<th class="px-3 py-2 text-left font-medium">Type</th>
-												<th class="px-3 py-2 text-left font-medium">Category</th>
-												<th class="px-3 py-2 text-left font-medium">Description</th>
-												<th class="px-3 py-2 text-right font-medium">Debit</th>
-												<th class="px-3 py-2 text-right font-medium">Credit</th>
-											</tr>
-										</thead>
-										<tbody class="divide-y divide-gray-50">
-											{#each fundData.entries as entry (entry.id)}
-												<tr>
-													<td class="px-3 py-1.5 whitespace-nowrap text-gray-500">{(entry.entry_date || '').slice(0, 10)}</td>
-													<td class="px-3 py-1.5">
-														<span class={cn(
-															'px-1.5 py-0.5 rounded-full',
-															entry.entry_type === 'revenue' ? 'bg-green-50 text-green-700'
-															: entry.entry_type === 'expense' ? 'bg-red-50 text-red-700'
-															: 'bg-gray-100 text-gray-600'
-														)}>
-															{entry.entry_type}
-														</span>
-													</td>
-													<td class="px-3 py-1.5 text-gray-600">{entry.category}</td>
-													<td class="px-3 py-1.5 text-gray-600 max-w-[16rem] truncate" title={entry.description}>{entry.description}</td>
-													<td class="px-3 py-1.5 text-right font-mono text-gray-700">{entry.debit ? formatAmount(entry.debit) : ''}</td>
-													<td class="px-3 py-1.5 text-right font-mono text-gray-700">{entry.credit ? formatAmount(entry.credit) : ''}</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
-								{#if fundData.truncated}
-									<p class="text-xs text-gray-400">Showing the most recent {fundData.entries.length} of {fundData.entries_total} entries.</p>
-								{/if}
-							{/if}
-						</div>
-					{/if}
-				</div>
-				{/if}
-
-				{#if showPermPicker}
-					<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-						<div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[min(90vh,48rem)] flex flex-col">
-							<div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
-								<h3 class="text-lg font-semibold text-gray-900">Manage permissions</h3>
-								<button
-									type="button"
-									onclick={() => closePermPicker(false)}
-									class="text-gray-400 hover:text-gray-600"
-									aria-label="Close"
-								>
-									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-								</button>
-							</div>
-							<div class="px-5 py-3 border-b border-gray-100">
-								<input
-									type="text"
-									bind:value={deptPermFilter}
-									placeholder="Filter permissions (name, category, description)..."
-									class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-								/>
-							</div>
-							<div class="flex-1 overflow-y-auto px-5 py-3">
-								{#if allOperations.length === 0}
-									<p class="text-sm text-gray-400">Permission catalog unavailable — the role_manager extension is not installed or you lack permission.view.</p>
-								{:else}
-									{@const groups = groupedOps(deptPermFilter)}
-									{@const filtering = deptPermFilter.trim().length > 0}
-									<div class="border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
-										{#each groups as group (group.category)}
-											{@const catKey = `${dept.name}/${group.category}`}
-											{@const isOpen = filtering || openPermCats[catKey]}
-											{@const grantedCount = group.ops.filter((op: any) => isDeptPermChecked(op.name, dept.name)).length}
-											<div>
-												<button
-													type="button"
-													onclick={() => openPermCats = { ...openPermCats, [catKey]: !openPermCats[catKey] }}
-													class="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50"
-												>
-													<span class="font-medium text-gray-700">{group.category}</span>
-													<span class="flex items-center gap-2 text-xs text-gray-400">
-														{#if grantedCount > 0}
-															<span class="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium">{grantedCount} granted</span>
-														{/if}
-														<span>{group.ops.length}</span>
-														<svg class="w-3.5 h-3.5 transition-transform {isOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-													</span>
-												</button>
-												{#if isOpen}
-													{#each group.ops as op (op.name)}
-														{@const checked = isDeptPermChecked(op.name, dept.name)}
-														<label class="flex items-start gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm border-t border-gray-50">
-															<input
-																type="checkbox"
-																checked={checked}
-																onchange={() => toggleDeptPerm(op.name, dept.name)}
-																class="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
-															/>
-															<span class="min-w-0">
-																<code class="text-xs font-medium text-gray-800">{op.name}</code>
-																{#if op.description}
-																	<span class="block text-xs text-gray-400">{op.description}</span>
-																{/if}
-															</span>
-														</label>
-													{/each}
-												{/if}
-											</div>
-										{/each}
-										{#if groups.length === 0}
-											<div class="px-3 py-2 text-xs text-gray-400">No matching permissions</div>
-										{/if}
-									</div>
-								{/if}
-							</div>
-							<div class="px-5 py-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
-								<span class="text-xs text-gray-500">
-									{#if deptPendingGrants.size > 0 || deptPendingRevokes.size > 0}
-										{#if deptPendingGrants.size > 0}<span class="text-green-600 font-medium">+{deptPendingGrants.size}</span>{/if}
-										{#if deptPendingGrants.size > 0 && deptPendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
-										{#if deptPendingRevokes.size > 0}<span class="text-red-600 font-medium">-{deptPendingRevokes.size}</span>{/if}
-									{:else}
-										No pending changes
-									{/if}
-								</span>
-								<div class="flex items-center gap-2">
-									<button
-										type="button"
-										onclick={() => closePermPicker(true)}
-										class="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-									>
-										Cancel
-									</button>
-									<button
-										type="button"
-										onclick={() => applyDeptPermChangesAndClose(dept.name)}
-										disabled={deptPermApplying || (deptPendingGrants.size === 0 && deptPendingRevokes.size === 0)}
-										class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
-									>
-										{deptPermApplying ? 'Applying…' : 'Apply'}
-									</button>
-								</div>
-							</div>
-						</div>
 					</div>
+				</div>
 				{/if}
 			</div>
 		{/if}
