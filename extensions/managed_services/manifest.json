@@ -1,6 +1,6 @@
 {
   "name": "managed_services",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "See your realm's current software version, install updates when available, buy credits, and review spending on upgrades and top-ups.",
   "author": "Realms Team",
   "ggg_api_version": 1,
@@ -53,7 +53,10 @@
   "icon": "cloud-upload",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/managed_services",
   "show_in_sidebar": true,
-  "entry_access": {
-    "default": "realm.configure.infrastructure"
-  }
+  "operations": [
+    "status",
+    "realm_monitor",
+    "scale_status",
+    "realm_upgrade"
+  ]
 }
