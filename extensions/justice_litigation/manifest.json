@@ -1,6 +1,6 @@
 {
   "name": "justice_litigation",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "ggg_api_version": 1,
   "description": "File a private dispute with the justice department, follow it through your realm's courts, and resolve or appeal cases if you oversee justice.",
   "permissions": [],
@@ -83,6 +83,21 @@
     "justice.begin_executing",
     "justice.close_case"
   ],
+  "operations": [
+    "me",
+    "user_list",
+    "department_chart",
+    "crypto_scopes",
+    "dispute_list_all",
+    "dispute_get",
+    "dispute_file",
+    "dispute_accept",
+    "dispute_reject",
+    "resolution_query",
+    "verdict_draft",
+    "verdict_issue",
+    "court_create"
+  ],
   "entities": {
     "LitigationContent": {
       "alias": "case_id",
@@ -103,28 +118,6 @@
           "max_length": 128
         }
       }
-    }
-  },
-  "entry_access": {
-    "default": "dispute.view",
-    "functions": {
-      "initialize": "realm.admin",
-      "create_court": "realm.admin",
-      "seed_default_courts": "realm.admin",
-      "file_case": "dispute.create",
-      "file_appeal": "dispute.create",
-      "withdraw_appeal": "dispute.create",
-      "create_litigation": "dispute.create",
-      "set_litigation_content": "dispute.create",
-      "get_justice_audience": "dispute.create",
-      "assign_judge": "dispute.assign",
-      "issue_verdict": "resolution.issue",
-      "transfer_case": "resolution.issue",
-      "begin_executing": "resolution.issue",
-      "close_case": "resolution.issue",
-      "execute_penalty": "fine.apply",
-      "waive_penalty": "fine.apply",
-      "decide_appeal": "appeal.allow"
     }
   }
 }
