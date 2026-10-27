@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy, tick } from 'svelte';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -648,12 +649,7 @@
 <div class="land-registry" class:expanded class:resizing={isResizing}>
 	{#if accessDeniedOp !== null}
 		<div class="denied-shell">
-			{#if ctx.ui?.AccessDenied}
-				{@const AccessDenied = ctx.ui.AccessDenied}
-				<AccessDenied operation={accessDeniedOp} />
-			{:else}
-				<p class="muted">You need additional permissions to view this page.</p>
-			{/if}
+			<AccessDenied operation={accessDeniedOp} />
 		</div>
 	{:else}
 		<aside class="sidebar" style="width: {sidebarWidth}px">
