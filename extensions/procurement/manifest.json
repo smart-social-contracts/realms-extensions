@@ -1,6 +1,6 @@
 {
   "name": "procurement",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "ggg_api_version": 1,
   "description": "Publish calls for offers, collect sealed bids until the closing date, have evaluators score them, award a winner, and keep a record of each supplier.",
   "author": "Smart Social Contracts",
@@ -48,6 +48,22 @@
     "procurement.award",
     "procurement.execute",
     "procurement.vendor_flag"
+  ],
+  "operations": [
+    "me",
+    "department_list",
+    "department_get",
+    "organization_list",
+    "events",
+    "tender_list",
+    "tender_get",
+    "tender_create",
+    "tender_open",
+    "tender_close",
+    "bid_submit",
+    "bids_reveal",
+    "bid_score",
+    "tender_award"
   ],
   "entities": {
     "Rfp": {
@@ -246,33 +262,6 @@
         "flags_json": {
           "type": "String"
         }
-      }
-    }
-  },
-  "entry_access": {
-    "default": "realm.data_view",
-    "functions": {
-      "create_rfp": "realm.admin",
-      "update_rfp": "realm.admin",
-      "publish_rfp": "realm.admin",
-      "close_rfp": "realm.admin",
-      "flag_vendor": "realm.admin",
-      "demo_advance_rfp": "demo.manage",
-      "async_task": "realm.admin",
-      "create_bid_shell": "bid.submit",
-      "set_bid_payload": "bid.submit",
-      "get_bid_payload": "bid.submit",
-      "get_evaluator_principals": "bid.submit",
-      "submit_scores": "bid.evaluate",
-      "compute_totals": "bid.evaluate",
-      "list_scores": "bid.evaluate",
-      "award_rfp": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "execute_contract": {
-        "level": "realm.admin",
-        "governed": true
       }
     }
   }
