@@ -20,7 +20,12 @@
 		getStatusColor,
 		mdToHtml,
 		clipboardCopy,
-		type ExtEnvelope,
+		citizenshipFromRealm,
+		invoiceFromRealm,
+		notificationFromRealm,
+		type RealmInvoice,
+		type RealmNotification,
+		type RealmReply,
 	} from './lib/helpers';
 	import { loadExtensionI18n, t } from './lib/i18n';
 
@@ -87,22 +92,16 @@
 		ctx?.reportHeight(document.body.scrollHeight);
 	}
 
-	async function callExt<T>(fn: string, args: Record<string, unknown> = {}): Promise<ExtEnvelope<T>> {
-		if (!ctx) return { success: false, error: 'Bridge not ready' };
-		const raw = await ctx.callExtension<ExtEnvelope<T> | T>(fn, args);
-		if (raw && typeof raw === 'object' && 'success' in raw) {
-			return raw as ExtEnvelope<T>;
-		}
-		return { success: true, data: raw as T };
-	}
-
-	async function callExtAsync<T>(fn: string, args: Record<string, unknown> = {}): Promise<ExtEnvelope<T>> {
-		if (!ctx) return { success: false, error: 'Bridge not ready' };
-		const raw = await ctx.callExtensionAsync<ExtEnvelope<T> | T>(fn, args);
-		if (raw && typeof raw === 'object' && 'success' in raw) {
-			return raw as ExtEnvelope<T>;
-		}
-		return { success: true, data: raw as T };
+	/** A realm operation the manifest declares; its reply without ``ok``, or an error with the realm's message. */
+	async function op<T = Record<string, unknown>>(
+		name: string,
+		args: Record<string, unknown> = {},
+		read = true,
+	): Promise<T> {
+		if (!ctx) throw new Error('Bridge not ready');
+		const reply = (await (read ? ctx.read(name, args) : ctx.run(name, args))) as RealmReply;
+		if (!reply?.ok) throw new Error(String(reply?.error ?? `${name} failed`));
+		return reply as T;
 	}
 
 	async function loadDashboard() {
@@ -111,17 +110,17 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const args = { user_id: principal };
-			const [sum, cit] = await Promise.all([
-				callExt<Record<string, unknown>>('get_dashboard_summary', args).catch(() => ({
-					success: false,
-				})),
-				callExt<Record<string, unknown>>('get_citizenship_status', args).catch(() => ({
-					success: false,
-				})),
+			const [me, mine, installed] = await Promise.all([
+				op<{ user?: Record<string, unknown> }>('me'),
+				op<{ invoices?: RealmInvoice[] }>('my_invoices', { count: 100 }).catch(() => ({ invoices: [] })),
+				op<{ extensions?: { id: string }[] }>('extension_list').catch(() => ({ extensions: [] })),
 			]);
-			summary = (sum.data ?? sum) as Record<string, unknown> | null;
-			citizenship = (cit.data ?? cit) as Record<string, unknown> | null;
+			summary = { user_name: me.user?.nickname ?? '' };
+			citizenship = citizenshipFromRealm(
+				me.user ?? {},
+				mine.invoices ?? [],
+				(installed.extensions ?? []).map((e) => e.id),
+			);
 		} catch (e) {
 			const { code, message } = bridgeErrorFields(e);
 			if (code === 'denied') {
@@ -139,10 +138,17 @@
 
 	async function loadNotifications() {
 		notificationsLoading = true;
-		notificationsUnavailable = true;
-		notifications = [];
-		notificationsLoading = false;
-		queueMicrotask(reportHeight);
+		notificationsUnavailable = false;
+		try {
+			const reply = await op<{ notifications?: RealmNotification[] }>('notification_list', { count: 100 });
+			notifications = (reply.notifications ?? []).map(notificationFromRealm).reverse();
+		} catch {
+			notificationsUnavailable = true;
+			notifications = [];
+		} finally {
+			notificationsLoading = false;
+			queueMicrotask(reportHeight);
+		}
 	}
 
 	async function loadInvoices() {
@@ -150,15 +156,12 @@
 		invoiceLoading = true;
 		invoiceError = '';
 		try {
-			const result = await callExt<{ invoices?: Record<string, unknown>[]; summary?: Record<string, unknown> }>(
-				'get_invoice_information',
-				{ user_id: principal },
-			);
-			if (result.success && result.data) {
-				invoiceData = result.data;
-			} else {
-				invoiceError = result.error || 'Failed to load invoices';
-			}
+			const [mine, catalog] = await Promise.all([
+				op<{ invoices?: RealmInvoice[] }>('my_invoices', { count: 100 }),
+				op<{ tokens?: { symbol: string; decimals?: number }[] }>('token_catalog').catch(() => ({ tokens: [] })),
+			]);
+			const decimals = new Map((catalog.tokens ?? []).map((t) => [t.symbol, Number(t.decimals ?? 0)]));
+			invoiceData = { invoices: (mine.invoices ?? []).map((inv) => invoiceFromRealm(inv, decimals)) };
 		} catch (e) {
 			invoiceError = bridgeErrorFields(e).message;
 		} finally {
@@ -194,14 +197,14 @@
 		void reloadAll();
 	});
 
+	// The realm only marks notifications read; there is no way back to unread.
 	async function toggleRead(notif: NotificationItem) {
+		if (notif.read) return;
 		try {
-			const newRead = !notif.read;
-			notifications = notifications.map((n) =>
-				n.id === notif.id ? { ...n, read: newRead } : n,
-			);
-		} catch {
-			/* cross-extension notifications unavailable in sandbox */
+			await op('notification_read', { notification: notif.id }, false);
+			notifications = notifications.map((n) => (n.id === notif.id ? { ...n, read: true } : n));
+		} catch (e) {
+			ctx?.notify('error', bridgeErrorFields(e).message);
 		}
 	}
 
@@ -218,22 +221,12 @@
 		}
 	}
 
-	async function openPaymentModal(record: Record<string, unknown>) {
+	function openPaymentModal(record: Record<string, unknown>) {
 		selectedRecord = record;
 		showPaymentModal = true;
-		paymentLoading = true;
-		paymentInfo = null;
-		try {
-			const result = await callExt<Record<string, unknown>>('get_invoice_deposit_address', {
-				invoice_id: record.id,
-			});
-			if (result.success && result.data) paymentInfo = result.data;
-		} catch {
-			/* shown as empty state in modal */
-		} finally {
-			paymentLoading = false;
-			queueMicrotask(reportHeight);
-		}
+		paymentLoading = false;
+		paymentInfo = (record.payment as Record<string, unknown>) ?? null;
+		queueMicrotask(reportHeight);
 	}
 
 	async function copyCliCommand(text: string) {
@@ -281,42 +274,20 @@
 		const invoiceId = String(record.id);
 		refreshingInvoiceId = invoiceId;
 		try {
-			const result = await callExtAsync<Record<string, unknown>>('check_invoice_payment', {
-				invoice_id: record.id,
-			});
-			if (result.success) {
-				await loadInvoices();
-				const data = result.data ?? {};
-				if (data.already_paid || data.paid) {
-					const refreshed =
-						invoiceData?.invoices?.find((inv) => String(inv.id) === invoiceId) ?? record;
-					await showInvoicePaidNotice(refreshed, Boolean(data.already_paid));
-				} else {
-					const scanned = data.scanned_transactions;
-					ctx.notify(
-						'info',
-						scanned == null
-							? 'Payment not found yet. Wait a moment and try again.'
-							: `Payment not found in the last ${scanned} treasury transfers.`,
-					);
-				}
+			const wasPaid = record.status === 'Paid';
+			const result = await op<{ status?: string }>('invoice_check', { invoice: record.id }, false);
+			await loadInvoices();
+			if (result.status === 'paid') {
+				const refreshed = invoiceData?.invoices?.find((inv) => String(inv.id) === invoiceId) ?? record;
+				await showInvoicePaidNotice(refreshed, wasPaid);
 			} else {
-				ctx.notify('error', result.error || 'Failed to check payment');
+				ctx.notify('info', 'Payment not found yet. Wait a moment and try again.');
 			}
 		} catch (e) {
 			ctx.notify('error', bridgeErrorFields(e).message);
 		} finally {
 			refreshingInvoiceId = null;
 			queueMicrotask(reportHeight);
-		}
-	}
-
-	async function demoMarkAsPaid(record: Record<string, unknown>) {
-		try {
-			const result = await callExt('demo_mark_invoice_paid', { invoice_id: record.id });
-			if (result.success) await loadInvoices();
-		} catch {
-			/* access denied surfaced on next load */
 		}
 	}
 
@@ -805,9 +776,6 @@
 														>
 															{refreshingInvoiceId === String(record.id) ? 'Refreshing…' : '↻ Refresh'}
 														</Button>
-														<Button tone="secondary" size="sm" onclick={() => demoMarkAsPaid(record)}>
-															Demo Pay
-														</Button>
 													</div>
 												{:else if record.status === 'Paid'}
 													<span class="text-xs text-green-600 dark:text-green-400">Paid</span>
@@ -866,9 +834,6 @@
 																onclick={() => void refreshInvoice(record)}
 															>
 																{refreshingInvoiceId === String(record.id) ? 'Refreshing…' : '↻ Refresh'}
-															</Button>
-															<Button tone="secondary" size="sm" onclick={() => demoMarkAsPaid(record)}>
-																Demo Pay
 															</Button>
 														</div>
 													{:else if record.status === 'Paid'}

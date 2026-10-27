@@ -10,7 +10,94 @@ export function bridgeErrorFields(err: unknown): { code: string; message: string
 	return { code: 'failed', message: String(err) };
 }
 
-export type ExtEnvelope<T = unknown> = { success: boolean; data?: T; error?: string };
+export type RealmReply = { ok: boolean; error?: string; [key: string]: unknown };
+
+export type RealmInvoice = {
+	id: string;
+	amount: number | string;
+	symbol: string;
+	status: string;
+	reason?: string;
+	paid_at?: number;
+	pay_to?: { owner: string; subaccount: string };
+};
+
+export type RealmNotification = {
+	id: string;
+	title?: string;
+	body?: string;
+	sender?: string;
+	at?: number;
+	read?: boolean;
+};
+
+/** ``amount`` base units as a decimal string with ``decimals`` places, trailing zeros dropped. */
+export function formatUnits(amount: number | string, decimals: number): string {
+	const digits = BigInt(amount).toString().padStart(decimals + 1, '0');
+	if (!decimals) return digits;
+	const frac = digits.slice(-decimals).replace(/0+$/, '');
+	return frac ? `${digits.slice(0, -decimals)}.${frac}` : digits.slice(0, -decimals);
+}
+
+function capitalize(s: string): string {
+	return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/** A ``my_invoices`` row as the dashboard shows it; ``decimals`` by symbol (raw units when unknown). */
+export function invoiceFromRealm(inv: RealmInvoice, decimals: Map<string, number>): Record<string, unknown> {
+	const places = decimals.get(inv.symbol);
+	const human = places == null ? String(inv.amount) : formatUnits(inv.amount, places);
+	return {
+		id: inv.id,
+		amount: human,
+		currency: inv.symbol,
+		status: capitalize(inv.status),
+		metadata: inv.reason ?? '',
+		paid_on: inv.paid_at ? new Date(inv.paid_at * 1000).toISOString() : null,
+		payment: {
+			invoice_id: inv.id,
+			principal: inv.pay_to?.owner ?? '',
+			subaccount: inv.pay_to?.subaccount ?? '',
+			amount_human: human,
+			amount_raw: String(inv.amount),
+			currency: inv.symbol,
+		},
+	};
+}
+
+export function notificationFromRealm(n: RealmNotification) {
+	return {
+		id: n.id,
+		title: n.title,
+		message: n.body,
+		sender: n.sender,
+		timestamp_ms: (n.at ?? 0) * 1000,
+		read: Boolean(n.read),
+	};
+}
+
+/** Membership activation from ``me``'s card, ``my_invoices`` and the installed extension ids. */
+export function citizenshipFromRealm(
+	user: Record<string, unknown>,
+	invoices: RealmInvoice[],
+	installed: string[],
+): Record<string, unknown> {
+	const paid = invoices.filter((i) => i.status === 'paid').length;
+	const invoicePaid = invoices.length > 0 && paid === invoices.length;
+	const passportRequired = installed.includes(PASSPORT_VERIFICATION_ID);
+	// No realm read reports a member's own verified identities yet.
+	const passportVerified = false;
+	return {
+		status: invoicePaid && (passportVerified || !passportRequired) ? 'active' : 'pending',
+		member_status: user.status ?? '',
+		invoice_paid: invoicePaid,
+		passport_verified: passportVerified,
+		passport_verification_installed: passportRequired,
+		installed_extensions: installed,
+		total_invoices: invoices.length,
+		paid_invoices: paid,
+	};
+}
 
 export function getGreeting(): string {
 	const hour = new Date().getHours();
@@ -171,11 +258,13 @@ export function getStatusColor(status: string): string {
 
 export function getPaymentCliCommand(info: Record<string, unknown> | null): string {
 	if (!info) return '';
-	if (info.amount_raw != null) {
-		const token = String(info.currency || 'token').toLowerCase();
-		return `dfx canister call ${token}_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}" }; amount = ${info.amount_raw} })' --network ic`;
-	}
-	return `dfx canister call token_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}"; subaccount = opt blob "${info.subaccount}" }; amount = ${info.amount_raw || 0} })' --network ic`;
+	const token = String(info.currency || 'token').toLowerCase();
+	const subaccount = info.subaccount ? `; subaccount = opt blob "${hexToBlob(String(info.subaccount))}"` : '';
+	return `dfx canister call ${token}_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}"${subaccount} }; amount = ${info.amount_raw ?? 0} })' --network ic`;
+}
+
+function hexToBlob(hex: string): string {
+	return hex.replace(/../g, (b) => `\\${b}`);
 }
 
 export function entries(obj: unknown): [string, unknown][] {
