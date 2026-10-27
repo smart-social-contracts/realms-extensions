@@ -1,7 +1,13 @@
 {
   "name": "zone_selector",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "ggg_api_version": 1,
+  "operations": [
+    "land_map",
+    "me",
+    "zone_set",
+    "zone_clear"
+  ],
   "capabilities": [
     "caller.get",
     "entity.list",
@@ -11,7 +17,7 @@
     "zone.update",
     "zone.delete"
   ],
-  "description": "View your realm's territory on a map, draw areas, and label them as residential, commercial, agricultural, or other zone types.",
+  "description": "View your realm's zones on a map and pick your own home zone, labelled residential, commercial, agricultural, or another zone type.",
   "permissions": [],
   "entry_points": [
     "get_my_zones",
@@ -38,12 +44,5 @@
   },
   "icon": "layers-subtract",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/zone_selector",
-  "show_in_sidebar": true,
-  "entry_access": {
-    "default": "self.data_manage",
-    "functions": {
-      "get_my_zones": "self.data_view",
-      "get_all_zones": "public"
-    }
-  }
+  "show_in_sidebar": true
 }

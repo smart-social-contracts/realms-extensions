@@ -4,26 +4,31 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	let zones: any[] = $state([]);
+	type Reply = { ok: boolean; error?: string; [key: string]: any };
+	type MapZone = { h3_index: string; name: string; zone_type: string };
+
+	let zones: MapZone[] = $state([]);
 	let initialLoading = $state(true);
 	let refreshing = $state(false);
-	let error = $state('');
+	let zonesUnreadable = $state(false);
 	let notice = $state('');
-	let isAdmin = $state(false);
+	let canPick = $state(false);
 	let editing = $state(false);
-	let userId = $state('');
+	// The realm does not report a zone's owner: your home is only known once you set it here.
+	let myZone = $state('');
+	let mapUnavailable = $state(false);
+	let h3Ready = $state(false);
+	let unsubscribePrincipal: (() => void) | null = null;
 
 	let zoneType = $state('residential');
 	let zoneName = $state('');
 	let painting = $state(false);
 
-	let isDrawing = $state(false);
-	let drawPoints: [number, number][] = $state([]);
-	let paintCells: string[] = $state([]);
-	let paintableCount = $state(0);
+	let isPicking = $state(false);
+	let pickedCell = $state('');
 	let paintResolution = $state(8);
 
-	let selectedZone: any = $state(null);
+	let selectedZone: MapZone | null = $state(null);
 
 	let mapContainer: HTMLDivElement | undefined = $state();
 	let mapReady = $state(false);
@@ -34,9 +39,9 @@
 
 	const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 	const SOURCE_ZONES = 'territory-zones';
-	const SOURCE_DRAFT_LINE = 'draft-line';
-	const SOURCE_DRAFT_POINTS = 'draft-points';
 	const SOURCE_PREVIEW = 'paint-preview';
+	const PAGE = 500;
+	const MAX_PAGES = 50;
 
 	const ZONE_TYPES = [
 		{ value: 'unassigned', label: 'Territory (unassigned)', color: '#d4d4d4' },
@@ -52,6 +57,10 @@
 		return ZONE_TYPES.find((t) => t.value === type)?.color || '#d4d4d4';
 	}
 
+	function zoneLabel(type: string) {
+		return ZONE_TYPES.find((t) => t.value === type)?.label || type || 'Territory (unassigned)';
+	}
+
 	function resolutionForZoom(zoom: number) {
 		if (zoom <= 2) return 3;
 		if (zoom <= 4) return 4;
@@ -60,28 +69,6 @@
 		if (zoom <= 10) return 7;
 		if (zoom <= 13) return 8;
 		return 9;
-	}
-
-	function maxCellsForResolution(res: number) {
-		if (res <= 4) return 300;
-		if (res <= 6) return 800;
-		if (res <= 8) return 1500;
-		return 2500;
-	}
-
-	function polygonToCells(points: [number, number][], resolution: number): string[] {
-		if (points.length < 3 || !h3) return [];
-		const ring = [...points];
-		const [lat0, lng0] = points[0];
-		const [latN, lngN] = points[points.length - 1];
-		if (lat0 !== latN || lng0 !== lngN) ring.push(points[0]);
-		try {
-			const cells = h3.polygonToCells(ring, resolution, false);
-			const cap = maxCellsForResolution(resolution);
-			return cells.length > cap ? cells.slice(0, cap) : cells;
-		} catch {
-			return [];
-		}
 	}
 
 	function loadScript(src: string): Promise<void> {
@@ -161,33 +148,65 @@
 		return filtered;
 	}
 
+	async function call(write: boolean, name: string, args: Record<string, unknown> = {}): Promise<Reply> {
+		try {
+			const reply = await (write ? ctx.run(name, args) : ctx.read(name, args));
+			if (reply && typeof reply === 'object') return reply;
+		} catch (e: any) {
+			return { ok: false, error: e?.message || `${name} did not answer` };
+		}
+		return { ok: false, error: `${name} did not answer` };
+	}
+
+	/** Every row of a paged read operation (``from``/``count``, continued by ``next``). */
+	async function readPages(name: string, key: string): Promise<{ rows: any[]; error: string }> {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		for (let i = 0; from != null && i < MAX_PAGES; i++) {
+			const reply = await call(false, name, { from, count: PAGE });
+			if (!reply.ok) return { rows, error: reply.error || `${name} was refused` };
+			rows.push(...(Array.isArray(reply[key]) ? reply[key] : []));
+			from = typeof reply.next === 'number' ? reply.next : null;
+		}
+		return { rows, error: '' };
+	}
+
 	async function loadAllZones(silent = false) {
 		if (!silent) {
 			if (zones.length === 0) initialLoading = true;
 			else refreshing = true;
 		}
-		error = '';
 		try {
-			const res = await ctx.callSync('get_all_zones', {});
-			if (res?.success) {
-				zones = res.data ?? [];
-				isAdmin = !!res.is_admin;
-			} else {
-				zones = [];
-				if (res?.error) error = res.error;
+			const res = await readPages('land_map', 'zones');
+			zones = res.rows
+				.filter((z) => z?.id)
+				.map((z) => ({
+					h3_index: String(z.id),
+					name: String(z.name || ''),
+					zone_type: String(z.kind || 'unassigned'),
+				}));
+			zonesUnreadable = !!res.error;
+			if (res.error) {
+				console.warn('[zone_selector] land_map:', res.error);
+				notice = 'Zones are not available to you right now.';
 			}
-		} catch (e: any) {
-			error = e?.message || String(e);
 		} finally {
 			initialLoading = false;
 			refreshing = false;
 		}
 	}
 
+	async function loadMe() {
+		const res = await call(false, 'me');
+		const perms: string[] = res.ok && Array.isArray(res.permissions) ? res.permissions : [];
+		canPick = perms.includes('all') || perms.includes('self.data_manage');
+		if (!res.ok) console.warn('[zone_selector] me:', res.error);
+	}
+
 	function zonesGeoJson() {
 		const features: any[] = [];
 		for (const zone of zones) {
-			if (!h3 || !zone.h3_index || String(zone.h3_index).startsWith('manual')) continue;
+			if (!h3 || !zone.h3_index) continue;
 			try {
 				const boundary = h3.cellToBoundary(zone.h3_index, true);
 				features.push({
@@ -197,6 +216,7 @@
 						zone_type: zone.zone_type,
 						name: zone.name || 'Zone',
 						color: zoneColor(zone.zone_type),
+						mine: zone.h3_index === myZone,
 					},
 					geometry: { type: 'Polygon', coordinates: [boundary] },
 				});
@@ -213,71 +233,19 @@
 		source?.setData(zonesGeoJson());
 	}
 
-	function draftGeoJson() {
-		const coords = drawPoints.map(([lat, lng]) => [lng, lat]);
-		return {
-			line: {
-				type: 'FeatureCollection',
-				features:
-					coords.length >= 2
-						? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }]
-						: [],
-			},
-			points: {
-				type: 'FeatureCollection',
-				features: coords.map((c, i) => ({
-					type: 'Feature',
-					properties: { first: i === 0 },
-					geometry: { type: 'Point', coordinates: c },
-				})),
-			},
-		};
-	}
-
-	function refreshDraftLayers() {
-		if (!map || !mapReady) return;
-		const { line, points } = draftGeoJson();
-		map.getSource(SOURCE_DRAFT_LINE)?.setData(line);
-		map.getSource(SOURCE_DRAFT_POINTS)?.setData(points);
-	}
-
 	function refreshPreviewLayer() {
 		if (!map || !mapReady || !h3) return;
 		const color = zoneColor(zoneType);
-		const features = paintCells.map((cell) => {
-			const boundary = h3.cellToBoundary(cell, true);
-			return {
-				type: 'Feature',
-				properties: { h3_index: cell, color },
-				geometry: { type: 'Polygon', coordinates: [boundary] },
-			};
-		});
+		const features = pickedCell
+			? [
+					{
+						type: 'Feature',
+						properties: { h3_index: pickedCell, color },
+						geometry: { type: 'Polygon', coordinates: [h3.cellToBoundary(pickedCell, true)] },
+					},
+				]
+			: [];
 		map.getSource(SOURCE_PREVIEW)?.setData({ type: 'FeatureCollection', features });
-	}
-
-	function existingZoneCells() {
-		return new Set(zones.map((z) => z.h3_index));
-	}
-
-	/** Recompute preview hexes from the in-progress polygon while drawing. */
-	function syncDraftPreview() {
-		if (!isDrawing || !h3 || !map) return;
-
-		if (drawPoints.length < 3) {
-			paintCells = [];
-			paintableCount = 0;
-			paintResolution = 0;
-			refreshPreviewLayer();
-			return;
-		}
-
-		const res = resolutionForZoom(map.getZoom());
-		const cells = polygonToCells(drawPoints, res);
-		const existing = existingZoneCells();
-		paintCells = cells;
-		paintableCount = cells.filter((c) => !existing.has(c)).length;
-		paintResolution = res;
-		refreshPreviewLayer();
 	}
 
 	function addMapLayers() {
@@ -294,7 +262,11 @@
 			id: 'zones-line',
 			type: 'line',
 			source: SOURCE_ZONES,
-			paint: { 'line-color': '#171717', 'line-width': 1.2, 'line-opacity': 0.6 },
+			paint: {
+				'line-color': '#171717',
+				'line-width': ['case', ['get', 'mine'], 3, 1.2],
+				'line-opacity': 0.6,
+			},
 		});
 
 		map.addSource(SOURCE_PREVIEW, {
@@ -314,35 +286,8 @@
 			paint: { 'line-color': '#171717', 'line-width': 1, 'line-dasharray': [2, 1] },
 		});
 
-		map.addSource(SOURCE_DRAFT_LINE, {
-			type: 'geojson',
-			data: { type: 'FeatureCollection', features: [] },
-		});
-		map.addLayer({
-			id: 'draft-line-layer',
-			type: 'line',
-			source: SOURCE_DRAFT_LINE,
-			paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [1, 1] },
-		});
-
-		map.addSource(SOURCE_DRAFT_POINTS, {
-			type: 'geojson',
-			data: { type: 'FeatureCollection', features: [] },
-		});
-		map.addLayer({
-			id: 'draft-points-layer',
-			type: 'circle',
-			source: SOURCE_DRAFT_POINTS,
-			paint: {
-				'circle-radius': 5,
-				'circle-color': ['case', ['get', 'first'], '#dc2626', '#2563eb'],
-				'circle-stroke-color': '#fff',
-				'circle-stroke-width': 1.5,
-			},
-		});
-
 		map.on('click', 'zones-fill', (e: any) => {
-			if (isDrawing) return;
+			if (isPicking) return;
 			const feature = e.features?.[0];
 			if (!feature) return;
 			const h3Index = feature.properties?.h3_index;
@@ -350,14 +295,11 @@
 		});
 
 		map.on('click', onMapClick);
-		map.on('zoomend', () => {
-			if (isDrawing) syncDraftPreview();
-		});
 		map.on('mouseenter', 'zones-fill', () => {
-			if (!isDrawing) map.getCanvas().style.cursor = 'pointer';
+			if (!isPicking) map.getCanvas().style.cursor = 'pointer';
 		});
 		map.on('mouseleave', 'zones-fill', () => {
-			if (!isDrawing) map.getCanvas().style.cursor = '';
+			if (!isPicking) map.getCanvas().style.cursor = '';
 		});
 	}
 
@@ -397,10 +339,11 @@
 		if (!mapContainer || map) return;
 
 		maplibregl = await loadMapLibre();
-		if (!maplibregl) throw new Error('MapLibre GL failed to initialize');
+		if (!maplibregl) throw new Error('MapLibre GL is unavailable');
 
 		try {
 			h3 = await loadH3();
+			h3Ready = !!h3;
 		} catch (e) {
 			console.warn('[zone_selector] h3-js unavailable, hexagons disabled', e);
 		}
@@ -425,6 +368,8 @@
 
 		if (typeof style === 'string') map.setProjection({ type: 'globe' });
 
+		// Tile hiccups are not the user's concern; without a listener MapLibre logs them as errors.
+		map.on('error', (e: any) => console.warn('[zone_selector] map:', e?.error?.message ?? e));
 		map.on('load', () => {
 			addMapLayers();
 			mapReady = true;
@@ -435,148 +380,101 @@
 	}
 
 	function onMapClick(e: any) {
-		if (!isDrawing) return;
-		drawPoints = [...drawPoints, [e.lngLat.lat, e.lngLat.lng]];
-		refreshDraftLayers();
-		syncDraftPreview();
-	}
-
-	function startDrawing() {
-		paintCells = [];
-		drawPoints = [];
-		isDrawing = true;
-		notice = '';
-		refreshDraftLayers();
-		refreshPreviewLayer();
-	}
-
-	function cancelDrawing() {
-		isDrawing = false;
-		drawPoints = [];
-		paintCells = [];
-		paintableCount = 0;
-		refreshDraftLayers();
-		refreshPreviewLayer();
-	}
-
-	function undoPoint() {
-		drawPoints = drawPoints.slice(0, -1);
-		refreshDraftLayers();
-		syncDraftPreview();
-	}
-
-	function finishShape() {
-		if (drawPoints.length < 3 || !h3 || !map) return;
-		syncDraftPreview();
-		isDrawing = false;
-		drawPoints = [];
-		refreshDraftLayers();
-		if (paintCells.length === 0) {
-			notice = 'That shape produced no H3 cells — try drawing a larger area.';
+		if (!isPicking || !h3 || !map) return;
+		const res = resolutionForZoom(map.getZoom());
+		try {
+			pickedCell = h3.latLngToCell(e.lngLat.lat, e.lngLat.lng, res);
+			paintResolution = res;
+		} catch {
+			pickedCell = '';
 		}
+		refreshPreviewLayer();
 	}
 
-	function discardPreview() {
-		paintCells = [];
-		paintableCount = 0;
+	function startPicking() {
+		pickedCell = '';
+		isPicking = true;
+		selectedZone = null;
+		notice = '';
 		refreshPreviewLayer();
+	}
+
+	function cancelPicking() {
+		isPicking = false;
+		pickedCell = '';
+		refreshPreviewLayer();
+	}
+
+	async function afterWrite(keepSelected: string) {
+		await loadAllZones(true);
+		selectedZone = keepSelected ? (zones.find((z) => z.h3_index === keepSelected) ?? null) : null;
+		refreshZonesLayer();
+		await tick();
+		map?.resize();
+	}
+
+	function declined(res: Reply) {
+		return `This zone was not changed: ${String(res.error || 'the realm declined').replace(/\.$/, '')}.`;
+	}
+
+	/** zone_set: make ``zone`` your home, optionally naming and typing it. */
+	async function setHome(zone: string, fields: { name?: string; kind?: string }, done: string) {
+		painting = true;
+		notice = '';
+		try {
+			const res = await call(true, 'zone_set', { zone, ...fields });
+			if (res.ok) {
+				myZone = String(res.zone || zone);
+				notice = done;
+				return true;
+			}
+			notice = declined(res);
+			return false;
+		} finally {
+			painting = false;
+		}
 	}
 
 	async function paintZones() {
-		if (paintableCount === 0 || !userId) return;
-		const newCells = paintCells.filter((c) => !zones.some((z) => z.h3_index === c));
-		if (newCells.length === 0) return;
+		if (!pickedCell) return;
+		const cell = pickedCell;
+		const existing = zones.find((z) => z.h3_index === cell);
+		const name = zoneName.trim() || (existing ? '' : `${zoneLabel(zoneType)} zone`);
+		const fields: { name?: string; kind: string } = { kind: zoneType };
+		if (name) fields.name = name;
+		if (await setHome(cell, fields, 'Your home zone is set.')) {
+			isPicking = false;
+			pickedCell = '';
+			refreshPreviewLayer();
+			await afterWrite(cell);
+		}
+	}
 
+	async function updateZoneType(zone: MapZone, newType: string) {
+		if (await setHome(zone.h3_index, { kind: newType }, 'Zone type updated.')) await afterWrite(zone.h3_index);
+	}
+
+	async function renameZone(zone: MapZone, name: string) {
+		if (!name.trim()) return;
+		if (await setHome(zone.h3_index, { name: name.trim() }, 'Zone renamed.')) await afterWrite(zone.h3_index);
+	}
+
+	async function claimZone(zone: MapZone) {
+		if (await setHome(zone.h3_index, {}, 'Your home zone is set.')) await afterWrite(zone.h3_index);
+	}
+
+	async function removeZone(zone: MapZone) {
 		painting = true;
-		error = '';
 		notice = '';
 		try {
-			const typeLabel = ZONE_TYPES.find((t) => t.value === zoneType)?.label || zoneType;
-			const res = await ctx.callSync('add_zones_batch', {
-				user_id: userId,
-				h3_indexes: newCells,
-				zone_type: zoneType,
-				name: zoneName.trim() || `${typeLabel} zone`,
-			});
-			if (res?.success) {
-				notice = res.data?.message || 'Zones painted.';
-				paintCells = [];
-				paintableCount = 0;
-				refreshPreviewLayer();
-				await loadAllZones(true);
-				refreshZonesLayer();
-				await tick();
-				map?.resize();
+			const res = await call(true, 'zone_clear', { zone: zone.h3_index });
+			if (res.ok) {
+				myZone = '';
+				notice = 'This zone is no longer your home.';
+				await afterWrite('');
 			} else {
-				error = res?.error || 'Failed to paint zones';
+				notice = declined(res);
 			}
-		} catch (e: any) {
-			error = e?.message || String(e);
-		} finally {
-			painting = false;
-		}
-	}
-
-	async function updateZoneType(zone: any, newType: string) {
-		painting = true;
-		try {
-			const res = await ctx.callSync('update_zone', {
-				user_id: userId,
-				zone_id: zone.h3_index,
-				zone_type: newType,
-			});
-			if (res?.success) {
-				await loadAllZones(true);
-				selectedZone = zones.find((z) => z.h3_index === zone.h3_index) ?? null;
-				refreshZonesLayer();
-				map?.resize();
-			} else {
-				error = res?.error || 'Failed to update zone';
-			}
-		} catch (e: any) {
-			error = e?.message || String(e);
-		} finally {
-			painting = false;
-		}
-	}
-
-	async function renameZone(zone: any, name: string) {
-		if (!name.trim()) return;
-		painting = true;
-		try {
-			const res = await ctx.callSync('update_zone', {
-				user_id: userId,
-				zone_id: zone.h3_index,
-				name: name.trim(),
-			});
-			if (res?.success) {
-				await loadAllZones(true);
-				selectedZone = zones.find((z) => z.h3_index === zone.h3_index) ?? null;
-				refreshZonesLayer();
-			} else {
-				error = res?.error || 'Failed to rename zone';
-			}
-		} catch (e: any) {
-			error = e?.message || String(e);
-		} finally {
-			painting = false;
-		}
-	}
-
-	async function removeZone(zone: any) {
-		painting = true;
-		try {
-			const res = await ctx.callSync('remove_zone', { user_id: userId, zone_id: zone.h3_index });
-			if (res?.success) {
-				selectedZone = null;
-				await loadAllZones(true);
-				refreshZonesLayer();
-				map?.resize();
-			} else {
-				error = res?.error || 'Failed to remove zone';
-			}
-		} catch (e: any) {
-			error = e?.message || String(e);
 		} finally {
 			painting = false;
 		}
@@ -610,36 +508,42 @@
 	}
 
 	$effect(() => {
-		if (mapReady && paintCells.length > 0) {
+		if (mapReady) {
 			zoneType;
+			pickedCell;
 			refreshPreviewLayer();
 		}
 	});
 
 	$effect(() => {
-		if (zones.length >= 0 && mapReady) refreshZonesLayer();
+		if (zones.length >= 0 && mapReady) {
+			myZone;
+			refreshZonesLayer();
+		}
 	});
 
 	onMount(async () => {
-		userId = ctx.userId || '';
-		ctx.principal?.subscribe?.((p: string) => {
-			userId = p || userId;
-		});
+		unsubscribePrincipal =
+			ctx.principal?.subscribe?.(() => {
+				myZone = '';
+			}) ?? null;
 
 		window.addEventListener('keydown', onWindowKeydown);
 
-		await loadAllZones(false);
+		await Promise.all([loadAllZones(false), loadMe()]);
 		await tick();
 		if (mapContainer) {
 			try {
 				await initMap();
 			} catch (e: any) {
-				error = e?.message || String(e);
+				console.warn('[zone_selector] map unavailable:', e?.message ?? e);
+				mapUnavailable = true;
 			}
 		}
 	});
 
 	onDestroy(() => {
+		unsubscribePrincipal?.();
 		window.removeEventListener('keydown', onWindowKeydown);
 		document.body.classList.remove('zone-selector-expanded');
 		document.body.style.overflow = '';
@@ -650,7 +554,7 @@
 </script>
 
 <div class="zone-display" class:expanded>
-	<div bind:this={mapContainer} class="zone-map" class:drawing={isDrawing}></div>
+	<div bind:this={mapContainer} class="zone-map" class:drawing={isPicking}></div>
 
 	<div class="zone-overlay zone-overlay-top">
 		<div class="zone-header">
@@ -662,18 +566,18 @@
 				<button type="button" class="expand-toggle" onclick={toggleExpanded} aria-pressed={expanded}>
 					{expanded ? 'Exit full screen' : 'Expand'}
 				</button>
-				{#if isAdmin}
+				{#if canPick && !mapUnavailable}
 					<button
 						type="button"
 						class="edit-toggle"
 						class:active={editing}
 						onclick={() => {
 							editing = !editing;
-							if (!editing) cancelDrawing();
+							if (!editing) cancelPicking();
 							notice = '';
 						}}
 					>
-						{editing ? 'Done editing' : 'Edit zones'}
+						{editing ? 'Done' : 'Choose my zone'}
 					</button>
 				{/if}
 			</div>
@@ -692,8 +596,8 @@
 				<span>Loading zones…</span>
 			</div>
 		{:else}
-			{#if error}
-				<div class="zone-error">{error}</div>
+			{#if mapUnavailable}
+				<div class="zone-notice">The map cannot be shown right now.</div>
 			{/if}
 			{#if notice}
 				<div class="zone-notice">{notice}</div>
@@ -702,7 +606,7 @@
 				<div class="zone-refresh">Updating zones…</div>
 			{/if}
 
-			{#if editing && isAdmin}
+			{#if editing && canPick}
 				<div class="edit-bar">
 					<div class="type-palette">
 						{#each ZONE_TYPES as t}
@@ -721,50 +625,35 @@
 					<input
 						class="zone-name-input"
 						type="text"
-						placeholder="Name for these zones (optional)"
+						placeholder="Name for your zone (optional)"
 						bind:value={zoneName}
 					/>
-					{#if !isDrawing && paintCells.length === 0}
-						<button type="button" class="draw-btn" onclick={startDrawing}>Start drawing a shape</button>
-					{:else if isDrawing}
+					{#if !h3Ready}
+						<div class="draw-hint">Picking a cell needs the hexagon grid, which is not available right now.</div>
+					{:else if !isPicking}
+						<button type="button" class="draw-btn" disabled={!mapReady} onclick={startPicking}>
+							Pick a cell on the map
+						</button>
+						<div class="draw-hint gap-note">
+							Each member has one home zone; choosing a new one replaces the previous. Painting many cells at
+							once is not offered on this realm.
+						</div>
+					{:else if !pickedCell}
 						<div class="draw-hint">
-							Click the globe to add points ({drawPoints.length} so far).
-							{#if drawPoints.length >= 3}
-								Previewing <strong>{paintableCount}</strong> new cell(s) as
-								<strong>{ZONE_TYPES.find((t) => t.value === zoneType)?.label || zoneType}</strong>
-								(H3 res {paintResolution}{paintCells.length !== paintableCount
-									? `, ${paintCells.length - paintableCount} already zoned — skipped`
-									: ''}).
-							{:else}
-								Add at least 3 points to preview hexes.
-							{/if}
+							Click the globe where your zone is (zoom in for a smaller cell).
 							<div class="draw-actions">
-								<button type="button" disabled={drawPoints.length === 0} onclick={undoPoint}>
-									Undo point
-								</button>
-								<button type="button" class="primary" disabled={drawPoints.length < 3} onclick={finishShape}>
-									Finish shape
-								</button>
-								<button type="button" onclick={cancelDrawing}>Cancel</button>
+								<button type="button" onclick={cancelPicking}>Cancel</button>
 							</div>
 						</div>
-					{:else if paintCells.length > 0}
+					{:else}
 						<div class="draw-hint">
-							Will paint <strong>{paintableCount}</strong> new cell(s) as
-							<strong>{ZONE_TYPES.find((t) => t.value === zoneType)?.label || zoneType}</strong>
-							(H3 res {paintResolution}{paintCells.length !== paintableCount
-								? `, ${paintCells.length - paintableCount} already zoned — skipped`
-								: ''}).
+							Set <code>{pickedCell}</code> as your home zone,
+							<strong>{zoneLabel(zoneType)}</strong> (H3 res {paintResolution}). Click elsewhere to pick another cell.
 							<div class="draw-actions">
-								<button
-									type="button"
-									class="primary"
-									disabled={painting || paintableCount === 0}
-									onclick={paintZones}
-								>
-									{painting ? 'Painting…' : `Paint ${paintableCount} zone(s)`}
+								<button type="button" class="primary" disabled={painting} onclick={paintZones}>
+									{painting ? 'Saving…' : 'Set as my zone'}
 								</button>
-								<button type="button" disabled={painting} onclick={discardPreview}>Discard</button>
+								<button type="button" disabled={painting} onclick={cancelPicking}>Cancel</button>
 							</div>
 						</div>
 					{/if}
@@ -795,14 +684,15 @@
 				</div>
 				<button type="button" class="panel-close" onclick={() => (selectedZone = null)}>&times;</button>
 			</div>
-			{#if isAdmin}
+			{#if canPick && selectedZone.h3_index === myZone}
+				<p class="panel-type">This is your home zone.</p>
 				<div class="panel-controls">
 					<label>
 						Type
 						<select
 							disabled={painting}
 							value={selectedZone.zone_type}
-							onchange={(e) => updateZoneType(selectedZone, (e.target as HTMLSelectElement).value)}
+							onchange={(e) => updateZoneType(selectedZone!, (e.target as HTMLSelectElement).value)}
 						>
 							{#each ZONE_TYPES as t}
 								<option value={t.value}>{t.label}</option>
@@ -814,29 +704,33 @@
 						<input
 							disabled={painting}
 							value={selectedZone.name || ''}
-							onchange={(e) => renameZone(selectedZone, (e.target as HTMLInputElement).value)}
+							onchange={(e) => renameZone(selectedZone!, (e.target as HTMLInputElement).value)}
 						/>
 					</label>
-					<button type="button" class="remove-btn" disabled={painting} onclick={() => removeZone(selectedZone)}>
-						Remove zone
+					<button type="button" class="remove-btn" disabled={painting} onclick={() => removeZone(selectedZone!)}>
+						No longer my zone
 					</button>
 				</div>
 			{:else}
 				<p class="panel-type">
-					Type: <strong>{selectedZone.zone_type || 'unassigned'}</strong>
+					Type: <strong>{zoneLabel(selectedZone.zone_type)}</strong>
 				</p>
-				{#if selectedZone.description}
-					<p class="panel-desc">{selectedZone.description}</p>
+				{#if canPick}
+					<div class="panel-controls">
+						<button type="button" class="claim-btn" disabled={painting} onclick={() => claimZone(selectedZone!)}>
+							Make this my zone
+						</button>
+					</div>
 				{/if}
 			{/if}
 		</div>
 	{/if}
 
-	{#if zones.length === 0 && !editing && !initialLoading}
+	{#if zones.length === 0 && !editing && !initialLoading && !zonesUnreadable}
 		<div class="zone-empty">
 			<p>
-				No zones have been set for this realm yet{isAdmin
-					? ' — use “Edit zones” to define the territory'
+				No zones have been set for this realm yet{canPick && !mapUnavailable
+					? ' — use “Choose my zone” to pick yours'
 					: ''}.
 			</p>
 		</div>
@@ -1042,6 +936,11 @@
 		cursor: pointer;
 	}
 
+	.draw-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
 	.draw-hint {
 		font-size: 0.8rem;
 		color: #404040;
@@ -1175,25 +1074,31 @@
 		cursor: pointer;
 	}
 
-	.remove-btn:disabled {
+	.remove-btn:disabled,
+	.claim-btn:disabled {
 		opacity: 0.5;
 	}
 
-	.panel-type,
-	.panel-desc {
+	.claim-btn {
+		padding: 0.45rem 0.9rem;
+		border: none;
+		border-radius: 0.5rem;
+		background: #171717;
+		color: #fff;
+		font-size: 0.8rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+
+	.gap-note {
+		margin-top: 0.5rem;
+		color: #737373;
+	}
+
+	.panel-type {
 		margin: 0.5rem 0 0;
 		font-size: 0.85rem;
 		color: #525252;
-	}
-
-	.zone-error {
-		margin-bottom: 0.5rem;
-		padding: 0.75rem 1rem;
-		border: 1px solid #fecaca;
-		border-radius: 0.5rem;
-		background: #fef2f2;
-		color: #991b1b;
-		font-size: 0.875rem;
 	}
 
 	.zone-notice {
