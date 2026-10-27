@@ -23,21 +23,25 @@
 		id: string;
 		title: string;
 		department: string;
-		scope: string;
 		created_by: string;
-		created_at: string;
+		/** Seconds since the epoch; 0 when unknown. */
+		at: number;
 		can_manage: boolean;
 	}
 
-	interface ReshareJob {
-		id: string;
-		department: string;
-		new_member_principal: string;
-		status: string;
-		created_at: string;
+	/** A document's stored content: the ciphertext lives inline in the slim Document's ``ref``. */
+	interface DocContent {
+		ciphertext: string;
+		wrapped: string;
 	}
 
-	type DocReshareStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'failed';
+	class CryptoUnavailable extends Error {}
+
+	const INLINE_REF = 'inline:';
+	const PAGE = 500;
+	const MAX_PAGES = 20;
+
+	type DocReshareStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'failed' | 'unavailable';
 
 	interface DocReshareProgress {
 		doc: DocMeta;
@@ -47,7 +51,13 @@
 
 	const principalStore = ctx.principal;
 	let me = $state('');
-	principalStore?.subscribe?.((v: string) => (me = v || ''));
+	let started = false;
+	principalStore?.subscribe?.((v: string) => {
+		const next = v || '';
+		if (next === me) return;
+		me = next;
+		if (started) loadAll();
+	});
 
 	let departments = $state<DeptInfo[]>([]);
 	let documents = $state<DocMeta[]>([]);
@@ -65,9 +75,8 @@
 	let directoryLabels = $state<Map<string, string>>(new Map());
 
 	let openDoc = $state<DocMeta | null>(null);
-	let openState = $state<'idle' | 'loading' | 'no_access' | 'ready' | 'error'>('idle');
+	let openState = $state<'idle' | 'loading' | 'no_access' | 'unavailable' | 'ready'>('idle');
 	let openContent = $state<{ title: string; body: string } | null>(null);
-	let openError = $state('');
 
 	let composerMode = $state<'create' | 'edit' | null>(null);
 	let editingDocId = $state<string | null>(null);
@@ -77,17 +86,14 @@
 	let pristineBody = $state('');
 	let saving = $state(false);
 	let saveError = $state('');
+	let cryptoNote = $state('');
 
-	let reshareJobs = $state<ReshareJob[]>([]);
 	let reshareDialogOpen = $state(false);
-	let reshareDialogMode = $state<'job' | 'manual'>('job');
-	let reshareTargetJobs = $state<ReshareJob[]>([]);
 	let reshareTargetDept = $state('');
 	let reshareDocProgress = $state<DocReshareProgress[]>([]);
 	let reshareRunning = $state(false);
 	let reshareCancelled = $state(false);
 	let reshareCompletedDocIds = $state<Set<string>>(new Set());
-	let reshareDismissLoading = $state(false);
 
 	const visibleDocs = $derived(
 		selectedDept ? documents.filter((d) => d.department === selectedDept) : documents,
@@ -105,44 +111,10 @@
 
 	const currentDept = $derived(departments.find((d) => d.name === selectedDept) || null);
 	const canManageSelected = $derived(!!currentDept?.can_manage);
-	const hasAnyManageDept = $derived(departments.some((d) => d.can_manage));
-
-	const pendingReshareJobs = $derived(reshareJobs.filter((j) => j.status === 'pending'));
-
-	const relevantPendingJobs = $derived.by(() => {
-		const managed = new Set(departments.filter((d) => d.can_manage).map((d) => d.name));
-		return pendingReshareJobs.filter((j) => managed.has(j.department));
-	});
-
-	const selectedDeptPendingJobs = $derived(
-		relevantPendingJobs.filter((j) => j.department === selectedDept),
-	);
-
-	const bannerPendingJobs = $derived.by(() => {
-		if (!hasAnyManageDept) return [];
-		if (canManageSelected) return selectedDeptPendingJobs;
-		return relevantPendingJobs;
-	});
-
-	const showReshareBanner = $derived(bannerPendingJobs.length > 0);
 
 	const reshareDialogDept = $derived(
 		departments.find((d) => d.name === reshareTargetDept) || null,
 	);
-
-	const reshareNewMembers = $derived.by(() => {
-		if (reshareDialogMode === 'manual') return [];
-		const seen = new Set<string>();
-		const out: string[] = [];
-		for (const job of reshareTargetJobs) {
-			const p = job.new_member_principal;
-			if (p && !seen.has(p)) {
-				seen.add(p);
-				out.push(p);
-			}
-		}
-		return out;
-	});
 
 	const reshareProgressCounts = $derived.by(() => {
 		const total = reshareDocProgress.length;
@@ -158,7 +130,10 @@
 		reshareDocProgress.length > 0 &&
 			reshareDocProgress.every(
 				(p) =>
-					p.status === 'done' || p.status === 'skipped' || p.status === 'failed',
+					p.status === 'done' ||
+					p.status === 'skipped' ||
+					p.status === 'failed' ||
+					p.status === 'unavailable',
 			),
 	);
 
@@ -200,12 +175,6 @@
 		if (!principal) return 'Unknown';
 		if (principal === me) return 'You';
 		return directoryLabels.get(principal) ?? truncatePrincipal(principal);
-	}
-
-	function parseCreatedAt(raw: string): number | null {
-		if (!raw?.trim()) return null;
-		const ms = new Date(raw.trim().replace(' ', 'T') + 'Z').getTime();
-		return Number.isNaN(ms) ? null : ms;
 	}
 
 	function formatRelativeTime(timestampMs: number): string {
@@ -399,61 +368,211 @@
 		}
 	}
 
-	async function loadDirectory() {
-		if (!ctx.backend?.directory_list) return;
+	async function call(kind: 'read' | 'run', name: string, args: Record<string, unknown>): Promise<any> {
+		if (typeof ctx[kind] !== 'function') return { ok: false, error: 'This realm cannot run it here.' };
 		try {
-			const resp: any = await ctx.backend.directory_list();
-			if (resp?.success && resp?.data?.message) {
-				const parsed = JSON.parse(resp.data.message);
-				const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
-				const map = new Map<string, string>();
-				for (const e of entries) {
-					if (e?.kind === 'user' && e.principal && e.label) {
-						map.set(e.principal, e.label);
-					}
-				}
-				directoryLabels = map;
-			}
-		} catch {
-			/* degrade silently */
+			const reply = await ctx[kind](name, args);
+			return reply && typeof reply === 'object' ? reply : { ok: false, error: 'No reply.' };
+		} catch (e: any) {
+			return { ok: false, error: String(e?.message ?? e) };
 		}
 	}
 
+	/** A realm read operation's reply, or null when it fails or is not available to the caller. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		const reply = await call('read', name, args);
+		if (reply.ok) return reply;
+		console.warn(`${name}:`, reply.error);
+		return null;
+	}
+
+	/** Run a realm operation that changes the realm; throws its refusal. */
+	async function run(name: string, args: Record<string, unknown>): Promise<any> {
+		const reply = await call('run', name, args);
+		if (!reply.ok) throw new Error(String(reply.error || `${name} was refused.`));
+		return reply;
+	}
+
+	/** Every row of a paginated read (``from`` / ``count`` / ``next``), or what was read before a failure. */
+	async function readAll(name: string, key: string, args: Record<string, unknown> = {}): Promise<any[]> {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		for (let i = 0; i < MAX_PAGES && from != null; i++) {
+			const reply = await read(name, { ...args, from, count: PAGE });
+			if (!reply) break;
+			if (Array.isArray(reply[key])) rows.push(...reply[key]);
+			from = typeof reply.next === 'number' ? reply.next : null;
+		}
+		return rows;
+	}
+
+	async function sha256Hex(text: string): Promise<string> {
+		const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+		return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+	}
+
+	async function loadDirectory() {
+		const users = await readAll('user_list', 'users');
+		const map = new Map<string, string>();
+		for (const u of users) {
+			if (u?.id && u.nickname) map.set(String(u.id), String(u.nickname));
+		}
+		directoryLabels = map;
+	}
+
+	function staffOf(head: unknown, positions: any[] | undefined): string[] {
+		const people = new Set<string>();
+		if (typeof head === 'string' && head) people.add(head);
+		for (const pos of positions ?? []) {
+			for (const h of pos?.holders ?? []) if (h?.user) people.add(String(h.user));
+		}
+		return [...people];
+	}
+
+	/** Every department with its staff (seat holders and head): they manage and read its documents. */
+	async function loadDepartments(): Promise<DeptInfo[]> {
+		const [list, chartReply] = await Promise.all([
+			readAll('department_list', 'departments'),
+			read('department_chart'),
+		]);
+		const staff = new Map<string, string[]>();
+		const walk = (node: any) => {
+			if (!node?.department) return;
+			staff.set(String(node.department), staffOf(node.head, node.positions));
+			for (const child of node.children ?? []) walk(child);
+		};
+		walk(chartReply?.chart);
+		await Promise.all(
+			list
+				.filter((d) => d?.id && !staff.has(String(d.id)))
+				.map(async (d) => {
+					const reply = await read('department_get', { department: d.id });
+					if (reply) staff.set(String(d.id), staffOf(reply.department?.head, reply.positions));
+				}),
+		);
+		return list
+			.filter((d) => d?.id)
+			.map((d) => {
+				const members = staff.get(String(d.id)) ?? [];
+				return {
+					name: String(d.id),
+					description: String(d.description ?? ''),
+					members,
+					can_manage: !!me && members.includes(me),
+				};
+			});
+	}
+
+	function toDoc(row: any, department: string, canManage: boolean): DocMeta {
+		return {
+			id: String(row.id),
+			title: String(row.title || 'Untitled'),
+			department: String(row.department || department),
+			created_by: String(row.author ?? ''),
+			at: Number(row.at) || 0,
+			can_manage: canManage,
+		};
+	}
+
+	/** Documents of the departments you staff, plus documents elsewhere that were shared with you. */
+	async function loadDocuments(all: DeptInfo[]): Promise<DocMeta[]> {
+		const docs = new Map<string, DocMeta>();
+		const lists = await Promise.all(
+			all
+				.filter((d) => d.can_manage)
+				.map(async (d) => (await readAll('document_list', 'documents', { department: d.name })).map((row) => toDoc(row, d.name, true))),
+		);
+		for (const doc of lists.flat()) docs.set(doc.id, doc);
+
+		const shared = (await readAll('crypto_scopes', 'scopes'))
+			.map((scope) => /^dept:(.+):doc:([^:]+)$/.exec(String(scope)))
+			.filter((m): m is RegExpExecArray => !!m && !docs.has(m[2]));
+		const replies = await Promise.all(shared.map((m) => read('document_get', { document: m[2] })));
+		for (const reply of replies) {
+			const row = reply?.document;
+			if (!row?.id) continue;
+			const dept = all.find((d) => d.name === row.department);
+			docs.set(String(row.id), toDoc(row, String(row.department ?? ''), !!dept?.can_manage));
+		}
+		return [...docs.values()];
+	}
+
+	let loadSeq = 0;
+
 	async function loadAll() {
+		const seq = ++loadSeq;
 		loading = true;
 		error = '';
 		try {
-			const dres: any = await ctx.callSync('list_departments');
-			if (!dres?.success) throw new Error(dres?.error || 'Failed to load departments');
-			departments = dres.data?.departments ?? [];
-			if (!selectedDept && departments.length) selectedDept = departments[0].name;
-
-			const lres: any = await ctx.callSync('list_documents');
-			if (!lres?.success) throw new Error(lres?.error || 'Failed to load documents');
-			documents = lres.data?.documents ?? [];
-
-			await loadReshareJobs();
-		} catch (e: any) {
-			error = String(e?.message ?? e);
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function loadReshareJobs() {
-		if (!departments.some((d) => d.can_manage)) {
-			reshareJobs = [];
-			return;
-		}
-		try {
-			const res: any = await ctx.callSync('reshare_list', {});
-			if (res?.success) {
-				reshareJobs = res.data?.jobs ?? [];
+			const all = await loadDepartments();
+			const docs = await loadDocuments(all);
+			if (seq !== loadSeq) return;
+			const withDocs = new Set(docs.map((d) => d.department));
+			const visible = all.filter((d) => d.can_manage || withDocs.has(d.name));
+			for (const name of withDocs) {
+				if (!visible.some((d) => d.name === name)) {
+					visible.push({ name, description: '', can_manage: false, members: [] });
+				}
 			}
-		} catch {
-			/* degrade silently */
+			departments = visible;
+			documents = docs;
+			if (!departments.some((d) => d.name === selectedDept)) selectedDept = departments[0]?.name ?? '';
+		} catch (e: any) {
+			console.warn('department_docs: load', e);
+			if (seq === loadSeq) error = 'Documents are not available right now.';
+		} finally {
+			if (seq === loadSeq) loading = false;
 		}
 	}
+
+	/** The stored ciphertext of ``doc`` and your wrapped key for it; null when you cannot open it. */
+	async function fetchContent(doc: DocMeta): Promise<DocContent | null> {
+		const reply = await read('document_get', { document: doc.id });
+		if (!reply) return null;
+		const ref = String(reply.document?.ref ?? '');
+		return {
+			ciphertext: ref.startsWith(INLINE_REF) ? ref.slice(INLINE_REF.length) : '',
+			wrapped: String(reply.wrapped_dek ?? ''),
+		};
+	}
+
+	async function decryptContent(content: DocContent): Promise<any | null> {
+		if (!content.wrapped || typeof ctx.crypto?.decryptWithEnvelope !== 'function') return null;
+		try {
+			return await ctx.crypto.decryptWithEnvelope(content.wrapped, content.ciphertext);
+		} catch (e) {
+			console.warn('department_docs: decrypt', e);
+			return null;
+		}
+	}
+
+	/** Encrypt ``data`` for the department's staff and you, then store it as ``docId`` (new when null). */
+	async function storeDocument(
+		dept: DeptInfo,
+		docId: string | null,
+		title: string,
+		data: { title: string; body: string },
+	): Promise<string> {
+		const recipients = Array.from(new Set([...dept.members, me].filter(Boolean)));
+		let plan: { ciphertext: string; wrappedDeks: Record<string, string> };
+		try {
+			plan = await ctx.crypto.encryptForRecipients(recipients, data);
+		} catch (e) {
+			console.warn('department_docs: encrypt', e);
+			throw new CryptoUnavailable();
+		}
+		const reply = await run('document_store', {
+			department: dept.name,
+			...(docId ? { document: docId } : {}),
+			title,
+			ref: INLINE_REF + plan.ciphertext,
+			hash: await sha256Hex(plan.ciphertext),
+			keys: plan.wrappedDeks,
+		});
+		return String(reply.document);
+	}
+
+	const CRYPTO_NOTE = "Encryption isn't available on this realm right now, so documents can't be saved.";
 
 	function initReshareDocProgress(dept: string) {
 		const docs = documents.filter((d) => d.department === dept);
@@ -463,15 +582,13 @@
 		}));
 	}
 
-	function openReshareDialog(opts: { jobs?: ReshareJob[]; manual?: boolean; dept?: string }) {
-		const dept = opts.dept ?? selectedDept;
+	function openManualReshareDialog() {
+		const dept = selectedDept;
 		if (!dept) return;
 		const deptInfo = departments.find((d) => d.name === dept);
 		if (!deptInfo?.can_manage) return;
 
 		reshareTargetDept = dept;
-		reshareDialogMode = opts.manual ? 'manual' : 'job';
-		reshareTargetJobs = opts.jobs ?? [];
 		reshareCancelled = false;
 		reshareRunning = false;
 		reshareCompletedDocIds = new Set();
@@ -479,18 +596,9 @@
 		reshareDialogOpen = true;
 	}
 
-	function openReshareBannerDialog() {
-		openReshareDialog({ jobs: bannerPendingJobs, dept: selectedDept });
-	}
-
-	function openManualReshareDialog() {
-		openReshareDialog({ manual: true, dept: selectedDept });
-	}
-
 	function closeReshareDialog() {
 		if (reshareRunning) return;
 		reshareDialogOpen = false;
-		reshareTargetJobs = [];
 		reshareDocProgress = [];
 		reshareCompletedDocIds = new Set();
 		reshareCancelled = false;
@@ -506,89 +614,59 @@
 		initReshareDocProgress(reshareTargetDept);
 	}
 
-	async function dismissReshareJobs() {
-		if (!reshareTargetJobs.length || reshareDismissLoading || reshareRunning) return;
-		reshareDismissLoading = true;
-		try {
-			for (const job of reshareTargetJobs) {
-				const res: any = await ctx.callSync('reshare_dismiss', { id: job.id });
-				if (!res?.success) throw new Error(res?.error || 'Failed to dismiss re-share job');
-			}
-			await loadReshareJobs();
-			closeReshareDialog();
-			ctx.notify?.('success', 'Re-share request dismissed.');
-		} catch (e: any) {
-			ctx.notify?.('error', String(e?.message ?? e));
-		} finally {
-			reshareDismissLoading = false;
-		}
-	}
-
-	function buildReshareRecipients(): string[] {
-		const members = reshareDialogDept?.members ?? [];
-		const extra = reshareDialogMode === 'job' ? reshareNewMembers : [];
-		return Array.from(new Set([...members, ...extra, me].filter(Boolean)));
-	}
-
 	function updateDocProgress(docId: string, patch: Partial<DocReshareProgress>) {
 		reshareDocProgress = reshareDocProgress.map((p) =>
 			p.doc.id === docId ? { ...p, ...patch } : p,
 		);
 	}
 
-	async function reshareSingleDocument(
-		progress: DocReshareProgress,
-		recipients: string[],
-	): Promise<void> {
+	async function reshareSingleDocument(progress: DocReshareProgress, dept: DeptInfo): Promise<void> {
 		const { doc } = progress;
 		updateDocProgress(doc.id, { status: 'in_progress', error: undefined });
 
 		try {
-			const res: any = await ctx.callSync('get_document', { id: doc.id });
-			if (!res?.success) throw new Error(res?.error || 'Failed to load document');
+			const content = await fetchContent(doc);
+			if (!content) throw new Error('This document could not be opened.');
 
-			const ciphertext = res.data?.ciphertext || '';
-			if (!ciphertext) {
+			if (!content.ciphertext) {
 				updateDocProgress(doc.id, { status: 'skipped' });
 				reshareCompletedDocIds = new Set([...reshareCompletedDocIds, doc.id]);
 				return;
 			}
 
-			const plaintext = await ctx.crypto.decryptScope(doc.scope, ciphertext);
+			const plaintext = await decryptContent(content);
 			if (!plaintext) {
-				updateDocProgress(doc.id, {
-					status: 'failed',
-					error: 'You do not have a decryption key for this document.',
-				});
+				updateDocProgress(
+					doc.id,
+					content.wrapped
+						? { status: 'unavailable', error: "Encryption isn't available on this realm right now." }
+						: { status: 'failed', error: 'You do not have a decryption key for this document.' },
+				);
 				return;
 			}
 
-			const { ciphertext: newCiphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(
-				recipients,
-				plaintext,
-			);
-
-			const updateRes: any = await ctx.callSync('update_document', {
-				id: doc.id,
-				ciphertext: newCiphertext,
+			await storeDocument(dept, doc.id, String(plaintext.title || doc.title), {
+				title: String(plaintext.title ?? doc.title),
+				body: String(plaintext.body ?? ''),
 			});
-			if (!updateRes?.success) throw new Error(updateRes?.error || 'Failed to update document');
-
-			await ctx.crypto.grantScope(doc.scope, wrappedDeks);
 
 			updateDocProgress(doc.id, { status: 'done' });
 			reshareCompletedDocIds = new Set([...reshareCompletedDocIds, doc.id]);
 		} catch (e: any) {
-			updateDocProgress(doc.id, { status: 'failed', error: String(e?.message ?? e) });
+			updateDocProgress(
+				doc.id,
+				e instanceof CryptoUnavailable
+					? { status: 'unavailable', error: "Encryption isn't available on this realm right now." }
+					: { status: 'failed', error: String(e?.message ?? e) },
+			);
 		}
 	}
 
 	async function startResharing() {
-		if (reshareRunning || !reshareTargetDept) return;
+		const dept = reshareDialogDept;
+		if (reshareRunning || !dept) return;
 		reshareRunning = true;
 		reshareCancelled = false;
-
-		const recipients = buildReshareRecipients();
 
 		try {
 			for (const progress of reshareDocProgress) {
@@ -600,7 +678,7 @@
 				) {
 					continue;
 				}
-				await reshareSingleDocument(progress, recipients);
+				await reshareSingleDocument(progress, dept);
 			}
 
 			const allProcessed = reshareDocProgress.every(
@@ -608,28 +686,19 @@
 					p.status === 'done' ||
 					p.status === 'skipped' ||
 					p.status === 'failed' ||
+					p.status === 'unavailable' ||
 					reshareCompletedDocIds.has(p.doc.id),
 			);
 
-			if (!reshareCancelled && allProcessed) {
-				if (reshareDialogMode === 'job' && reshareTargetJobs.length) {
-					for (const job of reshareTargetJobs) {
-						const res: any = await ctx.callSync('reshare_complete', { id: job.id });
-						if (!res?.success) throw new Error(res?.error || 'Failed to complete re-share job');
-					}
-				}
-				await loadReshareJobs();
+			const anyFailed = reshareDocProgress.some(
+				(p) => p.status === 'failed' || p.status === 'unavailable',
+			);
+			if (!reshareCancelled && allProcessed && !anyFailed) {
 				await loadAll();
 				reshareDialogOpen = false;
-				reshareTargetJobs = [];
 				reshareDocProgress = [];
 				reshareCompletedDocIds = new Set();
-				ctx.notify?.(
-					'success',
-					reshareDialogMode === 'manual'
-						? 'Department documents re-shared with all members.'
-						: 'Documents re-shared with new member(s).',
-				);
+				ctx.notify?.('success', 'Department documents re-shared with all members.');
 			}
 		} catch (e: any) {
 			ctx.notify?.('error', String(e?.message ?? e));
@@ -655,6 +724,8 @@
 				return 'Skipped (empty)';
 			case 'failed':
 				return 'Failed';
+			case 'unavailable':
+				return 'Not available';
 		}
 	}
 
@@ -698,27 +769,32 @@
 
 		openDoc = doc;
 		openContent = null;
-		openError = '';
 		openState = 'loading';
 		try {
-			const res: any = await ctx.callSync('get_document', { id: doc.id });
-			if (!res?.success) throw new Error(res?.error || 'Failed to load document');
-			const ciphertext = res.data?.ciphertext || '';
-			if (!ciphertext) {
+			const content = await fetchContent(doc);
+			if (!content) {
+				openState = 'unavailable';
+				return;
+			}
+			if (!content.ciphertext) {
 				openState = 'ready';
 				openContent = { title: doc.title, body: '(empty document)' };
 				return;
 			}
-			const decrypted = await ctx.crypto.decryptScope(doc.scope, ciphertext);
-			if (!decrypted) {
+			if (!content.wrapped) {
 				openState = 'no_access';
 				return;
 			}
-			openContent = { title: decrypted.title ?? doc.title, body: decrypted.body ?? '' };
+			const decrypted = await decryptContent(content);
+			if (!decrypted) {
+				openState = 'unavailable';
+				return;
+			}
+			openContent = { title: String(decrypted.title ?? doc.title), body: String(decrypted.body ?? '') };
 			openState = 'ready';
 		} catch (e: any) {
-			openError = String(e?.message ?? e);
-			openState = 'error';
+			console.warn('department_docs: open', e);
+			openState = 'unavailable';
 		}
 	}
 
@@ -729,6 +805,7 @@
 			editingDocId = null;
 			clearComposerForm();
 			saveError = '';
+			cryptoNote = '';
 			openDoc = null;
 			openContent = null;
 			openState = 'idle';
@@ -742,34 +819,40 @@
 
 		openDoc = doc;
 		openContent = null;
-		openError = '';
 		openState = 'loading';
 		composerMode = null;
 
 		try {
-			const res: any = await ctx.callSync('get_document', { id: doc.id });
-			if (!res?.success) throw new Error(res?.error || 'Failed to load document');
-			const ciphertext = res.data?.ciphertext || '';
+			const content = await fetchContent(doc);
+			if (!content) {
+				openState = 'unavailable';
+				return;
+			}
 			let title = doc.title;
 			let body = '';
-			if (ciphertext) {
-				const decrypted = await ctx.crypto.decryptScope(doc.scope, ciphertext);
-				if (!decrypted) {
+			if (content.ciphertext) {
+				if (!content.wrapped) {
 					ctx.notify?.('error', 'Cannot edit: you do not have a decryption key for this document.');
 					openState = 'no_access';
 					return;
 				}
-				title = decrypted.title ?? doc.title;
-				body = decrypted.body ?? '';
+				const decrypted = await decryptContent(content);
+				if (!decrypted) {
+					openState = 'unavailable';
+					return;
+				}
+				title = String(decrypted.title ?? doc.title);
+				body = String(decrypted.body ?? '');
 			}
 			composerMode = 'edit';
 			editingDocId = doc.id;
 			seedComposerForm(title, body);
 			saveError = '';
+			cryptoNote = '';
 			openState = 'idle';
 		} catch (e: any) {
-			openError = String(e?.message ?? e);
-			openState = 'error';
+			console.warn('department_docs: edit', e);
+			openState = 'unavailable';
 		}
 	}
 
@@ -780,6 +863,7 @@
 		editingDocId = null;
 		clearComposerForm();
 		saveError = '';
+		cryptoNote = '';
 		if (doc) await openDocument(doc);
 	}
 
@@ -803,49 +887,34 @@
 		}
 		saving = true;
 		saveError = '';
+		cryptoNote = '';
 		try {
-			const recipients = Array.from(
-				new Set([...(currentDept?.members ?? []), me].filter(Boolean)),
-			);
-			const payload = { title: formTitle.trim(), body: formBody };
-			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(recipients, payload);
+			const savedTitle = formTitle.trim();
+			const savedBody = formBody;
+			const payload = { title: savedTitle, body: savedBody };
 
 			if (composerMode === 'create') {
-				const created: any = await ctx.callSync('create_document', {
-					department: selectedDept,
-					title: formTitle.trim(),
-				});
-				if (!created?.success) throw new Error(created?.error || 'Failed to create document');
-				const { id, scope } = created.data;
-
-				const updateRes: any = await ctx.callSync('update_document', {
-					id,
-					title: formTitle.trim(),
-					ciphertext,
-				});
-				if (!updateRes?.success) throw new Error(updateRes?.error || 'Failed to store document');
-				await ctx.crypto.grantScope(scope, wrappedDeks);
+				if (!currentDept) throw new Error('Choose a department first.');
+				const id = await storeDocument(currentDept, null, savedTitle, payload);
 
 				composerMode = null;
 				clearComposerForm();
 				await loadAll();
 				const newDoc = documents.find((d) => d.id === id);
-				if (newDoc) await openDocument(newDoc);
+				if (newDoc) {
+					openDoc = newDoc;
+					openContent = { title: savedTitle, body: savedBody };
+					openState = 'ready';
+				}
 				ctx.notify?.('success', 'Document created and shared.');
 			} else if (composerMode === 'edit' && editingDocId) {
 				const doc = documents.find((d) => d.id === editingDocId) ?? openDoc;
 				if (!doc) throw new Error('Document not found');
+				const dept = departments.find((d) => d.name === doc.department);
+				if (!dept) throw new Error('Document not found');
 
-				const updateRes: any = await ctx.callSync('update_document', {
-					id: editingDocId,
-					title: formTitle.trim(),
-					ciphertext,
-				});
-				if (!updateRes?.success) throw new Error(updateRes?.error || 'Failed to update document');
-				await ctx.crypto.grantScope(doc.scope, wrappedDeks);
+				await storeDocument(dept, doc.id, savedTitle, payload);
 
-				const savedTitle = formTitle.trim();
-				const savedBody = formBody;
 				composerMode = null;
 				editingDocId = null;
 				clearComposerForm();
@@ -859,7 +928,8 @@
 				ctx.notify?.('success', 'Document updated.');
 			}
 		} catch (e: any) {
-			saveError = String(e?.message ?? e);
+			if (e instanceof CryptoUnavailable) cryptoNote = CRYPTO_NOTE;
+			else saveError = String(e?.message ?? e);
 		} finally {
 			saving = false;
 		}
@@ -875,8 +945,11 @@
 		});
 		if (!ok) return;
 		try {
-			const res: any = await ctx.callSync('delete_document', { id: doc.id });
-			if (!res?.success) throw new Error(res?.error || 'Failed to delete');
+			let deleted = false;
+			for (let i = 0; i < 100 && !deleted; i++) {
+				deleted = !!(await run('document_delete', { document: doc.id, count: PAGE })).deleted;
+			}
+			if (!deleted) throw new Error('The document is still being removed; try again.');
 			if (openDoc?.id === doc.id) {
 				openDoc = null;
 				openContent = null;
@@ -918,8 +991,8 @@
 	}
 
 	loadDirectory();
+	started = true;
 	loadAll();
-	loadReshareJobs();
 	unsubNarrow = subscribeNarrowViewport((value) => {
 		narrow = value;
 	});
@@ -1035,25 +1108,6 @@
 				</button>
 			{/if}
 		</div>
-		{#if showReshareBanner}
-			<div
-				class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20"
-				role="alert"
-			>
-				<p class="text-sm text-amber-800 dark:text-amber-200">
-					{bannerPendingJobs.length} new department member{bannerPendingJobs.length === 1
-						? ''
-						: 's'} need access to encrypted documents.
-				</p>
-				<button
-					type="button"
-					class="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600"
-					onclick={openReshareBannerDialog}
-				>
-					Review re-share
-				</button>
-			</div>
-		{/if}
 		{#if currentDept?.description}
 			<p class="text-xs text-gray-500 dark:text-gray-400">{currentDept.description}</p>
 		{/if}
@@ -1111,7 +1165,7 @@
 						class="space-y-1 max-h-[70vh] overflow-y-auto pr-1"
 					>
 						{#each filteredDocs as doc (doc.id)}
-							{@const ts = parseCreatedAt(doc.created_at)}
+							{@const ts = doc.at ? doc.at * 1000 : null}
 							<li class="group relative flex items-stretch">
 								<button
 									type="button"
@@ -1137,7 +1191,7 @@
 										{/if}
 										{#if ts !== null}
 											<span class="mx-1">·</span>
-											<time datetime={doc.created_at} title={formatFullUtc(ts)}>
+											<time datetime={new Date(ts).toISOString()} title={formatFullUtc(ts)}>
 												{formatRelativeTime(ts)}
 											</time>
 										{/if}
@@ -1236,6 +1290,9 @@
 							{#if saveError}
 								<p class="mb-2 text-sm text-red-600 dark:text-red-400">{saveError}</p>
 							{/if}
+							{#if cryptoNote}
+								<p class="mb-2 text-sm text-gray-500 dark:text-gray-400">{cryptoNote}</p>
+							{/if}
 							<div class="flex gap-2">
 								<button
 									class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
@@ -1321,9 +1378,9 @@
 										This document is encrypted and you don't have a key for it.
 									</p>
 								</div>
-							{:else if openState === 'error'}
+							{:else if openState === 'unavailable'}
 								<div
-									class="flex flex-1 flex-col items-center justify-center gap-3 text-center text-red-600 dark:text-red-400"
+									class="flex flex-1 flex-col items-center justify-center gap-3 text-center text-gray-500 dark:text-gray-400"
 								>
 									<svg
 										class="h-10 w-10 opacity-60"
@@ -1333,10 +1390,12 @@
 										stroke-width="1.5"
 										aria-hidden="true"
 									>
-										<circle cx="12" cy="12" r="9" />
-										<path d="M12 8v5M12 16h.01" stroke-linecap="round" />
+										<rect x="5" y="11" width="14" height="10" rx="2" />
+										<path d="M8 11V7a4 4 0 118 0v4" stroke-linecap="round" />
 									</svg>
-									<p class="text-sm">{openError}</p>
+									<p class="text-sm">
+										This document can't be opened right now. Encryption may not be available on this realm.
+									</p>
 								</div>
 							{:else if openState === 'ready' && openContent}
 								<h2 class="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
@@ -1388,23 +1447,14 @@
 			>
 				<div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
 					<h2 id="reshare-dialog-title" class="text-lg font-semibold text-gray-900 dark:text-white">
-						{reshareDialogMode === 'manual'
-							? `Re-share documents in ${reshareTargetDept}`
-							: 'Re-share documents with new member(s)'}
+						{`Re-share documents in ${reshareTargetDept}`}
 					</h2>
-					{#if reshareDialogMode === 'job' && reshareNewMembers.length}
-						<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-							New member{reshareNewMembers.length === 1 ? '' : 's'}:
-							{#each reshareNewMembers as principal, i (principal)}
-								<span class="font-mono">{truncatePrincipal(principal)}</span>{#if i < reshareNewMembers.length - 1},
-								{/if}
-							{/each}
-						</p>
-					{:else if reshareDialogMode === 'manual'}
-						<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-							Re-encrypt all documents for current department members.
-						</p>
-					{/if}
+					<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+						Re-encrypt all documents for current department members.
+					</p>
+					<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+						Run this after someone joins the department so they can read existing documents.
+					</p>
 				</div>
 
 				<div class="flex-1 overflow-y-auto px-4 py-3">
@@ -1473,7 +1523,16 @@
 										</span>
 									</div>
 									{#if item.error}
-										<p class="mt-1 text-xs text-red-600 dark:text-red-400">{item.error}</p>
+										<p
+											class={cn(
+												'mt-1 text-xs',
+												item.status === 'unavailable'
+													? 'text-gray-500 dark:text-gray-400'
+													: 'text-red-600 dark:text-red-400',
+											)}
+										>
+											{item.error}
+										</p>
 									{/if}
 								</li>
 							{/each}
@@ -1508,16 +1567,6 @@
 							Resume
 						</button>
 					{:else if !reshareAllFinished}
-						{#if reshareDialogMode === 'job' && reshareTargetJobs.length}
-							<button
-								type="button"
-								class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
-								disabled={reshareDismissLoading}
-								onclick={dismissReshareJobs}
-							>
-								{reshareDismissLoading ? 'Dismissing…' : 'Dismiss'}
-							</button>
-						{/if}
 						<button
 							type="button"
 							class="rounded-lg px-3 py-2 text-sm text-gray-600 hover:underline dark:text-gray-400"
