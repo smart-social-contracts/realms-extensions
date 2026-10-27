@@ -1,7 +1,17 @@
 {
   "name": "land_registry",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "ggg_api_version": 1,
+  "operations": [
+    "land_list",
+    "land_map",
+    "user_list",
+    "land_register",
+    "land_transfer",
+    "land_freeze",
+    "land_unfreeze",
+    "land_mint_nft"
+  ],
   "capabilities": [
     "land.list",
     "land.get",
@@ -43,30 +53,5 @@
     "it": "Catasto",
     "zh-CN": "土地登记",
     "ca-valencia": "Registre de Terres"
-  },
-  "entry_access": {
-    "default": "realm.data_view",
-    "functions": {
-      "create_land": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "update_land_ownership": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "update_land": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "register_land_nft": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "update_land_nft_token": {
-        "level": "realm.admin",
-        "governed": true
-      }
-    }
   }
 }
