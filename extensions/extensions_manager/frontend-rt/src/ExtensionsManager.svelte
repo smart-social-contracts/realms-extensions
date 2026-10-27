@@ -1,49 +1,97 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
 	type TabId = 'overview' | 'access';
+	type Reply = { ok: boolean; error?: string; [key: string]: any };
 
-	interface ExtManifest {
+	interface ExtAccess {
 		name: string;
 		version: string;
-		description?: string;
-		icon?: string;
-		categories?: string[];
+		description: string;
+		profiles: string[];
+		departments: string[];
 	}
+
+	const PAGE = 500;
+	const MAX_PAGES = 20;
+	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
 
 	let activeTab: TabId = $state('overview');
 
-	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const level = type === 'error' ? 'error' : 'success';
+	function addToast(message: string, type: 'success' | 'info' | 'error' = 'success') {
 		if (typeof ctx.notify === 'function') {
-			ctx.notify(level, message);
+			ctx.notify(type, message);
 			return;
 		}
-		console.warn('[extension]', level, message);
+		console.warn('[extension]', type, message);
 	}
-	let pkgInstalledCount: number | null = $state(null);
 	let pkgUpdateCount = $state(0);
 	let loading = $state(true);
 	let error = $state('');
 	let accessDeniedOp = $state('');
 	let extensionCount = $state(0);
 	let codexCount = $state(0);
-	let extensionManifests: Record<string, ExtManifest> = $state({});
-	let codexManifests: Record<string, ExtManifest> = $state({});
 
 	// Access Control
-	let extensions: any[] = $state([]);
+	let extensions: ExtAccess[] = $state([]);
 	let extLoading = $state(false);
 	let expandedExt: string | null = $state(null);
 	let grantTarget = $state('');
-	let grantType: 'user' | 'department' | 'profile' = $state('user');
+	let grantType: 'department' | 'profile' = $state('profile');
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	async function call(write: boolean, name: string, args: Record<string, unknown> = {}): Promise<Reply> {
+		try {
+			const reply = await (write ? ctx.run(name, args) : ctx.read(name, args));
+			if (reply && typeof reply === 'object') return reply;
+		} catch (e: any) {
+			return { ok: false, error: e?.message || `${name} did not answer` };
+		}
+		return { ok: false, error: `${name} did not answer` };
+	}
+
+	/** Every row of a paged read operation (``from``/``count``, continued by ``next``). */
+	async function readPages(name: string, key: string): Promise<{ rows: any[]; error: string }> {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		for (let i = 0; from != null && i < MAX_PAGES; i++) {
+			const reply = await call(false, name, { from, count: PAGE });
+			if (!reply.ok) return { rows, error: reply.error || `${name} was refused` };
+			rows.push(...(Array.isArray(reply[key]) ? reply[key] : []));
+			from = typeof reply.next === 'number' ? reply.next : null;
+		}
+		return { rows, error: '' };
+	}
+
+	/** Show a refused read as the access-denied panel, anything else as a neutral notice. */
+	function refused(message: string, what: string) {
+		const needs = message.match(ACCESS_REFUSAL);
+		if (needs || message === 'sign in first') {
+			accessDeniedOp = needs?.[1] ?? '';
+			error = '';
+		} else {
+			accessDeniedOp = '';
+			error = `${what} are unavailable right now: ${message}`;
+		}
+	}
+
+	function strings(value: unknown): string[] {
+		return Array.isArray(value) ? value.filter((v) => typeof v === 'string' && v) : [];
+	}
+
+	function toAccess(raw: any): ExtAccess {
+		return {
+			name: String(raw?.id ?? ''),
+			version: String(raw?.version ?? ''),
+			description: typeof raw?.manifest?.description === 'string' ? raw.manifest.description : '',
+			profiles: strings(raw?.access?.profiles),
+			departments: strings(raw?.access?.departments),
+		};
 	}
 
 	function registryBaseUrl(canisterId: string): string | null {
@@ -74,134 +122,96 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const [extRaw, codexRaw, statusResp] = await Promise.all([
-				ctx.backend.list_runtime_extensions().catch(() => '{}'),
-				ctx.backend.list_codex_packages().catch(() => '{}'),
-				ctx.backend.status().catch(() => null),
+			const [ext, codex] = await Promise.all([
+				readPages('extension_list', 'extensions'),
+				call(false, 'codex_status', { from: 1, count: 1 }),
 			]);
+			if (ext.error) refused(ext.error, 'Packages');
+			const installed = ext.rows.map(toAccess).filter((e) => e.name);
+			extensionCount = installed.length;
 
-			const extParsed = typeof extRaw === 'string' ? JSON.parse(extRaw) : extRaw;
-			const codexParsed = typeof codexRaw === 'string' ? JSON.parse(codexRaw) : codexRaw;
-			const installedExt = extParsed?.success ? (extParsed.runtime_extensions ?? []) : [];
-			const installedCodex = codexParsed?.success ? (codexParsed.codex_packages ?? []) : [];
-			const extMfsts = extParsed?.success ? (extParsed.all_manifests ?? {}) : {};
-			const codexMfsts = codexParsed?.success ? (codexParsed.manifests ?? {}) : {};
-			extensionManifests = extMfsts;
-			codexManifests = codexMfsts;
-			extensionCount = Object.keys(extMfsts).length || installedExt.length;
-			codexCount = Array.isArray(installedCodex) ? installedCodex.length : Object.keys(codexMfsts).length;
-			pkgInstalledCount = extensionCount + codexCount;
+			// codex_status ids are "<codex>@<version>"; only one codex is active at a time.
+			const active = codex.ok && codex.codex ? codex.codex : null;
+			if (!codex.ok) console.warn('codex_status:', codex.error);
+			codexCount = active ? 1 : 0;
+			const activeCodex = active
+				? { id: String(active.id ?? '').split('@')[0], version: String(active.version ?? '') }
+				: null;
 
-			const registries = (statusResp?.success && statusResp?.data?.status?.registries) || [];
-			let updates = 0;
-			for (const reg of registries) {
-				try {
-					const base = registryBaseUrl(reg.canister_id);
-					if (!base) continue;
-					const [extResp, codexResp] = await Promise.all([
-						fetch(`${base}/api/extensions`, { headers: { Accept: 'application/json' } }).then(r => r.ok ? r.json() : []).catch(() => []),
-						fetch(`${base}/api/codices`, { headers: { Accept: 'application/json' } }).then(r => r.ok ? r.json() : []).catch(() => []),
-					]);
-					for (const e of extResp) {
-						if (!installedExt.includes(e.ext_id)) continue;
-						const installedVersion = extMfsts?.[e.ext_id]?.version;
-						if (installedVersion && e.latest && versionGreater(e.latest, installedVersion)) updates++;
-					}
-					for (const c of codexResp) {
-						if (!installedCodex.includes(c.codex_id)) continue;
-						const installedVersion = codexMfsts?.[c.codex_id]?.version;
-						if (installedVersion && c.latest && versionGreater(c.latest, installedVersion)) updates++;
-					}
-				} catch { /* unreachable registry */ }
-			}
-			pkgUpdateCount = updates;
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			pkgUpdateCount = await countUpdates(installed, activeCodex);
 		} finally {
 			loading = false;
 		}
 	}
 
+	/** Packages whose file registry has a newer version than the one installed. */
+	async function countUpdates(installed: ExtAccess[], codex: { id: string; version: string } | null) {
+		const canisterId = ctx.config?.fileRegistryCanisterId;
+		const base = canisterId ? registryBaseUrl(canisterId) : null;
+		if (!base) return 0;
+		const get = (path: string) =>
+			fetch(`${base}${path}`, { headers: { Accept: 'application/json' } })
+				.then((r) => (r.ok ? r.json() : []))
+				.catch(() => []);
+		const [extResp, codexResp] = await Promise.all([get('/api/extensions'), get('/api/codices')]);
+		const versions = new Map(installed.map((e) => [e.name, e.version]));
+		let updates = 0;
+		for (const e of Array.isArray(extResp) ? extResp : []) {
+			const current = versions.get(e?.ext_id);
+			if (current && e.latest && versionGreater(e.latest, current)) updates++;
+		}
+		for (const c of Array.isArray(codexResp) ? codexResp : []) {
+			if (codex && c?.codex_id === codex.id && c.latest && versionGreater(c.latest, codex.version)) updates++;
+		}
+		return updates;
+	}
+
 	// --- Access Control ---
 	async function loadExtensions() {
 		extLoading = true;
+		error = '';
+		accessDeniedOp = '';
 		try {
-			const res = await callExt('list_extensions');
-			extensions = res?.data?.extensions ?? [];
-		} catch (e: any) {
-			addToast(e?.message || 'Failed to load extensions', 'error');
+			const ext = await readPages('extension_list', 'extensions');
+			if (ext.error) refused(ext.error, 'Extensions');
+			extensions = ext.rows.map(toAccess).filter((e) => e.name);
 		} finally {
 			extLoading = false;
 		}
 	}
 
-	async function grantExtension(extName: string) {
-		if (!grantTarget.trim()) return;
-		let fn = '';
-		let args: Record<string, string> = { extension: extName };
-		if (grantType === 'user') {
-			fn = 'grant_extension_to_user';
-			args.user_principal = grantTarget.trim();
-		} else if (grantType === 'department') {
-			fn = 'grant_extension_to_department';
-			args.department = grantTarget.trim();
-		} else {
-			fn = 'grant_extension_to_profile';
-			args.profile = grantTarget.trim();
+	/** Replace ``ext``'s profiles and departments; a governed call files a proposal instead, shown as such. */
+	async function setAccess(ext: ExtAccess, profiles: string[], departments: string[], done: string) {
+		const reply = await call(true, 'extension_set_access', { extension: ext.name, profiles, departments });
+		if (!reply.ok) {
+			addToast(reply.error || 'The change was not accepted', 'error');
+			return false;
 		}
-		try {
-			const res = await callExt(fn, args);
-			if (res?.success) {
-				addToast('Access granted');
-				grantTarget = '';
-				await loadExtensions();
-			} else {
-				addToast(res?.error || 'Failed', 'error');
-			}
-		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
-		}
+		if (reply.proposal) addToast(`Submitted for a vote as proposal ${reply.proposal}.`, 'info');
+		else addToast(done);
+		await loadExtensions();
+		return true;
 	}
 
-	async function revokeExtUser(extName: string, principal: string) {
-		try {
-			const res = await callExt('revoke_extension_from_user', { extension: extName, user_principal: principal });
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
+	async function grantExtension(ext: ExtAccess) {
+		const target = grantTarget.trim();
+		if (!target) return;
+		const profiles = grantType === 'profile' ? [...new Set([...ext.profiles, target])] : ext.profiles;
+		const departments = grantType === 'department' ? [...new Set([...ext.departments, target])] : ext.departments;
+		if (await setAccess(ext, profiles, departments, 'Access granted')) grantTarget = '';
 	}
 
-	async function revokeExtDept(extName: string, deptName: string) {
-		try {
-			const res = await callExt('revoke_extension_from_department', { extension: extName, department: deptName });
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
+	async function revokeExtDept(ext: ExtAccess, deptName: string) {
+		await setAccess(ext, ext.profiles, ext.departments.filter((d) => d !== deptName), 'Revoked');
 	}
 
-	async function revokeExtProfile(extName: string, profileName: string) {
-		try {
-			const res = await callExt('revoke_extension_from_profile', { extension: extName, profile: profileName });
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
-	}
-
-	function shortPrincipal(p: string): string {
-		if (!p || p.length < 12) return p;
-		return p.slice(0, 5) + '...' + p.slice(-5);
+	async function revokeExtProfile(ext: ExtAccess, profileName: string) {
+		await setAccess(ext, ext.profiles.filter((p) => p !== profileName), ext.departments, 'Revoked');
 	}
 
 	$effect(() => {
-		if (activeTab === 'overview') loadPackages();
-		else if (activeTab === 'access') loadExtensions();
+		const tab = activeTab;
+		untrack(() => (tab === 'overview' ? loadPackages() : loadExtensions()));
 	});
 </script>
 
@@ -241,11 +251,7 @@
 	</div>
 
 	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
+		<AccessDenied operation={accessDeniedOp} />
 	{:else if error}
 		<div class="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm">
 			{error}
@@ -314,7 +320,9 @@
 					</svg>
 				</div>
 			{:else if extensions.length === 0}
-				<p class="text-center text-gray-500 py-8">No Extension entities found. Extensions are seeded when installed.</p>
+				{#if !error && !accessDeniedOp}
+					<p class="text-center text-gray-500 py-8">No extensions are installed yet.</p>
+				{/if}
 			{:else}
 				{#each extensions as ext (ext.name)}
 					<div class="border border-gray-200 rounded-xl overflow-hidden">
@@ -335,7 +343,7 @@
 							<div class="px-4 py-3 border-t border-gray-100 bg-gray-50 space-y-3">
 								<!-- Profiles -->
 								<div>
-									<div class="text-sm font-medium text-gray-700 mb-1">Profile-level access (from manifest):</div>
+									<div class="text-sm font-medium text-gray-700 mb-1">Profile access:</div>
 									{#if ext.profiles.length === 0}
 										<span class="text-sm text-gray-400">None</span>
 									{:else}
@@ -343,7 +351,7 @@
 											{#each ext.profiles as p}
 												<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full">
 													{p}
-													<button onclick={() => revokeExtProfile(ext.name, p)} class="text-blue-400 hover:text-blue-600">&times;</button>
+													<button onclick={() => revokeExtProfile(ext, p)} class="text-blue-400 hover:text-blue-600">&times;</button>
 												</span>
 											{/each}
 										</div>
@@ -360,45 +368,31 @@
 											{#each ext.departments as d}
 												<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full">
 													{d}
-													<button onclick={() => revokeExtDept(ext.name, d)} class="text-purple-400 hover:text-purple-600">&times;</button>
+													<button onclick={() => revokeExtDept(ext, d)} class="text-purple-400 hover:text-purple-600">&times;</button>
 												</span>
 											{/each}
 										</div>
 									{/if}
 								</div>
 
-								<!-- Users -->
-								<div>
-									<div class="text-sm font-medium text-gray-700 mb-1">Direct user access:</div>
-									{#if ext.users.length === 0}
-										<span class="text-sm text-gray-400">None</span>
-									{:else}
-										<div class="flex flex-wrap gap-1">
-											{#each ext.users as u}
-												<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">
-													{u.nickname || shortPrincipal(u.principal)}
-													<button onclick={() => revokeExtUser(ext.name, u.principal)} class="text-green-400 hover:text-green-600">&times;</button>
-												</span>
-											{/each}
-										</div>
-									{/if}
-								</div>
+								<p class="text-xs text-gray-500">
+									Access is given to profiles and departments; direct access for single users is not offered in this realm version.
+								</p>
 
 								<!-- Grant form -->
 								<div class="pt-2 border-t border-gray-200">
 									<div class="text-sm font-medium text-gray-700 mb-2">Grant access:</div>
 									<div class="flex gap-2 flex-wrap">
 										<select bind:value={grantType} class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
-											<option value="user">User</option>
 											<option value="department">Department</option>
 											<option value="profile">Profile</option>
 										</select>
 										<input
 											bind:value={grantTarget}
-											placeholder={grantType === 'user' ? 'Principal' : grantType === 'department' ? 'Dept name' : 'Profile name'}
+											placeholder={grantType === 'department' ? 'Dept name' : 'Profile name'}
 											class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
 										/>
-										<button onclick={() => grantExtension(ext.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
+										<button onclick={() => grantExtension(ext)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
 									</div>
 								</div>
 							</div>
