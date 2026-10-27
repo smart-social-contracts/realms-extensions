@@ -12,7 +12,6 @@
 		max_uses: number;
 		revoked: boolean;
 		expires_at: string | null;
-		created_at?: string;
 	}
 
 	let profile = $state('member');
@@ -27,6 +26,7 @@
 	// Codes list
 	let codes: RegistrationCode[] = $state([]);
 	let listLoading = $state(false);
+	let listNote = $state('');
 	let revokingHash: string | null = $state(null);
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
@@ -38,18 +38,25 @@
 		console.warn('[extension]', level, message);
 	}
 
-	function generateRandomCode(length: number): string {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		const values = crypto.getRandomValues(new Uint8Array(length));
-		return Array.from(values, v => chars[v % chars.length]).join('');
+	/** A realm operation's reply; never throws, failures come back as ``{ ok: false, error }``. */
+	async function call(kind: 'read' | 'run', name: string, args: Record<string, unknown> = {}): Promise<any> {
+		try {
+			return (await ctx[kind](name, args)) ?? { ok: false, error: `${name} returned no reply` };
+		} catch (e: any) {
+			return { ok: false, error: e?.message ?? String(e) };
+		}
 	}
 
-	async function hashCode(code: string): Promise<string> {
-		const encoder = new TextEncoder();
-		const data = encoder.encode(code);
-		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-		const hashArray = Array.from(new Uint8Array(hashBuffer));
-		return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+	function deniedPermission(message: string): string | null {
+		const m = /^\S+ needs (\S+)$/.exec(message.trim());
+		return m ? m[1] : null;
+	}
+
+	/** The canister of the quarter answering this tab: quarter_directory lists itself first. */
+	async function answeringQuarter(): Promise<string> {
+		const reply = await call('read', 'quarter_directory');
+		const first = reply?.ok && Array.isArray(reply.quarters) ? reply.quarters[0] : null;
+		return typeof first?.id === 'string' ? first.id : '';
 	}
 
 	async function generateInvitation() {
@@ -60,32 +67,26 @@
 		linkCopied = false;
 
 		try {
-			const code = generateRandomCode(16);
-			const codeHash = await hashCode(code);
+			const uses = Math.max(1, Math.floor(Number(maxUses) || 1));
+			const hours = Number(expiresInHours) || 0;
+			const args: Record<string, unknown> = { profile, max_uses: uses };
+			if (hours > 0) args.expires_in = Math.round(hours * 3600);
 
-			// The code is created on whichever quarter this admin tab is pointed at
-			// (ctx.backend follows the active quarter). The backend returns its own
-			// canister id so we can make the invite link target that quarter only.
-			const res: any = await ctx.callSync('generate_registration_url', {
-				code_hash: codeHash,
-				profile,
-				max_uses: maxUses,
-				expires_in_hours: expiresInHours,
-				user_id: 'admin',
-				created_by: 'admin',
-				frontend_url: '',
-			});
+			// The invite lives on the quarter this admin tab is pointed at, so the link targets that quarter only.
+			const [reply, quarterId] = await Promise.all([call('run', 'invite_create', args), answeringQuarter()]);
+			const code = reply?.ok ? String(reply.invite?.code ?? '') : '';
+			if (!code) {
+				addToast(`Could not generate the invitation: ${reply?.error || 'no code was returned'}`, 'error');
+				return;
+			}
 
-			const quarterId: string = res?.data?.canister_id ?? '';
 			generatedQuarterId = quarterId || null;
 			const quarterParam = quarterId ? `&quarter=${encodeURIComponent(quarterId)}` : '';
-			const link = `${window.location.origin}/join?invite=${code}${quarterParam}`;
+			const link = `${window.location.origin}/join?invite=${encodeURIComponent(code)}${quarterParam}`;
 			generatedLink = link;
 			qrSvg = generateQrSvg(link);
 			addToast('Invitation code generated successfully');
 			await loadCodes();
-		} catch (e: any) {
-			addToast(`Failed to generate invitation: ${e?.message || String(e)}`, 'error');
 		} finally {
 			generating = false;
 		}
@@ -143,15 +144,40 @@
 		img.src = url;
 	}
 
+	function toCode(row: any): RegistrationCode {
+		const expires = Number(row?.expires_at) || 0;
+		return {
+			code_hash: String(row?.id ?? ''),
+			profile: String(row?.profile || 'member'),
+			uses_count: Number(row?.uses) || 0,
+			max_uses: Number(row?.max_uses) || 0,
+			revoked: !!row?.revoked,
+			// Realm times are seconds; 0 means the invite never expires.
+			expires_at: expires > 0 ? new Date(expires * 1000).toISOString() : null,
+		};
+	}
+
 	async function loadCodes() {
 		listLoading = true;
+		listNote = '';
 		try {
-			const result = await ctx.callSync('get_registration_codes', { include_used: true });
-			const data = result?.data ?? result;
-			codes = Array.isArray(data) ? data : (data?.codes ?? []);
-		} catch (e: any) {
-			addToast(`Failed to load codes: ${e?.message || String(e)}`, 'error');
-			codes = [];
+			const rows: RegistrationCode[] = [];
+			let from: number | null = 1;
+			for (let pages = 0; from != null && pages < 1000; pages++) {
+				const reply = await call('read', 'invite_list', { from, count: 500 });
+				if (!reply?.ok) {
+					const message = String(reply?.error ?? '');
+					const perm = deniedPermission(message);
+					listNote = perm
+						? `Viewing invitations needs the ${perm} permission.`
+						: `Invitations could not be listed${message ? `: ${message}` : '.'}`;
+					codes = [];
+					return;
+				}
+				for (const row of Array.isArray(reply.invites) ? reply.invites : []) rows.push(toCode(row));
+				from = typeof reply.next === 'number' ? reply.next : null;
+			}
+			codes = rows.filter((c) => c.code_hash);
 		} finally {
 			listLoading = false;
 		}
@@ -160,11 +186,13 @@
 	async function revokeCode(codeHash: string) {
 		revokingHash = codeHash;
 		try {
-			await ctx.callSync('revoke_registration_code', { code_hash: codeHash });
+			const reply = await call('run', 'invite_revoke', { invite: codeHash });
+			if (!reply?.ok) {
+				addToast(`Could not revoke the invitation: ${reply?.error || 'no reply'}`, 'error');
+				return;
+			}
 			addToast('Invitation revoked');
 			await loadCodes();
-		} catch (e: any) {
-			addToast(`Failed to revoke: ${e?.message || String(e)}`, 'error');
 		} finally {
 			revokingHash = null;
 		}
@@ -323,6 +351,10 @@
 				<div class="inline-block animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
 				<p class="mt-2 text-gray-600">Loading invitations…</p>
 			</div>
+		{:else if listNote}
+			<div class="text-center py-10">
+				<p class="text-gray-500">{listNote}</p>
+			</div>
 		{:else if codes.length === 0}
 			<div class="text-center py-10">
 				<p class="text-gray-500">No invitation codes found.</p>
@@ -357,7 +389,7 @@
 										'px-2 py-0.5 rounded-full text-xs font-medium',
 										code.profile === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
 									)}>
-										{code.profile === 'admin' ? 'Admin' : 'Member'}
+										{code.profile === 'admin' ? 'Admin' : code.profile === 'member' ? 'Member' : code.profile}
 									</span>
 								</td>
 								<td class="px-4 py-3 text-gray-700">

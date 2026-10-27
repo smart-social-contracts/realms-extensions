@@ -1,6 +1,6 @@
 {
   "name": "census",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "deprecated": true,
   "description": "No longer used — invite new members and view member counts in User Management instead.",
   "author": "Realms Team",
@@ -23,5 +23,12 @@
     "admin"
   ],
   "show_in_sidebar": false,
-  "icon": "users"
+  "icon": "users",
+  "operations": [
+    "user_list",
+    "invite_list",
+    "invite_create",
+    "invite_revoke",
+    "quarter_directory"
+  ]
 }
