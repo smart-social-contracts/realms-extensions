@@ -1,13 +1,20 @@
 {
   "name": "system_info",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "ggg_api_version": 1,
   "runtime": "sandboxed",
   "sdk_version": "1",
   "capabilities": [
-    "call_extension",
     "system.snapshot",
     "log.write"
+  ],
+  "operations": [
+    "status",
+    "realm_monitor",
+    "extension_list",
+    "codex_status",
+    "quarter_directory",
+    "scale_status"
   ],
   "description": "See health and resource usage for this realm, including compute budget, memory, stored data, installed extensions, and token balances.",
   "author": "Realms Team",
@@ -36,15 +43,6 @@
   "icon": "server",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/system_info",
   "show_in_sidebar": true,
-  "entry_access": {
-    "default": "realm.monitor",
-    "functions": {
-      "get_system_info": "realm.monitor",
-      "get_db_stats": "realm.monitor",
-      "get_canister_stats": "realm.monitor",
-      "get_token_balances": "realm.monitor"
-    }
-  },
   "screenshots": [
     "screenshots/01-overview.png"
   ]
