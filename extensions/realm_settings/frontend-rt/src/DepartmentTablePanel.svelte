@@ -2,10 +2,12 @@
 	import { onMount } from 'svelte';
 	import {
 		EXAMPLE_DEPARTMENT_TABLE,
+		applyDepartmentTable,
 		documentHasDestroy,
 		formatApplyResult,
 		parseDepartmentTableText,
 	} from './departmentTable';
+	import { opCaller, proposalOf, refusalText } from './ops';
 
 	let {
 		ctx,
@@ -39,30 +41,22 @@
 		if (addToast) addToast(msg, type);
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
-
-	function deniedMessage(res: any, fallback: string): string {
-		if (res?.denied_operation) return `Requires permission: ${res.denied_operation}`;
-		return res?.error || fallback;
-	}
+	const call = opCaller(ctx);
 
 	async function loadNames() {
 		loadingNames = true;
-		try {
-			const res = await callExt('list_department_names');
-			if (res?.success) {
-				departmentNames = Array.isArray(res.data?.names) ? res.data.names : [];
-				if (destroyName && !departmentNames.includes(destroyName)) {
-					destroyName = '';
-				}
+		const res = await call(false, 'department_list', { count: 500 });
+		// The list is optional: without it (or without the permission), destroy takes a typed name.
+		if (res.ok && Array.isArray(res.departments)) {
+			departmentNames = res.departments
+				.filter((d: any) => d && !d.is_root)
+				.map((d: any) => String(d.id ?? ''))
+				.filter(Boolean);
+			if (destroyName && !departmentNames.includes(destroyName)) {
+				destroyName = '';
 			}
-		} catch {
-			/* list is optional — destroy still accepts a typed name */
-		} finally {
-			loadingNames = false;
 		}
+		loadingNames = false;
 	}
 
 	async function applyTable() {
@@ -75,20 +69,15 @@
 		error = '';
 		message = '';
 		try {
-			const res = await callExt('apply_department_table', { document: check.doc });
-			if (res?.success) {
-				const summary = formatApplyResult(res);
-				message = summary;
-				notify(summary);
-				await loadNames();
+			const data = await applyDepartmentTable(check.doc, call);
+			const summary = formatApplyResult({ data });
+			if (data.errors?.length) {
+				error = summary;
 			} else {
-				error = deniedMessage(res, 'Failed to apply department table');
-				notify(error, 'error');
+				message = data.warnings?.length ? `${summary} · ${data.warnings.join('; ')}` : summary;
+				notify(summary);
 			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			error = op ? `Requires permission: ${op}` : e?.message || String(e);
-			notify(error, 'error');
+			await loadNames();
 		} finally {
 			applying = false;
 		}
@@ -107,28 +96,19 @@
 		destroying = true;
 		error = '';
 		message = '';
-		try {
-			const res = await callExt('delete_department', { name });
-			if (res?.success) {
-				const summary = res.data?.message || `Department '${name}' deleted`;
-				message = summary;
-				notify(summary);
-				confirmDestroy = false;
-				destroyName = '';
-				await loadNames();
-			} else {
-				error = deniedMessage(res, 'Failed to destroy department');
-				notify(error, 'error');
-				confirmDestroy = false;
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			error = op ? `Requires permission: ${op}` : e?.message || String(e);
-			notify(error, 'error');
-			confirmDestroy = false;
-		} finally {
-			destroying = false;
+		const res = await call(true, 'department_delete', { department: name });
+		const proposal = proposalOf(res);
+		if (res.ok) {
+			const summary = proposal ? `Submitted as proposal ${proposal}` : `Department '${name}' deleted`;
+			message = summary;
+			notify(summary);
+			destroyName = '';
+			await loadNames();
+		} else {
+			error = refusalText(res, `Department '${name}' was not deleted`);
 		}
+		confirmDestroy = false;
+		destroying = false;
 	}
 
 	onMount(loadNames);
@@ -138,9 +118,12 @@
 	<h2 class="text-lg font-semibold text-gray-900 mb-1">Department tables (JSON)</h2>
 	<p class="text-sm text-gray-500 mb-5">
 		Apply the founder department-table document from realms #358: upsert departments, posts, and
-		staff, or destroy a department and its children. This is not Department Management CRUD.
-		Apply needs <code class="bg-gray-100 px-1 rounded">organization.add</code>; destroy rows also
-		need <code class="bg-gray-100 px-1 rounded">organization.delete</code>.
+		staff, or destroy a department. This is not Department Management CRUD.
+		Creating needs <code class="bg-gray-100 px-1 rounded">org.create</code>, posts
+		<code class="bg-gray-100 px-1 rounded">org.manage_members</code>, staff
+		<code class="bg-gray-100 px-1 rounded">org.appoint</code>; editing and destroying need
+		<code class="bg-gray-100 px-1 rounded">org.set_policy</code>. Changes a department's policy
+		governs are submitted as proposals.
 	</p>
 
 	{#if message}
@@ -211,9 +194,9 @@
 	<div class="mt-8 pt-6 border-t border-gray-100">
 		<h3 class="text-sm font-semibold text-gray-900">Destroy a department</h3>
 		<p class="mt-1 text-sm text-gray-500 mb-4">
-			Calls host <code class="bg-gray-100 px-1 rounded">delete_department</code> — cascade purge,
-			then the department row. Root cannot be destroyed. Requires
-			<code class="bg-gray-100 px-1 rounded">organization.delete</code>.
+			Runs <code class="bg-gray-100 px-1 rounded">department_delete</code>. The department must have
+			no sub-departments and only closed positions; the root cannot be destroyed. Requires
+			<code class="bg-gray-100 px-1 rounded">org.set_policy</code>.
 		</p>
 		<div class="flex flex-col sm:flex-row gap-2">
 			{#if departmentNames.length}

@@ -1,28 +1,12 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
+	import { onMount } from 'svelte';
 	import ProposalModal from './ProposalModal.svelte';
 	import QuartersPanel from './QuartersPanel.svelte';
-	import SandboxPanel from './SandboxPanel.svelte';
 	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
 	import DepartmentTablePanel from './DepartmentTablePanel.svelte';
-	import LanguagesPanel from './LanguagesPanel.svelte';
-	import {
-		parseRealmLanguages,
-		realmLanguagesConfig,
-		validateRealmLanguages,
-	} from './languages';
-	import {
-		isNarrowViewport,
-		subscribeNarrowViewport,
-	} from '../../../_shared/frontend/mobile-chrome';
-	import {
-		BRANDING_FILE_MAX_BYTES,
-		CUSTOM_BACKGROUND,
-		CUSTOM_LOGO,
-		isValidHexColor,
-		resolvePublicAssetUrl,
-		snapshotEquals,
-	} from '../../../_shared/frontend/branding';
+	import { loadRealmRow, opCaller, proposalOf, refusalText, refusedPermission } from './ops';
+	import { isValidHexColor, snapshotEquals } from '../../../_shared/frontend/branding';
 	import {
 		CUSTOM_TOKEN_ID,
 		isTokenChoiceSelectable,
@@ -35,9 +19,7 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	let narrow = $state(isNarrowViewport());
-	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
-
+	const call = opCaller(ctx);
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
 	let settingsLoading = $state(true);
@@ -57,53 +39,24 @@
 	let realmSettingsCurrency = $state('');
 	let realmSettingsCurrencyDecimals = $state(8);
 	let realmSettingsTokenCanisterId = $state('');
-let realmSettingsTokenIndexerId = $state('');
-let realmSettingsNftCanisterId = $state('');
-let realmSettingsLanguages: string[] = $state([]);
-let realmSettingsPrimaryLanguage = $state('');
-let governanceVotingWindowDays = $state<number | null>(null);
-let liveVotingWindowSeconds = $state<number | null>(null);
-let tokenResolving = $state(false);
-let tokenChoice = $state('');
-let monetaryTokensDisabled = $state(false);
-let tokenPickerLocale = $state('en');
-// The shared-ledger catalog comes from status().shared_tokens; nothing is baked in.
-let tokenOptions = $state<SharedTokenOption[]>([]);
-const customSelectable = $derived(isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled));
+	let realmSettingsNftCanisterId = $state('');
+	let governanceVotingWindowDays = $state<number | null>(null);
+	let liveVotingWindowSeconds = $state<number | null>(null);
+	let tokenChoice = $state('');
+	let monetaryTokensDisabled = $state(false);
+	let tokenPickerLocale = $state('en');
+	let tokenOptions = $state<SharedTokenOption[]>([]);
+	const customSelectable = $derived(isTokenChoiceSelectable(CUSTOM_TOKEN_ID, monetaryTokensDisabled));
 
-// Email notification configuration (issue #266): realm-level on/off toggle.
-// Sender identity is derived from realm settings; SMTP credentials stay on the server.
-let realmSettingsEmailEnabled = $state(true);
-let savedEmailEnabled = $state(true);
-let adminEmail = $state('');
-let testFlagsEnabled = $state(false);
-let emailDirty = $derived(realmSettingsEmailEnabled !== savedEmailEnabled);
-let inhabitantEmails = $state('');
-let sendingJoinLink = $state(false);
-let joinLinkHref = $state('');
-
-	// Governed-action confirmation (issue #262): when the root org policy is
-	// not 1/1, update_realm_config returns requires_confirmation and the
-	// change must go through a proposal + vote.
-	let governedConfirm = $state<any>(null);
-	let governedSubmitting = $state(false);
-	let governedRetry = $state<(() => Promise<void>) | null>(null);
 	let savePreview = $state<null | { appliesDirectly: boolean; policy: string; governedBy: string }>(null);
 	let governanceAppliesDirectly = $state(true);
 	let governancePolicyLabel = $state('1/1');
 	let governanceGovernedBy = $state('root');
 	let savedSnapshot: Record<string, unknown> | null = $state(null);
-	let pendingLogoDataUrl = $state('');
-	let pendingBackgroundDataUrl = $state('');
-	let brandingUploadError = $state('');
 	let showPublicPreviewLink = $state(false);
 
-type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'notifications' | 'advanced';
-let activeTab: SettingsTab = $state('general');
-
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
+	type SettingsTab = 'general' | 'governance' | 'treasury' | 'infrastructure' | 'advanced';
+	let activeTab: SettingsTab = $state('general');
 
 	function formatDuration(seconds: number): string {
 		if (!Number.isFinite(seconds) || seconds <= 0) return 'unknown';
@@ -116,24 +69,29 @@ let activeTab: SettingsTab = $state('general');
 		return `${Math.round(seconds)} seconds`;
 	}
 
+	let votingWindowKnown = $derived(liveVotingWindowSeconds != null);
+	let votingWindowValid = $derived(
+		!votingWindowKnown ||
+			(governanceVotingWindowDays != null &&
+				Number.isFinite(governanceVotingWindowDays) &&
+				Math.round(governanceVotingWindowDays * 86400) >= 1),
+	);
 	let governanceDirty = $derived(
 		liveVotingWindowSeconds != null &&
 			governanceVotingWindowDays != null &&
 			Number.isFinite(governanceVotingWindowDays) &&
 			Math.round(governanceVotingWindowDays * 86400) !== liveVotingWindowSeconds,
 	);
-	let tokenResolveMessage = $state('');
-	let tokenResolveError = $state('');
 
 	// Lifecycle state
 	let lifecycleLoading = $state(true);
 	let lifecycleAdvancing = $state(false);
 	let lifecycleError = $state('');
+	let confirmLaunch = $state(false);
 	let currentStage = $state('alpha');
-	let stageIndex = $state(0);
-	let lifecycleData: any = $state({});
-	const STAGES = ['alpha', 'beta', 'production', 'deprecation', 'terminated'];
+	const STAGES = ['setup', 'alpha', 'beta', 'production', 'deprecation', 'terminated'];
 	const STAGE_LABELS: Record<string, string> = {
+		setup: 'Setup',
 		alpha: 'Alpha',
 		beta: 'Beta',
 		production: 'Production',
@@ -141,17 +99,19 @@ let activeTab: SettingsTab = $state('general');
 		terminated: 'Terminated',
 	};
 	const STAGE_DESCRIPTIONS: Record<string, string> = {
+		setup: 'The founder is configuring the realm',
 		alpha: 'Gathering interest, deposits refundable',
 		beta: 'Deposits locked, infrastructure preparation',
 		production: 'Fully operational',
 		deprecation: 'Winding down, no new members',
 		terminated: 'Closed, read-only archive',
 	};
+	const stageIndex = $derived(Math.max(0, STAGES.indexOf(currentStage)));
 
 	let proposalModalOpen = $state(false);
 	let proposalModalTitle = $state('');
 	let proposalModalDescription = $state('');
-	let proposalModalCode = $state('');
+	let proposalModalActions = $state<Change[]>([]);
 	let proposalModalOperation = $state('');
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
@@ -163,51 +123,40 @@ let activeTab: SettingsTab = $state('general');
 		console.warn('[extension]', level, message);
 	}
 
-	function buildTokenWalletProposalLines(): string[] {
-		const lines: string[] = [];
-		if (!realmSettingsTokenCanisterId || !realmSettingsCurrency.trim()) {
-			return lines;
-		}
-		const indexer = realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim();
-		const sym = realmSettingsCurrency.trim();
-		const decimals = Number(realmSettingsCurrencyDecimals) || 0;
-		lines.push('');
-		lines.push('from ggg import Token');
-		lines.push(`_sym = ${JSON.stringify(sym)}`);
-		lines.push(`_existing = Token[_sym]`);
-		lines.push('if _existing:');
-		lines.push(`    _existing.ledger = ${JSON.stringify(realmSettingsTokenCanisterId.trim())}`);
-		lines.push(`    _existing.indexer = ${JSON.stringify(indexer)}`);
-		lines.push(`    _existing.decimals = ${decimals}`);
-		lines.push(`    _existing.symbol = _sym`);
-		lines.push('else:');
-		lines.push(
-			`    _t = Token(name=_sym, ledger=${JSON.stringify(realmSettingsTokenCanisterId.trim())}, indexer=${JSON.stringify(indexer)}, decimals=${decimals})`,
-		);
-		lines.push('    _t.symbol = _sym');
-		return lines;
-	}
+	/** The realm operation and arguments one group of settings is saved with. */
+	type Change = { op: string; args: Record<string, unknown> };
+
+	const SETTING_GROUPS: { op: string; keys: readonly string[] }[] = [
+		{ op: 'realm_configure', keys: ['name', 'manifesto', 'welcome_message', 'open_registration', 'ai_assistant_enabled'] },
+		{ op: 'realm_configure_branding', keys: ['logo_url', 'background_image_url', 'primary_color'] },
+		{
+			op: 'realm_configure_tokens',
+			keys: ['accounting_currency', 'accounting_currency_decimals', 'token_canister_id', 'nft_canister_id'],
+		},
+		{ op: 'realm_configure_infrastructure', keys: ['file_registry_canister_id', 'marketplace_canister_id'] },
+		{ op: 'governance_update', keys: ['voting_window'] },
+	];
 
 	function currentSettingsSnapshot(): Record<string, unknown> {
 		return {
 			name: realmSettingsName,
 			manifesto: realmSettingsManifesto,
 			welcome_message: realmSettingsWelcome,
-			languages: [...realmSettingsLanguages],
-			primary_language: realmSettingsPrimaryLanguage,
 			logo_url: realmSettingsLogoUrl,
 			background_image_url: realmSettingsBackgroundUrl,
 			primary_color: realmSettingsPrimaryColor,
 			open_registration: realmSettingsOpenRegistration,
 			ai_assistant_enabled: realmSettingsAiAssistantEnabled,
+			accounting_currency: realmSettingsCurrency.trim(),
+			accounting_currency_decimals: Number(realmSettingsCurrencyDecimals),
 			token_canister_id: realmSettingsTokenCanisterId.trim(),
-			token_indexer_canister_id:
-				realmSettingsTokenIndexerId.trim() || realmSettingsTokenCanisterId.trim(),
 			nft_canister_id: realmSettingsNftCanisterId.trim(),
-			file_registry_canister_id: realmSettingsFileRegistryId,
-			marketplace_canister_id: realmSettingsMarketplaceId,
-			email_enabled: realmSettingsEmailEnabled,
-			voting_window_days: governanceVotingWindowDays,
+			file_registry_canister_id: realmSettingsFileRegistryId.trim(),
+			marketplace_canister_id: realmSettingsMarketplaceId.trim(),
+			voting_window:
+				votingWindowKnown && governanceVotingWindowDays != null
+					? Math.round(governanceVotingWindowDays * 86400)
+					: null,
 		};
 	}
 
@@ -215,135 +164,31 @@ let activeTab: SettingsTab = $state('general');
 		savedSnapshot = currentSettingsSnapshot();
 	}
 
-	function buildDirtyConfig(confirmProposal: boolean): Record<string, unknown> {
+	/** One change per operation whose settings differ from the saved ones; the token group goes whole. */
+	function buildChanges(): Change[] {
 		const next = currentSettingsSnapshot();
 		const prev = savedSnapshot || {};
-		const config: Record<string, unknown> = {};
-		if (confirmProposal) config.confirm = true;
-		const simpleKeys = [
-			'name',
-			'manifesto',
-			'welcome_message',
-			'primary_language',
-			'logo_url',
-			'background_image_url',
-			'primary_color',
-			'open_registration',
-			'ai_assistant_enabled',
-			'token_canister_id',
-			'token_indexer_canister_id',
-			'nft_canister_id',
-			'file_registry_canister_id',
-			'marketplace_canister_id',
-		] as const;
-		for (const key of simpleKeys) {
-			if (!snapshotEquals(prev[key], next[key])) config[key] = next[key];
+		const changes: Change[] = [];
+		for (const { op, keys } of SETTING_GROUPS) {
+			const dirty = keys.filter((key) => !snapshotEquals(prev[key], next[key]));
+			if (!dirty.length) continue;
+			const sent = op === 'realm_configure_tokens' ? keys : dirty;
+			changes.push({ op, args: Object.fromEntries(sent.map((key) => [key, next[key]])) });
 		}
-		if (!snapshotEquals(prev.languages, next.languages)) {
-			config.languages = next.languages;
-			config.primary_language = next.primary_language;
-		}
-		if (prev.email_enabled !== next.email_enabled) {
-			config.email_service_config = { enabled: realmSettingsEmailEnabled };
-		}
-		if (prev.voting_window_days !== next.voting_window_days) {
-			config.config_overrides = {
-				governance: {
-					voting_window_days: Number(
-						governanceVotingWindowDays ??
-							(liveVotingWindowSeconds != null ? liveVotingWindowSeconds / 86400 : 7),
-					),
-				},
-			};
-		}
-		if (pendingLogoDataUrl) {
-			config.logo_data_url = pendingLogoDataUrl;
-			config.logo_url = CUSTOM_LOGO;
-		}
-		if (pendingBackgroundDataUrl) {
-			config.background_data_url = pendingBackgroundDataUrl;
-			config.background_image_url = CUSTOM_BACKGROUND;
-		}
-		return config;
+		return changes;
 	}
 
-	async function onBrandingFile(kind: 'logo' | 'background', event: Event) {
-		brandingUploadError = '';
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		if (!file) return;
-		if (file.size > BRANDING_FILE_MAX_BYTES) {
-			brandingUploadError = `Image is too large (max ${Math.round(BRANDING_FILE_MAX_BYTES / 1024)} KB). Upload a smaller file or use a URL.`;
-			input.value = '';
-			return;
-		}
-		const dataUrl = await new Promise<string>((resolve, reject) => {
-			const reader = new FileReader();
-			reader.onload = () => resolve(String(reader.result || ''));
-			reader.onerror = () => reject(new Error('Could not read file'));
-			reader.readAsDataURL(file);
-		});
-		if (kind === 'logo') {
-			pendingLogoDataUrl = dataUrl;
-			realmSettingsLogoUrl = CUSTOM_LOGO;
-		} else {
-			pendingBackgroundDataUrl = dataUrl;
-			realmSettingsBackgroundUrl = CUSTOM_BACKGROUND;
-		}
+	function keysOf(op: string): readonly string[] {
+		return SETTING_GROUPS.find((group) => group.op === op)?.keys ?? [];
 	}
 
-	function buildRealmConfigCode(): string {
-		const lines = ['from ggg import Realm', '', 'realm = Realm.load("1")'];
-		if (realmSettingsName) lines.push(`realm.name = ${JSON.stringify(realmSettingsName)}`);
-		if (realmSettingsManifesto) lines.push(`realm.manifesto = ${JSON.stringify(realmSettingsManifesto)}`);
-		lines.push(`realm.welcome_message = ${JSON.stringify(realmSettingsWelcome)}`);
-		if (realmSettingsLogoUrl) lines.push(`realm.logo_url = ${JSON.stringify(realmSettingsLogoUrl)}`);
-		if (realmSettingsBackgroundUrl) lines.push(`realm.background_image_url = ${JSON.stringify(realmSettingsBackgroundUrl)}`);
-		lines.push(`realm.open_registration = ${realmSettingsOpenRegistration ? 'True' : 'False'}`);
-		lines.push(`realm.ai_assistant_enabled = ${realmSettingsAiAssistantEnabled ? 'True' : 'False'}`);
-		if (realmSettingsTokenCanisterId.trim()) {
-			lines.push(`realm.token_canister_id = ${JSON.stringify(realmSettingsTokenCanisterId.trim())}`);
-		}
-		if (realmSettingsNftCanisterId.trim()) {
-			lines.push(`realm.nft_canister_id = ${JSON.stringify(realmSettingsNftCanisterId.trim())}`);
-		}
-		if (realmSettingsFileRegistryId) lines.push(`realm.file_registry_canister_id = ${JSON.stringify(realmSettingsFileRegistryId)}`);
-		if (realmSettingsMarketplaceId) lines.push(`realm.marketplace_canister_id = ${JSON.stringify(realmSettingsMarketplaceId)}`);
-		lines.push(`realm.languages = ${JSON.stringify(realmSettingsLanguages)}`);
-		lines.push(`realm.primary_language = ${JSON.stringify(realmSettingsPrimaryLanguage)}`);
-		lines.push(...buildTokenWalletProposalLines());
-		lines.push('');
-		lines.push('import json');
-		lines.push('_md = json.loads(realm.manifest_data or "{}")');
-		lines.push('_setup = _md.get("setup") or {}');
-		lines.push('if not isinstance(_setup, dict):');
-		lines.push('    _setup = {}');
-		lines.push('_branding = _setup.get("branding") or {}');
-		lines.push('if not isinstance(_branding, dict):');
-		lines.push('    _branding = {}');
-		lines.push('_colors = _branding.get("colors") or {}');
-		lines.push('if not isinstance(_colors, dict):');
-		lines.push('    _colors = {}');
-		lines.push(`_colors["primary"] = ${JSON.stringify(realmSettingsPrimaryColor)}`);
-		lines.push('_branding["colors"] = _colors');
-		lines.push('_setup["branding"] = _branding');
-		lines.push('_md["setup"] = _setup');
-		lines.push('realm.manifest_data = json.dumps(_md)');
-		return lines.join('\n');
-	}
-
-	function openProposalForSettings(deniedOp: string) {
+	function openProposalForSettings(actions: Change[], permissions: string) {
 		proposalModalTitle = 'Update realm settings';
-		proposalModalDescription = 'This proposal updates the realm configuration (identity, languages, branding, registration, currency, and infrastructure) as specified in the code below.';
-		proposalModalCode = buildRealmConfigCode();
-		proposalModalOperation = deniedOp;
+		proposalModalDescription =
+			'This proposal updates the realm configuration with the operations listed below.';
+		proposalModalActions = actions;
+		proposalModalOperation = permissions;
 		proposalModalOpen = true;
-	}
-
-	function applyHostLanguages(source: unknown) {
-		const parsed = parseRealmLanguages(source);
-		realmSettingsLanguages = parsed.languages;
-		realmSettingsPrimaryLanguage = parsed.primary_language;
 	}
 
 	function snapshotRealmInfo(): Record<string, unknown> | null {
@@ -360,103 +205,83 @@ let activeTab: SettingsTab = $state('general');
 		return typeof info === 'object' ? info as Record<string, unknown> : null;
 	}
 
-	async function loadHostLanguages() {
-		try {
-			const res = await callExt('get_languages');
-			if (res?.success && res.data) {
-				applyHostLanguages(res.data);
-				if (realmSettingsLanguages.length || realmSettingsPrimaryLanguage) return;
-			}
-		} catch {
-			/* host fields may not exist until realms #361 lands */
-		}
-		const info = snapshotRealmInfo();
-		if (info) applyHostLanguages(info);
+	/** Who must approve a realm-wide change, read from the root department's policy. */
+	async function loadGovernancePolicy(status: string) {
+		governanceAppliesDirectly = true;
+		governancePolicyLabel = '1/1';
+		governanceGovernedBy = 'root';
+		if (status === 'setup') return;
+		const listed = await call(false, 'department_list', { count: 500 });
+		const root = listed.ok && Array.isArray(listed.departments) ? listed.departments.find((d: any) => d?.is_root) : null;
+		if (!root) return;
+		governanceGovernedBy = String(root.id);
+		const got = await call(false, 'department_get', { department: root.id });
+		const policy = got.ok ? got.department?.policy : null;
+		if (!policy || typeof policy !== 'object') return;
+		const m = Number(policy.m ?? 1);
+		const n = Number(policy.n ?? 1);
+		governancePolicyLabel = `${m}/${n}`;
+		governanceAppliesDirectly = m <= 1 && n <= 1 && !policy.quorum_percent && !(policy.veto?.length > 0);
 	}
 
 	async function loadRealmSettings() {
 		settingsLoading = true;
 		settingsError = '';
 		try {
-			const resp = await ctx.backend.status();
-			if (resp?.success && resp?.data?.status) {
-				const s = resp.data.status;
-				realmSettingsName = s.realm_name || '';
-				realmSettingsManifesto = s.realm_manifesto || '';
-				realmSettingsWelcome = s.realm_welcome_message || '';
-				realmSettingsLogoUrl = s.logo_url || '';
-				realmSettingsBackgroundUrl = s.background_image_url || '';
-				realmSettingsPrimaryColor =
-					typeof s.primary_color === 'string' && isValidHexColor(s.primary_color)
-						? s.primary_color
-						: '#3b82f6';
-				realmSettingsOpenRegistration = !!s.open_registration;
-				realmSettingsAiAssistantEnabled = s.ai_assistant_enabled !== false;
-				realmSettingsFileRegistryId = s.file_registry_canister_id || '';
-				realmSettingsMarketplaceId = s.marketplace_canister_id || '';
-				realmSettingsCurrency = s.accounting_currency || '';
-				realmSettingsCurrencyDecimals = Number(s.accounting_currency_decimals ?? 8);
-				realmSettingsTokenIndexerId = s.token_indexer_canister_id || '';
-				const token = (s.canisters || []).find(
-					(c: { canister_type?: string }) => c.canister_type === 'token_backend',
-				);
-				realmSettingsTokenCanisterId = token?.canister_id || '';
-				if (!realmSettingsTokenIndexerId && realmSettingsTokenCanisterId) {
-					realmSettingsTokenIndexerId = realmSettingsTokenCanisterId;
+			const [{ realm }, catalog] = await Promise.all([
+				loadRealmRow(call),
+				call(false, 'token_catalog'),
+			]);
+			realmSettingsName = realm.name || '';
+			realmSettingsManifesto = realm.manifesto || '';
+			realmSettingsWelcome = realm.welcome_message || '';
+			realmSettingsLogoUrl = realm.logo_url || '';
+			realmSettingsBackgroundUrl = realm.background_image_url || '';
+			realmSettingsPrimaryColor =
+				typeof realm.primary_color === 'string' && isValidHexColor(realm.primary_color)
+					? realm.primary_color
+					: '#3b82f6';
+			realmSettingsOpenRegistration = !!realm.open_registration;
+			realmSettingsAiAssistantEnabled = realm.ai_assistant_enabled !== false;
+			realmSettingsFileRegistryId = realm.file_registry_canister_id || '';
+			realmSettingsMarketplaceId = realm.marketplace_canister_id || '';
+			realmSettingsCurrency = realm.accounting_currency || '';
+			realmSettingsCurrencyDecimals = Number(realm.accounting_currency_decimals ?? 8);
+			realmSettingsTokenCanisterId = realm.token_canister_id || '';
+			realmSettingsNftCanisterId = realm.nft_canister_id || '';
+
+			tokenOptions = sharedTokenOptions(catalog.ok ? catalog.tokens : null);
+			if (!tokenOptions.length) tokenOptions = sharedTokenOptions(realm.shared_tokens_json);
+			const matched = matchSharedToken(tokenOptions, {
+				symbol: realmSettingsCurrency,
+				token_canister_id: realmSettingsTokenCanisterId,
+			});
+			tokenChoice =
+				matched?.id ??
+				(realmSettingsTokenCanisterId ? CUSTOM_TOKEN_ID : tokenOptions[0]?.id ?? CUSTOM_TOKEN_ID);
+
+			const info = snapshotRealmInfo();
+			const flag = realm.test_flags?.test_mode_disable_monetary_tokens;
+			const explicitDisable =
+				typeof flag === 'boolean'
+					? flag
+					: typeof info?.testModeDisableMonetaryTokens === 'boolean'
+						? info.testModeDisableMonetaryTokens
+						: undefined;
+			monetaryTokensDisabled = resolveDisableMonetaryTokens(explicitDisable, String(realm.network || ''));
+			tokenPickerLocale = String(info?.primaryLanguage || 'en');
+
+			liveVotingWindowSeconds = null;
+			governanceVotingWindowDays = null;
+			if (full) {
+				const exported = await call(false, 'realm_export', { entity: 'Calendar', count: 1 });
+				const seconds = Number(exported.ok && Array.isArray(exported.rows) ? exported.rows[0]?.voting_window : NaN);
+				if (Number.isFinite(seconds) && seconds > 0) {
+					liveVotingWindowSeconds = seconds;
+					governanceVotingWindowDays = seconds / 86400;
 				}
-				tokenOptions = sharedTokenOptions(s.shared_tokens);
-				const matched = matchSharedToken(tokenOptions, {
-					symbol: realmSettingsCurrency,
-					token_canister_id: realmSettingsTokenCanisterId,
-				});
-				tokenChoice =
-					matched?.id ??
-					(realmSettingsTokenCanisterId ? CUSTOM_TOKEN_ID : tokenOptions[0]?.id ?? CUSTOM_TOKEN_ID);
-				const network = String(s.network || '');
-				let explicitDisable: boolean | undefined;
-				if (typeof s.test_mode_disable_monetary_tokens === 'boolean') {
-					explicitDisable = s.test_mode_disable_monetary_tokens;
-				} else if (typeof ctx.realmInfo?.testModeDisableMonetaryTokens === 'boolean') {
-					explicitDisable = ctx.realmInfo.testModeDisableMonetaryTokens;
-				} else {
-					try {
-						const flagsRaw = await ctx.backend.get_runtime_flags();
-						const flags = typeof flagsRaw === 'string' ? JSON.parse(flagsRaw) : flagsRaw;
-						if (typeof flags?.test_mode_disable_monetary_tokens === 'boolean') {
-							explicitDisable = flags.test_mode_disable_monetary_tokens;
-						}
-						if (flags?.primary_language) tokenPickerLocale = String(flags.primary_language);
-					} catch {
-						// keep host default from network
-					}
-				}
-				monetaryTokensDisabled = resolveDisableMonetaryTokens(explicitDisable, network);
-				tokenPickerLocale = String(
-					s.primary_language || ctx.realmInfo?.primaryLanguage || tokenPickerLocale,
-				);
-				const nft = (s.canisters || []).find(
-					(c: { canister_type?: string }) => c.canister_type === 'nft_backend',
-				);
-				realmSettingsNftCanisterId = nft?.canister_id || '';
-				testFlagsEnabled = s.test_mode === true || ctx.realmInfo?.testMode === true;
-				applyHostLanguages(s);
 			}
-			if (!realmSettingsLanguages.length && !realmSettingsPrimaryLanguage) {
-				await loadHostLanguages();
-			}
-			const gov = await callExt('get_governance_settings');
-			if (gov?.success && gov.data) {
-				liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
-				governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
-				if (typeof gov.data.applies_directly === 'boolean') {
-					governanceAppliesDirectly = gov.data.applies_directly;
-				}
-				if (gov.data.governed_policy) governancePolicyLabel = String(gov.data.governed_policy);
-				if (gov.data.governed_by) governanceGovernedBy = String(gov.data.governed_by);
-			}
-			if (realmSettingsTokenCanisterId && isValidCanisterId(realmSettingsTokenCanisterId)) {
-				await resolveTokenLedger({ silent: true });
-			}
+			await loadGovernancePolicy(String(realm.status || ''));
 			rememberSettingsSnapshot();
 		} catch (e: any) {
 			settingsError = e?.message || String(e);
@@ -466,113 +291,86 @@ let activeTab: SettingsTab = $state('general');
 	}
 
 	function selectTokenChoice(id: string) {
-		if (!isTokenChoiceSelectable(id, monetaryTokensDisabled)) return;
+		const option = tokenOptions.find((item) => item.id === id);
+		if (!isTokenChoiceSelectable(id, monetaryTokensDisabled, option?.monetary)) return;
 		tokenChoice = id;
-		if (id === CUSTOM_TOKEN_ID) return;
-		const token = tokenOptions.find((item) => item.id === id);
-		if (!token) return;
-		realmSettingsTokenCanisterId = token.ledger;
-		realmSettingsCurrency = token.symbol;
-		realmSettingsCurrencyDecimals = token.decimals;
-		realmSettingsTokenIndexerId = token.indexer || token.ledger;
+		if (!option) return;
+		realmSettingsTokenCanisterId = option.ledger;
+		realmSettingsCurrency = option.symbol;
+		realmSettingsCurrencyDecimals = option.decimals;
 	}
 
-	async function resolveTokenLedger(opts?: { silent?: boolean }) {
-		const silent = opts?.silent ?? false;
-		tokenResolveError = '';
-		if (!silent) {
-			tokenResolveMessage = '';
-		}
-		const ledger = realmSettingsTokenCanisterId.trim();
-		if (!ledger || !isValidCanisterId(ledger)) {
-			tokenResolveError = 'Enter a valid treasury ledger canister ID first';
-			return;
-		}
-		tokenResolving = true;
-		try {
-			const raw = await ctx.backend.resolve_token_ledger(ledger);
-			const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (result?.success) {
-				realmSettingsCurrency = result.symbol || realmSettingsCurrency;
-				realmSettingsCurrencyDecimals = Number(result.decimals ?? realmSettingsCurrencyDecimals);
-				if (result.indexer_canister_id) {
-					realmSettingsTokenIndexerId = result.indexer_canister_id;
-				}
-				if (!silent) {
-					tokenResolveMessage = `Resolved ${result.symbol} (${result.decimals} decimals) from ledger`;
-				}
-			} else {
-				tokenResolveError = result?.error || 'Could not resolve token metadata';
-			}
-		} catch (e: any) {
-			tokenResolveError = e?.message || String(e);
-		} finally {
-			tokenResolving = false;
-		}
+	// Typing a ledger of one's own turns a catalog choice into a custom token.
+	function onLedgerInput() {
+		const chosen = tokenOptions.find((item) => item.id === tokenChoice);
+		if (chosen && chosen.ledger !== realmSettingsTokenCanisterId.trim()) tokenChoice = CUSTOM_TOKEN_ID;
 	}
 
-	async function saveRealmSettings(confirmProposal = false) {
+	const ledgerLocked = $derived(
+		monetaryTokensDisabled &&
+			!isTokenChoiceSelectable(
+				tokenChoice,
+				true,
+				tokenOptions.find((item) => item.id === tokenChoice)?.monetary,
+			),
+	);
+
+	async function saveRealmSettings() {
 		settingsSaving = true;
 		settingsMessage = '';
 		settingsError = '';
 		try {
-			const languageCheck = validateRealmLanguages({
-				languages: realmSettingsLanguages,
-				primary_language: realmSettingsPrimaryLanguage,
-			});
-			if (!languageCheck.ok) {
-				settingsError = languageCheck.error;
-				return;
-			}
-			const config = buildDirtyConfig(confirmProposal);
-			const payloadKeys = Object.keys(config).filter((key) => key !== 'confirm');
-			if (payloadKeys.length === 0) {
+			const changes = buildChanges();
+			if (changes.length === 0) {
 				settingsError = 'No changes to save.';
 				return;
 			}
-			const raw = await ctx.backend.update_realm_config(JSON.stringify(config));
-			const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (result?.applied === 'proposal') {
-				governedConfirm = null;
-				settingsMessage = `Proposal ${result.proposal_id} created — the change applies after the vote passes (see the Voting page).`;
-				addToast(`Proposal ${result.proposal_id} created`);
-			} else if (result?.requires_confirmation) {
-				governedConfirm = result;
-				governedRetry = () => saveRealmSettings(true);
-			} else if (result?.success) {
-				settingsMessage = 'Realm settings saved successfully.';
-				addToast('Realm settings updated');
-				savedEmailEnabled = realmSettingsEmailEnabled;
-				pendingLogoDataUrl = '';
-				pendingBackgroundDataUrl = '';
-				showPublicPreviewLink = true;
-				const gov = await callExt('get_governance_settings');
-				if (gov?.success && gov.data) {
-					liveVotingWindowSeconds = Number(gov.data.voting_window_seconds ?? 604_800);
-					governanceVotingWindowDays = Number(gov.data.voting_window_days ?? liveVotingWindowSeconds / 86400);
-					if (typeof gov.data.applies_directly === 'boolean') {
-						governanceAppliesDirectly = gov.data.applies_directly;
+			const proposals: string[] = [];
+			const refused: Change[] = [];
+			const permissions = new Set<string>();
+			const failures: string[] = [];
+			let applied = 0;
+			for (const change of changes) {
+				const res = await call(true, change.op, change.args);
+				const proposal = proposalOf(res);
+				if (proposal) {
+					proposals.push(proposal);
+				} else if (res.ok) {
+					applied += 1;
+					const next = currentSettingsSnapshot();
+					savedSnapshot = {
+						...(savedSnapshot || {}),
+						...Object.fromEntries(keysOf(change.op).map((key) => [key, next[key]])),
+					};
+					if (change.op === 'governance_update') liveVotingWindowSeconds = Number(next.voting_window);
+				} else {
+					const needs = refusedPermission(res);
+					if (needs) {
+						refused.push(change);
+						permissions.add(needs);
+					} else {
+						failures.push(refusalText(res, 'A setting was not saved'));
 					}
-					if (gov.data.governed_policy) governancePolicyLabel = String(gov.data.governed_policy);
-					if (gov.data.governed_by) governanceGovernedBy = String(gov.data.governed_by);
-				}
-				rememberSettingsSnapshot();
-				await ctx.realmInfo?.fetch?.();
-			} else if (result?.denied_operation) {
-				openProposalForSettings(result.denied_operation);
-			} else {
-				settingsError = result?.error || 'Failed to save settings';
-				if (result?.error_code === 'ledger_unresolvable') {
-					tokenResolveError = result.error || settingsError;
 				}
 			}
-		} catch (e: any) {
-			const msg = e?.message || String(e);
-			if (msg.includes('Access denied') && msg.includes("lacks permission")) {
-				const match = msg.match(/lacks permission '([^']+)'/);
-				openProposalForSettings(match?.[1] || 'realm.configure.branding');
-			} else {
-				settingsError = msg;
+			if (refused.length) {
+				openProposalForSettings(refused, [...permissions].join(', '));
+			} else if (applied || proposals.length) {
+				await loadRealmSettings();
+			}
+			const parts: string[] = [];
+			if (applied) parts.push('Realm settings saved.');
+			if (proposals.length) {
+				parts.push(`Submitted as proposal ${proposals.join(', ')}: the change applies once the vote passes.`);
+			}
+			if (parts.length) {
+				settingsMessage = parts.join(' ');
+				addToast(settingsMessage);
+			}
+			if (failures.length) settingsError = failures.join(' ');
+			if (applied) {
+				showPublicPreviewLink = true;
+				await ctx.realmInfo?.fetch?.();
 			}
 		} finally {
 			settingsSaving = false;
@@ -582,16 +380,11 @@ let activeTab: SettingsTab = $state('general');
 	async function requestSavePreview() {
 		settingsError = '';
 		settingsMessage = '';
-		const languageCheck = validateRealmLanguages({
-			languages: realmSettingsLanguages,
-			primary_language: realmSettingsPrimaryLanguage,
-		});
-		if (!languageCheck.ok) {
-			settingsError = languageCheck.error;
+		if (!isValidHexColor(realmSettingsPrimaryColor)) {
+			settingsError = 'The primary color must look like #1E6B52.';
 			return;
 		}
-		const preview = buildDirtyConfig(false);
-		if (Object.keys(preview).length === 0) {
+		if (buildChanges().length === 0) {
 			settingsError = 'No changes to save.';
 			return;
 		}
@@ -604,17 +397,7 @@ let activeTab: SettingsTab = $state('general');
 
 	async function confirmSavePreview() {
 		savePreview = null;
-		await saveRealmSettings(false);
-	}
-
-	async function submitGovernedProposal() {
-		if (!governedRetry) return;
-		governedSubmitting = true;
-		try {
-			await governedRetry();
-		} finally {
-			governedSubmitting = false;
-		}
+		await saveRealmSettings();
 	}
 
 	function isValidCanisterId(value: string): boolean {
@@ -622,228 +405,59 @@ let activeTab: SettingsTab = $state('general');
 		return /^[a-z0-9]{5}(-[a-z0-9]{5})*-cai$/.test(value);
 	}
 
-	let fileRegistryIdValid = $derived(isValidCanisterId(realmSettingsFileRegistryId));
-	let marketplaceIdValid = $derived(isValidCanisterId(realmSettingsMarketplaceId));
-	let tokenCanisterIdValid = $derived(isValidCanisterId(realmSettingsTokenCanisterId));
-	let tokenIndexerIdValid = $derived(isValidCanisterId(realmSettingsTokenIndexerId));
-	let nftCanisterIdValid = $derived(isValidCanisterId(realmSettingsNftCanisterId));
+	let fileRegistryIdValid = $derived(isValidCanisterId(realmSettingsFileRegistryId.trim()));
+	let marketplaceIdValid = $derived(isValidCanisterId(realmSettingsMarketplaceId.trim()));
+	let tokenCanisterIdValid = $derived(isValidCanisterId(realmSettingsTokenCanisterId.trim()));
+	let nftCanisterIdValid = $derived(isValidCanisterId(realmSettingsNftCanisterId.trim()));
 	let currencyValid = $derived(
-		!!realmSettingsCurrency.trim() &&
-			realmSettingsCurrency.trim().length <= 16 &&
+		realmSettingsCurrency.trim().length <= 16 &&
 			Number.isInteger(Number(realmSettingsCurrencyDecimals)) &&
 			Number(realmSettingsCurrencyDecimals) >= 0 &&
-			Number(realmSettingsCurrencyDecimals) <= 18 &&
-			(!realmSettingsTokenCanisterId.trim() || tokenCanisterIdValid),
+			Number(realmSettingsCurrencyDecimals) <= 18,
 	);
 	let tokensValid = $derived(
 		tokenCanisterIdValid &&
-			tokenIndexerIdValid &&
 			nftCanisterIdValid &&
 			(!realmSettingsTokenCanisterId.trim() || !!realmSettingsCurrency.trim()),
 	);
 	let infraValid = $derived(fileRegistryIdValid && marketplaceIdValid && currencyValid && tokensValid);
-	let languagesValid = $derived(
-		validateRealmLanguages({
-			languages: realmSettingsLanguages,
-			primary_language: realmSettingsPrimaryLanguage,
-		}).ok,
-	);
 
-	let nextStage = $derived(
-		stageIndex < STAGES.length - 1 ? STAGES[stageIndex + 1] : null
-	);
+	const nextStage = $derived(currentStage === 'setup' ? 'alpha' : null);
 
 	async function loadLifecycle() {
 		lifecycleLoading = true;
 		lifecycleError = '';
-		try {
-		const raw = await ctx.backend.extension_sync_call(
-			'realm_settings',
-			'get_realm_stage',
-			'{}',
-		);
-			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const res = envelope?.response
-				? typeof envelope.response === 'string'
-					? JSON.parse(envelope.response)
-					: envelope.response
-				: envelope;
-			if (res?.success && res?.data) {
-				currentStage = res.data.stage || 'alpha';
-				stageIndex = res.data.stage_index ?? 0;
-				lifecycleData = res.data.lifecycle || {};
-			} else {
-				lifecycleError = res?.error || 'Failed to load lifecycle';
-			}
-		} catch (e: any) {
-			lifecycleError = e?.message || String(e);
-		} finally {
-			lifecycleLoading = false;
+		const info = await call(false, 'realm_info');
+		if (info.ok && info.realm?.status) {
+			currentStage = String(info.realm.status);
+		} else {
+			lifecycleError = 'The realm stage could not be loaded.';
 		}
+		lifecycleLoading = false;
 	}
 
-	async function advanceStage(confirmProposal = false) {
+	async function advanceStage() {
 		if (!nextStage) return;
-		lifecycleAdvancing = true;
-		lifecycleError = '';
-		try {
-		const raw = await ctx.backend.extension_sync_call(
-			'realm_settings',
-			'set_realm_stage',
-			JSON.stringify({
-				stage: nextStage,
-				reason: 'Admin advancement via Settings',
-				...(confirmProposal ? { confirm: true } : {}),
-			}),
-		);
-			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const res = envelope?.response
-				? typeof envelope.response === 'string'
-					? JSON.parse(envelope.response)
-					: envelope.response
-				: envelope;
-			if (res?.applied === 'proposal') {
-				governedConfirm = null;
-				addToast(`Proposal ${res.proposal_id} created — stage advances after the vote passes`);
-			} else if (res?.requires_confirmation) {
-				governedConfirm = res;
-				governedRetry = () => advanceStage(true);
-			} else if (res?.success) {
-				addToast(`Stage advanced to ${STAGE_LABELS[nextStage]}`);
-				await loadLifecycle();
-			} else if (res?.denied_operation) {
-				openProposalForStageAdvance(res.denied_operation);
-			} else {
-				lifecycleError = res?.error || 'Failed to advance stage';
-			}
-		} catch (e: any) {
-			const msg = e?.message || String(e);
-			if (msg.includes('Access denied') && msg.includes("lacks permission")) {
-				const match = msg.match(/lacks permission '([^']+)'/);
-				openProposalForStageAdvance(match?.[1] || 'realm.lifecycle.advance');
-			} else {
-				lifecycleError = msg;
-			}
-		} finally {
-			lifecycleAdvancing = false;
-		}
-	}
-
-	function openProposalForStageAdvance(deniedOp: string) {
-		if (!nextStage) return;
-		proposalModalTitle = `Advance realm to ${STAGE_LABELS[nextStage]} stage`;
-		proposalModalDescription = `This proposal advances the realm from "${STAGE_LABELS[currentStage]}" to "${STAGE_LABELS[nextStage]}". ${STAGE_DESCRIPTIONS[nextStage]}.`;
-		proposalModalCode = [
-			'from ggg import Realm',
-			'',
-			'realm = Realm.load("1")',
-			`realm.status = "${nextStage}"`,
-		].join('\n');
-		proposalModalOperation = deniedOp;
-		proposalModalOpen = true;
-	}
-
-	function parseExtensionEnvelope(raw: unknown) {
-		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		return envelope?.response
-			? typeof envelope.response === 'string'
-				? JSON.parse(envelope.response)
-				: envelope.response
-			: envelope;
-	}
-
-	async function loadEmailConfig() {
-		try {
-			const raw = await ctx.backend.extension_sync_call(
-				'realm_settings',
-				'get_email_config',
-				'{}',
-			);
-			const res = parseExtensionEnvelope(raw);
-			if (res?.success && res?.data) {
-				realmSettingsEmailEnabled = res.data.enabled !== false;
-				savedEmailEnabled = res.data.enabled !== false;
-			}
-
-			const userEmailRaw = await ctx.backend.extension_sync_call(
-				'notifications',
-				'get_user_email',
-				'{}',
-			);
-			const userRes = parseExtensionEnvelope(userEmailRaw);
-			if (userRes?.success && userRes?.data) {
-				adminEmail = userRes.data.email || '';
-			}
-		} catch (e: any) {
-			console.error('Failed to load email config:', e?.message || String(e));
-		}
-	}
-
-	async function sendInhabitantJoinLink() {
-		settingsMessage = '';
-		settingsError = '';
-		joinLinkHref = '';
-		const emails = inhabitantEmails
-			.split(/[\n,;]+/)
-			.map((value) => value.trim())
-			.filter(Boolean);
-		if (emails.length === 0) {
-			settingsError = 'Enter one or more inhabitant email addresses.';
+		if (!confirmLaunch) {
+			confirmLaunch = true;
 			return;
 		}
-		sendingJoinLink = true;
-		try {
-			const raw = await ctx.backend.extension_sync_call(
-				'notifications',
-				'send_join_link',
-				JSON.stringify({ emails }),
-			);
-			const res = parseExtensionEnvelope(raw);
-			if (res?.success) {
-				const data = res.data || {};
-				const queued = data.queued ?? emails.length;
-				joinLinkHref = data.href || '';
-				settingsMessage = `Join link queued to ${queued} inhabitant${queued === 1 ? '' : 's'}.`;
-				addToast(settingsMessage);
-			} else {
-				settingsError = res?.error || 'Failed to queue join-link emails';
-			}
-		} catch (e: any) {
-			settingsError = e?.message || String(e);
-		} finally {
-			sendingJoinLink = false;
+		lifecycleAdvancing = true;
+		lifecycleError = '';
+		const res = await call(true, 'setup_launch');
+		if (res.ok) {
+			addToast('The realm has launched');
+			await Promise.all([loadLifecycle(), loadRealmSettings()]);
+		} else {
+			lifecycleError = refusalText(res, 'The realm was not launched');
 		}
+		confirmLaunch = false;
+		lifecycleAdvancing = false;
 	}
 
-	async function sendTestEmail() {
-		settingsMessage = '';
-		settingsError = '';
-		try {
-			const raw = await ctx.backend.extension_sync_call(
-				'notifications',
-				'send_test_email',
-				JSON.stringify({
-					subject: 'Realms email test',
-					body: 'If you received this message, the realm email service is configured correctly.',
-				}),
-			);
-			const res = parseExtensionEnvelope(raw);
-			if (res?.success) {
-				const dest = adminEmail.trim() || 'your address';
-				settingsMessage = `Test email queued to ${dest}.`;
-				addToast(`Test email queued to ${dest}`);
-			} else {
-				settingsError = res?.error || 'Failed to queue test email';
-			}
-		} catch (e: any) {
-			settingsError = e?.message || String(e);
-		}
-	}
-
-	$effect(() => {
+	onMount(() => {
 		loadRealmSettings();
 		loadLifecycle();
-		loadEmailConfig();
 	});
 </script>
 
@@ -901,9 +515,7 @@ let activeTab: SettingsTab = $state('general');
 		<button
 			type="button"
 			onclick={() => requestSavePreview()}
-			disabled={activeTab === 'notifications'
-				? settingsSaving || !emailDirty
-				: settingsSaving || !infraValid || !languagesValid || governanceVotingWindowDays == null}
+			disabled={settingsSaving || !infraValid || !votingWindowValid}
 			class="px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>{settingsSaving ? 'Saving…' : 'Save Settings'}</button>
 	</div>
@@ -957,16 +569,6 @@ let activeTab: SettingsTab = $state('general');
 		>
 			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
 			<span class="chrome-label">Infrastructure</span>
-		</button>
-		<button
-			type="button"
-			onclick={() => (activeTab = 'notifications')}
-			class="chrome-tab {activeTab === 'notifications' ? 'is-on' : ''}"
-			title="Notifications"
-			aria-label="Notifications"
-		>
-			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-			<span class="chrome-label">Notifications</span>
 		</button>
 		<button
 			type="button"
@@ -1034,112 +636,40 @@ let activeTab: SettingsTab = $state('general');
 					{/each}
 				</div>
 				<!-- Progress line behind circles -->
-				<div class="absolute top-[18px] left-[10%] right-[10%] h-0.5 bg-gray-200 -z-0"></div>
+				<div class="absolute top-[18px] left-[8.33%] right-[8.33%] h-0.5 bg-gray-200 -z-0"></div>
 				<div
-					class="absolute top-[18px] left-[10%] h-0.5 bg-green-500 -z-0 transition-all duration-500"
-					style="width: {stageIndex / (STAGES.length - 1) * 80}%"
+					class="absolute top-[18px] left-[8.33%] h-0.5 bg-green-500 -z-0 transition-all duration-500"
+					style="width: {stageIndex / (STAGES.length - 1) * 83.33}%"
 				></div>
 			</div>
 
-			<!-- Lifecycle metrics -->
-			{#if currentStage === 'alpha' || currentStage === 'beta'}
-				{#if narrow}
-					<div class="grid grid-cols-2 mb-5 border-y border-gray-200">
-						<div class="px-3 py-2 border-b border-r border-gray-200">
-							<div class="text-xs text-gray-500">Registered Users</div>
-							<div class="text-lg font-bold text-gray-900">{lifecycleData.registered_users?.toLocaleString() ?? '—'}</div>
-						</div>
-						<div class="px-3 py-2 border-b border-gray-200">
-							<div class="text-xs text-gray-500">Critical Mass</div>
-							<div class="text-lg font-bold text-gray-900">{lifecycleData.critical_mass?.toLocaleString() ?? '—'}</div>
-						</div>
-						<div class="px-3 py-2 border-r border-gray-200">
-							<div class="text-xs text-gray-500">Deposits Locked</div>
-							<div class={cn('text-lg font-bold', lifecycleData.deposits_locked ? 'text-amber-600' : 'text-gray-400')}>
-								{lifecycleData.deposits_locked ? 'Yes' : 'No'}
-							</div>
-						</div>
-						<div class="px-3 py-2">
-							<div class="text-xs text-gray-500">Progress</div>
-							<div class="text-lg font-bold text-blue-600">
-								{lifecycleData.critical_mass
-									? Math.min(100, Math.round((lifecycleData.registered_users / lifecycleData.critical_mass) * 100))
-									: 0}%
-							</div>
-						</div>
-					</div>
-				{:else}
-					<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-							<div class="text-xs text-gray-500 mb-1">Registered Users</div>
-							<div class="text-lg font-bold text-gray-900">{lifecycleData.registered_users?.toLocaleString() ?? '—'}</div>
-						</div>
-						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-							<div class="text-xs text-gray-500 mb-1">Critical Mass</div>
-							<div class="text-lg font-bold text-gray-900">{lifecycleData.critical_mass?.toLocaleString() ?? '—'}</div>
-						</div>
-						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-							<div class="text-xs text-gray-500 mb-1">Deposits Locked</div>
-							<div class={cn('text-lg font-bold', lifecycleData.deposits_locked ? 'text-amber-600' : 'text-gray-400')}>
-								{lifecycleData.deposits_locked ? 'Yes' : 'No'}
-							</div>
-						</div>
-						<div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-							<div class="text-xs text-gray-500 mb-1">Progress</div>
-							<div class="text-lg font-bold text-blue-600">
-								{lifecycleData.critical_mass
-									? Math.min(100, Math.round((lifecycleData.registered_users / lifecycleData.critical_mass) * 100))
-									: 0}%
-							</div>
-						</div>
-					</div>
-				{/if}
-			{/if}
-
-			{#if currentStage === 'beta'}
-				<div class={cn('mb-5', narrow ? 'grid grid-cols-1 gap-0 border-y border-gray-200 divide-y divide-gray-200' : 'grid grid-cols-3 gap-3')}>
-					<div class={cn(narrow ? 'px-3 py-2' : 'rounded-lg p-3 border', !narrow && (lifecycleData.land_acquired ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'))}>
-						<div class="text-xs text-gray-500 mb-1">Land Acquired</div>
-						<div class={cn('text-sm font-semibold', lifecycleData.land_acquired ? 'text-green-700' : 'text-gray-400')}>
-							{lifecycleData.land_acquired ? 'Ready' : 'Pending'}
-						</div>
-					</div>
-					<div class={cn(narrow ? 'px-3 py-2' : 'rounded-lg p-3 border', !narrow && (lifecycleData.infrastructure_ready ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'))}>
-						<div class="text-xs text-gray-500 mb-1">Infrastructure</div>
-						<div class={cn('text-sm font-semibold', lifecycleData.infrastructure_ready ? 'text-green-700' : 'text-gray-400')}>
-							{lifecycleData.infrastructure_ready ? 'Ready' : 'Pending'}
-						</div>
-					</div>
-					<div class={cn(narrow ? 'px-3 py-2' : 'rounded-lg p-3 border', !narrow && (lifecycleData.providers_ready ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'))}>
-						<div class="text-xs text-gray-500 mb-1">Providers</div>
-						<div class={cn('text-sm font-semibold', lifecycleData.providers_ready ? 'text-green-700' : 'text-gray-400')}>
-							{lifecycleData.providers_ready ? 'Ready' : 'Pending'}
-						</div>
-					</div>
-				</div>
-			{/if}
-
 			<!-- Advance button -->
-			{#if nextStage && currentStage !== 'terminated'}
+			{#if nextStage}
 				<div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-2 border-t border-gray-100">
 					<button
 						onclick={() => advanceStage()}
 						disabled={lifecycleAdvancing}
 						class={cn(
 							'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-							currentStage === 'production'
-								? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-								: 'bg-[var(--color-primary-600,#2563eb)] text-white hover:bg-[var(--color-primary-700,#1d4ed8)]',
+							'bg-[var(--color-primary-600,#2563eb)] text-white hover:bg-[var(--color-primary-700,#1d4ed8)]',
 							'disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
 						)}
 					>
 						{#if lifecycleAdvancing}
 							<div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
 						{/if}
-						Advance to {STAGE_LABELS[nextStage]}
+						{confirmLaunch ? 'Confirm launch' : 'Launch realm'}
 					</button>
-					<span class="text-xs text-gray-500">{STAGE_DESCRIPTIONS[nextStage]}</span>
+					<span class="text-xs text-gray-500">
+						{confirmLaunch
+							? 'Launching ends the founder setup rights: settings are governed from then on.'
+							: STAGE_DESCRIPTIONS[nextStage]}
+					</span>
 				</div>
+			{:else if currentStage !== 'terminated'}
+				<p class="pt-2 border-t border-gray-100 text-xs text-gray-500">
+					Advancing to the next stage is not available in this realm version.
+				</p>
 			{/if}
 
 			{#if lifecycleError}
@@ -1171,53 +701,42 @@ let activeTab: SettingsTab = $state('general');
 			</div>
 		</section>
 
-		<LanguagesPanel
-			bind:languages={realmSettingsLanguages}
-			bind:primaryLanguage={realmSettingsPrimaryLanguage}
-		/>
+		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-1">Languages</h2>
+			<p class="text-sm text-gray-500">Not available in this realm version.</p>
+		</section>
 
 		<!-- Branding -->
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Branding</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				Logo, background, and primary color for the public hero, join page, and primary buttons.
-				Upload a file to store it on this realm (recommended), or paste an external URL.
+				Paste the address of an image hosted elsewhere.
 				Requires <code class="bg-gray-100 px-1 rounded">realm.configure.branding</code>.
 			</p>
 			<div class="space-y-5">
 				<div>
-					<label for="rs-logo-file" class="block text-sm font-medium text-gray-700 mb-1">Logo file</label>
-					<input id="rs-logo-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
-						onchange={(event) => onBrandingFile('logo', event)}
-						class="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-800" />
-					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Logo URL</label>
-					<input id="rs-logo" type="url" bind:value={realmSettingsLogoUrl} placeholder="https://example.com/logo.png or /custom/logo.png"
+					<label for="rs-logo" class="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
+					<input id="rs-logo" type="url" bind:value={realmSettingsLogoUrl} placeholder="https://example.com/logo.png"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					{#if pendingLogoDataUrl || realmSettingsLogoUrl}
+					{#if realmSettingsLogoUrl}
 						<div class="mt-2 flex items-center gap-3">
-							<img src={pendingLogoDataUrl || resolvePublicAssetUrl(realmSettingsLogoUrl, CUSTOM_LOGO)} alt="Logo preview" class="h-12 w-12 object-contain rounded border border-gray-200 bg-gray-50" />
-							<span class="text-xs text-gray-500">{pendingLogoDataUrl ? 'Will upload to /custom/logo.png on save' : 'Preview'}</span>
+							<img src={realmSettingsLogoUrl} alt="Logo preview" class="h-12 w-12 object-contain rounded border border-gray-200 bg-gray-50" />
+							<span class="text-xs text-gray-500">Preview</span>
 						</div>
 					{/if}
 				</div>
 				<div>
-					<label for="rs-bg-file" class="block text-sm font-medium text-gray-700 mb-1">Background image file</label>
-					<input id="rs-bg-file" type="file" accept="image/png,image/jpeg,image/webp"
-						onchange={(event) => onBrandingFile('background', event)}
-						class="block w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-800" />
-					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mt-3 mb-1">Background Image URL</label>
-					<input id="rs-bg" type="url" bind:value={realmSettingsBackgroundUrl} placeholder="https://example.com/background.png or /custom/background.png"
+					<label for="rs-bg" class="block text-sm font-medium text-gray-700 mb-1">Background Image URL</label>
+					<input id="rs-bg" type="url" bind:value={realmSettingsBackgroundUrl} placeholder="https://example.com/background.png"
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-					{#if pendingBackgroundDataUrl || realmSettingsBackgroundUrl}
+					{#if realmSettingsBackgroundUrl}
 						<div class="mt-2">
-							<img src={pendingBackgroundDataUrl || resolvePublicAssetUrl(realmSettingsBackgroundUrl, CUSTOM_BACKGROUND)} alt="Background preview" class="h-24 w-full object-cover rounded border border-gray-200" />
-							<span class="text-xs text-gray-500">{pendingBackgroundDataUrl ? 'Will upload to /custom/background.png on save' : 'Preview'}</span>
+							<img src={realmSettingsBackgroundUrl} alt="Background preview" class="h-24 w-full object-cover rounded border border-gray-200" />
+							<span class="text-xs text-gray-500">Preview</span>
 						</div>
 					{/if}
 				</div>
-				{#if brandingUploadError}
-					<p class="text-xs text-red-600">{brandingUploadError}</p>
-				{/if}
 				<div>
 					<label for="rs-primary-color" class="block text-sm font-medium text-gray-700 mb-1">Primary color</label>
 					<div class="flex items-center gap-3">
@@ -1281,6 +800,9 @@ let activeTab: SettingsTab = $state('general');
 				How long new proposals stay open for voting. Applies to proposals created after you save.
 				Use decimals for short test windows (for example, <code class="bg-gray-100 px-1 rounded">0.0012</code> ≈ 104 seconds).
 			</p>
+			{#if !votingWindowKnown}
+				<p class="text-sm text-gray-500">The voting window is shown to realm administrators.</p>
+			{:else}
 			{#if liveVotingWindowSeconds != null}
 				<div class="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
 					Effective now:
@@ -1310,20 +832,23 @@ let activeTab: SettingsTab = $state('general');
 					</p>
 				{/if}
 			</div>
+			{/if}
 		</section>
 
-		{@render saveBar()}
+		{#if votingWindowKnown}
+			{@render saveBar()}
+		{/if}
 	{:else if activeTab === 'treasury'}
 		<!-- Currency -->
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Currency token</h2>
 			<p class="text-sm text-gray-500 mb-5">
 				Fungible treasury token used for balances, invoices, and transfers in this realm.
-				Changing ledger or indexer requires <code class="bg-gray-100 px-1 rounded">realm.configure.tokens</code>.
+				Changing the ledger requires <code class="bg-gray-100 px-1 rounded">realm.configure.tokens</code>.
 			</p>
 			<div class="space-y-3 mb-5">
 				{#each tokenOptions as token (token.id)}
-					{@const selectable = isTokenChoiceSelectable(token.id, monetaryTokensDisabled)}
+					{@const selectable = isTokenChoiceSelectable(token.id, monetaryTokensDisabled, token.monetary)}
 					<label
 						class={cn(
 							'flex items-start gap-3 rounded-lg border p-3',
@@ -1377,69 +902,49 @@ let activeTab: SettingsTab = $state('general');
 			<div class="space-y-4">
 				<div>
 					<label for="rs-token-ledger" class="block text-sm font-medium text-gray-700 mb-1">Treasury ledger canister</label>
-					<div class="flex flex-col sm:flex-row gap-2">
-						<input
-							id="rs-token-ledger"
-							type="text"
-							bind:value={realmSettingsTokenCanisterId}
-							onblur={resolveTokenLedger}
-							placeholder="xxxxx-xxxxx-xxxxx-xxxxx-cai"
-							disabled={monetaryTokensDisabled && tokenChoice !== 'REALMS'}
-							class={cn(
-								'flex-1 px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
-								realmSettingsTokenCanisterId && !tokenCanisterIdValid
-									? 'border-red-300 focus:ring-red-300'
-									: 'border-gray-300 focus:ring-blue-500',
-							)}
-						/>
-						<button
-							type="button"
-							onclick={resolveTokenLedger}
-							disabled={tokenResolving || !realmSettingsTokenCanisterId.trim() || (monetaryTokensDisabled && tokenChoice !== 'REALMS')}
-							class="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
-						>{tokenResolving ? 'Resolving…' : 'Resolve from ledger'}</button>
-					</div>
-					<p class="mt-1 text-xs text-gray-500">ICRC-1 ledger for treasury balances and transfers.</p>
-				</div>
-				<div>
-					<label for="rs-token-indexer" class="block text-sm font-medium text-gray-700 mb-1">Token indexer canister</label>
 					<input
-						id="rs-token-indexer"
+						id="rs-token-ledger"
 						type="text"
-						bind:value={realmSettingsTokenIndexerId}
-						placeholder="Defaults to ledger when blank"
+						bind:value={realmSettingsTokenCanisterId}
+						oninput={onLedgerInput}
+						placeholder="xxxxx-xxxxx-xxxxx-xxxxx-cai"
+						disabled={ledgerLocked}
 						class={cn(
 							'w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:border-blue-500',
-							realmSettingsTokenIndexerId && !tokenIndexerIdValid
+							realmSettingsTokenCanisterId && !tokenCanisterIdValid
 								? 'border-red-300 focus:ring-red-300'
 								: 'border-gray-300 focus:ring-blue-500',
 						)}
 					/>
-					<p class="mt-1 text-xs text-gray-500">ICRC-1 indexer for invoice payment detection (ckBTC uses a separate index canister).</p>
+					<p class="mt-1 text-xs text-gray-500">ICRC-1 ledger for treasury balances and transfers.</p>
 				</div>
 			</div>
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
 				<div>
 					<label for="rs-currency" class="block text-sm font-medium text-gray-700 mb-1">Currency symbol</label>
-					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="REALMS" maxlength="16" readonly
-						class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-700" />
-					<p class="mt-1 text-xs text-gray-500">Auto-filled from the ledger canister metadata.</p>
+					<input id="rs-currency" type="text" bind:value={realmSettingsCurrency} placeholder="REALMS" maxlength="16"
+						readonly={tokenChoice !== CUSTOM_TOKEN_ID}
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm',
+							tokenChoice !== CUSTOM_TOKEN_ID ? 'border-gray-200 bg-gray-50 text-gray-700' : 'border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500',
+						)} />
+					<p class="mt-1 text-xs text-gray-500">{tokenChoice === CUSTOM_TOKEN_ID ? 'Symbol of your custom token.' : 'Filled in from the token you chose.'}</p>
 				</div>
 				<div>
 					<label for="rs-decimals" class="block text-sm font-medium text-gray-700 mb-1">Decimals</label>
-					<input id="rs-decimals" type="number" bind:value={realmSettingsCurrencyDecimals} min="0" max="18" step="1" readonly
-						class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-700" />
-					<p class="mt-1 text-xs text-gray-500">Auto-filled from the ledger canister metadata.</p>
+					<input id="rs-decimals" type="number" bind:value={realmSettingsCurrencyDecimals} min="0" max="18" step="1"
+						readonly={tokenChoice !== CUSTOM_TOKEN_ID}
+						class={cn(
+							'w-full px-3 py-2 border rounded-lg text-sm',
+							tokenChoice !== CUSTOM_TOKEN_ID ? 'border-gray-200 bg-gray-50 text-gray-700' : 'border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500',
+						)} />
+					<p class="mt-1 text-xs text-gray-500">{tokenChoice === CUSTOM_TOKEN_ID ? 'Decimals of your custom token (0–18).' : 'Filled in from the token you chose.'}</p>
 				</div>
 			</div>
-			{#if tokenResolveMessage}
-				<p class="mt-3 text-xs text-green-700">{tokenResolveMessage}</p>
-			{/if}
-			{#if tokenResolveError}
-				<p class="mt-3 text-xs text-red-600">{tokenResolveError}</p>
-			{/if}
 			{#if !currencyValid}
-				<p class="mt-3 text-xs text-red-600">Resolve a valid ledger canister to populate symbol and decimals.</p>
+				<p class="mt-3 text-xs text-red-600">Enter a symbol of up to 16 characters and decimals between 0 and 18.</p>
+			{:else if realmSettingsTokenCanisterId.trim() && !realmSettingsCurrency.trim()}
+				<p class="mt-3 text-xs text-red-600">Enter the token's symbol.</p>
 			{/if}
 		</section>
 
@@ -1511,84 +1016,10 @@ let activeTab: SettingsTab = $state('general');
 		</section>
 
 		{@render saveBar()}
-	{:else if activeTab === 'notifications'}
-		<!-- Email notifications -->
-		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-1">Email notifications</h2>
-			<p class="text-sm text-gray-500 mb-5">
-				When enabled, every notification emails members who have a verified address.
-				Mail is sent using the realm name as the sender; SMTP credentials stay on the server and are not stored in the realm.
-			</p>
-
-			<div class="space-y-5">
-				<div class="flex items-center gap-3">
-					<label for="rs-email-enabled" class="relative inline-flex items-center cursor-pointer">
-						<input id="rs-email-enabled" type="checkbox" bind:checked={realmSettingsEmailEnabled} class="sr-only peer" />
-						<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
-					</label>
-					<div>
-						<span class="text-sm font-medium text-gray-700">Enable email notifications</span>
-						<p class="text-xs text-gray-500">When off, no emails are sent regardless of user preferences.</p>
-					</div>
-				</div>
-
-				<div class="pt-5 border-t border-gray-100">
-					<h3 class="text-sm font-semibold text-gray-900">Send join link to inhabitants</h3>
-					<p class="mt-1 text-sm text-gray-500">
-						Email the realm join URL to inhabitants (citizens), including people who are not members yet.
-						Civil servants are not the only audience — anyone you list here receives the same public join link.
-					</p>
-					<label for="rs-inhabitant-emails" class="mt-3 block text-sm font-medium text-gray-700">
-						Inhabitant email addresses
-					</label>
-					<textarea
-						id="rs-inhabitant-emails"
-						bind:value={inhabitantEmails}
-						rows="4"
-						placeholder="one@example.com&#10;two@example.com"
-						class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-					></textarea>
-					<p class="mt-1 text-xs text-gray-500">Separate addresses with commas, semicolons, or new lines.</p>
-					<button
-						type="button"
-						onclick={sendInhabitantJoinLink}
-						disabled={sendingJoinLink || !inhabitantEmails.trim()}
-						class="mt-3 px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-					>
-						{sendingJoinLink ? 'Sending…' : 'Send link'}
-					</button>
-					{#if joinLinkHref}
-						<p class="mt-2 text-xs text-gray-600">
-							Queued path: <code class="font-mono">{joinLinkHref}</code>
-							(the mail worker prefixes the public realm URL).
-						</p>
-					{/if}
-				</div>
-
-				{#if testFlagsEnabled}
-					<div class="pt-2 border-t border-gray-100">
-						<button
-							type="button"
-							onclick={sendTestEmail}
-							disabled={!adminEmail.trim()}
-							class="px-6 py-2.5 bg-[var(--color-primary-600,#2563eb)] text-white rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-						>
-							Send test email to {adminEmail || 'my address'}
-						</button>
-						{#if !adminEmail.trim()}
-							<p class="mt-2 text-xs text-gray-500">Add your email in user Settings to send a test message.</p>
-						{/if}
-					</div>
-				{/if}
-			</div>
-		</section>
-
-		{@render saveBar()}
 	{:else if activeTab === 'advanced'}
 		<DepartmentTablePanel {ctx} {addToast} />
 		<QuartersPanel {ctx} {addToast} />
 		<TrustPolicyPanel {ctx} {addToast} />
-		<SandboxPanel {ctx} {addToast} />
 	{/if}
 </div>
 
@@ -1597,7 +1028,7 @@ let activeTab: SettingsTab = $state('general');
 	open={proposalModalOpen}
 	title={proposalModalTitle}
 	description={proposalModalDescription}
-	codeInline={proposalModalCode}
+	actions={proposalModalActions}
 	deniedOperation={proposalModalOperation}
 	onclose={() => proposalModalOpen = false}
 />
@@ -1613,7 +1044,7 @@ let activeTab: SettingsTab = $state('general');
 					Root policy is {savePreview.policy}, so this save will take effect as soon as you continue.
 				{:else}
 					Root department <span class="font-medium">{savePreview.governedBy}</span> uses
-					policy {savePreview.policy}. Continuing opens a confirmation to create that proposal.
+					policy {savePreview.policy}. Continuing files that proposal.
 					The change applies only after the vote passes.
 				{/if}
 			</p>
@@ -1628,42 +1059,6 @@ let activeTab: SettingsTab = $state('general');
 					onclick={confirmSavePreview}
 					class="px-4 py-2 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] transition-colors"
 				>Continue</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if governedConfirm}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-		<div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6">
-			<div class="flex items-start gap-3 mb-4">
-				<div class="shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
-					<svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m0 3.75h.008M4.5 19.5h15a1.5 1.5 0 001.3-2.25l-7.5-13a1.5 1.5 0 00-2.6 0l-7.5 13a1.5 1.5 0 001.3 2.25z"/>
-					</svg>
-				</div>
-				<div>
-					<h3 class="text-lg font-semibold text-gray-900">A vote is required</h3>
-					<p class="text-sm text-gray-600 mt-1">
-						{governedConfirm.summary || 'This change'} is governed by
-						<span class="font-medium">{governedConfirm.governed_by}</span>
-						(policy {governedConfirm.governed_policy || governedConfirm.policy}).
-						It will only apply after the proposal passes on the Voting page.
-					</p>
-				</div>
-			</div>
-			<div class="flex justify-end gap-3">
-				<button
-					type="button"
-					onclick={() => { governedConfirm = null; governedRetry = null; }}
-					class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-				>Cancel</button>
-				<button
-					type="button"
-					onclick={submitGovernedProposal}
-					disabled={governedSubmitting}
-					class="px-4 py-2 text-sm font-medium text-white bg-[var(--color-primary-600,#2563eb)] rounded-lg hover:bg-[var(--color-primary-700,#1d4ed8)] disabled:bg-gray-400 transition-colors"
-				>{governedSubmitting ? 'Submitting…' : 'Submit proposal'}</button>
 			</div>
 		</div>
 	</div>
