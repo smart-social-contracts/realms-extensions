@@ -21,5 +21,13 @@
   "no_messages": "Noch keine Nachrichten.",
   "not_member": "Dieser Benutzer ist kein Realm-Mitglied.",
   "active_member": "Aktives Mitglied",
-  "inactive_member": "Inaktives Mitglied"
+  "inactive_member": "Inaktives Mitglied",
+  "members_unavailable": "Die Mitgliederliste ist für dich gerade nicht verfügbar.",
+  "profile_unavailable": "Das Profil dieses Mitglieds ist gerade nicht verfügbar.",
+  "private_data_unavailable": "Private Daten der Mitglieder bleiben bei ihnen und werden hier nicht angezeigt.",
+  "membership_status": "Mitgliedsstatus",
+  "status_details_unavailable": "Identitäts-, Steuer- und Berechtigungsprüfungen werden hier nicht angezeigt.",
+  "messages_history_note": "Gesendete Benachrichtigungen erscheinen im Posteingang des Mitglieds; hier stehen nur die in dieser Sitzung gesendeten.",
+  "notification_sent": "Gesendet.",
+  "send_failed": "Nicht gesendet: {reason}"
 }

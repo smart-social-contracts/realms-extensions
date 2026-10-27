@@ -21,5 +21,13 @@
   "no_messages": "尚无消息。",
   "not_member": "此用户不是领域成员。",
   "active_member": "活跃成员",
-  "inactive_member": "非活跃成员"
+  "inactive_member": "非活跃成员",
+  "members_unavailable": "你目前无法查看成员列表。",
+  "profile_unavailable": "该成员的资料目前不可用。",
+  "private_data_unavailable": "成员的私人数据归其本人所有,此处不显示。",
+  "membership_status": "成员状态",
+  "status_details_unavailable": "身份、税务和资格审核信息不在此处显示。",
+  "messages_history_note": "你发送的通知会出现在成员的收件箱中;此处仅列出本次会话发送的通知。",
+  "notification_sent": "已发送。",
+  "send_failed": "未发送:{reason}"
 }
