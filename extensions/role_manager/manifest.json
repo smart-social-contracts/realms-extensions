@@ -1,6 +1,6 @@
 {
   "name": "role_manager",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "runtime": "in_process",
   "description": "See everyone in your realm, assign roles, grant or revoke permissions, send registration invites, and choose which extensions each person may use.",
   "author": "Smart Social Contracts",
@@ -23,68 +23,20 @@
     "zh-CN": "用户管理",
     "ca-valencia": "Gestió d'Usuaris"
   },
-  "entry_access": {
-    "default": "realm.data_view",
-    "functions": {
-      "propose_role_action": "proposal.create",
-      "propose_role_assignment": "proposal.create",
-      "assign_profile": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_profile": {
-        "level": "role.revoke",
-        "governed": true
-      },
-      "grant_permission": {
-        "level": "permission.grant",
-        "governed": true
-      },
-      "revoke_permission": {
-        "level": "permission.revoke",
-        "governed": true
-      },
-      "batch_grant_permissions": {
-        "level": "permission.grant",
-        "governed": true
-      },
-      "batch_revoke_permissions": {
-        "level": "permission.revoke",
-        "governed": true
-      },
-      "update_profile_operations": {
-        "level": "permission.grant",
-        "governed": true
-      },
-      "grant_extension_to_user": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_extension_from_user": {
-        "level": "role.revoke",
-        "governed": true
-      },
-      "grant_extension_to_department": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_extension_from_department": {
-        "level": "role.revoke",
-        "governed": true
-      },
-      "grant_extension_to_profile": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_extension_from_profile": {
-        "level": "role.revoke",
-        "governed": true
-      },
-      "generate_registration_url": "invite.manage",
-      "revoke_registration_code": "invite.manage",
-      "get_registration_codes": "invite.manage",
-      "validate_registration_code": "public",
-      "consume_registration_code": "public"
-    }
-  }
+  "operations": [
+    "me",
+    "user_list",
+    "user_get",
+    "ops_list",
+    "realm_export",
+    "role_assign",
+    "role_revoke",
+    "profile_edit",
+    "proposal_create",
+    "invite_create",
+    "invite_list",
+    "invite_revoke",
+    "extension_list",
+    "extension_set_access"
+  ]
 }

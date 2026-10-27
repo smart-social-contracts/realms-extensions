@@ -3,6 +3,8 @@
 	import { onMount } from 'svelte';
 	import InvitationManager from './InvitationManager.svelte';
 	import ExtensionAccess from './ExtensionAccess.svelte';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
+	import { call, readPages, refusedPermission, type Reply } from './realm';
 	import {
 		isNarrowViewport,
 		persistSessionFlag,
@@ -17,7 +19,7 @@
 	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
 	type Tab = 'people' | 'profiles' | 'invitations' | 'extensions';
-	type View = 'users' | 'detail' | 'assign' | 'permission' | 'profiles';
+	type View = 'users' | 'detail' | 'assign' | 'profiles';
 
 	let activeTab: Tab = $state('people');
 
@@ -30,7 +32,13 @@
 
 	interface ProfileDef {
 		name: string;
-		allowed_to: string[];
+		description: string;
+		/** Null when the caller cannot read profile details. */
+		allowed_to: string[] | null;
+	}
+
+	interface ProfileView extends ProfileDef {
+		user_count: number;
 	}
 
 	interface OperationDef {
@@ -40,13 +48,15 @@
 	}
 
 	let users: UserEntry[] = $state([]);
-	let profiles: ProfileDef[] = $state([]);
-	let allOperations: OperationDef[] = $state([]);
+	let profileRows: ProfileDef[] | null = $state(null);
+	let opCatalog: OperationDef[] = $state([]);
+	let heldPermissions: Set<string> | null = $state(null);
+	let myPrincipal = $state('');
 	let loading = $state(true);
 	let listLoadingMore = $state(false);
 	let listHasMore = $state(false);
 	let listNextFromId = $state(1);
-	const LIST_FETCH_SIZE = 10;
+	const LIST_FETCH_SIZE = 50;
 	let error = $state('');
 	let accessDeniedOp = $state('');
 	let successMsg = $state('');
@@ -54,23 +64,14 @@
 	let searchQuery = $state('');
 
 	let selectedUser: UserEntry | null = $state(null);
-	let userPermissions: string[] = $state([]);
-	let userDirectPerms: string[] = $state([]);
 	let detailLoading = $state(false);
 
 	let assignProfileName = $state('');
 	let assignLoading = $state(false);
 
-	let permFilter = $state('');
-	let permLoading = $state(false);
-	let pendingGrants: Set<string> = $state(new Set());
-	let pendingRevokes: Set<string> = $state(new Set());
-
-	let callerCanAssign = $state(false);
-	let callerCanRevoke = $state(false);
-	let callerCanGrantPerms = $state(false);
-	let callerCanRevokePerms = $state(false);
-	let callerGrantableOps: Set<string> = $state(new Set());
+	let callerCanAssign = $derived(holds('role.assign'));
+	let callerCanRevoke = $derived(holds('role.revoke'));
+	let callerCanEditProfiles = $derived(holds('permission.grant'));
 	let showHelp = $state(readSessionFlag(HELP_KEY) === true);
 
 	function toggleHelp() {
@@ -78,9 +79,39 @@
 		persistSessionFlag(HELP_KEY, showHelp);
 	}
 
-	let profilesList: any[] = $state([]);
+	// Without profile details (db.export), the names come from the users' cards and the seeded profiles.
+	let profiles: ProfileDef[] = $derived(
+		profileRows ??
+			[...new Set(['admin', 'member', ...users.flatMap((u) => u.profiles)])]
+				.sort()
+				.map((name) => ({ name, description: '', allowed_to: null })),
+	);
+	let profilesList: ProfileView[] = $derived(
+		profiles.map((p) => ({ ...p, user_count: users.filter((u) => u.profiles.includes(p.name)).length })),
+	);
+	let allOperations: OperationDef[] = $derived.by(() => {
+		const known = new Set(opCatalog.map((op) => op.name));
+		const extra = [...new Set((profileRows ?? []).flatMap((p) => p.allowed_to ?? []))]
+			.filter((name) => !known.has(name))
+			.sort()
+			.map((name) => ({ name, category: name.split('.')[0], description: '' }));
+		return [...opCatalog, ...extra];
+	});
+	let userPermissions: string[] | null = $derived.by(() => {
+		if (!selectedUser) return [];
+		if (selectedUser.principal === myPrincipal && heldPermissions) return [...heldPermissions].sort();
+		if (!profileRows) return null;
+		const held = new Set<string>();
+		for (const name of selectedUser.profiles) {
+			for (const perm of profileRows.find((p) => p.name === name)?.allowed_to ?? []) held.add(perm);
+		}
+		return [...held].sort();
+	});
+	let assignProfilePerms = $derived(profiles.find((p) => p.name === assignProfileName)?.allowed_to ?? null);
+
 	let profilesLoading = $state(false);
-	let selectedProfile: any | null = $state(null);
+	let selectedProfileName = $state('');
+	let selectedProfile: ProfileView | null = $derived(profilesList.find((p) => p.name === selectedProfileName) ?? null);
 	let profilePermFilter = $state('');
 	let profileCategoryFilter = $state('all');
 	let profileGrantedOnly = $state(false);
@@ -100,26 +131,6 @@
 			: users,
 	);
 
-	let filteredOperations = $derived(() => {
-		const q = permFilter.trim().toLowerCase();
-		const ops = q
-			? allOperations.filter(
-					(op) =>
-						op.name.toLowerCase().includes(q) ||
-						op.category.toLowerCase().includes(q) ||
-						op.description.toLowerCase().includes(q),
-				)
-			: allOperations;
-
-		const groups: Record<string, OperationDef[]> = {};
-		for (const op of ops) {
-			if (!groups[op.category]) groups[op.category] = [];
-			groups[op.category].push(op);
-		}
-		return groups;
-	});
-
-	let hasPendingChanges = $derived(pendingGrants.size > 0 || pendingRevokes.size > 0);
 	let hasProfilePendingChanges = $derived(profilePendingGrants.size > 0 || profilePendingRevokes.size > 0);
 
 	let profileOperationCategories = $derived(
@@ -155,25 +166,38 @@
 		return groups;
 	});
 
-	async function callSync(fn: string, args: Record<string, any> = {}) {
-		const raw = await ctx.callSync(fn, args);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
+	/** Without a readable `me`, every action is offered and the realm decides. */
+	function holds(permission: string): boolean {
+		return heldPermissions === null || heldPermissions.has('all') || heldPermissions.has(permission);
+	}
+
+	function toUser(card: any): UserEntry {
+		return {
+			principal: String(card?.id ?? ''),
+			nickname: String(card?.nickname ?? ''),
+			profiles: Array.isArray(card?.profiles) ? card.profiles.map(String) : [],
+			status: String(card?.status ?? ''),
+		};
+	}
+
+	function showFailure(reply: Reply, permission: string, fallback: string) {
+		const needed = refusedPermission(reply.error, permission);
+		accessDeniedOp = needed ?? '';
+		error = needed ? '' : reply.error || fallback;
+	}
+
+	/** A governed change files a proposal instead of acting, which is still a success. */
+	function outcome(reply: Reply, done: string): string {
+		return reply.proposal ? `Submitted for a vote as proposal ${reply.proposal}.` : done;
 	}
 
 	async function fetchUsersPage(fromId: number) {
-		const res = await callSync('list_users_with_profiles', {
-			from_id: fromId,
-			page_size: LIST_FETCH_SIZE,
-		});
-		if (res?.success) {
-			const batch = res.data?.users ?? [];
-			return {
-				users: Array.isArray(batch) ? batch : [],
-				hasMore: !!res.data?.has_more,
-				nextFromId: res.data?.next_from_id ?? null,
-			};
-		}
-		throw new Error(res?.error || 'Failed to load users');
+		const reply = await call(ctx, false, 'user_list', { from: fromId, count: LIST_FETCH_SIZE });
+		const batch: UserEntry[] = reply.ok && Array.isArray(reply.users)
+			? reply.users.map(toUser).filter((u: UserEntry) => u.principal)
+			: [];
+		const nextFromId: number | null = reply.ok && typeof reply.next === 'number' ? reply.next : null;
+		return { reply, users: batch, nextFromId };
 	}
 
 	function mergeUsers(existing: UserEntry[], batch: UserEntry[]) {
@@ -195,18 +219,10 @@
 		listNextFromId = 1;
 		try {
 			const page = await fetchUsersPage(1);
+			if (!page.reply.ok) showFailure(page.reply, 'user.view', 'The member list is unavailable right now.');
 			users = page.users;
-			listHasMore = page.hasMore;
+			listHasMore = page.nextFromId != null;
 			listNextFromId = page.nextFromId ?? 1;
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
 		} finally {
 			loading = false;
 		}
@@ -219,77 +235,90 @@
 		try {
 			const fromId = listNextFromId || 1;
 			const page = await fetchUsersPage(fromId);
+			if (!page.reply.ok) {
+				error = page.reply.error || 'More members could not be read right now.';
+				return;
+			}
 			users = mergeUsers(users, page.users);
-			listHasMore = page.hasMore;
+			listHasMore = page.nextFromId != null;
 			listNextFromId = page.nextFromId ?? fromId;
-		} catch (e: any) {
-			error = e?.message ?? String(e);
 		} finally {
 			listLoadingMore = false;
 		}
 	}
 
-	async function loadProfiles() {
-		try {
-			const res = await callSync('get_available_profiles');
-			if (res?.success) {
-				profiles = res.data?.profiles ?? [];
-			}
-		} catch (e: any) {
-			console.error('Failed to load profiles:', e);
+	async function loadSelf() {
+		const reply = await call(ctx, false, 'me');
+		if (reply.ok && Array.isArray(reply.permissions)) {
+			heldPermissions = new Set(reply.permissions.map(String));
+			myPrincipal = String(reply.user?.id ?? '');
+		} else {
+			console.warn('me:', reply.error);
 		}
 	}
 
-	async function loadOperations() {
+	/** Profiles with their permissions; only a holder of db.export can read them. */
+	async function loadProfiles() {
+		if (!holds('db.export')) return;
+		profilesLoading = true;
 		try {
-			const res = await callSync('get_all_operations');
-			if (res?.success) {
-				allOperations = res.data?.operations ?? [];
-				callerCanAssign = res.data?.caller_can_assign_roles ?? false;
-				callerCanRevoke = res.data?.caller_can_revoke_roles ?? false;
-				callerCanGrantPerms = res.data?.caller_can_grant_permissions ?? false;
-				callerCanRevokePerms = res.data?.caller_can_revoke_permissions ?? false;
-				callerGrantableOps = new Set(
-					(res.data?.operations ?? [])
-						.filter((op: any) => op.caller_can_grant)
-						.map((op: any) => op.name)
-				);
+			const res = await readPages(ctx, 'realm_export', 'rows', { entity: 'UserProfile' });
+			if (res.error) {
+				console.warn('realm_export:', res.error);
+				return;
 			}
-		} catch (e: any) {
-			console.error('Failed to load operations:', e);
+			profileRows = res.rows
+				.filter((row) => row?.id)
+				.map((row) => ({
+					name: String(row.id),
+					description: String(row.description ?? ''),
+					allowed_to: Array.isArray(row.allowed_to) ? row.allowed_to.map(String) : [],
+				}))
+				.sort((a, b) => a.name.localeCompare(b.name));
+		} finally {
+			profilesLoading = false;
 		}
+	}
+
+	/** The permission catalog: each permission with the operations it allows. */
+	async function loadOperations() {
+		const reply = await call(ctx, false, 'ops_list');
+		if (!reply.ok) {
+			console.warn('ops_list:', reply.error);
+			return;
+		}
+		const byPerm = new Map<string, string[]>();
+		for (const op of Array.isArray(reply.operations) ? reply.operations : []) {
+			const perm = typeof op?.perm === 'string' ? op.perm : '';
+			if (!perm || op.public) continue;
+			byPerm.set(perm, [...(byPerm.get(perm) ?? []), String(op.name)]);
+		}
+		opCatalog = [
+			{ name: 'all', category: 'all', description: 'Every permission: full administrative access.' },
+			...[...byPerm.keys()].sort().map((perm) => ({
+				name: perm,
+				category: perm.split('.')[0],
+				description: `Allows ${byPerm.get(perm)!.join(', ')}`,
+			})),
+		];
 	}
 
 	async function viewUser(user: UserEntry) {
 		selectedUser = user;
 		view = 'detail';
 		detailLoading = true;
-		userPermissions = [];
-		userDirectPerms = [];
 		try {
-			const res = await callSync('get_user_effective_permissions', {
-				target_principal: user.principal,
-			});
-			if (res?.success) {
-				userPermissions = res.data?.effective_operations ?? [];
-				userDirectPerms = res.data?.direct_permissions ?? [];
-				selectedUser = {
-					...user,
-					profiles: res.data?.profiles ?? user.profiles,
-				};
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			const reply = await call(ctx, false, 'user_get', { user: user.principal });
+			if (reply.ok && reply.user) selectedUser = toUser(reply.user);
+			else if (!reply.ok) console.warn('user_get:', reply.error);
 		} finally {
 			detailLoading = false;
 		}
+	}
+
+	async function refreshAfterRoleChange() {
+		if (selectedUser) await viewUser(selectedUser);
+		await loadUsers();
 	}
 
 	// When set, the confirmation modal is shown before a governance proposal
@@ -313,33 +342,21 @@
 
 		assignLoading = true;
 		try {
-			const res = await callSync('assign_profile', {
-				target_principal: selectedUser.principal,
-				profile_name: assignProfileName,
-			});
-			if (res?.success) {
-				successMsg = res.data?.message || 'Profile assigned';
+			const profileName = assignProfileName;
+			const reply = await call(ctx, true, 'role_assign', { user: selectedUser.principal, profile: profileName });
+			if (reply.ok) {
+				successMsg = outcome(reply, `Profile "${profileName}" assigned`);
 				assignProfileName = '';
 				view = 'detail';
-				await viewUser({ ...selectedUser!, profiles: res.data?.profiles ?? selectedUser!.profiles });
-				await loadUsers();
-			} else if (res?.governance_blocked) {
+				await refreshAfterRoleChange();
+			} else if (refusedPermission(reply.error, '') === 'role.assign') {
 				proposeConfirm = {
 					action: 'assign',
-					profileName: assignProfileName,
-					reason: res.error || 'This realm requires a governance vote for role assignments.',
+					profileName,
+					reason: 'You do not have the role.assign permission, so this assignment must be approved by a governance vote.',
 				};
 			} else {
-				error = res?.error || 'Failed to assign profile';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
+				error = reply.error || 'The profile could not be assigned.';
 			}
 		} finally {
 			assignLoading = false;
@@ -351,186 +368,23 @@
 		error = '';
 		accessDeniedOp = '';
 		successMsg = '';
-		try {
-			const res = await callSync('revoke_profile', {
-				target_principal: selectedUser.principal,
-				profile_name: profileName,
-			});
-			if (res?.success) {
-				successMsg = res.data?.message || 'Profile revoked';
-				await viewUser({ ...selectedUser!, profiles: res.data?.profiles ?? selectedUser!.profiles });
-				await loadUsers();
-			} else if (res?.governance_blocked) {
-				proposeConfirm = {
-					action: 'revoke',
-					profileName,
-					reason: res.error || 'This realm requires a governance vote for role revocations.',
-				};
-			} else {
-				error = res?.error || 'Failed to revoke profile';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		}
-	}
-
-	function canToggle(opName: string): boolean {
-		const fromProfile = !userDirectPerms.includes(opName) && userPermissions.includes(opName);
-		if (fromProfile) return false;
-		const isCurrentlyGranted = userDirectPerms.includes(opName);
-		if (isCurrentlyGranted) return callerCanRevokePerms;
-		return callerCanGrantPerms && callerGrantableOps.has(opName);
-	}
-
-	function togglePermission(opName: string) {
-		if (!canToggle(opName)) return;
-		const isCurrentlyGranted = userDirectPerms.includes(opName);
-
-		if (isCurrentlyGranted) {
-			if (pendingRevokes.has(opName)) {
-				pendingRevokes = new Set([...pendingRevokes].filter(n => n !== opName));
-			} else {
-				pendingRevokes = new Set([...pendingRevokes, opName]);
-				pendingGrants = new Set([...pendingGrants].filter(n => n !== opName));
-			}
+		const reply = await call(ctx, true, 'role_revoke', { user: selectedUser.principal, profile: profileName });
+		if (reply.ok) {
+			successMsg = outcome(reply, `Profile "${profileName}" revoked`);
+			await refreshAfterRoleChange();
+		} else if (refusedPermission(reply.error, '') === 'role.revoke') {
+			proposeConfirm = {
+				action: 'revoke',
+				profileName,
+				reason: 'You do not have the role.revoke permission, so this revocation must be approved by a governance vote.',
+			};
 		} else {
-			if (pendingGrants.has(opName)) {
-				pendingGrants = new Set([...pendingGrants].filter(n => n !== opName));
-			} else {
-				pendingGrants = new Set([...pendingGrants, opName]);
-				pendingRevokes = new Set([...pendingRevokes].filter(n => n !== opName));
-			}
+			error = reply.error || 'The profile could not be revoked.';
 		}
 	}
 
-	function isChecked(opName: string): boolean {
-		const isGranted = userDirectPerms.includes(opName);
-		if (pendingGrants.has(opName)) return true;
-		if (pendingRevokes.has(opName)) return false;
-		return isGranted;
-	}
-
-	function permState(opName: string): 'granted' | 'pending-grant' | 'pending-revoke' | 'none' {
-		if (pendingGrants.has(opName)) return 'pending-grant';
-		if (pendingRevokes.has(opName)) return 'pending-revoke';
-		if (userDirectPerms.includes(opName)) return 'granted';
-		return 'none';
-	}
-
-	async function applyPermissionChanges() {
-		if (!selectedUser) return;
-		permLoading = true;
-		error = '';
-		accessDeniedOp = '';
-		successMsg = '';
-		const toGrant = [...pendingGrants];
-		const toRevoke = [...pendingRevokes];
-
-		try {
-			if (toGrant.length > 0) {
-				const res = await callSync('batch_grant_permissions', {
-					target_principal: selectedUser.principal,
-					permission_names: toGrant,
-				});
-				if (!res?.success) {
-					error = res?.error || 'Failed to grant permissions';
-					permLoading = false;
-					return;
-				}
-			}
-			if (toRevoke.length > 0) {
-				const res = await callSync('batch_revoke_permissions', {
-					target_principal: selectedUser.principal,
-					permission_names: toRevoke,
-				});
-				if (!res?.success) {
-					error = res?.error || 'Failed to revoke permissions';
-					permLoading = false;
-					return;
-				}
-			}
-
-			successMsg = `${toGrant.length} granted, ${toRevoke.length} revoked`;
-			pendingGrants = new Set();
-			pendingRevokes = new Set();
-			await viewUser(selectedUser);
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			permLoading = false;
-		}
-	}
-
-	function discardPermissionChanges() {
-		pendingGrants = new Set();
-		pendingRevokes = new Set();
-	}
-
-	async function handleRevokePermission(permissionName: string) {
-		if (!selectedUser) return;
-		error = '';
-		accessDeniedOp = '';
-		successMsg = '';
-		try {
-			const res = await callSync('revoke_permission', {
-				target_principal: selectedUser.principal,
-				permission_name: permissionName,
-			});
-			if (res?.success) {
-				successMsg = res.data?.message || 'Permission revoked';
-				await viewUser({ ...selectedUser!, profiles: selectedUser!.profiles });
-			} else {
-				error = res?.error || 'Failed to revoke permission';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		}
-	}
-
-	async function loadProfilesWithPermissions() {
-		profilesLoading = true;
-		try {
-			const res = await callSync('list_profiles_with_permissions');
-			if (res?.success) {
-				profilesList = res.data?.profiles ?? [];
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			profilesLoading = false;
-		}
-	}
-
-	function selectProfile(profile: any) {
-		selectedProfile = profile;
+	function selectProfile(profile: ProfileView) {
+		selectedProfileName = profile.name;
 		profilePermFilter = '';
 		profileCategoryFilter = 'all';
 		profileGrantedOnly = false;
@@ -540,10 +394,7 @@
 	}
 
 	function profileOpCurrentlyGranted(opName: string): boolean {
-		if (!selectedProfile) return false;
-		const builtIn = selectedProfile.allowed_to ?? [];
-		const extra = selectedProfile.extra_permissions ?? [];
-		return builtIn.includes(opName) || extra.includes(opName);
+		return (selectedProfile?.allowed_to ?? []).includes(opName);
 	}
 
 	function profileRowMatchesGrantedOnly(opName: string): boolean {
@@ -564,29 +415,8 @@
 		return allOperations.filter((op) => op.category === category).length;
 	}
 
-	function mapProfileOpError(errorCode: string | undefined, fallback: string): string {
-		switch (errorCode) {
-			case 'missing_args':
-				return 'Missing required arguments.';
-			case 'profile_not_found':
-				return 'Profile not found.';
-			case 'unknown_operation':
-				return 'One or more operations are not recognized.';
-			case 'not_permitted':
-				return 'You are not permitted to modify this profile.';
-			case 'cannot_grant_unheld':
-				return 'You cannot grant permissions you do not hold yourself.';
-			case 'would_orphan_admin':
-				return 'This change would leave the realm with no profile holding full administrative access.';
-			case 'internal_error':
-				return 'The realm could not apply this change. Please try again.';
-			default:
-				return fallback || 'Failed to update profile permissions';
-		}
-	}
-
 	function toggleProfilePerm(opName: string) {
-		if (!selectedProfile) return;
+		if (!selectedProfile || !callerCanEditProfiles) return;
 		const isGranted = profileOpCurrentlyGranted(opName);
 
 		if (isGranted) {
@@ -628,48 +458,37 @@
 		if (!selectedProfile) return 'none';
 		if (profilePendingGrants.has(opName)) return 'pending-grant';
 		if (profilePendingRevokes.has(opName)) return 'pending-revoke';
-		if ((selectedProfile.allowed_to ?? []).includes(opName)) return 'built-in';
-		if ((selectedProfile.extra_permissions ?? []).includes(opName)) return 'granted';
+		if ((selectedProfile.allowed_to ?? []).includes(opName)) return 'granted';
 		return 'none';
 	}
 
 	async function applyProfilePermChanges() {
-		if (!selectedProfile) return;
+		const profile = selectedProfile;
+		if (!profile?.allowed_to) return;
 		const toGrant = [...profilePendingGrants];
 		const toRevoke = [...profilePendingRevokes];
 		if (toGrant.length === 0 && toRevoke.length === 0) return;
 
-		profilePermApplying = true;
 		error = '';
 		accessDeniedOp = '';
 		successMsg = '';
+		if (toRevoke.includes('all') && !profilesList.some((p) => p.name !== profile.name && (p.allowed_to ?? []).includes('all'))) {
+			error = 'This change would leave the realm with no profile holding full administrative access.';
+			return;
+		}
+		const allowedTo = [...new Set([...profile.allowed_to.filter((p) => !toRevoke.includes(p)), ...toGrant])].sort();
+
+		profilePermApplying = true;
 		try {
-			const res = await callSync('update_profile_operations', {
-				profile_name: selectedProfile.name,
-				grant: toGrant,
-				revoke: toRevoke,
-			});
-			if (!res?.success) {
-				error = mapProfileOpError(res?.error_code, res?.error);
+			const reply = await call(ctx, true, 'profile_edit', { profile: profile.name, allowed_to: allowedTo });
+			if (!reply.ok) {
+				showFailure(reply, 'permission.grant', 'The profile could not be updated.');
 				return;
 			}
-			const granted = res.data?.granted?.length ?? toGrant.length;
-			const revoked = res.data?.revoked?.length ?? toRevoke.length;
-			successMsg = `${granted} granted, ${revoked} revoked on profile "${selectedProfile.name}"`;
+			successMsg = outcome(reply, `${toGrant.length} granted, ${toRevoke.length} revoked on profile "${profile.name}"`);
 			profilePendingGrants = new Set();
 			profilePendingRevokes = new Set();
-			await loadProfilesWithPermissions();
-			const updated = profilesList.find((p) => p.name === selectedProfile?.name);
-			if (updated) selectedProfile = updated;
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			await loadProfiles();
 		} finally {
 			profilePermApplying = false;
 		}
@@ -678,36 +497,29 @@
 	async function handlePropose() {
 		if (!selectedUser || !proposeConfirm) return;
 		const { action, profileName } = proposeConfirm;
+		const target = selectedUser.principal;
+		const who = selectedUser.nickname || truncatePrincipal(target);
 		assignLoading = true;
 		error = '';
 		accessDeniedOp = '';
 		successMsg = '';
 		try {
-			const res = await callSync('propose_role_action', {
-				action,
-				target_principal: selectedUser.principal,
-				profile_name: profileName,
+			const reply = await call(ctx, true, 'proposal_create', {
+				title: action === 'assign' ? `Assign profile "${profileName}" to ${who}` : `Revoke profile "${profileName}" from ${who}`,
+				description: `${action === 'assign' ? 'Give' : 'Take away'} the "${profileName}" profile ${action === 'assign' ? 'to' : 'from'} ${target}.`,
+				action: { op: action === 'assign' ? 'role_assign' : 'role_revoke', args: { user: target, profile: profileName } },
 			});
-			if (res?.success) {
-				successMsg = res.data?.message || 'Governance proposal created';
-				proposeConfirm = null;
+			proposeConfirm = null;
+			if (reply.ok) {
+				successMsg = reply.proposal
+					? `Proposal ${reply.proposal} created. Members can vote on it in Voting.`
+					: 'Proposal created. Members can vote on it in Voting.';
 				if (action === 'assign') {
 					assignProfileName = '';
 					view = 'detail';
 				}
 			} else {
-				proposeConfirm = null;
-				error = res?.error || 'Failed to create proposal';
-			}
-		} catch (e: any) {
-			proposeConfirm = null;
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
+				showFailure(reply, 'proposal.create', 'The proposal could not be created.');
 			}
 		} finally {
 			assignLoading = false;
@@ -738,9 +550,10 @@
 	}
 
 	onMount(() => {
-		loadUsers();
-		loadProfiles();
-		loadOperations();
+		void (async () => {
+			await loadSelf();
+			await Promise.all([loadUsers(), loadProfiles(), loadOperations()]);
+		})();
 	});
 </script>
 
@@ -842,7 +655,7 @@
 			</button>
 			<button
 				type="button"
-				onclick={() => { activeTab = 'profiles'; view = 'profiles'; loadProfilesWithPermissions(); }}
+				onclick={() => { activeTab = 'profiles'; view = 'profiles'; loadProfiles(); }}
 				class="chrome-tab {activeTab === 'profiles' ? 'is-on' : ''}"
 				title="Profiles"
 				aria-label="Profiles"
@@ -874,7 +687,7 @@
 	</div>
 
 	{#if activeTab === 'invitations'}
-		<InvitationManager {ctx} />
+		<InvitationManager {ctx} profileNames={profiles.map((p) => p.name)} />
 	{:else if activeTab === 'extensions'}
 		<ExtensionAccess {ctx} />
 	{:else}
@@ -887,9 +700,9 @@
 					<ul class="space-y-1.5 text-blue-700">
 						<li><strong>Assign Profile</strong> applies directly when you hold <code class="bg-blue-100 px-1 rounded">role.assign</code> and realm policy allows it; otherwise it creates a governance proposal after your confirmation.</li>
 						<li><strong>Revoke Profile</strong> requires <code class="bg-blue-100 px-1 rounded">role.revoke</code>.</li>
-						<li><strong>Manage Permissions</strong> requires <code class="bg-blue-100 px-1 rounded">permission.grant</code> to grant and <code class="bg-blue-100 px-1 rounded">permission.revoke</code> to revoke.</li>
-						<li><strong>You can only grant permissions you hold yourself.</strong> Permissions you don't hold are shown but cannot be toggled.</li>
-						<li>Permissions inherited <em>via a profile</em> cannot be individually revoked — remove the profile instead.</li>
+						<li><strong>Permissions</strong> are granted through profiles: edit a profile's permissions in the <strong>Profiles</strong> tab (requires <code class="bg-blue-100 px-1 rounded">permission.grant</code>).</li>
+						<li><strong>You can only grant permissions you hold yourself.</strong> A profile you assign or edit may hold only permissions you hold.</li>
+						<li>When the realm's policy requires a vote, a change is submitted as a proposal instead of applied at once.</li>
 					</ul>
 				</div>
 				<button onclick={() => { showHelp = false; persistSessionFlag(HELP_KEY, false); }} class="text-blue-400 hover:text-blue-600 ml-3 flex-shrink-0">&times;</button>
@@ -934,11 +747,7 @@
 
 	<!-- Banners -->
 	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
+		<AccessDenied operation={accessDeniedOp} />
 	{:else if error}
 		<div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
 			<svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -978,10 +787,9 @@
 							Assign Profile
 						</button>
 						<button
-							onclick={() => { if (callerCanGrantPerms || callerCanRevokePerms) { view = 'permission'; permFilter = ''; pendingGrants = new Set(); pendingRevokes = new Set(); } }}
-							disabled={!callerCanGrantPerms && !callerCanRevokePerms}
+							disabled
 							class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-							title={!callerCanGrantPerms && !callerCanRevokePerms ? 'Requires permission.grant or permission.revoke' : 'Manage fine-grained permissions'}
+							title="Permissions are granted through profiles (Profiles tab)"
 						>
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
 							Manage Permissions
@@ -1012,38 +820,24 @@
 					</div>
 				{/if}
 
-				<!-- Direct permissions -->
-				{#if userDirectPerms.length > 0}
-					<h3 class="text-sm font-semibold text-gray-700 mb-2 mt-4">Direct Permissions</h3>
-					<div class="flex flex-wrap gap-2">
-						{#each userDirectPerms as perm}
-							<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
-								{perm}
-								{#if callerCanRevokePerms}
-									<button
-										onclick={() => handleRevokePermission(perm)}
-										class="ml-0.5 opacity-60 hover:opacity-100"
-										title="Revoke permission"
-									>
-										<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-									</button>
-								{/if}
-							</span>
-						{/each}
-					</div>
-				{/if}
+				<p class="text-xs text-gray-500 mt-3">Individual permissions are granted through profiles; edit them in the Profiles tab.</p>
 			</div>
 
-			<!-- Effective operations -->
+			<!-- Permissions held through profiles -->
 			<div class="rounded-lg border border-gray-200 bg-white p-5">
-				<h3 class="text-base font-semibold text-gray-900 mb-3">Effective Operations ({userPermissions.length})</h3>
-				{#if detailLoading}
+				<h3 class="text-base font-semibold text-gray-900 mb-1">Permissions{#if userPermissions} ({userPermissions.length}){/if}</h3>
+				{#if selectedUser.principal !== myPrincipal}
+					<p class="text-xs text-gray-500 mb-3">From assigned profiles; seats in departments may add more.</p>
+				{/if}
+				{#if detailLoading || (profilesLoading && !userPermissions)}
 					<div class="flex items-center gap-2 text-gray-400 text-sm">
 						<div class="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin"></div>
 						Loading...
 					</div>
+				{:else if !userPermissions}
+					<p class="text-sm text-gray-400">Profile permissions are not visible with your access.</p>
 				{:else if userPermissions.length === 0}
-					<p class="text-sm text-gray-400">No operations</p>
+					<p class="text-sm text-gray-400">No permissions</p>
 				{:else}
 					<div class="flex flex-wrap gap-1.5">
 						{#each userPermissions as op}
@@ -1079,11 +873,11 @@
 				</select>
 			</div>
 
-			{#if assignProfileName}
+			{#if assignProfileName && assignProfilePerms}
 				<div class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-					<h4 class="text-xs font-semibold text-gray-600 mb-1">Operations granted by "{assignProfileName}":</h4>
+					<h4 class="text-xs font-semibold text-gray-600 mb-1">Permissions granted by "{assignProfileName}":</h4>
 					<div class="flex flex-wrap gap-1">
-						{#each profiles.find(p => p.name === assignProfileName)?.allowed_to ?? [] as op}
+						{#each assignProfilePerms as op}
 							<code class="px-1.5 py-0.5 text-xs bg-white border rounded text-gray-600">{op}</code>
 						{/each}
 					</div>
@@ -1103,148 +897,6 @@
 			<p class="mt-2 text-xs text-gray-500">
 				Applied directly when you are allowed to; otherwise a governance proposal is created (after your confirmation).
 			</p>
-		</div>
-
-	<!-- Manage Permissions View -->
-	{:else if view === 'permission' && selectedUser}
-		<button onclick={() => { view = 'detail'; discardPermissionChanges(); }} class="text-sm text-indigo-600 hover:text-indigo-800 mb-4 inline-flex items-center gap-1">
-			<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-			Back to user detail
-		</button>
-
-		<div class="rounded-lg border border-gray-200 bg-white">
-			<div class="px-5 py-4 border-b border-gray-200">
-				<div class="flex items-center gap-2 mb-1">
-					<h2 class="text-xl font-semibold text-gray-900">Manage Permissions</h2>
-					<span class="text-xs px-2 py-0.5 rounded-full font-medium {callerCanGrantPerms ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}">
-						{callerCanGrantPerms ? 'Can grant' : 'View only'}
-					</span>
-				</div>
-				<p class="text-sm text-gray-500">Manage fine-grained permissions for <strong>{selectedUser.nickname || truncatePrincipal(selectedUser.principal)}</strong></p>
-				{#if !callerCanGrantPerms && !callerCanRevokePerms}
-					<p class="mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
-						You don't have <code>permission.grant</code> or <code>permission.revoke</code>. You can view permissions but cannot modify them.
-					</p>
-				{:else}
-					<p class="mt-2 text-xs text-gray-500">
-						Greyed-out permissions are ones you don't hold yourself and cannot grant to others.
-					</p>
-				{/if}
-			</div>
-
-			<!-- Filter + Actions Bar -->
-			<div class="px-5 py-3 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-				<div class="flex-1 min-w-[200px]">
-					<input
-						type="text"
-						bind:value={permFilter}
-						placeholder="Filter permissions by name, category, or description..."
-						class="w-full rounded-lg border border-gray-300 px-3.5 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-					/>
-				</div>
-				{#if hasPendingChanges}
-					<div class="flex items-center gap-2">
-						<span class="text-xs text-gray-500">
-							{#if pendingGrants.size > 0}<span class="text-green-600 font-medium">+{pendingGrants.size}</span>{/if}
-							{#if pendingGrants.size > 0 && pendingRevokes.size > 0}&nbsp;/&nbsp;{/if}
-							{#if pendingRevokes.size > 0}<span class="text-red-600 font-medium">-{pendingRevokes.size}</span>{/if}
-						</span>
-						<button
-							onclick={discardPermissionChanges}
-							class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-						>Discard</button>
-						<button
-							onclick={applyPermissionChanges}
-							disabled={permLoading}
-							class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-gray-900 text-white font-medium hover:bg-black disabled:opacity-40"
-						>
-							{#if permLoading}
-								<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-							{/if}
-							Apply Changes
-						</button>
-					</div>
-				{/if}
-			</div>
-
-			<!-- Permission List -->
-			<div class="max-h-[480px] overflow-y-auto">
-				{#each Object.entries(filteredOperations()) as [category, ops]}
-					<div class="border-b border-gray-100 last:border-b-0">
-						<div class="px-5 py-2 bg-gray-50 sticky top-0 z-10">
-							<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">{category}</h3>
-						</div>
-						{#each ops as op}
-							{@const state = permState(op.name)}
-							{@const checked = isChecked(op.name)}
-							{@const fromProfile = !userDirectPerms.includes(op.name) && userPermissions.includes(op.name)}
-							{@const canGrant = callerGrantableOps.has(op.name)}
-							{@const togglable = canToggle(op.name)}
-							<label
-								class="flex items-start gap-3 px-5 py-2.5 transition-colors
-									{state === 'pending-grant' ? 'bg-green-50' : state === 'pending-revoke' ? 'bg-red-50' : ''}
-									{togglable ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}
-									{!togglable && !fromProfile ? 'opacity-50' : ''}"
-								title={fromProfile ? 'Inherited via profile — remove the profile to revoke' : !canGrant && !userDirectPerms.includes(op.name) ? 'You don\'t hold this permission and cannot grant it' : !callerCanGrantPerms && !userDirectPerms.includes(op.name) ? 'You lack the permission.grant permission' : ''}
-							>
-								<input
-									type="checkbox"
-									checked={checked || fromProfile}
-									disabled={!togglable}
-									onchange={() => togglePermission(op.name)}
-									class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 {!togglable ? 'opacity-50' : ''}"
-								/>
-								<div class="flex-1 min-w-0">
-									<div class="flex items-center gap-2">
-										<code class="text-sm font-medium {togglable || fromProfile ? 'text-gray-900' : 'text-gray-400'}">{op.name}</code>
-										{#if state === 'pending-grant'}
-											<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700">WILL GRANT</span>
-										{:else if state === 'pending-revoke'}
-											<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">WILL REVOKE</span>
-										{:else if state === 'granted'}
-											<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">GRANTED</span>
-										{:else if fromProfile}
-											<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500">VIA PROFILE</span>
-										{:else if !canGrant}
-											<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-400">NOT HELD</span>
-										{/if}
-									</div>
-									<p class="text-xs {togglable || fromProfile ? 'text-gray-500' : 'text-gray-400'} mt-0.5">{op.description}</p>
-								</div>
-							</label>
-						{/each}
-					</div>
-				{:else}
-					<div class="text-center py-8 text-sm text-gray-400">
-						{permFilter ? 'No permissions match your filter' : 'Loading permissions...'}
-					</div>
-				{/each}
-			</div>
-
-			<!-- Sticky bottom bar when changes pending -->
-			{#if hasPendingChanges}
-				<div class="px-5 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
-					<span class="text-sm text-gray-600">
-						{pendingGrants.size + pendingRevokes.size} pending change{pendingGrants.size + pendingRevokes.size !== 1 ? 's' : ''}
-					</span>
-					<div class="flex gap-2">
-						<button
-							onclick={discardPermissionChanges}
-							class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
-						>Discard</button>
-						<button
-							onclick={applyPermissionChanges}
-							disabled={permLoading}
-							class="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg bg-gray-900 text-white font-medium hover:bg-black disabled:opacity-40"
-						>
-							{#if permLoading}
-								<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-							{/if}
-							Apply Changes
-						</button>
-					</div>
-				</div>
-			{/if}
 		</div>
 
 	<!-- Profiles View -->
@@ -1298,10 +950,13 @@
 								class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors {selectedProfile?.name === profile.name ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}"
 							>
 								<div class="font-medium">{profile.name}</div>
-								<div class="text-xs text-gray-400 mt-0.5">{profile.user_count} user{profile.user_count !== 1 ? 's' : ''} &middot; {(profile.allowed_to ?? []).length + (profile.extra_permissions ?? []).length} ops</div>
+								<div class="text-xs text-gray-400 mt-0.5">{profile.user_count} user{profile.user_count !== 1 ? 's' : ''}{#if profile.allowed_to} &middot; {profile.allowed_to.length} permission{profile.allowed_to.length !== 1 ? 's' : ''}{/if}</div>
 							</button>
 						{/each}
 					</div>
+					{#if listHasMore}
+						<p class="text-xs text-gray-400 mt-2 px-3">User counts cover the members loaded in People.</p>
+					{/if}
 				{/if}
 			</div>
 
@@ -1314,16 +969,18 @@
 							{#if selectedProfile.description}
 								<p class="text-sm text-gray-500 mt-0.5">{selectedProfile.description}</p>
 							{/if}
+							{#if selectedProfile.allowed_to && !callerCanEditProfiles}
+								<p class="text-xs text-gray-500 mt-2">Changing a profile's permissions requires <code>permission.grant</code>.</p>
+							{/if}
 						</div>
 
+						{#if !selectedProfile.allowed_to}
+							<p class="px-5 py-8 text-center text-sm text-gray-400">This profile's permissions are not visible with your access.</p>
+						{:else}
 						<!-- Summary -->
 						<div class="px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
 							<div class="text-sm text-gray-700">
-								<span class="font-semibold">{(selectedProfile.allowed_to ?? []).length + (selectedProfile.extra_permissions ?? []).length}</span> granted
-								<span class="text-gray-400 mx-1">&middot;</span>
-								<span class="text-gray-500">{(selectedProfile.allowed_to ?? []).length} built-in</span>
-								<span class="text-gray-400 mx-1">&middot;</span>
-								<span class="text-gray-500">{(selectedProfile.extra_permissions ?? []).length} extra</span>
+								<span class="font-semibold">{selectedProfile.allowed_to.length}</span> granted
 							</div>
 							{#if hasProfilePendingChanges}
 								<div class="flex items-center gap-2">
@@ -1398,13 +1055,14 @@
 										{@const checked = isProfilePermChecked(op.name)}
 										{@const isAll = op.name === 'all'}
 										<label
-											class="flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-gray-50 cursor-pointer
+											class="flex items-start gap-3 px-5 py-2.5 transition-colors {callerCanEditProfiles ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}
 												{state === 'pending-grant' ? 'bg-green-50' : state === 'pending-revoke' ? 'bg-red-50' : ''}
 												{isAll ? 'border-l-4 border-red-400 bg-red-50/30' : ''}"
 										>
 											<input
 												type="checkbox"
 												checked={checked}
+												disabled={!callerCanEditProfiles}
 												onchange={() => toggleProfilePerm(op.name)}
 												class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 {isAll ? 'border-red-400' : ''}"
 											/>
@@ -1418,23 +1076,24 @@
 														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700">WILL GRANT</span>
 													{:else if state === 'pending-revoke'}
 														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">WILL REVOKE</span>
-													{:else if state === 'built-in'}
-														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-600">BUILT-IN</span>
 													{:else if state === 'granted'}
-														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-700">EXTRA</span>
+														<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">GRANTED</span>
 													{/if}
 												</div>
-												<p class="text-xs text-gray-500 mt-0.5">{op.description}</p>
+												{#if op.description}
+													<p class="text-xs text-gray-500 mt-0.5">{op.description}</p>
+												{/if}
 											</div>
 										</label>
 									{/each}
 								</div>
 							{:else}
 								<div class="text-center py-8 text-sm text-gray-400">
-									{profilePermFilter || profileGrantedOnly || profileCategoryFilter !== 'all' ? 'No permissions match your filters' : 'Loading permissions...'}
+									{profilePermFilter || profileGrantedOnly || profileCategoryFilter !== 'all' ? 'No permissions match your filters' : 'No permissions listed'}
 								</div>
 							{/each}
 						</div>
+						{/if}
 
 					</div>
 				{:else}
