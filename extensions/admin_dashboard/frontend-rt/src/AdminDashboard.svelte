@@ -1,223 +1,201 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
-	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
+	/** One page of rows, or the realm's reason for refusing it. */
+	type Page = { rows: any[]; next: number | null } | string;
 
 	interface EntityType {
 		value: string;
 		label: string;
 		className: string;
+		load: (from: number | null) => Promise<Page>;
 	}
 
 	const entityIcons: Record<string, string> = {
-		Balance: '💵', Call: '📞', Codex: '📚', Contract: '📝', Dispute: '⚖️',
-		Human: '🧑', Identity: '🆔', Instrument: '💰', Invoice: '🧾', Land: '🏞️',
-		License: '📃', Mandate: '📜', Member: '👥', Notification: '🔔',
-		Organization: '🏢', PaymentAccount: '💳', Permission: '🔐', Proposal: '🗳️',
-		Realm: '🏛️', Registry: '📋', Service: '⚙️', Task: '📋',
-		TaskExecution: '▶️', TaskSchedule: '⏰', TaskStep: '📌', Token: '🪙',
-		Trade: '🤝', Transfer: '🔄', Treasury: '🏦', User: '👤',
-		UserProfile: '📋', Vote: '✅', Zone: '🗺️',
+		Department: '🗂️', Dispute: '⚖️', Event: '🕒', Fund: '🏦', Invite: '✉️',
+		Land: '🏞️', LedgerEntry: '📒', License: '📃', NFTToken: '🖼️',
+		Organization: '🏢', Proposal: '🗳️', Realm: '🏛️', Task: '📋', Tender: '📣',
+		Token: '🪙', User: '👤',
 	};
 
-	let entityTypes: EntityType[] = $state([]);
-	let selectedType = $state('');
-	let loading = $state(true);
-	let error = $state('');
-	let accessDeniedOp = $state('');
+	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
+	const pageSize = 10;
+	const MAX_HOPS = 20;
 
-	function addToast(message: string, type: 'success' | 'error' = 'success') {
-		const level = type === 'error' ? 'error' : 'success';
+	let selectedType = $state('User');
+	let accessDeniedOp: string | null = $state(null);
+	let unavailable = $state(false);
+
+	function addToast(message: string, type: 'success' | 'warning' = 'success') {
 		if (typeof ctx.notify === 'function') {
-			ctx.notify(level, message);
+			ctx.notify(type, message);
 			return;
 		}
-		console.warn('[extension]', level, message);
+		console.warn('[extension]', type, message);
 	}
 	let items: any[] = $state([]);
 	let objLoading = $state(false);
 	let expandedItem: number | null = $state(null);
 	let currentPage = $state(0);
-	let pageSize = 10;
-	let totalItems = $state(0);
-	let totalPages = $state(0);
-
-	// Delete
-	let deletingId: string | null = $state(null);
-	let confirmDeleteItem: any | null = $state(null);
+	let nextCursor: number | null = $state(null);
+	// cursors[i] is the `from` of page i (null: the operation's default start).
+	let cursors: (number | null)[] = [null];
+	let requestSeq = 0;
 
 	function getIcon(className: string): string {
 		return entityIcons[className] || '📊';
 	}
 
 	function formatLabel(className: string): string {
-		return className.replace(/([A-Z])/g, ' $1').trim();
+		return className.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
-
-	function parseEntities(response: any): { objects: any[]; pagination: any } {
-		if (response?.success && response?.data?.objectsListPaginated) {
-			const paginated = response.data.objectsListPaginated;
-			const objects = (paginated.objects || []).map((s: any) => {
-				try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return s; }
-			});
-			return { objects, pagination: paginated.pagination };
-		}
-		if (response?.data && Array.isArray(response.data)) {
-			return { objects: response.data, pagination: null };
-		}
-		return { objects: [], pagination: null };
-	}
-
-	async function loadEntityTypes() {
-		loading = true;
-		error = '';
-		accessDeniedOp = '';
+	/** A realm read operation's reply; failures come back as `{ ok: false, error }` rather than throwing. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
 		try {
-			const res = await callExt('get_entity_types');
-			const classes = res?.data ?? (Array.isArray(res) ? res : []);
-			entityTypes = classes.map((className: string) => ({
-				value: className,
-				label: `${getIcon(className)} ${formatLabel(className)}`,
-				className,
-			}));
-			if (entityTypes.length > 0 && !selectedType) {
-				selectedType = entityTypes[0].value;
-			}
+			const reply = await ctx.read(name, args);
+			if (reply?.ok) return reply;
+			return { ok: false, error: String(reply?.error ?? '') };
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-			entityTypes = [{ value: 'User', label: '👤 User', className: 'User' }];
-			if (!selectedType) selectedType = 'User';
-		} finally {
-			loading = false;
+			return { ok: false, error: String(e?.message ?? e) };
 		}
+	}
+
+	/** A paginated list operation whose rows are under `key`. */
+	function listed(op: string, key: string) {
+		return async (from: number | null): Promise<Page> => {
+			const reply = await read(op, { ...(from != null ? { from } : {}), count: pageSize });
+			if (!reply.ok) return reply.error;
+			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: reply.next ?? null };
+		};
+	}
+
+	async function loadFunds(from: number | null): Promise<Page> {
+		const reply = await read('treasury_view', { from: from ?? 1, count: pageSize });
+		if (!reply.ok) return reply.error;
+		const funds = reply.funds && typeof reply.funds === 'object' ? reply.funds : {};
+		return { rows: Object.entries(funds).map(([id, balances]) => ({ id, balances })), next: reply.next ?? null };
+	}
+
+	function registeredTokens(key: 'tokens' | 'nft_tokens') {
+		return async (): Promise<Page> => {
+			const reply = await read('treasury_view', { count: 1 });
+			if (!reply.ok) return reply.error;
+			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: null };
+		};
+	}
+
+	async function loadRealm(): Promise<Page> {
+		const [info, status] = await Promise.all([read('realm_info'), read('status')]);
+		if (!info.ok && !status.ok) return info.error;
+		const row = {
+			...(info.ok ? info.realm : {}),
+			...(status.ok
+				? { status: status.status, version: status.version, canister: status.canister, operations: status.operations }
+				: {}),
+		};
+		return { rows: [row], next: null };
+	}
+
+	function entity(className: string, load: EntityType['load']): EntityType {
+		return { value: className, label: `${getIcon(className)} ${formatLabel(className)}`, className, load };
+	}
+
+	const entityTypes: EntityType[] = [
+		entity('Department', listed('department_list', 'departments')),
+		entity('Dispute', listed('dispute_list_all', 'disputes')),
+		entity('Event', listed('events', 'events')),
+		entity('Fund', loadFunds),
+		entity('Invite', listed('invite_list', 'invites')),
+		entity('Land', listed('land_list', 'lands')),
+		entity('LedgerEntry', listed('ledger_view', 'entries')),
+		entity('License', listed('license_list', 'licenses')),
+		entity('NFTToken', registeredTokens('nft_tokens')),
+		entity('Organization', listed('organization_list', 'organizations')),
+		entity('Proposal', listed('proposal_list', 'proposals')),
+		entity('Realm', loadRealm),
+		entity('Task', listed('task_list', 'tasks')),
+		entity('Tender', listed('tender_list', 'tenders')),
+		entity('Token', registeredTokens('tokens')),
+		entity('User', listed('user_list', 'users')),
+	];
+
+	function titleOf(item: any): string {
+		for (const key of ['name', 'title', 'nickname', 'op', 'description']) {
+			if (typeof item?.[key] === 'string' && item[key]) return item[key];
+		}
+		return '';
+	}
+
+	function shown(value: unknown): string {
+		if (value == null || value === '') return '—';
+		return typeof value === 'object' ? JSON.stringify(value) : String(value);
 	}
 
 	// ── Browse ──
 
-	async function loadData() {
+	async function loadData(pageIndex = 0) {
+		const type = entityTypes.find((t) => t.value === selectedType);
+		if (!type) return;
+		const seq = ++requestSeq;
 		objLoading = true;
 		expandedItem = null;
-		try {
-			const raw = await ctx.backend.get_objects_paginated(selectedType, currentPage, pageSize, 'desc');
-			const resp = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const { objects, pagination } = parseEntities(resp);
-			items = objects;
-			if (pagination) {
-				totalItems = Number(pagination.total_items || 0);
-				totalPages = Number(pagination.total_pages || 0);
-			} else {
-				totalItems = objects.length;
-				totalPages = 1;
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-			items = [];
-		} finally {
-			objLoading = false;
+		accessDeniedOp = null;
+		unavailable = false;
+
+		let page = await type.load(cursors[pageIndex] ?? null);
+		// Id-range pages can come back empty (deleted rows): follow `next` to the next rows.
+		for (let hops = 0; typeof page !== 'string' && page.rows.length === 0 && page.next != null && hops < MAX_HOPS; hops++) {
+			page = await type.load(page.next);
 		}
+		if (seq !== requestSeq) return;
+
+		if (typeof page === 'string') {
+			console.warn(`[admin_dashboard] ${type.value}:`, page);
+			const needs = page.match(ACCESS_REFUSAL);
+			if (needs || page === 'sign in first') accessDeniedOp = needs?.[1] ?? '';
+			else unavailable = true;
+			items = [];
+			nextCursor = null;
+		} else {
+			items = page.rows;
+			nextCursor = page.next;
+			currentPage = pageIndex;
+			cursors = [...cursors.slice(0, pageIndex + 1), page.next];
+		}
+		objLoading = false;
 	}
 
 	function toggleExpand(index: number) {
 		expandedItem = expandedItem === index ? null : index;
 	}
 
-	function copyJSON(item: any) {
-		navigator.clipboard.writeText(JSON.stringify(item, null, 2));
-		addToast('JSON copied to clipboard');
-	}
-
-	function goToPage(page: number) {
-		currentPage = page;
-		loadData();
-	}
-
-	// ── Delete ──
-
-	function requestDelete(item: any) {
-		confirmDeleteItem = item;
-	}
-
-	function cancelDelete() {
-		confirmDeleteItem = null;
-	}
-
-	async function executeDelete() {
-		if (!confirmDeleteItem) return;
-		const item = confirmDeleteItem;
-		const entityType = item._type || selectedType;
-		const entityId = item._id || item.id;
-		confirmDeleteItem = null;
-		deletingId = String(entityId);
-
+	async function copyJSON(item: any) {
 		try {
-			const result = await callExt('delete_entity', {
-				entity_type: entityType,
-				entity_id: String(entityId),
-			});
-			if (result?.success) {
-				items = items.filter(i => !((i._id || i.id) === entityId && (i._type || selectedType) === entityType));
-				totalItems = Math.max(0, totalItems - 1);
-				addToast(`Deleted ${entityType}#${entityId}`);
-			} else {
-				addToast(result?.error || 'Delete failed', 'error');
-			}
-		} catch (e: any) {
-			addToast(`Delete error: ${e?.message}`, 'error');
-		} finally {
-			deletingId = null;
+			await navigator.clipboard.writeText(JSON.stringify(item, null, 2));
+			addToast('JSON copied to clipboard');
+		} catch {
+			addToast('Copying is not available in this browser', 'warning');
 		}
 	}
 
+	function goToPage(page: number) {
+		loadData(page);
+	}
+
 	$effect(() => {
-		loadEntityTypes();
+		selectedType;
+		untrack(() => {
+			cursors = [null];
+			currentPage = 0;
+			loadData(0);
+		});
 	});
 </script>
-
-<!-- Delete confirmation modal -->
-{#if confirmDeleteItem}
-	<div class="fixed inset-0 bg-black/50 z-40 flex items-center justify-center">
-		<div class="bg-white rounded-xl shadow-xl p-6 max-w-md mx-4">
-			<h3 class="text-lg font-bold text-gray-900 mb-2">Confirm Delete</h3>
-			<p class="text-gray-600 mb-4">
-				Are you sure you want to delete <strong>{confirmDeleteItem._type || selectedType}#{confirmDeleteItem._id || confirmDeleteItem.id}</strong>?
-				{#if confirmDeleteItem.name}
-					<br><span class="text-gray-500">({confirmDeleteItem.name})</span>
-				{/if}
-			</p>
-			<p class="text-red-600 text-sm mb-4">This action cannot be undone.</p>
-			<div class="flex justify-end gap-3">
-				<button
-					onclick={cancelDelete}
-					class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
-				>Cancel</button>
-				<button
-					onclick={executeDelete}
-					class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-				>Delete</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 <div class="w-full px-4 max-w-none">
 	<!-- Header -->
@@ -227,8 +205,8 @@
 			<p class="text-gray-600 mt-1">{extensionDescription}</p>
 		</div>
 		<button
-			onclick={() => loadEntityTypes()}
-			disabled={loading}
+			onclick={() => loadData(currentPage)}
+			disabled={objLoading}
 			class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
 			title="Refresh"
 		>
@@ -238,51 +216,38 @@
 		</button>
 	</div>
 
-	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
-	{:else if error}
-		<div class="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm">
-			{error}
-			<button onclick={() => error = ''} class="ml-2 text-red-600 hover:text-red-800 font-bold">&times;</button>
-		</div>
+	{#if accessDeniedOp !== null}
+		<AccessDenied operation={accessDeniedOp} />
 	{/if}
 
 	<!-- Entity type selector -->
 	<div class="mb-4 bg-white shadow-sm rounded-lg p-4">
 		<div class="flex items-center gap-4 flex-wrap">
 			<label for="entity-type-select" class="font-medium text-gray-700">Entity Type:</label>
-			{#if loading}
-				<div class="flex items-center gap-2 text-gray-400 text-sm">
-					<div class="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-					Loading types…
-				</div>
-			{:else}
-				<select
-					id="entity-type-select"
-					bind:value={selectedType}
-					class="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-				>
-					{#each entityTypes as type}
-						<option value={type.value}>{type.label}</option>
-					{/each}
-				</select>
-			{/if}
+			<select
+				id="entity-type-select"
+				bind:value={selectedType}
+				class="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+			>
+				{#each entityTypes as type}
+					<option value={type.value}>{type.label}</option>
+				{/each}
+			</select>
 		</div>
+		<p class="mt-3 text-xs text-gray-500">
+			Records are read-only here. Only record types the realm offers a list for are shown.
+		</p>
 	</div>
 
 	<div class="mb-4 flex items-center gap-4">
 			<button
-				onclick={loadData}
+				onclick={() => loadData(0)}
 				disabled={objLoading}
 				class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 			>{objLoading ? 'Loading…' : 'Load Data'}</button>
 			<div class="ml-auto text-gray-600 text-sm">
 				{#if items.length > 0}
-					Showing {items.length} of {totalItems} items
+					Showing {items.length} {items.length === 1 ? 'item' : 'items'}{nextCursor != null ? ' (more on the next page)' : ''}
 				{/if}
 			</div>
 		</div>
@@ -295,7 +260,15 @@
 				</div>
 			{:else if items.length === 0}
 				<div class="text-center py-10 p-6">
-					<p class="text-gray-500 text-lg">No items loaded. Select an entity type and click "Load Data".</p>
+					<p class="text-gray-500 text-lg">
+						{#if accessDeniedOp !== null}
+							Nothing to show.
+						{:else if unavailable}
+							This list isn't available right now.
+						{:else}
+							No items found.
+						{/if}
+					</p>
 				</div>
 			{:else}
 				<div class="divide-y divide-gray-200">
@@ -309,10 +282,10 @@
 											class="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
 										>
 											{expandedItem === index ? '▼' : '▶'}
-											{item._type || selectedType} #{item._id || item.id || index + 1}
+											{selectedType} #{item.id || currentPage * pageSize + index + 1}
 										</button>
-										{#if item.name}
-											<span class="text-gray-700 truncate">- {item.name}</span>
+										{#if titleOf(item)}
+											<span class="text-gray-700 truncate">- {titleOf(item)}</span>
 										{/if}
 									</div>
 								</div>
@@ -327,16 +300,6 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
 										</svg>
 									</button>
-									<button
-										onclick={() => requestDelete(item)}
-										disabled={deletingId === String(item._id || item.id)}
-										class="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition-colors disabled:opacity-50"
-										title="Delete entity"
-									>
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-										</svg>
-									</button>
 								</div>
 							</div>
 
@@ -347,7 +310,7 @@
 											<div class="min-w-0">
 												<span class="font-semibold text-gray-700">{key}:</span>
 												<span class="text-gray-600 ml-2 break-all">
-													{typeof value === 'object' ? JSON.stringify(value) : String(value)}
+													{shown(value)}
 												</span>
 											</div>
 										{/each}
@@ -365,32 +328,27 @@
 				</div>
 
 				<!-- Pagination Controls -->
-				{#if totalPages > 1}
+				{#if currentPage > 0 || nextCursor != null}
 					<div class="border-t border-gray-200 p-4 flex items-center justify-between">
 						<div class="flex items-center gap-2">
 							<button
 								onclick={() => goToPage(0)}
-								disabled={currentPage === 0}
+								disabled={currentPage === 0 || objLoading}
 								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
 							>First</button>
 							<button
 								onclick={() => goToPage(currentPage - 1)}
-								disabled={currentPage === 0}
+								disabled={currentPage === 0 || objLoading}
 								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
 							>Prev</button>
 						</div>
-						<span class="text-sm text-gray-600">Page {currentPage + 1} of {totalPages}</span>
+						<span class="text-sm text-gray-600">Page {currentPage + 1}</span>
 						<div class="flex items-center gap-2">
 							<button
 								onclick={() => goToPage(currentPage + 1)}
-								disabled={currentPage >= totalPages - 1}
+								disabled={nextCursor == null || objLoading}
 								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
 							>Next</button>
-							<button
-								onclick={() => goToPage(totalPages - 1)}
-								disabled={currentPage >= totalPages - 1}
-								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-							>Last</button>
 						</div>
 					</div>
 				{/if}

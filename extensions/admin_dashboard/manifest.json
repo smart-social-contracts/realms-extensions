@@ -1,8 +1,25 @@
 {
   "name": "admin_dashboard",
-  "version": "1.3.0",
-  "description": "Look up anything stored in your realm by type, open records to read their details, copy them for reference, and remove items you no longer need when you have permission.",
+  "version": "1.4.0",
+  "description": "Look up what is stored in your realm by type, open records to read their details, and copy them for reference.",
   "author": "Realms Team",
+  "operations": [
+    "status",
+    "realm_info",
+    "user_list",
+    "invite_list",
+    "department_list",
+    "organization_list",
+    "proposal_list",
+    "task_list",
+    "treasury_view",
+    "ledger_view",
+    "land_list",
+    "license_list",
+    "tender_list",
+    "dispute_list_all",
+    "events"
+  ],
   "categories": [
     "realm_management"
   ],
@@ -22,12 +39,5 @@
     "admin"
   ],
   "show_in_sidebar": true,
-  "icon": "search",
-  "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "get_entity_types": "db.export",
-      "delete_entity": "db.manage"
-    }
-  }
+  "icon": "search"
 }
