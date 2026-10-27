@@ -8,16 +8,23 @@
 	let aiAssistantEnabled = $derived(ctx.config?.aiAssistantEnabled !== false);
 
 	interface Codex {
-		_id: string;
-		id?: string;
+		/** The realm's codex key, `<package>@<version>`. */
+		id: string;
+		/** The package id in the file registry (namespace `ext/<package>/<version>`). */
+		package: string;
 		name: string;
 		description?: string;
-		code_preview?: string;
 		code?: string;
-		source?: string;
 		version?: string;
-		created_at?: number | null;
-		updated_at?: number | null;
+		status?: string;
+		installed_at?: number | null;
+	}
+
+	interface HistoryRow {
+		id?: string;
+		version?: string;
+		status?: string;
+		installed_at?: number | null;
 	}
 
 	const MONACO_THEME = 'vs';
@@ -27,6 +34,8 @@
 	const WORD_WRAP_KEY = 'codex-viewer-word-wrap';
 	const MINIMAP_KEY = 'codex-viewer-minimap';
 	const NARROW_VIEWPORT = '(max-width: 720px)';
+	const REGISTRY_TIMEOUT_MS = 20_000;
+	const MAX_HISTORY_PAGES = 20;
 
 	function isNarrowViewport(): boolean {
 		if (typeof window === 'undefined') return false;
@@ -60,17 +69,18 @@
 		persistSessionFlag(SIDEBAR_COLLAPSED_KEY, collapsed);
 	}
 
-	let codexes: Codex[] = $state([]);
+	let codexes = $state<Codex[]>([]);
 	let loading = $state(true);
-	let error = $state('');
-	let accessDeniedOp = $state('');
+	let unavailable = $state(false);
 	let searchTerm = $state('');
-	let selectedCodex: Codex | null = $state(null);
+	let selectedCodex = $state<Codex | null>(null);
 	let detailLoading = $state(false);
 	let copied = $state(false);
 	let linkCopied = $state(false);
-	let currentSelection: SelectionInfo | null = $state(null);
-	let initialRange: LineRange | null = $state(null);
+	let currentSelection = $state<SelectionInfo | null>(null);
+	let initialRange = $state<LineRange | null>(null);
+	const sourceCache = new Map<string, string>();
+	let registryId: string = $derived(ctx.config?.fileRegistryCanisterId || '');
 	let pendingExplainOnLoad = $state(false);
 	let urlSyncTimer: ReturnType<typeof setTimeout> | undefined;
 	let sidebarCollapsed = $state(readSidebarCollapsed());
@@ -90,22 +100,87 @@
 			: codexes,
 	);
 
-	let editorCode = $derived(
-		selectedCodex
-			? unescapeCode(selectedCodex.code || selectedCodex.source || selectedCodex.code_preview)
-			: '',
-	);
+	let editorCode = $derived(selectedCodex?.code ?? '');
 
 	let explainButtonLabel = $derived(
 		currentSelection?.text?.trim() ? 'Explain selection' : 'Explain codex',
 	);
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	/** A realm read operation's reply, or null when it fails or is not available to the caller. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		try {
+			const reply = await ctx.read(name, args);
+			if (reply?.ok) return reply;
+			console.warn(`${name}:`, reply?.error);
+		} catch (e) {
+			console.warn(`${name} failed:`, e);
+		}
+		return null;
+	}
+
+	// Same URL scheme the host uses to load extension bundles from the file registry.
+	function registryBaseUrl(canisterId: string): string {
+		const host = window.location.host;
+		if (host.includes('localhost') || host.includes('127.0.0.1')) {
+			return `http://${canisterId}.localhost:${host.split(':')[1] ?? '4943'}`;
+		}
+		return `https://${canisterId}.icp0.io`;
+	}
+
+	/** A file of a published codex package as text, or null when it cannot be fetched. */
+	async function registryFile(codex: Codex, path: string): Promise<string | null> {
+		if (!registryId || !codex.package || !codex.version) return null;
+		const url = `${registryBaseUrl(registryId)}/ext/${encodeURIComponent(codex.package)}/${encodeURIComponent(codex.version)}/${path}`;
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), REGISTRY_TIMEOUT_MS);
+		try {
+			const resp = await fetch(url, { signal: controller.signal });
+			return resp.ok ? await resp.text() : null;
+		} catch (e) {
+			console.warn(`${path} of ${codex.id}:`, e);
+			return null;
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	function toCodex(row: HistoryRow): Codex | null {
+		const id = String(row.id ?? '');
+		if (!id) return null;
+		const at = id.lastIndexOf('@');
+		const pkg = at > 0 ? id.slice(0, at) : id;
+		return {
+			id,
+			package: pkg,
+			name: pkg,
+			version: row.version || (at > 0 ? id.slice(at + 1) : undefined),
+			status: row.status,
+			installed_at: row.installed_at ?? null,
+		};
+	}
+
+	/** Name and description from each package's manifest.json; best effort, the list works without them. */
+	async function enrichFromManifests(list: Codex[]) {
+		await Promise.all(
+			list.map(async (codex) => {
+				const text = await registryFile(codex, 'manifest.json');
+				if (!text) return;
+				try {
+					const manifest = JSON.parse(text);
+					const patch: Partial<Codex> = {};
+					if (typeof manifest?.name === 'string' && manifest.name) patch.name = manifest.name;
+					if (typeof manifest?.description === 'string') patch.description = manifest.description;
+					codexes = codexes.map((c) => (c.id === codex.id ? { ...c, ...patch } : c));
+					if (selectedCodex?.id === codex.id) selectedCodex = { ...selectedCodex, ...patch };
+				} catch {
+					/* not a JSON manifest */
+				}
+			}),
+		);
 	}
 
 	function getCodexId(codex: Codex): string {
-		return codex._id || codex.id || codex.name || '';
+		return codex.id || codex.name || '';
 	}
 
 	function parseLinesParam(lines: string | null): LineRange | null {
@@ -214,6 +289,7 @@
 
 		const match =
 			codexes.find((c) => getCodexId(c) === codexParam) ??
+			codexes.find((c) => c.package === codexParam && c.status === 'active') ??
 			codexes.find((c) => c.name === codexParam);
 		if (match) {
 			await selectCodex(match, { skipUrlSync: true });
@@ -222,23 +298,34 @@
 
 	async function loadCodexes() {
 		loading = true;
-		error = '';
-		accessDeniedOp = '';
+		unavailable = false;
 		try {
-			const res = await callExt('get_all_codexes');
-			codexes = res?.codexes ?? res?.data ?? (Array.isArray(res) ? res : []);
+			const rows: HistoryRow[] = [];
+			let from: number | null = 1;
+			for (let i = 0; from && i < MAX_HISTORY_PAGES; i++) {
+				const status = await read('codex_status', { from, count: 100 });
+				if (!status) {
+					unavailable = i === 0;
+					break;
+				}
+				rows.push(...((status.history ?? []) as HistoryRow[]));
+				if (i === 0 && status.codex) rows.push(status.codex as HistoryRow);
+				from = typeof status.next === 'number' ? status.next : null;
+			}
+			const byId = new Map<string, Codex>();
+			for (const row of rows) {
+				const codex = toCodex(row);
+				if (codex && !byId.has(codex.id)) byId.set(codex.id, codex);
+			}
+			codexes = [...byId.values()].sort(
+				(a, b) =>
+					Number(b.status === 'active') - Number(a.status === 'active') ||
+					Number(b.installed_at ?? 0) - Number(a.installed_at ?? 0),
+			);
+			void enrichFromManifests(codexes);
 			await applyUrlState();
 			if (!selectedCodex && codexes.length > 0) {
 				await selectCodex(codexes[0]);
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
 			}
 		} finally {
 			loading = false;
@@ -249,7 +336,7 @@
 		codex: Codex,
 		opts: { skipUrlSync?: boolean; preserveRange?: boolean } = {},
 	) {
-		if (selectedCodex && getCodexId(selectedCodex) === getCodexId(codex) && selectedCodex.code) {
+		if (selectedCodex && getCodexId(selectedCodex) === getCodexId(codex) && selectedCodex.code != null) {
 			if (!opts.preserveRange) {
 				currentSelection = null;
 				if (!opts.skipUrlSync) initialRange = null;
@@ -260,45 +347,30 @@
 		}
 
 		detailLoading = true;
-		error = '';
-		accessDeniedOp = '';
 		if (!opts.preserveRange) {
 			currentSelection = null;
 			if (!opts.skipUrlSync) initialRange = null;
 		}
+		selectedCodex = codex;
 
-		try {
-			const codexId = getCodexId(codex);
-			const res = await callExt('get_codex_details', { codex_id: codexId });
-			const detail = res?.codex ?? res?.data ?? res;
-			if (detail && typeof detail === 'object' && (detail.code || detail.name)) {
-				selectedCodex = detail;
-			} else {
-				selectedCodex = codex;
-			}
-		} catch {
-			selectedCodex = codex;
-		} finally {
-			detailLoading = false;
-			publishFocus(selectedCodex, currentSelection);
-			if (!opts.skipUrlSync) syncUrlFromState(selectedCodex, currentSelection);
-			maybeTriggerExplainOnLoad();
+		let code = sourceCache.get(codex.id);
+		if (code === undefined) {
+			code = (await registryFile(codex, 'backend/hooks.py')) ?? '';
+			if (code) sourceCache.set(codex.id, code);
 		}
+		if (selectedCodex?.id !== codex.id) return;
+		const current: Codex = { ...selectedCodex, code };
+		selectedCodex = current;
+		detailLoading = false;
+		publishFocus(current, currentSelection);
+		if (!opts.skipUrlSync) syncUrlFromState(current, currentSelection);
+		maybeTriggerExplainOnLoad();
 	}
 
 	function maybeTriggerExplainOnLoad() {
 		if (!pendingExplainOnLoad || !aiAssistantEnabled) return;
 		pendingExplainOnLoad = false;
 		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
-	}
-
-	function unescapeCode(code: string | undefined | null): string {
-		if (!code) return '';
-		return code
-			.replace(/\\n/g, '\n')
-			.replace(/\\t/g, '\t')
-			.replace(/\\"/g, '"')
-			.replace(/\\\\/g, '\\');
 	}
 
 	function isSelected(codex: Codex): boolean {
@@ -412,19 +484,6 @@
 {/snippet}
 
 <div class="codex-workspace">
-	{#if accessDeniedOp}
-		<div class="codex-denied">
-			{#if ctx.ui?.AccessDenied}
-				<p class="access-denied-msg">You need additional permissions to view this page.</p>
-			{:else}
-				<p>You need additional permissions to view this page.</p>
-			{/if}
-		</div>
-	{:else if error}
-		<div class="codex-denied">
-			<div class="error-banner">{error}</div>
-		</div>
-	{:else}
 		{#if !sidebarCollapsed}
 		<aside class="codex-sidebar" id="codex-file-list">
 			<div class="sidebar-header">
@@ -476,7 +535,11 @@
 					<div class="list-loading">Loading codexes…</div>
 				{:else if filteredCodexes.length === 0}
 					<div class="list-empty">
-						{searchTerm ? 'No codexes match your search' : 'No codexes found'}
+						{#if unavailable}
+							Codex information is not available to you.
+						{:else}
+							{searchTerm ? 'No codexes match your search' : 'No codexes found'}
+						{/if}
 					</div>
 				{:else}
 					{#each filteredCodexes as codex (getCodexId(codex))}
@@ -504,6 +567,9 @@
 						<span class="badge badge-lang">{MONACO_LANGUAGE}</span>
 						{#if selectedCodex.version}
 							<span class="badge badge-version">v{selectedCodex.version}</span>
+						{/if}
+						{#if selectedCodex.status}
+							<span class="badge badge-status">{selectedCodex.status}</span>
 						{/if}
 					</div>
 					<div class="toolbar-actions">
@@ -647,7 +713,11 @@
 							/>
 						{/key}
 					{:else}
-						<div class="monaco-loading">No code available for this codex.</div>
+						<div class="monaco-loading">
+							{registryId
+								? 'No code available for this codex.'
+								: 'Codex source is not available in this view.'}
+						</div>
 					{/if}
 				</div>
 			{:else}
@@ -671,7 +741,6 @@
 				</div>
 			{/if}
 		</main>
-	{/if}
 </div>
 
 <style>
@@ -683,20 +752,6 @@
 		background: #fff;
 		border-top: 1px solid #e5e7eb;
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-	}
-
-	.codex-denied {
-		padding: 24px;
-		width: 100%;
-	}
-
-	.error-banner {
-		padding: 12px 16px;
-		background: #fef2f2;
-		border: 1px solid #fecaca;
-		color: #b91c1c;
-		border-radius: 8px;
-		font-size: 0.875rem;
 	}
 
 	/* Sidebar */
@@ -921,6 +976,12 @@
 	.badge-version {
 		background: #dcfce7;
 		color: #166534;
+	}
+
+	.badge-status {
+		background: #f3f4f6;
+		color: #374151;
+		text-transform: capitalize;
 	}
 
 	.toolbar-actions {
