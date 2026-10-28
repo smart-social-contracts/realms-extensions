@@ -19,7 +19,7 @@ test('the form refuses a proposal without a title or description', async ({ page
   }
 });
 
-test('a member submits a proposal and votes yes on it', async ({ page }) => {
+test('a member submits a proposal, votes yes on it, and it is executed', async ({ page }) => {
   const title = `E2E poll ${Date.now()}`;
   const { ext, close } = await openExtension(page, 'voting');
   try {
@@ -33,7 +33,11 @@ test('a member submits a proposal and votes yes on it', async ({ page }) => {
     const card = ext.getByText(title).locator('xpath=ancestor::div[.//button[normalize-space()="Yes"]][1]');
     await expect(card.getByText(/Y:0\b/)).toBeVisible({ timeout: 60_000 });
     await card.getByRole('button', { name: 'Yes' }).click();
-    await expect(card.getByText(/Y:1\b/)).toBeVisible({ timeout: 60_000 });
+
+    // The admin is the realm's only voter, so one yes passes the poll and it is executed at once.
+    const done = ext.locator('div').filter({ hasText: title }).filter({ hasText: 'Executed' });
+    await expect(done.first()).toBeVisible({ timeout: 60_000 });
+    await expect(ext.getByRole('button', { name: 'Yes' })).toHaveCount(0);
   } finally {
     await close();
   }
