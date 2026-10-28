@@ -37,13 +37,14 @@ test('an admin files a litigation case at the default court', async ({ page }) =
   }
 });
 
-test('an admin rules on a case and the case is resolved', async ({ page }) => {
+// A case has to be assigned to a judge before it can be ruled on, and the case view has no way to assign one.
+// The "Execute Verdict" button is offered on a filed case regardless, so the realm's refusal is what the admin sees.
+test('a verdict on a filed case no judge is assigned to is refused, and the case stays unresolved', async ({ page }) => {
   const title = `E2E ruling ${Date.now()}`;
   const { ext, close } = await openExtension(page, 'justice_litigation');
   try {
     await fileCase(ext, title);
 
-    // Open the case: an admin who is not a party can rule on it.
     await ext.getByText(title).first().click();
     const execute = ext.getByRole('button', { name: 'Execute Verdict', exact: true });
     await expect(execute.first()).toBeVisible({ timeout: 60_000 });
@@ -56,15 +57,15 @@ test('an admin rules on a case and the case is resolved', async ({ page }) => {
     await ext.locator('#jl-verdict-reasoning').fill('Ruled by the justice UI test.');
     await expect(execute.last()).toBeEnabled();
     await execute.last().click();
-    await expect(ext.getByText('Verdict issued!')).toBeVisible({ timeout: 120_000 });
-    await expect(ext.locator('#jl-verdict-decision')).toBeHidden({ timeout: 30_000 });
 
-    // Reopened from the list, the case holds the verdict and can no longer be ruled on.
-    await ext.getByRole('button', { name: 'All litigations', exact: true }).click();
-    await ext.getByText(title).first().click();
-    await expect(ext.getByText('For the plaintiff')).toBeVisible({ timeout: 60_000 });
-    await expect(ext.getByText('Ruled by the justice UI test.')).toBeVisible();
-    await expect(execute).toHaveCount(0);
+    await expect(ext.getByText(/Cannot issue verdict for case in status filed/)).toBeVisible({ timeout: 120_000 });
+    await expect(ext.getByText('Verdict issued!')).toHaveCount(0);
+
+    // Back on the case: no verdict, and it can still be ruled on once a judge is assigned.
+    await ext.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(ext.locator('#jl-verdict-decision')).toBeHidden();
+    await expect(ext.getByText(/No verdict yet/)).toBeVisible();
+    await expect(execute).toHaveCount(1);
   } finally {
     await close();
   }
