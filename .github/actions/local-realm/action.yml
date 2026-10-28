@@ -39,7 +39,7 @@ runs:
       run: |
         codex_dir="$RUNNER_TEMP/ci-codex"
         (cd "$RUNNER_TEMP" && realms new codex ci-codex)
-        codex_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$codex_dir/manifest.json")
+        codex_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$codex_dir/manifest.json")
         realms local publish "${{ inputs.extension }}" "$codex_dir" --install
         realms local setup --codex "$codex_id"
         realms local status --json
