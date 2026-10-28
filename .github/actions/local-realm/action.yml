@@ -9,7 +9,7 @@ inputs:
     description: Directory of the extension under test, relative to the repository root
     required: true
   realms-version:
-    description: Realms release to run ("latest", or a tag such as v0.7.0)
+    description: Realms release to run ("latest", "newest" for the newest release including pre-releases, or a tag such as v0.7.0)
     default: latest
   cli-version:
     description: realms-gos version on PyPI (empty = the latest, pre-releases included)
@@ -32,7 +32,17 @@ runs:
 
     - name: Start the local realm
       shell: bash
-      run: realms local start --version "${{ inputs.realms-version }}" --yes
+      run: |
+        version="$REALMS_VERSION"
+        if [ "$version" = "newest" ]; then
+          # `latest` skips pre-releases, so an extension that needs the next realm only fails against this
+          version=$(gh release list --repo smart-social-contracts/realms-gos --limit 1 --json tagName --jq '.[0].tagName')
+        fi
+        echo "Realms release: $version"
+        realms local start --version "$version" --yes
+      env:
+        REALMS_VERSION: ${{ inputs.realms-version }}
+        GH_TOKEN: ${{ github.token }}
 
     - uses: actions/setup-node@v4
       with:

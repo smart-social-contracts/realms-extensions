@@ -17,10 +17,14 @@ on:
       - 'extensions/_shared/testing/e2e/**'
       - '.github/actions/local-realm/**'
       - '.github/workflows/justice-local-e2e.yml'
+  schedule:
+    # Nightly against the newest realm release, pre-releases included: the break to catch is an extension
+    # that no longer loads on the realm about to ship
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       realms_version:
-        description: 'Realms release to run (latest, or a tag)'
+        description: 'Realms release to run (latest, newest including pre-releases, or a tag)'
         default: latest
         type: string
 
@@ -39,7 +43,7 @@ jobs:
         uses: ./.github/actions/local-realm
         with:
           extension: extensions/justice_litigation
-          realms-version: ${{ inputs.realms_version || 'latest' }}
+          realms-version: ${{ inputs.realms_version || (github.event_name == 'schedule' && 'newest' || 'latest') }}
 
       - name: Install the test dependencies
         run: |
