@@ -1,0 +1,45 @@
+name: Local realm
+description: >
+  Start a realm on the runner with `realms local start` (icp-cli + PocketIC, the released canisters, no
+  Casals or dfx), publish the extension under test, and launch the realm with a minimal codex.
+  Afterwards `realms local status --json` gives the realm's URL and canister ids.
+
+inputs:
+  extension:
+    description: Directory of the extension under test, relative to the repository root
+    required: true
+  realms-version:
+    description: Realms release to run ("latest", or a tag such as v0.7.0)
+    default: latest
+  cli-version:
+    description: realms-gos version on PyPI (empty = the latest, pre-releases included)
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install the realms CLI
+      shell: bash
+      run: |
+        pipx install --pip-args=--pre "realms-gos${CLI_VERSION:+==$CLI_VERSION}"
+        realms local --help > /dev/null
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+
+    - name: Start the local realm
+      shell: bash
+      run: realms local start --version "${{ inputs.realms-version }}" --yes
+
+    - name: Publish the extension and a minimal codex, then launch
+      shell: bash
+      run: |
+        codex_dir="$RUNNER_TEMP/ci-codex"
+        (cd "$RUNNER_TEMP" && realms new codex ci-codex)
+        codex_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$codex_dir/manifest.json")
+        realms local publish "${{ inputs.extension }}" "$codex_dir" --install
+        realms local setup --codex "$codex_id"
+        realms local status --json
