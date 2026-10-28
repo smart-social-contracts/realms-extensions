@@ -20,8 +20,8 @@ on:
   workflow_dispatch:
     inputs:
       realms_version:
-        description: 'Realms release to run (latest, or a tag)'
-        default: latest
+        description: 'Realms release to run (a tag, or latest)'
+        default: v0.8.0-rc2
         type: string
 
 jobs:
@@ -39,7 +39,8 @@ jobs:
         uses: ./.github/actions/local-realm
         with:
           extension: extensions/tax_manager
-          realms-version: ${{ inputs.realms_version || 'latest' }}
+          # tax_manager declares capabilities that v0.7.0 (the latest release) cannot load; v0.8.0-rc2 can.
+          realms-version: ${{ inputs.realms_version || 'v0.8.0-rc2' }}
 
       - name: Install the test dependencies
         run: |
