@@ -68,7 +68,7 @@ function hostHtml(status: LocalStatus, path: string): string {
 }
 
 export interface OpenedExtension {
-  /** The extension's own (sandboxed) frame. */
+  /** Where the extension's UI is: its own sandboxed frame, or the realm's frame when it is not sandboxed. */
   ext: FrameLocator;
   /** The realm's frame around it. */
   realm: FrameLocator;
@@ -102,8 +102,15 @@ export async function openExtension(page: Page, id: string, path = `/extensions/
   await page.goto(`http://localhost:${(server.address() as AddressInfo).port}/`);
 
   const realm = page.frameLocator('#realm');
+  // A sandboxed extension runs in a frame of its own, inside the realm's; any other renders in the realm's frame.
+  const sandbox = realm.locator(`iframe[title="Extension ${id}"]`);
+  const inRealm = realm.locator(`[data-extension-id="${id}"]`);
+  const deadline = Date.now() + 120_000;
+  while ((await sandbox.count()) === 0 && (await inRealm.count()) === 0 && Date.now() < deadline) {
+    await page.waitForTimeout(1_000);
+  }
   return {
-    ext: realm.frameLocator(`iframe[title="Extension ${id}"]`),
+    ext: (await sandbox.count()) > 0 ? realm.frameLocator(`iframe[title="Extension ${id}"]`) : realm,
     realm,
     user,
     principal,
