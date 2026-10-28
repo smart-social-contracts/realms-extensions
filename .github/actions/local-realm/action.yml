@@ -34,6 +34,19 @@ runs:
       shell: bash
       run: realms local start --version "${{ inputs.realms-version }}" --yes
 
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Build the extension's frontend
+      # Without this the realm would run the copy of the extension it ships with, not this checkout's.
+      shell: bash
+      run: |
+        dir="${{ inputs.extension }}/frontend-rt"
+        if [ -f "$dir/package.json" ]; then
+          (cd "$dir" && npm install --no-audit --no-fund && npm run build && ls -la dist)
+        fi
+
     - name: Publish the extension and a minimal codex, then launch
       shell: bash
       run: |
