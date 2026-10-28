@@ -1,19 +1,17 @@
 import { expect, test } from '@playwright/test';
 import { openExtension, randomPrincipal } from '../../../../_shared/testing/e2e/local-realm';
 
-// A realm launched with a minimal codex has no courts: the admin sets up the default one from the form,
-// then files a case against another party. Checked through the extension's own UI.
+// The admin files a case at the default court against another party. Checked through the extension's own UI.
 
-test('an admin sets up the default court and files a litigation case', async ({ page }) => {
+test('an admin files a litigation case at the default court', async ({ page }) => {
   const title = `E2E case ${Date.now()}`;
   const { ext, close } = await openExtension(page, 'justice_litigation');
   try {
     await ext.getByRole('button', { name: 'Create litigation' }).click({ timeout: 120_000 });
 
-    // No courts yet: the form says so, and the admin can set one up.
-    await expect(ext.getByText('This realm has no courts yet.')).toBeVisible({ timeout: 60_000 });
-    await ext.getByRole('button', { name: 'Set up default court' }).click();
+    // The extension sets up a default court when it is installed, so the case has somewhere to be filed.
     await expect(ext.getByText(/Filing at:/)).toBeVisible({ timeout: 120_000 });
+    await expect(ext.getByText('Default Court').first()).toBeVisible();
 
     // Nothing to file without a defendant, a title and a description.
     const create = ext.getByRole('button', { name: 'Create Litigation' });
