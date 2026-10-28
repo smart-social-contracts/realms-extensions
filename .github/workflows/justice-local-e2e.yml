@@ -1,0 +1,63 @@
+name: Justice UI test (local realm)
+
+# Starts a realm on the runner with `realms local start`, installs the justice_litigation extension from this checkout
+# and drives its UI in Playwright, checking the realm's own state afterwards. Needs no shared test realm.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/justice_litigation/**'
+      - 'extensions/_shared/testing/e2e/**'
+      - '.github/actions/local-realm/**'
+      - '.github/workflows/justice-local-e2e.yml'
+  pull_request:
+    paths:
+      - 'extensions/justice_litigation/**'
+      - 'extensions/_shared/testing/e2e/**'
+      - '.github/actions/local-realm/**'
+      - '.github/workflows/justice-local-e2e.yml'
+  workflow_dispatch:
+    inputs:
+      realms_version:
+        description: 'Realms release to run (latest, or a tag)'
+        default: latest
+        type: string
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Local realm with the justice_litigation extension
+        uses: ./.github/actions/local-realm
+        with:
+          extension: extensions/justice_litigation
+          realms-version: ${{ inputs.realms_version || 'latest' }}
+
+      - name: Install the test dependencies
+        run: |
+          npm install --no-audit --no-fund --prefix extensions/_shared/testing/e2e
+          npm install --no-audit --no-fund --prefix extensions/justice_litigation/tests/e2e
+          npx --prefix extensions/justice_litigation/tests/e2e playwright install --with-deps chromium
+
+      - name: Justice UI test
+        working-directory: extensions/justice_litigation/tests/e2e
+        run: npx playwright test
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: justice-local-e2e
+          path: |
+            extensions/justice_litigation/tests/e2e/playwright-report
+            extensions/justice_litigation/tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 14

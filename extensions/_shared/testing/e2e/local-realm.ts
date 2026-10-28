@@ -132,3 +132,8 @@ export async function readOp(name: string, args: Record<string, unknown> = {}): 
   });
   return JSON.parse(await actor.read(name, JSON.stringify(args)));
 }
+
+/** A principal nobody holds the key to: a party for a flow that needs another member's id. */
+export function randomPrincipal(): string {
+  return Ed25519KeyIdentity.generate().getPrincipal().toText();
+}
