@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
-	import {
-		planImportBatches,
-		IMPORT_BATCH_SIZE,
-		type ImportDependencyGraph,
-		type ImportRecord,
-	} from '../../../_shared/frontend/import-order.ts';
+	import type { ImportRecord } from '../../../_shared/frontend/import-order.ts';
+	import { ENTITY_TYPES } from './entities.ts';
 	import {
 		LETTER_BATCH,
 		emptyJob,
@@ -14,6 +10,7 @@
 		formatEta,
 		nextMintBatch,
 		parseCitizenRows,
+		type CitizenRow,
 		type LetterJobState,
 		type MintedLetter,
 	} from './letterJob.ts';
@@ -65,9 +62,10 @@
 	const citizenImportPlaceholder =
 		'[{"id":"cit-001","name":"Alice","address":"1 Main Street","quarter":"Q1"}]';
 
-	let entityTypes: string[] = $state([]);
-	let selectedType = $state('');
-	let importGraph: ImportDependencyGraph | null = $state(null);
+	const entityTypes = ENTITY_TYPES;
+	let selectedType = $state(ENTITY_TYPES[0]);
+	const USER_BATCH = 200;
+	const INVITE_SECONDS = 365 * 86400;
 
 	// Export
 	let exporting = $state(false);
@@ -80,7 +78,6 @@
 	let importPreview: ImportPreview | null = $state(null);
 	let importing = $state(false);
 	let importResult: any | null = $state(null);
-	let importProgress = $state({ batch: 0, total: 0, successful: 0, failed: 0 });
 	let fileInput: HTMLInputElement | undefined = $state();
 	let dragOver = $state(false);
 
@@ -99,40 +96,28 @@
 	}
 
 	// Citizen census
-	const CITIZEN_BATCH_SIZE = 200;
 	let citizenJson = $state('');
-	let citizenImporting = $state(false);
-	let citizenReport: any = $state(null);
-	let citizenProgress = $state({ batch: 0, total: 0 });
 	let citizenStatus: any = $state(null);
 	let pendingInvites: any[] = $state([]);
 	let pendingTotal = $state(0);
 	let pendingLoading = $state(false);
 	let showPending = $state(false);
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	async function call(name: string, args: Record<string, unknown> = {}, read = true) {
+		const res = await (read ? ctx.read(name, args) : ctx.run(name, args));
+		if (!res.ok) throw new Error(res.error);
+		return res;
 	}
 
-	async function loadMeta() {
-		try {
-			const [typesRes, graphRes, statusRes] = await Promise.all([
-				callExt('get_entity_types'),
-				callExt('get_import_type_graph'),
-				callExt('import_status'),
-			]);
-			entityTypes = typesRes?.data ?? [];
-			if (entityTypes.length && !selectedType) selectedType = entityTypes[0];
-			if (graphRes?.success && graphRes?.data) {
-				importGraph = {
-					dependencies: graphRes.data.dependencies || {},
-					fields: graphRes.data.fields || {},
-				};
-			}
-			if (statusRes?.success) citizenStatus = statusRes.data;
-		} catch (e: any) {
-			addToast(e?.message || 'Failed to load', 'error');
+	async function pages(name: string, args: Record<string, unknown>, key: string, read = true): Promise<any[]> {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const res = await call(name, { ...args, from, count: 500 }, read);
+			out.push(...res[key]);
+			from = res.next;
 		}
+		return out;
 	}
 
 	// ── Export ──
@@ -141,15 +126,15 @@
 		exporting = true;
 		exportResult = null;
 		try {
-			const result = await callExt('export_data', all
-				? { include_codexes: true }
-				: { entity_types: [selectedType], include_codexes: true });
-			if (result?.success && result?.data) {
-				exportResult = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
-				addToast(`Exported ${exportResult.total_entities ?? '?'} entities`);
-			} else {
-				addToast(result?.error || 'Export failed', 'error');
+			const entities: ImportRecord[] = [];
+			const codexes: ImportRecord[] = [];
+			for (const entity of all ? entityTypes : [selectedType]) {
+				for (const row of await pages('realm_export', { entity }, 'rows')) {
+					(entity === 'Codex' ? codexes : entities).push({ _type: entity, ...row });
+				}
 			}
+			exportResult = { entities, codexes, total_entities: entities.length, total_codexes: codexes.length };
+			addToast(`Exported ${entities.length} entities`);
 		} catch (e: any) {
 			addToast(e?.message || 'Export failed', 'error');
 		} finally {
@@ -245,71 +230,38 @@
 		}
 	}
 
+	/** This realm imports members only: User records become members with user_import, skipping known ones. */
 	async function executeEntityImport() {
 		if (!importPreview?.valid) return;
 		importing = true;
 		importResult = null;
 		try {
-			const allRecords: ImportRecord[] = [...importPreview.entities];
-			for (const codex of importPreview.codexes) allRecords.push({ ...codex, _type: 'Codex' });
-
-			let batches: ImportRecord[][] = [allRecords];
-			let sortWarnings: string[] = [];
-			if (importGraph && allRecords.length > 0) {
-				const plan = planImportBatches(allRecords, importGraph, IMPORT_BATCH_SIZE);
-				batches = plan.batches;
-				sortWarnings = plan.warnings;
-			} else if (allRecords.length > IMPORT_BATCH_SIZE) {
-				batches = [];
-				for (let i = 0; i < allRecords.length; i += IMPORT_BATCH_SIZE) {
-					batches.push(allRecords.slice(i, i + IMPORT_BATCH_SIZE));
-				}
+			const records = [...importPreview.entities, ...importPreview.codexes];
+			const users = importPreview.entities.filter((r) => r._type === 'User');
+			const known = new Set((await pages('user_list', {}, 'users')).map((u) => u.id));
+			const fresh = users.filter((u) => !known.has(String(u.id)));
+			const errors: string[] = [];
+			if (records.length > users.length) {
+				errors.push(`${records.length - users.length} records are not User records: importing them is not supported by this realm version`);
 			}
-
-			importProgress = { batch: 0, total: batches.length, successful: 0, failed: 0 };
-			const allErrors: string[] = [];
-			let totalRecords = 0;
-
-			for (let i = 0; i < batches.length; i++) {
-				importProgress = { ...importProgress, batch: i + 1 };
-				const result = await callExt('import_data', {
-					format: 'json',
-					data: JSON.stringify(batches[i]),
-					sort_records: false,
-				});
-				if (!result?.success) {
-					importResult = result;
-					addToast(result?.error || `Batch ${i + 1} failed`, 'error');
-					return;
-				}
-				const d = result.data || {};
-				totalRecords += d.total_records || batches[i].length;
-				importProgress = {
-					...importProgress,
-					successful: importProgress.successful + (d.successful || 0),
-					failed: importProgress.failed + (d.failed || 0),
-				};
-				if (d.errors?.length) allErrors.push(...d.errors);
+			if (users.length > fresh.length) errors.push(`${users.length - fresh.length} users are already members`);
+			let added = 0;
+			for (let i = 0; i < fresh.length; i += USER_BATCH) {
+				const batch = fresh.slice(i, i + USER_BATCH).map((u) => ({ user: String(u.id), nickname: String(u.nickname ?? '') }));
+				const res = await call('user_import', { users: batch }, false);
+				if (res.requires_vote) errors.push(`Proposal ${res.proposal} created — a vote is required to add ${batch.length} members`);
+				else added += res.added;
 			}
-
 			importResult = {
 				success: true,
-				data: {
-					total_records: totalRecords,
-					successful: importProgress.successful,
-					failed: importProgress.failed,
-					errors: allErrors.slice(0, 10),
-					warnings: sortWarnings,
-					batches: batches.length,
-				},
+				data: { total_records: records.length, successful: added, failed: records.length - added, errors },
 			};
-			addToast(`Imported ${importProgress.successful} of ${totalRecords} records`);
+			addToast(`Imported ${added} of ${records.length} records`);
 		} catch (e: any) {
 			importResult = { success: false, error: e.message };
 			addToast(e?.message || 'Import failed', 'error');
 		} finally {
 			importing = false;
-			importProgress = { batch: 0, total: 0, successful: 0, failed: 0 };
 		}
 	}
 
@@ -323,62 +275,31 @@
 		reader.readAsText(file);
 	}
 
-	async function runCitizenImport() {
-		let records: unknown;
-		try {
-			records = JSON.parse(citizenJson);
-		} catch {
-			addToast('Invalid JSON — expected an array of citizen records', 'error');
-			return;
-		}
-		if (!Array.isArray(records)) {
-			addToast('Expected a JSON array of citizen records', 'error');
-			return;
-		}
-
-		citizenImporting = true;
-		citizenReport = null;
-		const batches: unknown[][] = [];
-		for (let i = 0; i < records.length; i += CITIZEN_BATCH_SIZE) {
-			batches.push(records.slice(i, i + CITIZEN_BATCH_SIZE));
-		}
-		citizenProgress = { batch: 0, total: batches.length };
-
-		let created = 0;
-		let skipped = 0;
-		try {
-			for (let i = 0; i < batches.length; i++) {
-				citizenProgress = { batch: i + 1, total: batches.length };
-				const res = await callExt('import_citizens', { citizens: batches[i] });
-				if (!res?.success) {
-					addToast(res?.error || `Citizen batch ${i + 1} failed`, 'error');
-					return;
-				}
-				const data = res.data || res;
-				created += data.created_count ?? (data.created?.length ?? 0);
-				skipped += data.skipped_count ?? (data.skipped?.length ?? 0);
-			}
-			citizenReport = { created_count: created, skipped_count: skipped };
-			citizenJson = '';
-			addToast(`${created} citizens imported, ${skipped} skipped`);
-			await loadMeta();
-			if (showPending) await loadPending();
-		} catch (e: any) {
-			addToast(e?.message || 'Import failed', 'error');
-		} finally {
-			citizenImporting = false;
-			citizenProgress = { batch: 0, total: 0 };
-		}
-	}
-
-	async function loadPending() {
+	/** Claims of the invites minted for the letters in this browser's saved job: codes are never shown again. */
+	async function loadCensus() {
+		const job = letterJob ?? savedLetterJob;
+		const minted = Object.values(job?.minted ?? {}).filter((l) => l.invite);
+		if (!job || !minted.length) return;
 		pendingLoading = true;
 		try {
-			const res = await callExt('list_citizen_invites', { only_pending: true, limit: 50 });
-			if (res?.success) {
-				pendingInvites = res.data?.citizens ?? [];
-				pendingTotal = res.data?.total ?? 0;
-			}
+			const invites = new Map((await pages('invite_list', {}, 'invites', false)).map((i) => [i.id, i]));
+			const now = Date.now() / 1000;
+			const pending = minted.filter((l) => {
+				const i = invites.get(l.invite);
+				return i && !i.revoked && i.uses < i.max_uses && (!i.expires_at || now < i.expires_at);
+			});
+			citizenStatus = {
+				total: minted.length,
+				claimed: minted.filter((l) => (invites.get(l.invite)?.uses ?? 0) > 0).length,
+				pending: pending.length,
+			};
+			pendingInvites = pending.slice(0, 50).map((l) => ({
+				id: l.id,
+				name: l.name,
+				quarter: String(job.rows.find((r) => r.id === l.id)?.raw.quarter ?? ''),
+				url: letterJoinUrlFromWindow(l.code),
+			}));
+			pendingTotal = pending.length;
 		} catch (e: any) {
 			addToast(e?.message || 'Failed to load invites', 'error');
 		} finally {
@@ -423,13 +344,6 @@
 			}
 		} catch {
 			/* host snapshot is optional */
-		}
-		try {
-			const res = await callExt('letter_context');
-			if (res?.success && res.data?.realm_name) realmName = res.data.realm_name;
-			if (res?.data?.logo_url) logoUrl = res.data.logo_url;
-		} catch {
-			/* fallback to /custom/logo.png */
 		}
 		const logo = await loadLogoBytes(logoUrl);
 		letterBranding = {
@@ -491,6 +405,12 @@
 		if (letterJob) letterJob.paused = true;
 	}
 
+	/** A one-use member invite for ``row``; its code is returned only now, so the job keeps it. */
+	async function mintLetter(row: CitizenRow): Promise<MintedLetter> {
+		const { invite } = await call('invite_create', { max_uses: 1, expires_in: INVITE_SECONDS }, false);
+		return { id: row.id, name: row.name, address: row.address, code: invite.code, invite: invite.id, join_path: '' };
+	}
+
 	async function runLetterJob(job: LetterJobState) {
 		letterRunning = true;
 		letterError = null;
@@ -510,21 +430,11 @@
 						job.cursor += 1;
 						continue;
 					}
-					const res = await callExt('ensure_letter_codes', {
-						citizens: batch.map((r) => r.raw),
+					const minted = await Promise.allSettled(batch.map(mintLetter));
+					minted.forEach((m, i) => {
+						if (m.status === 'fulfilled') job.minted[m.value.id] = m.value;
+						else letterRowErrors = [...letterRowErrors, { index: job.rows.indexOf(batch[i]), id: batch[i].id, error: String(m.reason?.message ?? m.reason) }];
 					});
-					if (!res?.success) {
-						letterError = res?.error || `Letter mint failed at ${row.id}`;
-						addToast(letterError, 'error');
-						break;
-					}
-					const mintedRows: MintedLetter[] = res.data?.letters ?? [];
-					for (const item of mintedRows) {
-						job.minted[item.id] = item;
-					}
-					if (res.data?.errors?.length) {
-						letterRowErrors = [...letterRowErrors, ...res.data.errors];
-					}
 					await saveLetterJob(job);
 					letter = job.minted[row.id];
 				}
@@ -552,7 +462,7 @@
 				job.doneAt = Date.now();
 				await saveLetterJob(job);
 				addToast(`Downloaded ${job.downloaded.length} registration letters`);
-				await loadMeta();
+				await loadCensus();
 			}
 		} catch (e: any) {
 			letterError = e?.message || 'Letter generate failed';
@@ -584,7 +494,7 @@
 			: 0
 	);
 
-	$effect(() => { loadMeta(); refreshSavedLetterJob(); });
+	$effect(() => { refreshSavedLetterJob().then(loadCensus); });
 </script>
 
 <div class="w-full py-4 sm:py-6">
@@ -628,7 +538,7 @@
 
 	{:else if activeTab === 'import'}
 		<div class="bg-white shadow-sm rounded-lg p-6">
-			<p class="text-gray-600 text-sm mb-4">Import entity JSON (upsert). Records are topologically sorted and uploaded in batches of {IMPORT_BATCH_SIZE}.</p>
+			<p class="text-gray-600 text-sm mb-4">Import entity JSON. This realm version imports User records only, as members, in batches of {USER_BATCH}; importing other entity types is not supported.</p>
 			<div class="flex gap-2 mb-4">
 				<button onclick={() => importMode = 'file'} class={cn('px-3 py-1.5 text-sm rounded-lg', importMode === 'file' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100')}>Upload File</button>
 				<button onclick={() => importMode = 'editor'} class={cn('px-3 py-1.5 text-sm rounded-lg', importMode === 'editor' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100')}>JSON Editor</button>
@@ -655,15 +565,6 @@
 				<div class="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
 					<p class="text-sm text-green-800 mb-2">{importPreview.totalEntities} entities, {importPreview.totalCodexes} codexes</p>
 					<button onclick={executeEntityImport} disabled={importing} class="px-4 py-2 bg-green-600 text-white rounded-lg disabled:opacity-50">{importing ? 'Importing…' : 'Confirm Import'}</button>
-					{#if importing && importProgress.total > 1}
-						<div class="mt-3">
-							<div class="flex justify-between text-xs text-gray-600 mb-1">
-								<span>Batch {importProgress.batch} / {importProgress.total}</span>
-								<span>{Math.round((importProgress.batch / importProgress.total) * 100)}%</span>
-							</div>
-							<div class="h-2 bg-gray-200 rounded-full"><div class="h-full bg-green-600 transition-all" style:width="{Math.round((importProgress.batch / importProgress.total) * 100)}%"></div></div>
-						</div>
-					{/if}
 				</div>
 			{:else if importPreview && !importPreview.valid}
 				<div class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -686,7 +587,7 @@
 		<div class="bg-white shadow-sm rounded-lg p-6 space-y-6">
 			{#if citizenStatus?.total > 0}
 				<div class="p-4 bg-gray-50 rounded-lg">
-					<p class="text-sm font-medium">Census progress</p>
+					<p class="text-sm font-medium">Census progress <span class="font-normal text-gray-400">(letters generated in this browser)</span></p>
 					<p class="text-2xl font-bold">{citizenStatus.claimed} <span class="text-sm font-normal text-gray-400">/ {citizenStatus.total} claimed ({claimPercent}%)</span></p>
 					<p class="text-xs text-gray-500">{citizenStatus.pending} pending</p>
 				</div>
@@ -694,7 +595,7 @@
 			<div>
 				<h2 class="text-lg font-semibold mb-2">Import citizens</h2>
 				<p class="text-sm text-gray-500 mb-2">
-					JSON array — up to {CITIZEN_BATCH_SIZE} per batch. Include a postal
+					JSON array. Include a postal
 					<code class="bg-gray-100 px-1 rounded">address</code> on each row.
 					Registration codes are for printed letters, not email.
 				</p>
@@ -713,10 +614,11 @@
 					/>
 				</div>
 				<textarea bind:value={citizenJson} class="w-full h-40 p-3 border rounded-lg font-mono text-sm" placeholder={citizenImportPlaceholder}></textarea>
-				<button onclick={runCitizenImport} disabled={citizenImporting} class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">{citizenImporting ? 'Importing…' : 'Import Citizens'}</button>
-				{#if citizenImporting && citizenProgress.total > 1}
-					<p class="text-xs text-gray-500 mt-2">Batch {citizenProgress.batch} / {citizenProgress.total}</p>
-				{/if}
+				<button disabled class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">Import Citizens</button>
+				<p class="text-xs text-amber-700 mt-2">
+					Importing citizens without letters is not supported by this realm version: an invite code is
+					shown only when it is created, so codes are minted when you generate the letters below.
+				</p>
 			</div>
 			<div class="border-t border-gray-100 pt-6">
 				<h2 class="text-lg font-semibold mb-2">Registration letters</h2>
@@ -785,7 +687,7 @@
 				{/if}
 			</div>
 			<div>
-				<button onclick={() => { showPending = !showPending; if (showPending) loadPending(); }} class="text-sm text-blue-600 hover:underline">
+				<button onclick={() => { showPending = !showPending; if (showPending) loadCensus(); }} class="text-sm text-blue-600 hover:underline">
 					{showPending ? 'Hide' : 'Show'} pending invites ({pendingTotal || citizenStatus?.pending || 0})
 				</button>
 				{#if showPending}

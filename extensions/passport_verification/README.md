@@ -27,16 +27,17 @@ This extension integrates **Rarimo's zero-knowledge proof technology** to verify
 
 ## Technical Architecture
 
-**Frontend**: Svelte component with QR code display and status management
-**Backend**: Python Basilisk extension using IC HTTP outcalls
+**Frontend**: Svelte component with QR code display and status management; it calls the Rarimo API from the browser
+**Backend**: none
 **External Service**: Rarimo API (`api.app.rarime.com`)
 **Proof System**: Zero-knowledge cryptography with NFC passport reading
 
-### Backend Functions
+### Realm operations
 
-- `get_verification_link(user_id)` - Generate verification session and RariMe app URL
-- `check_verification_status(user_id)` - Poll verification status from Rarimo API
-- `create_passport_identity(verification_data)` - Store verified identity in realm
+- `identity_submit` - Once Rarimo reports the session verified, submit a `passport` identity (issuer `rarime`,
+  `ref` the session's verification-status URL). It stays pending until someone with `identity.review` approves it.
+
+The Rarimo `event_id` is derived from the realm's canister id, so it is stable per realm.
 
 ### Verification Requirements
 
@@ -59,13 +60,13 @@ This extension integrates **Rarimo's zero-knowledge proof technology** to verify
 - ✅ Only cryptographic proofs are shared
 - ✅ No passport images or personal data stored on blockchain
 - ✅ Session IDs derived from caller principals (unique per user)
-- ✅ HTTP outcalls use IC consensus for security (100M cycles)
+- ✅ The realm records only a pending identity; a reviewer confirms it
 
 ## External Dependencies
 
 - **Rarimo API**: ZK proof verification service
 - **RariMe Mobile App**: Required for NFC passport scanning
-- **Internet Computer**: HTTP outcalls for API communication
+- **Browser**: calls the Rarimo API directly (the realm makes no HTTP outcalls for this extension)
 
 ## Requirements
 
