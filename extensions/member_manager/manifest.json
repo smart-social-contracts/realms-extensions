@@ -1,15 +1,6 @@
 {
   "name": "member_manager",
-  "version": "1.0.6",
-  "ggg_api_version": 1,
-  "capabilities": [
-    "member.list",
-    "member.profile",
-    "member.notifications",
-    "notification.create",
-    "crypto.envelope",
-    "log.write"
-  ],
+  "version": "2.0.0",
   "description": "Look up members, review profiles and standing, read private details shared with you, and send notifications.",
   "author": "Smart Social Contracts",
   "categories": [
@@ -30,10 +21,10 @@
   ],
   "show_in_sidebar": true,
   "icon": "user-check",
-  "entry_access": {
-    "default": "user.view",
-    "functions": {
-      "send_member_notification": "notification.send"
-    }
-  }
+  "operations": [
+    "user_list",
+    "realm_export",
+    "crypto_envelope",
+    "notification_send"
+  ]
 }

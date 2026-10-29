@@ -19,22 +19,8 @@ builds and uploads it to `ext/package_manager/<version>/frontend/dist/index.js`.
 ## Mount contract
 
 The bundle's default export matches `realm_frontend`'s extension-loader
-contract:
+contract: `mount(target, ctx)` returning `{ unmount() }`. It calls the realm
+through `ctx.read` / `ctx.run` (only the operations its manifest declares) and
+the marketplace canister through `ctx.marketplace`.
 
-```ts
-mount(target: HTMLElement, props: {
-  backend: any;          // authenticated realm_backend actor (injected by host)
-  extensionId: string;   // 'package_manager'
-  version: string;       // e.g. '0.1.0'
-  principal?: string;    // current user's principal text
-  isAuthenticated?: boolean;
-}): { unmount(): void };
-```
-
-Everything host-specific (the realm_backend actor, the user's principal,
-the auth state) must arrive via `props`. The bundle does not import from
-the host's `$lib/canisters` or `$lib/stores/*` because those modules do
-not exist inside this isolated build.
-
-The list of registries the realm is connected to is fetched from
-`backend.status()` directly inside the bundle.
+The realm's file registry comes from `setup_state`; installs pull from it.

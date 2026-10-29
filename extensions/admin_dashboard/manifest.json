@@ -1,6 +1,6 @@
 {
   "name": "admin_dashboard",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "description": "Look up anything stored in your realm by type, open records to read their details, copy them for reference, and remove items you no longer need when you have permission.",
   "author": "Realms Team",
   "categories": [
@@ -23,11 +23,8 @@
   ],
   "show_in_sidebar": true,
   "icon": "search",
-  "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "get_entity_types": "db.export",
-      "delete_entity": "db.manage"
-    }
-  }
+  "operations": [
+    "realm_export",
+    "realm_monitor"
+  ]
 }

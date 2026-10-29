@@ -13,10 +13,6 @@
     "enabled": false
   },
   "python_tests": {
-    "enabled": true,
-    "test_files": [
-      "tests/test_voting.py",
-      "tests/test_dispatch_compat.py"
-    ]
+    "enabled": false
   }
 }

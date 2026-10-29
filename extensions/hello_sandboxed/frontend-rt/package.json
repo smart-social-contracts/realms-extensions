@@ -1,6 +1,6 @@
 {
   "name": "hello_sandboxed-frontend-rt",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@realmsgos/extension-bridge": "^0.2.0",
+    "@realmsgos/extension-bridge": "^0.3.0",
     "@realmsgos/extension-ui": "^0.2.0"
   },
   "devDependencies": {

@@ -19,8 +19,9 @@
 		metadata: string;
 		step_to_execute: number;
 		total_steps: number;
+		steps: any[];
 		schedules: TaskSchedule[];
-		executions_count: number;
+		executions_count?: number;
 		created_at: number | null;
 		updated_at: number | null;
 	}
@@ -31,26 +32,24 @@
 	let accessDeniedOp = $state('');
 	let searchTerm = $state('');
 	let statusFilter = $state('');
-	let refreshInterval: ReturnType<typeof setInterval> | null = $state(null);
 
 	let runningTasks: Record<string, boolean> = $state({});
 	let deletingTasks: Record<string, boolean> = $state({});
 
 	const PAGE_SIZE = 10;
+	const EXEC_PAGE_SIZE = 10;
 	let fromId = $state(1);
-	let maxId = $state(0);
 	let nextFromId: number | null = $state(null);
 	let hasMore = $state(false);
 	let pageHistory: number[] = $state([1]);
 
 	let selectedTask: any = $state(null);
 	let taskDetail: any = $state(null);
-	let taskLogs: any[] = $state([]);
+	let execNext: number | null = $state(null);
 	let detailLoading = $state(false);
 
 	let expandedExecution: string | null = $state(null);
 	let executionLogs: Record<string, string> = $state({});
-	let executionLogsLoading: Record<string, boolean> = $state({});
 	let showCodeModal = $state(false);
 	let codeModalContent: { name: string; code: string; description: string } | null = $state(null);
 	let activeDetailTab: 'overview' | 'steps' | 'executions' = $state('overview');
@@ -85,17 +84,42 @@
 		console.warn('[extension]', level, message);
 	}
 
-	async function callSync(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	async function call(name: string, args: Record<string, unknown>, read = false) {
+		const reply = await (read ? ctx.read(name, args) : ctx.run(name, args));
+		if (!reply.ok) throw new Error(reply.error);
+		return reply;
+	}
+
+	function toTask(t: any): Task {
+		return {
+			_id: t.name,
+			name: t.name,
+			status: t.status,
+			metadata: '',
+			step_to_execute: t.steps.filter((s: any) => s.status === 'completed').length,
+			total_steps: t.steps.length,
+			steps: t.steps.map((s: any, i: number) => ({
+				_id: String(i),
+				status: s.status,
+				run_next_after: s.wait,
+				codex: { name: s.op, code: JSON.stringify(s.args, null, 2), description: '' },
+			})),
+			schedules: t.schedules.map((s: any) => ({ ...s, _id: s.name })),
+			created_at: null,
+			updated_at: null,
+		};
+	}
+
+	function toExecution(run: any) {
+		return { _id: run.name, name: run.name, status: run.status, created_at: run.started_at, result: run.result };
 	}
 
 	async function loadTasks() {
 		try {
-			const data = await callSync('get_all_tasks', { from_id: fromId, page_size: PAGE_SIZE });
-			tasks = data?.tasks ?? data?.data?.tasks ?? (Array.isArray(data) ? data : []);
-			maxId = data?.max_id ?? 0;
-			nextFromId = data?.next_from_id ?? null;
-			hasMore = data?.has_more ?? false;
+			const page = await call('task_list', { from: fromId, count: PAGE_SIZE }, true);
+			tasks = page.tasks.map(toTask);
+			nextFromId = page.next;
+			hasMore = page.next != null;
 			error = '';
 			accessDeniedOp = '';
 		} catch (e: any) {
@@ -132,19 +156,14 @@
 		selectedTask = taskId;
 		detailLoading = true;
 		try {
-		const [det, logs] = await Promise.all([
-			callSync('get_task_details', { task_id: taskId }).catch(() => null),
-			callSync('get_task_logs', { task_id: taskId }).catch(() => ({ data: [] })),
-		]);
-		const raw = det?.task ?? det?.data?.task ?? det?.data ?? det;
-		if (raw) {
-			if (raw.executions_count == null && raw.executions) {
-				raw.executions_count = raw.executions.length;
-			}
-			raw.total_steps = raw.steps?.length ?? 0;
-		}
-		taskDetail = raw;
-		taskLogs = logs?.data ?? (Array.isArray(logs) ? logs : []);
+			const logs = await call('task_logs', { task: taskId, count: EXEC_PAGE_SIZE }, true);
+			taskDetail = {
+				...tasks.find((t) => t._id === taskId),
+				executions: logs.runs.map(toExecution),
+				executions_count: logs.runs.length ? Number(logs.runs[0].name.split('#').pop()) : 0,
+				exec_has_more: logs.next != null,
+			};
+			execNext = logs.next;
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);
 			if (op != null) {
@@ -159,62 +178,27 @@
 		}
 	}
 
+	async function loadMoreExecutions() {
+		const logs = await call('task_logs', { task: selectedTask, from: execNext, count: EXEC_PAGE_SIZE }, true);
+		taskDetail = {
+			...taskDetail,
+			executions: [...taskDetail.executions, ...logs.runs.map(toExecution)],
+			exec_has_more: logs.next != null,
+		};
+		execNext = logs.next;
+	}
+
 	function goBackToList() {
 		selectedTask = null;
 		taskDetail = null;
-		taskLogs = [];
 		activeDetailTab = 'overview';
 		expandedExecution = null;
 		executionLogs = {};
 	}
 
-	function parseEmbeddedLogs(result: string): string {
-		if (!result) return '';
-		try {
-			const parsed = JSON.parse(result.replace(/'/g, '"').replace(/None/g, 'null').replace(/True/g, 'true').replace(/False/g, 'false'));
-			if (parsed?.logs && Array.isArray(parsed.logs)) {
-				return parsed.logs.map((log: any) => {
-					const level = log.level || 'INFO';
-					const msg = log.message || '';
-					return `[${level}] ${msg}`;
-				}).join('\n');
-			}
-		} catch {}
-		const logsMatch = result.match(/'logs':\s*\[(.+?)\]/s);
-		if (logsMatch) {
-			const entries = [...logsMatch[1].matchAll(/'message':\s*'([^']*?)'/g)];
-			if (entries.length > 0) {
-				return entries.map(m => m[1]).join('\n');
-			}
-		}
-		return '';
-	}
-
-	async function loadExecutionLogs(executionId: string, loggerName: string) {
-		if (expandedExecution === executionId) {
-			expandedExecution = null;
-			return;
-		}
-		expandedExecution = executionId;
-		if (executionLogs[executionId]) return;
-		executionLogsLoading[executionId] = true;
-		try {
-			const res = await callSync('get_execution_logs', { logger_name: loggerName, limit: 200 });
-			const logs = res?.logs || res?.data?.logs || '';
-			if (logs && logs !== 'No logs available') {
-				executionLogs[executionId] = logs;
-			} else {
-				const exec = taskDetail?.executions?.find((e: any) => e._id === executionId);
-				const embedded = exec?.result ? parseEmbeddedLogs(exec.result) : '';
-				executionLogs[executionId] = embedded || 'No logs available (log buffer rotated)';
-			}
-		} catch (e: any) {
-			const exec = taskDetail?.executions?.find((e: any) => e._id === executionId);
-			const embedded = exec?.result ? parseEmbeddedLogs(exec.result) : '';
-			executionLogs[executionId] = embedded || 'Error loading logs: ' + (e?.message || String(e));
-		} finally {
-			delete executionLogsLoading[executionId];
-		}
+	function loadExecutionLogs(executionId: string) {
+		expandedExecution = expandedExecution === executionId ? null : executionId;
+		executionLogs[executionId] = 'Execution logs are not supported by this realm version.';
 	}
 
 	function openCodeModal(codex: { name: string; code: string; description: string }) {
@@ -227,26 +211,15 @@
 		codeModalContent = null;
 	}
 
-	async function toggleSchedule(scheduleId: string, disabled: boolean) {
-		try {
-			const res = await callSync('toggle_schedule', {
-				schedule_id: scheduleId,
-				disabled: !disabled,
-			});
-			showToast(disabled ? 'Schedule resumed' : 'Schedule paused', 'success');
-			await loadTasks();
-		} catch (e: any) {
-			showToast(e?.message || 'Error toggling schedule', 'error');
-		}
-	}
+	const SCHEDULE_UNSUPPORTED = 'Pausing or resuming a schedule is not supported by this realm version.';
 
 	let stoppingTasks: Record<string, boolean> = $state({});
 
 	async function runTaskNow(taskId: string) {
 		runningTasks[taskId] = true;
 		try {
-			const data = await callSync('run_task_now', { task_id: taskId });
-			showToast(data?.message || 'Task started', 'success');
+			const data = await call('task_run', { task: taskId });
+			showToast(`Task ${data.status}`, 'success');
 			await loadTasks();
 			if (selectedTask === taskId) await viewTaskDetails(taskId);
 		} catch (e: any) {
@@ -259,8 +232,8 @@
 	async function stopTask(taskId: string) {
 		stoppingTasks[taskId] = true;
 		try {
-			const data = await callSync('stop_task', { task_id: taskId });
-			showToast(data?.message || 'Task stopped', 'success');
+			await call('task_cancel', { task: taskId });
+			showToast('Task stopped', 'success');
 			await loadTasks();
 			if (selectedTask === taskId) await viewTaskDetails(taskId);
 		} catch (e: any) {
@@ -273,8 +246,8 @@
 	async function deleteTask(taskId: string) {
 		deletingTasks[taskId] = true;
 		try {
-			const data = await callSync('delete_task', { task_id: taskId });
-			showToast(data?.message || 'Task deleted', 'success');
+			while ((await call('task_delete', { task: taskId })).remaining > 0);
+			showToast('Task deleted', 'success');
 			if (selectedTask === taskId) goBackToList();
 			await loadTasks();
 		} catch (e: any) {
@@ -336,13 +309,8 @@
 		return new Date(ms).toLocaleString();
 	}
 
-	function getProgressPercent(task: Task): number {
-		if (!task.total_steps || task.total_steps === 0) return 0;
-		return Math.round((task.step_to_execute / task.total_steps) * 100);
-	}
-
 	function isTaskRunning(task: { status?: string }): boolean {
-		return task?.status?.toLowerCase() === 'running';
+		return task?.status === 'running' || task?.status === 'waiting';
 	}
 
 	$effect(() => {
@@ -556,8 +524,9 @@
 												{/if}
 											</div>
 											<button
-												onclick={() => toggleSchedule(sched._id, sched.disabled)}
-												class="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+												disabled
+												title={SCHEDULE_UNSUPPORTED}
+												class="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
 											>
 												{sched.disabled ? 'Resume' : 'Pause'}
 											</button>
@@ -651,7 +620,7 @@
 							{#each taskDetail.executions as exec}
 								<div>
 									<button
-										onclick={() => loadExecutionLogs(exec._id, exec.logger_name)}
+										onclick={() => loadExecutionLogs(exec._id)}
 										class="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-left"
 									>
 										<div class="flex-shrink-0">
@@ -702,12 +671,7 @@
 											{/if}
 											<div>
 												<span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Logs</span>
-												{#if executionLogsLoading[exec._id]}
-													<div class="mt-2 flex items-center gap-2 text-sm text-gray-500">
-														<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
-														Loading logs...
-													</div>
-												{:else if executionLogs[exec._id]}
+												{#if executionLogs[exec._id]}
 													<pre class="mt-2 text-xs font-mono bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">{executionLogs[exec._id]}</pre>
 												{:else}
 													<p class="mt-2 text-sm text-gray-400">No logs available for this execution</p>
@@ -722,10 +686,7 @@
 						{#if taskDetail.exec_has_more}
 							<div class="px-5 py-3 border-t border-gray-100 dark:border-gray-700 text-center">
 								<button
-									onclick={async () => {
-										detailLoading = true;
-										await viewTaskDetails(selectedTask);
-									}}
+									onclick={loadMoreExecutions}
 									class="text-sm text-blue-600 dark:text-blue-400 hover:underline"
 								>
 									Load more executions...
@@ -889,7 +850,7 @@
 										class="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:underline text-xs"
 									>
 										<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-										{task.executions_count ?? 0} runs
+										Runs
 									</button>
 								</div>
 							</div>
@@ -919,8 +880,9 @@
 								{#if task.schedules?.length > 0}
 									{@const schedule = task.schedules[0]}
 									<button
-										onclick={() => toggleSchedule(schedule._id, schedule.disabled)}
-										class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors
+										disabled
+										title={SCHEDULE_UNSUPPORTED}
+										class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed
 											{schedule.disabled
 												? 'text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30'
 												: 'text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-900/30'}"
@@ -970,7 +932,7 @@
 											<span>Last: {formatRelativeTime(task.schedules[0].last_run_at)}</span>
 										{/if}
 									{/if}
-									<span>{task.executions_count ?? 0} runs</span>
+									<span>Runs</span>
 								</div>
 							</div>
 							<div class="flex items-center gap-2 flex-shrink-0">
@@ -992,8 +954,9 @@
 								{#if task.schedules?.length > 0}
 									{@const schedule = task.schedules[0]}
 									<button
-										onclick={() => toggleSchedule(schedule._id, schedule.disabled)}
-										class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors
+										disabled
+										title={SCHEDULE_UNSUPPORTED}
+										class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed
 											{schedule.disabled
 												? 'text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30'
 												: 'text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-900/30'}"

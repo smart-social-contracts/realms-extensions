@@ -6,13 +6,12 @@
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
 	interface RegistrationCode {
-		code_hash: string;
+		id: string;
 		profile: string;
-		uses_count: number;
+		uses: number;
 		max_uses: number;
 		revoked: boolean;
-		expires_at: string | null;
-		created_at?: string;
+		expires_at: number;
 	}
 
 	let profile = $state('member');
@@ -38,20 +37,6 @@
 		console.warn('[extension]', level, message);
 	}
 
-	function generateRandomCode(length: number): string {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		const values = crypto.getRandomValues(new Uint8Array(length));
-		return Array.from(values, v => chars[v % chars.length]).join('');
-	}
-
-	async function hashCode(code: string): Promise<string> {
-		const encoder = new TextEncoder();
-		const data = encoder.encode(code);
-		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-		const hashArray = Array.from(new Uint8Array(hashBuffer));
-		return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-	}
-
 	async function generateInvitation() {
 		generating = true;
 		generatedLink = null;
@@ -60,26 +45,18 @@
 		linkCopied = false;
 
 		try {
-			const code = generateRandomCode(16);
-			const codeHash = await hashCode(code);
-
 			// The code is created on whichever quarter this admin tab is pointed at
-			// (ctx.backend follows the active quarter). The backend returns its own
-			// canister id so we can make the invite link target that quarter only.
-			const res: any = await ctx.callSync('generate_registration_url', {
-				code_hash: codeHash,
-				profile,
-				max_uses: maxUses,
-				expires_in_hours: expiresInHours,
-				user_id: 'admin',
-				created_by: 'admin',
-				frontend_url: '',
-			});
+			// (ctx.run follows the active quarter), so the link targets that quarter only.
+			const [res, here] = await Promise.all([
+				ctx.run('invite_create', { profile, max_uses: maxUses, expires_in: expiresInHours * 3600 }),
+				ctx.read('status'),
+			]);
+			if (!res.ok) throw new Error(res.error);
 
-			const quarterId: string = res?.data?.canister_id ?? '';
+			const quarterId: string = here.ok ? here.canister : '';
 			generatedQuarterId = quarterId || null;
 			const quarterParam = quarterId ? `&quarter=${encodeURIComponent(quarterId)}` : '';
-			const link = `${window.location.origin}/join?invite=${code}${quarterParam}`;
+			const link = `${window.location.origin}/join?invite=${encodeURIComponent(res.invite.code)}${quarterParam}`;
 			generatedLink = link;
 			qrSvg = generateQrSvg(link);
 			addToast('Invitation code generated successfully');
@@ -146,9 +123,14 @@
 	async function loadCodes() {
 		listLoading = true;
 		try {
-			const result = await ctx.callSync('get_registration_codes', { include_used: true });
-			const data = result?.data ?? result;
-			codes = Array.isArray(data) ? data : (data?.codes ?? []);
+			const all: RegistrationCode[] = [];
+			for (let from: number | null = 1; from; ) {
+				const page = await ctx.run('invite_list', { from, count: 100 });
+				if (!page.ok) throw new Error(page.error);
+				all.push(...page.invites);
+				from = page.next;
+			}
+			codes = all;
 		} catch (e: any) {
 			addToast(`Failed to load codes: ${e?.message || String(e)}`, 'error');
 			codes = [];
@@ -160,7 +142,8 @@
 	async function revokeCode(codeHash: string) {
 		revokingHash = codeHash;
 		try {
-			await ctx.callSync('revoke_registration_code', { code_hash: codeHash });
+			const res = await ctx.run('invite_revoke', { invite: codeHash });
+			if (!res.ok) throw new Error(res.error);
 			addToast('Invitation revoked');
 			await loadCodes();
 		} catch (e: any) {
@@ -172,14 +155,14 @@
 
 	function getStatus(code: RegistrationCode): { label: string; color: string } {
 		if (code.revoked) return { label: 'Revoked', color: 'bg-red-100 text-red-700' };
-		if (code.max_uses > 0 && code.uses_count >= code.max_uses) return { label: 'Used', color: 'bg-gray-100 text-gray-700' };
-		if (code.expires_at && new Date(code.expires_at) < new Date()) return { label: 'Expired', color: 'bg-yellow-100 text-yellow-700' };
+		if (code.uses >= code.max_uses) return { label: 'Used', color: 'bg-gray-100 text-gray-700' };
+		if (code.expires_at && code.expires_at * 1000 < Date.now()) return { label: 'Expired', color: 'bg-yellow-100 text-yellow-700' };
 		return { label: 'Active', color: 'bg-green-100 text-green-700' };
 	}
 
-	function formatExpiry(expiresAt: string | null): string {
+	function formatExpiry(expiresAt: number): string {
 		if (!expiresAt) return 'Never';
-		const date = new Date(expiresAt);
+		const date = new Date(expiresAt * 1000);
 		const now = new Date();
 		const diff = date.getTime() - now.getTime();
 
@@ -347,9 +330,9 @@
 								<td class="px-4 py-3">
 									<span
 										class="font-mono text-xs bg-gray-100 px-2 py-1 rounded cursor-help"
-										title={code.code_hash}
+										title={code.id}
 									>
-										{code.code_hash.slice(0, 12)}…
+										{code.id.slice(0, 12)}…
 									</span>
 								</td>
 								<td class="px-4 py-3">
@@ -361,7 +344,7 @@
 									</span>
 								</td>
 								<td class="px-4 py-3 text-gray-700">
-									{code.uses_count} / {code.max_uses || '∞'}
+									{code.uses} / {code.max_uses}
 								</td>
 								<td class="px-4 py-3">
 									<span class={cn('px-2 py-0.5 rounded-full text-xs font-medium', status.color)}>
@@ -372,13 +355,13 @@
 									{formatExpiry(code.expires_at)}
 								</td>
 								<td class="px-4 py-3 text-right">
-									{#if !code.revoked && !(code.max_uses > 0 && code.uses_count >= code.max_uses)}
+									{#if !code.revoked && code.uses < code.max_uses}
 										<button
-											onclick={() => revokeCode(code.code_hash)}
-											disabled={revokingHash === code.code_hash}
+											onclick={() => revokeCode(code.id)}
+											disabled={revokingHash === code.id}
 											class="px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 										>
-											{revokingHash === code.code_hash ? 'Revoking…' : 'Revoke'}
+											{revokingHash === code.id ? 'Revoking…' : 'Revoke'}
 										</button>
 									{/if}
 								</td>

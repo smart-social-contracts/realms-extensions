@@ -56,8 +56,13 @@
 		accessDenied = false;
 		response = '';
 		try {
-			const result = await ctx.callExtension<string>('greet', { name: name.trim() });
-			response = typeof result === 'string' ? result : String(result);
+			const reply = await ctx.read('realm_info');
+			if (reply.ok) {
+				const realm = reply.realm as { name: string };
+				response = `Hello, ${name.trim()}! Welcome to ${realm.name}.`;
+			} else {
+				error = reply.error;
+			}
 		} catch (e) {
 			const { code, message } = bridgeErrorFields(e);
 			if (code === 'denied') {
@@ -148,7 +153,7 @@
 				{#if accessDenied}
 					<div class="mt-4">
 						<AccessDenied
-							operation="greet"
+							operation="realm_info"
 							message="You need additional permissions to perform this action."
 						/>
 					</div>

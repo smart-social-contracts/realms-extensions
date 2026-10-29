@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "0.2.8",
+  "version": "1.0.0",
   "description": "See token balances and transfer history for your realm's treasury, send payments when allowed, and look up balances tied to members or invoices.",
   "author": "Smart Social Contracts",
   "repository": "https://github.com/smart-social-contracts/realms-extension-vault",
@@ -12,16 +12,6 @@
   "permissions": [
     "treasury_management"
   ],
-  "entry_points": [
-    "get_active_tokens",
-    "get_balance",
-    "get_status",
-    "get_transactions",
-    "get_vault_balance",
-    "refresh_vault_balance",
-    "refresh",
-    "transfer"
-  ],
   "profiles": [
     "admin"
   ],
@@ -31,13 +21,6 @@
   "icon": "shield-dollar",
   "doc_url": "https://github.com/smart-social-contracts/realms-extension-vault",
   "show_in_sidebar": true,
-  "python_dependencies": [
-    "ic-basilisk>=0.10.6",
-    "ic-basilisk-toolkit>=0.2.0",
-    "ic-python-db>=0.7.1",
-    "ic-python-logging>=0.3.1"
-  ],
-  "entity_method_overrides": [],
   "sidebar_label": {
     "en": "Vault",
     "es": "Bóveda",
@@ -48,23 +31,14 @@
     "ca-valencia": "Cofre"
   },
   "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "get_active_tokens": "treasury.view",
-      "get_vault_balance": "treasury.view",
-      "get_balance": "treasury.view",
-      "get_transactions": "treasury.view",
-      "get_status": "treasury.view",
-      "lookup_balance": "treasury.view",
-      "list_subaccounts": "treasury.view",
-      "refresh": "treasury.view",
-      "refresh_vault_balance": "treasury.view",
-      "register_subaccount": "treasury.manage",
-      "unregister_subaccount": "treasury.manage",
-      "transfer": {
-        "level": "transfer.create",
-        "governed": true
-      }
-    }
-  }
+    "default": "realm.admin"
+  },
+  "operations": [
+    "realm_info",
+    "treasury_view",
+    "ledger_view",
+    "user_list",
+    "invoice_refresh",
+    "transfer_create"
+  ]
 }

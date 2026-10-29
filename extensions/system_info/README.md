@@ -1,26 +1,21 @@
 # System Info Extension
 
-Admin dashboard showing system health, versions, entity counts, token balances, cycles, and canister metadata.
+Admin dashboard showing the realm's version, canister id, installed extensions and entity counts.
 
 ## Features
 
-- **Python / Basilisk / Realms** version and build info
-- **Installed extensions** with version, commit, and datetime
+- **Realms** version
+- **Installed extensions** with version and description
 - **Database entities** — per-type counts
-- **Filesystem** — file counts by extension type
-- **Token balances** — cached balances from the Wallet (ckBTC, ckUSD, ICP, etc.)
-- **Canister metrics** — cycles (TC), stable memory (MB), canister IDs
-- **Dependencies** — build-time dependency versions
 
-## Backend Functions
+## Realm operations
 
-| Function | Type | Description |
-|---|---|---|
-| `get_system_info` | sync | Full system snapshot (all sections) |
-| `get_db_stats` | sync | Per-entity-type counts |
-| `get_canister_stats` | sync | Cycles, memory, canister IDs |
-| `get_token_balances` | sync | Cached wallet balances |
+| Operation | Description |
+|---|---|
+| `status` | Version and canister id |
+| `realm_monitor` | Running version and row counts per entity |
+| `extension_list` | Installed extensions, page by page |
 
 ## Access
 
-Admin-only (`profiles: ["admin"]`). Available at `/extensions/system_info`.
+`realm_monitor` needs `realm.monitor`. Available at `/extensions/system_info`.

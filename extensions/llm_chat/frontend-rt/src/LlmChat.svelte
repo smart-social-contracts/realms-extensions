@@ -375,25 +375,9 @@
 			const [objType, objId] = explain.split(':');
 			if (objType === 'codex' && objId) {
 				isExplainMode = true;
-			ctx.backend
-				.extension_sync_call('codex_viewer', 'get_codex_details', JSON.stringify({ codex_id: objId }))
-					.then((response: any) => {
-						if (response.success) {
-							const data =
-								typeof response.response === 'string'
-									? JSON.parse(response.response)
-									: response.response;
-							const codexName = data.codex?.name || `codex_${objId}`;
-							const codexLink = `/extensions/codex_viewer/${objId}`;
-							pendingExplainCodexId = objId;
-							newMessage = `Please explain this codex: [${codexName}](${codexLink})`;
-							setTimeout(() => sendMessage(), 300);
-						}
-					})
-					.catch((err: any) => {
-						console.error('Failed to fetch codex for explanation:', err);
-						isExplainMode = false;
-					});
+				pendingExplainCodexId = objId;
+				newMessage = `Please explain this codex: [${objId}](/extensions/codex_viewer/${objId})`;
+				setTimeout(() => sendMessage(), 300);
 			} else if (objType === 'financial_statements') {
 				isExplainMode = true;
 				const context = params.get('context') || '';

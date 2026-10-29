@@ -1,13 +1,7 @@
 {
   "name": "llm_chat",
-  "version": "1.0.22",
-  "ggg_api_version": 1,
-  "capabilities": [
-    "caller.get",
-    "time.now",
-    "log.write",
-    "schema.entities"
-  ],
+  "version": "2.0.0",
+  "operations": [],
   "description": "Ask questions about your realm — its governance, proposals, rules, and more — and get answers from an AI assistant in chat.",
   "sidebar_label": {
     "en": "AI Assistant",
@@ -27,8 +21,5 @@
   "icon": "brain",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/llm_chat",
   "show_in_sidebar": true,
-  "hideFooter": true,
-  "entry_access": {
-    "default": "realm.data_view"
-  }
+  "hideFooter": true
 }

@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { neededPermission, type Change } from './realm';
+
 	let {
 		ctx,
 		open = false,
 		title = '',
 		description = '',
-		codeInline = '',
+		action = null,
 		deniedOperation = '',
 		onclose = () => {},
 	}: {
@@ -12,7 +14,7 @@
 		open: boolean;
 		title: string;
 		description: string;
-		codeInline: string;
+		action: Change | null;
 		deniedOperation: string;
 		onclose: () => void;
 	} = $props();
@@ -28,38 +30,16 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.backend.extension_async_call(
-				'voting',
-				'submit_proposal',
-				JSON.stringify({
-					title,
-					description,
-					proposal_type: 'code_execution',
-					source: codeInline,
-					requested_permissions: [],
-				}),
-			);
-			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (envelope?.success === false) {
-				error = envelope.response ?? 'Failed to submit proposal';
-				return;
-			}
-			const res = envelope?.response ? (typeof envelope.response === 'string' ? JSON.parse(envelope.response) : envelope.response) : envelope;
-			if (res?.success) {
+			const res = await ctx.run('proposal_create', { title, description, action });
+			if (res.ok) {
 				submitted = true;
-				proposalId = res.data?.id || '';
+				proposalId = res.proposal;
 			} else {
-				error = res?.error || 'Failed to submit proposal';
+				accessDeniedOp = neededPermission(res.error) ?? '';
+				error = accessDeniedOp ? '' : res.error || 'Failed to submit proposal';
 			}
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			error = e?.message ?? String(e);
 		} finally {
 			submitting = false;
 		}
@@ -146,18 +126,18 @@
 							<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
 							</svg>
-							<span class="text-sm font-medium text-gray-700">Code to Execute</span>
+							<span class="text-sm font-medium text-gray-700">Action to Run</span>
 						</div>
 						<div class="bg-gray-900 rounded-lg overflow-hidden">
-							<pre class="p-4 overflow-x-auto text-sm"><code class="text-gray-100">{codeInline}</code></pre>
+							<pre class="p-4 overflow-x-auto text-sm"><code class="text-gray-100">{JSON.stringify(action, null, 2)}</code></pre>
 						</div>
 					</div>
 
 					<div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
 						<p class="text-xs text-amber-800">
 							<strong>How it works:</strong> This will create a proposal visible to all realm members.
-							Once enough members vote "Yes" (meeting the threshold and quorum), the code above will be
-							executed automatically on the realm backend.
+							Once enough members vote "Yes" (meeting the threshold and quorum), the action above can be
+							executed on the realm backend.
 						</p>
 					</div>
 

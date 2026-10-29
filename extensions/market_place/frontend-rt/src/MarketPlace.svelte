@@ -100,8 +100,8 @@
 		clearError();
 		try {
 			const [listRes, statsRes] = await Promise.all([
-				ctx.backend.list_extensions(),
-				ctx.backend.marketplace_stats().catch(() => null),
+				ctx.marketplace.list_extensions(),
+				ctx.marketplace.marketplace_stats().catch(() => null),
 			]);
 
 			const raw = typeof listRes === 'string' ? JSON.parse(listRes) : listRes;
@@ -139,7 +139,7 @@
 		loading = true;
 		clearError();
 		try {
-			const res = await ctx.backend.search_marketplace(searchQuery.trim());
+			const res = await ctx.marketplace.search_marketplace(searchQuery.trim());
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			const list = raw?.listings ?? raw?.data ?? (Array.isArray(raw) ? raw : []);
 			extensions = list.map((e: any) => ({
@@ -165,7 +165,7 @@
 		loading = true;
 		clearError();
 		try {
-			const res = await ctx.backend.get_my_purchases();
+			const res = await ctx.marketplace.get_my_purchases();
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			purchases = (raw?.data ?? (Array.isArray(raw) ? raw : [])).map((p: any) => ({
 				...p,
@@ -198,7 +198,7 @@
 		purchasing = true;
 		clearError();
 		try {
-			const res = await ctx.backend.buy_extension(selectedExtension.extension_id || selectedExtension.id || selectedExtension.name);
+			const res = await ctx.marketplace.buy_extension(selectedExtension.extension_id || selectedExtension.id || selectedExtension.name);
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Err) { error = raw.Err; }
 			else {
@@ -224,7 +224,7 @@
 	async function checkLicense() {
 		checkingLicense = true;
 		try {
-			const res = await ctx.backend.check_developer_license();
+			const res = await ctx.marketplace.check_developer_license();
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Ok) {
 				isDeveloper = raw.Ok.is_active !== false;
@@ -244,7 +244,7 @@
 		purchasingLicense = true;
 		clearError();
 		try {
-			const res = await ctx.backend.purchase_developer_license();
+			const res = await ctx.marketplace.purchase_developer_license();
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Err) { error = raw.Err; }
 			else {
@@ -269,7 +269,7 @@
 		loading = true;
 		clearError();
 		try {
-			const res = await ctx.backend.get_my_developer_stats();
+			const res = await ctx.marketplace.get_my_developer_stats();
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Ok) {
 				devStats = {
@@ -324,7 +324,7 @@
 				icon: formData.icon,
 				categories: formData.categories ? formData.categories.split(',').map((c) => c.trim()) : [],
 			});
-			const res = await ctx.backend.publish_extension(payload);
+			const res = await ctx.marketplace.publish_extension(payload);
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Err) { error = raw.Err; }
 			else {
@@ -350,7 +350,7 @@
 	async function handleUnpublish(extId: string) {
 		clearError();
 		try {
-			const res = await ctx.backend.unpublish_extension(extId);
+			const res = await ctx.marketplace.unpublish_extension(extId);
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Err) { error = raw.Err; }
 			else {
@@ -373,7 +373,7 @@
 		withdrawing = true;
 		clearError();
 		try {
-			const res = await ctx.backend.request_payout();
+			const res = await ctx.marketplace.request_payout();
 			const raw = typeof res === 'string' ? JSON.parse(res) : res;
 			if (raw?.Err) { error = raw.Err; }
 			else {
@@ -400,6 +400,12 @@
 	}
 
 	onMount(async () => {
+		if (!ctx.marketplace) {
+			error = 'No marketplace is configured for this realm.';
+			loading = false;
+			checkingLicense = false;
+			return;
+		}
 		await Promise.all([loadBrowse(), loadPurchases(), checkLicense()]);
 	});
 

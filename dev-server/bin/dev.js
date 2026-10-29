@@ -4,7 +4,10 @@
  *
  * Starts a Vite dev server for the given extension.
  * - In-process extensions (default): mounts frontend-rt via dev-entry.ts
- * - Sandboxed extensions (manifest runtime: "sandboxed"): mock host + iframe
+ * - Sandboxed extensions (manifest runtime: "sandboxed"): mock host + iframe, from
+ *   frontend-rt/ (or frontend/ when frontend-rt/ has no index.html)
+ *
+ * Both call the realm of dev-config.json, only the operations the manifest declares.
  *
  * If ext_id is omitted, infers it from the cwd.
  */
@@ -22,6 +25,12 @@ const config = JSON.parse(readFileSync(resolve(devServerRoot, 'dev-config.json')
 
 const EXT_PORT = 5556;
 const HOST_PORT = 5555;
+const TEST_IDENTITY_INDEX = Number.isFinite(Number(config.testIdentityIndex)) ? Number(config.testIdentityIndex) : 0;
+const PROXY = {
+	'/api': { target: config.host, changeOrigin: true },
+	'/custom': { target: config.canisterUrl, changeOrigin: true },
+	'/images': { target: config.canisterUrl, changeOrigin: true },
+};
 
 function readManifest(extDir) {
 	const manifestPath = resolve(extDir, 'manifest.json');
@@ -58,7 +67,7 @@ const manifest = readManifest(extDir);
 const isSandboxed = manifest?.runtime === 'sandboxed';
 
 if (isSandboxed) {
-	extFrontend = resolve(extDir, 'frontend');
+	extFrontend = resolve(extDir, existsSync(resolve(extDir, 'frontend-rt', 'index.html')) ? 'frontend-rt' : 'frontend');
 	const indexHtml = resolve(extFrontend, 'index.html');
 	if (!existsSync(indexHtml)) {
 		console.error(`Sandboxed extension entry not found: ${indexHtml}`);
@@ -95,6 +104,7 @@ if (isSandboxed) {
 		sdk_version: manifest.sdk_version,
 		capabilities: manifest.capabilities ?? [],
 		entry_access: manifest.entry_access,
+		operations: manifest.operations ?? [],
 	};
 
 	const hostServer = await createServer({
@@ -112,7 +122,9 @@ if (isSandboxed) {
 							.replaceAll('__EXT_ID__', JSON.stringify(extId))
 							.replaceAll('__EXT_IFRAME_URL__', JSON.stringify(iframeUrl))
 							.replaceAll('__MANIFEST__', JSON.stringify(sandboxManifest))
-							.replaceAll('__DEV_LOCALE__', JSON.stringify(config.locale || 'en')),
+							.replaceAll('__DEV_LOCALE__', JSON.stringify(config.locale || 'en'))
+							.replaceAll('__BACKEND_CANISTER_ID__', JSON.stringify(config.backendCanisterId))
+							.replaceAll('__TEST_IDENTITY_INDEX__', JSON.stringify(TEST_IDENTITY_INDEX)),
 						map: null,
 					};
 				},
@@ -141,6 +153,7 @@ if (isSandboxed) {
 			port: HOST_PORT,
 			strictPort: true,
 			open: false,
+			proxy: PROXY,
 		},
 	});
 
@@ -158,12 +171,11 @@ if (isSandboxed) {
 		plugins: [svelte({ compilerOptions: { dev: false }, emitCss: false }), tailwindcss()],
 		define: {
 			__EXT_ID__: JSON.stringify(extId),
+			__OPERATIONS__: JSON.stringify(manifest?.operations ?? []),
 			__BACKEND_CANISTER_ID__: JSON.stringify(config.backendCanisterId),
 			__FILE_REGISTRY_CANISTER_ID__: JSON.stringify(config.fileRegistryCanisterId),
 			__DEV_LOCALE__: JSON.stringify(config.locale || 'en'),
-			__TEST_IDENTITY_INDEX__: JSON.stringify(
-				Number.isFinite(Number(config.testIdentityIndex)) ? Number(config.testIdentityIndex) : 0,
-			),
+			__TEST_IDENTITY_INDEX__: JSON.stringify(TEST_IDENTITY_INDEX),
 		},
 		resolve: {
 			alias: {
@@ -176,11 +188,7 @@ if (isSandboxed) {
 			port: HOST_PORT,
 			open: false,
 			watch: { usePolling: true, interval: 500 },
-			proxy: {
-				'/api': { target: config.host, changeOrigin: true },
-				'/custom': { target: config.canisterUrl, changeOrigin: true },
-				'/images': { target: config.canisterUrl, changeOrigin: true },
-			},
+			proxy: PROXY,
 		},
 	});
 

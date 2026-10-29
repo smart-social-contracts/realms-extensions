@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
+	import { ENTITY_TYPES } from './entities';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -41,12 +42,11 @@
 	let expandedItem: number | null = $state(null);
 	let currentPage = $state(0);
 	let pageSize = 10;
-	let totalItems = $state(0);
-	let totalPages = $state(0);
-
-	// Delete
-	let deletingId: string | null = $state(null);
-	let confirmDeleteItem: any | null = $state(null);
+	// The row each visited page starts at; realm_export pages by id range.
+	let pageStarts: number[] = $state([1]);
+	let nextFrom: number | null = $state(null);
+	let rowCounts: Record<string, number> = $state({});
+	let totalItems = $derived(rowCounts[selectedType]);
 
 	function getIcon(className: string): string {
 		return entityIcons[className] || '📊';
@@ -56,85 +56,56 @@
 		return className.replace(/([A-Z])/g, ' $1').trim();
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
-
-	function parseEntities(response: any): { objects: any[]; pagination: any } {
-		if (response?.success && response?.data?.objectsListPaginated) {
-			const paginated = response.data.objectsListPaginated;
-			const objects = (paginated.objects || []).map((s: any) => {
-				try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return s; }
-			});
-			return { objects, pagination: paginated.pagination };
-		}
-		if (response?.data && Array.isArray(response.data)) {
-			return { objects: response.data, pagination: null };
-		}
-		return { objects: [], pagination: null };
+	function deny(reply: { error?: string }) {
+		const needed = / needs (\S+)$/.exec(reply.error ?? '')?.[1];
+		accessDeniedOp = needed ?? '';
+		error = needed ? '' : reply.error || 'Request failed';
 	}
 
 	async function loadEntityTypes() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
-		try {
-			const res = await callExt('get_entity_types');
-			const classes = res?.data ?? (Array.isArray(res) ? res : []);
-			entityTypes = classes.map((className: string) => ({
-				value: className,
-				label: `${getIcon(className)} ${formatLabel(className)}`,
-				className,
-			}));
-			if (entityTypes.length > 0 && !selectedType) {
-				selectedType = entityTypes[0].value;
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-			entityTypes = [{ value: 'User', label: '👤 User', className: 'User' }];
-			if (!selectedType) selectedType = 'User';
-		} finally {
-			loading = false;
-		}
+		entityTypes = ENTITY_TYPES.map((className) => ({
+			value: className,
+			label: `${getIcon(className)} ${formatLabel(className)}`,
+			className,
+		}));
+		if (!selectedType) selectedType = 'User';
+		const monitor = await ctx.read('realm_monitor');
+		rowCounts = monitor.ok ? monitor.rows : {};
+		loading = false;
 	}
 
 	// ── Browse ──
 
-	async function loadData() {
+	async function loadPage(page: number) {
 		objLoading = true;
 		expandedItem = null;
 		try {
-			const raw = await ctx.backend.get_objects_paginated(selectedType, currentPage, pageSize, 'desc');
-			const resp = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			const { objects, pagination } = parseEntities(resp);
-			items = objects;
-			if (pagination) {
-				totalItems = Number(pagination.total_items || 0);
-				totalPages = Number(pagination.total_pages || 0);
-			} else {
-				totalItems = objects.length;
-				totalPages = 1;
+			const reply = await ctx.read('realm_export', { entity: selectedType, from: pageStarts[page], count: pageSize });
+			if (!reply.ok) {
+				deny(reply);
+				items = [];
+				return;
 			}
+			accessDeniedOp = '';
+			currentPage = page;
+			items = reply.rows;
+			nextFrom = reply.next;
+			if (reply.next) pageStarts[page + 1] = reply.next;
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			accessDeniedOp = '';
+			error = e?.message ?? String(e);
 			items = [];
 		} finally {
 			objLoading = false;
 		}
+	}
+
+	function loadData() {
+		pageStarts = [1];
+		loadPage(0);
 	}
 
 	function toggleExpand(index: number) {
@@ -147,77 +118,13 @@
 	}
 
 	function goToPage(page: number) {
-		currentPage = page;
-		loadData();
-	}
-
-	// ── Delete ──
-
-	function requestDelete(item: any) {
-		confirmDeleteItem = item;
-	}
-
-	function cancelDelete() {
-		confirmDeleteItem = null;
-	}
-
-	async function executeDelete() {
-		if (!confirmDeleteItem) return;
-		const item = confirmDeleteItem;
-		const entityType = item._type || selectedType;
-		const entityId = item._id || item.id;
-		confirmDeleteItem = null;
-		deletingId = String(entityId);
-
-		try {
-			const result = await callExt('delete_entity', {
-				entity_type: entityType,
-				entity_id: String(entityId),
-			});
-			if (result?.success) {
-				items = items.filter(i => !((i._id || i.id) === entityId && (i._type || selectedType) === entityType));
-				totalItems = Math.max(0, totalItems - 1);
-				addToast(`Deleted ${entityType}#${entityId}`);
-			} else {
-				addToast(result?.error || 'Delete failed', 'error');
-			}
-		} catch (e: any) {
-			addToast(`Delete error: ${e?.message}`, 'error');
-		} finally {
-			deletingId = null;
-		}
+		loadPage(page);
 	}
 
 	$effect(() => {
 		loadEntityTypes();
 	});
 </script>
-
-<!-- Delete confirmation modal -->
-{#if confirmDeleteItem}
-	<div class="fixed inset-0 bg-black/50 z-40 flex items-center justify-center">
-		<div class="bg-white rounded-xl shadow-xl p-6 max-w-md mx-4">
-			<h3 class="text-lg font-bold text-gray-900 mb-2">Confirm Delete</h3>
-			<p class="text-gray-600 mb-4">
-				Are you sure you want to delete <strong>{confirmDeleteItem._type || selectedType}#{confirmDeleteItem._id || confirmDeleteItem.id}</strong>?
-				{#if confirmDeleteItem.name}
-					<br><span class="text-gray-500">({confirmDeleteItem.name})</span>
-				{/if}
-			</p>
-			<p class="text-red-600 text-sm mb-4">This action cannot be undone.</p>
-			<div class="flex justify-end gap-3">
-				<button
-					onclick={cancelDelete}
-					class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
-				>Cancel</button>
-				<button
-					onclick={executeDelete}
-					class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-				>Delete</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 <div class="w-full px-4 max-w-none">
 	<!-- Header -->
@@ -282,7 +189,7 @@
 			>{objLoading ? 'Loading…' : 'Load Data'}</button>
 			<div class="ml-auto text-gray-600 text-sm">
 				{#if items.length > 0}
-					Showing {items.length} of {totalItems} items
+					Showing {items.length}{totalItems != null ? ` of ${totalItems}` : ''} items
 				{/if}
 			</div>
 		</div>
@@ -309,7 +216,7 @@
 											class="text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
 										>
 											{expandedItem === index ? '▼' : '▶'}
-											{item._type || selectedType} #{item._id || item.id || index + 1}
+											{selectedType} #{item.id ?? index + 1}
 										</button>
 										{#if item.name}
 											<span class="text-gray-700 truncate">- {item.name}</span>
@@ -328,10 +235,9 @@
 										</svg>
 									</button>
 									<button
-										onclick={() => requestDelete(item)}
-										disabled={deletingId === String(item._id || item.id)}
+										disabled
 										class="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition-colors disabled:opacity-50"
-										title="Delete entity"
+										title="Deleting records is not supported by this realm version"
 									>
 										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -365,7 +271,7 @@
 				</div>
 
 				<!-- Pagination Controls -->
-				{#if totalPages > 1}
+				{#if currentPage > 0 || nextFrom}
 					<div class="border-t border-gray-200 p-4 flex items-center justify-between">
 						<div class="flex items-center gap-2">
 							<button
@@ -379,18 +285,13 @@
 								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
 							>Prev</button>
 						</div>
-						<span class="text-sm text-gray-600">Page {currentPage + 1} of {totalPages}</span>
+						<span class="text-sm text-gray-600">Page {currentPage + 1}</span>
 						<div class="flex items-center gap-2">
 							<button
 								onclick={() => goToPage(currentPage + 1)}
-								disabled={currentPage >= totalPages - 1}
+								disabled={!nextFrom}
 								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
 							>Next</button>
-							<button
-								onclick={() => goToPage(totalPages - 1)}
-								disabled={currentPage >= totalPages - 1}
-								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-							>Last</button>
 						</div>
 					</div>
 				{/if}
