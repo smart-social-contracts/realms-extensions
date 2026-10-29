@@ -60,7 +60,7 @@ jobs:
           bash run_tests.sh
         else
           echo "ℹ️  No run_tests.sh found - skipping local backend tests"
-          echo "ℹ️  Full integration tests run via integration-test.yml workflow"
+          echo "ℹ️  UI tests run in the local-realm workflows, where an extension has one"
         fi
 
     - name: Set up Node.js
@@ -74,16 +74,6 @@ jobs:
           cd extensions/passport_verification/tests/e2e
           npm install
           npx playwright install chromium --with-deps
-        fi
-
-    - name: Run E2E tests (against staging)
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      env:
-        PLAYWRIGHT_BASE_URL: https://gzya5-jyaaa-aaaac-qai5a-cai.icp0.io
-      run: |
-        if [ -d extensions/passport_verification/tests/e2e ]; then
-          cd extensions/passport_verification/tests/e2e
-          npx playwright test || echo "⚠️  E2E tests failed (staging may not be deployed)"
         fi
 
     - name: Upload test logs
