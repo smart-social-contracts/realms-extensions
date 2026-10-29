@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "operations": [
     "appoint",
     "department_create",
@@ -12,6 +12,7 @@
     "me",
     "position_create",
     "proposal_create",
+    "quarter_add",
     "quarter_configure",
     "quarter_directory",
     "realm_configure",

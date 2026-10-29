@@ -32,6 +32,8 @@
 		threshold: number;
 		populations: number[];
 		should_scale: boolean;
+		pending: string;
+		pending_error: string;
 	}
 
 	const call = opCaller(ctx);
@@ -40,6 +42,7 @@
 	let quarters: Quarter[] = $state([]);
 	let policy = $state<ScaleStatus | null>(null);
 	let toggling = $state(false);
+	let adding = $state(false);
 
 	const maxPopulation = $derived(
 		policy && policy.populations.length ? Math.max(...policy.populations) : 0,
@@ -89,6 +92,8 @@
 				threshold: count(scale.scale_at),
 				populations: pops.map(count),
 				should_scale: scale.wanted === true,
+				pending: String(scale.pending?.member ?? ''),
+				pending_error: String(scale.pending?.error ?? ''),
 			};
 		} else {
 			policy = null;
@@ -115,6 +120,19 @@
 			notify(refusalText(res, 'Auto-scaling was not changed'), 'error');
 		}
 		toggling = false;
+	}
+
+	/** quarter_add: Casals builds the realm's next quarter, then the capital registers it. Under a realm-wide
+	 *  policy that is not direct, it becomes a proposal for the members to vote on. */
+	async function addQuarter() {
+		adding = true;
+		const res = await call(true, 'quarter_add', {});
+		const proposal = proposalOf(res);
+		if (proposal) notify(`Submitted as proposal ${proposal}`);
+		else if (res.ok) notify(`Casals is building ${res.member}`);
+		else notify(refusalText(res, 'No quarter was added'), 'error');
+		adding = false;
+		await load();
 	}
 
 	onMount(() => {
@@ -223,8 +241,21 @@
 					<div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
 					<span class="ml-3 text-sm font-medium text-gray-700">Auto-scaling {policy.auto_scale_enabled ? 'enabled' : 'disabled'}</span>
 				</label>
-				<p class="sm:ml-auto text-xs text-gray-500">
-					New quarters are provisioned by the platform once a scale is queued.
+				<button
+					type="button"
+					data-testid="add-quarter"
+					class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+					disabled={adding || !!policy.pending}
+					onclick={addQuarter}
+				>
+					{adding ? 'Adding…' : 'Add a quarter'}
+				</button>
+				<p class="sm:ml-auto text-xs text-gray-500" data-testid="quarter-pending">
+					{#if policy.pending}
+						Casals is building {policy.pending}{policy.pending_error ? ` (last try: ${policy.pending_error})` : ''}.
+					{:else}
+						Casals builds a new quarter on the realm's stand; at 90% of capacity the realm proposes one itself.
+					{/if}
 				</p>
 			</div>
 		{/if}
