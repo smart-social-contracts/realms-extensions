@@ -14,5 +14,10 @@
     "@playwright/test": "1.52.0",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^3.4.3",
+    "@dfinity/candid": "^3.4.3",
+    "@dfinity/identity": "3.4.3"
   }
 }

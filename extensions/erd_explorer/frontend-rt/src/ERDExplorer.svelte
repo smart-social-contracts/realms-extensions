@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount } from 'svelte';
+	import { ENTITY_TYPES } from './entities';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -18,7 +19,7 @@
 	let dragOffset = { x: 0, y: 0 };
 
 	const svgWidth = 900;
-	const svgHeight = 600;
+	const perRow = 4;
 
 	const REL_COLORS: Record<string, string> = {
 		OneToOne: '#4F46E5',
@@ -33,65 +34,42 @@
 		Identity: '#F59E0B',
 	};
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
+	let rowCounts: Record<string, number> = $state({});
 
 	async function loadEntitySchema() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
-		try {
-			const response = await callExt('get_entity_schema');
-			const schema = response?.entities ?? response?.data?.entities ?? response?.data ?? response;
-
-			if (schema && typeof schema === 'object') {
-				let col = 0;
-				let row = 0;
-				const perRow = 4;
-				const newEntities: Record<string, any> = {};
-
-				for (const [name, data] of Object.entries(schema)) {
-					if (name.startsWith('_')) continue;
-					const eData = data as any;
-					newEntities[name] = {
-						...eData,
-						fields: eData.fields || [],
-						relationships: eData.relationships || {},
-						position: { x: 80 + col * 200, y: 80 + row * 160 },
-						expanded: false,
-					};
-					col++;
-					if (col >= perRow) { col = 0; row++; }
-				}
-				entities = newEntities;
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			loading = false;
-		}
+		const monitor = await ctx.read('realm_monitor');
+		rowCounts = monitor.ok ? monitor.rows : {};
+		const newEntities: Record<string, any> = {};
+		ENTITY_TYPES.forEach((name, i) => {
+			newEntities[name] = {
+				fields: [],
+				relationships: {},
+				position: { x: 80 + (i % perRow) * 200, y: 80 + Math.floor(i / perRow) * 160 },
+				expanded: false,
+			};
+		});
+		entities = newEntities;
+		loading = false;
 	}
 
 	async function loadEntityData(entityType: string, page: number = 0) {
-		try {
-			const response = await callExt('get_entity_data', {
-				entity_type: entityType,
-				page_num: page,
-				page_size: pageSize,
-			});
-			if (response) {
-				entityData = { ...entityData, [entityType]: response?.data ?? response };
-			}
-		} catch (e: any) {
-			console.error(`Failed to load ${entityType} data:`, e);
+		// realm_export pages by id range: remember where each visited page starts.
+		const starts: number[] = entityData[entityType]?.starts ?? [1];
+		const response = await ctx.read('realm_export', { entity: entityType, from: starts[page], count: pageSize });
+		if (!response.ok) {
+			const op = / needs (\S+)$/.exec(response.error)?.[1];
+			if (op) accessDeniedOp = op;
+			else error = response.error;
+			return;
+		}
+		if (response.next) starts[page + 1] = response.next;
+		entityData = { ...entityData, [entityType]: { items: response.rows, next: response.next, starts } };
+		if (response.rows.length > 0) {
+			entities[entityType].fields = Object.keys(response.rows[0]);
+			entities = { ...entities };
 		}
 	}
 
@@ -118,15 +96,15 @@
 	}
 
 	function getPaginatedData(name: string): any[] {
-		return entityData[name]?.items || entityData[name]?.data || [];
+		return entityData[name]?.items || [];
 	}
 
-	function getTotalPages(name: string): number {
-		return entityData[name]?.total_pages || 0;
+	function hasNextPage(name: string): boolean {
+		return !!entityData[name]?.next;
 	}
 
-	function getTotalCount(name: string): number {
-		return entityData[name]?.total_items_count || entityData[name]?.total_count || 0;
+	function getTotalCount(name: string): number | undefined {
+		return rowCounts[name];
 	}
 
 	async function changePage(name: string, newPage: number) {
@@ -156,6 +134,7 @@
 	}
 
 	let entityEntries = $derived(Object.entries(entities));
+	let svgHeight = $derived(Math.max(600, 80 + Math.ceil(entityEntries.length / perRow) * 160));
 	let selectedFields = $derived(
 		selectedEntity && entities[selectedEntity]
 			? (Array.isArray(entities[selectedEntity].fields)
@@ -219,6 +198,7 @@
 			<div class="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col">
 				<div class="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
 					<h3 class="text-sm font-semibold text-gray-700">Entity Relationship Diagram</h3>
+					<span class="text-xs text-gray-500">Relationships are not supported by this realm version.</span>
 					<div class="flex gap-3 text-xs">
 						{#each Object.entries(REL_COLORS) as [type, color]}
 							<div class="flex items-center gap-1">
@@ -278,7 +258,7 @@
 									tabindex="0"
 								/>
 								<text x="75" y="25" text-anchor="middle" fill="white" font-weight="600" font-size="14">{name}</text>
-								<text x="75" y="45" text-anchor="middle" fill="white" opacity="0.8" font-size="11">{getTotalCount(name) || 0} records</text>
+								<text x="75" y="45" text-anchor="middle" fill="white" opacity="0.8" font-size="11">{getTotalCount(name) != null ? `${getTotalCount(name)} records` : ''}</text>
 								<text x="75" y="65" text-anchor="middle" fill="white" opacity="0.9" font-size="10">Click to explore</text>
 							</g>
 						{/each}
@@ -292,7 +272,9 @@
 					<div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
 						<h3 class="text-sm font-semibold text-gray-700">
 							{selectedEntity} Data
-							<span class="text-xs text-gray-400 font-normal ml-1">({getTotalCount(selectedEntity)} total)</span>
+							{#if getTotalCount(selectedEntity) != null}
+								<span class="text-xs text-gray-400 font-normal ml-1">({getTotalCount(selectedEntity)} total)</span>
+							{/if}
 						</h3>
 					</div>
 
@@ -358,18 +340,18 @@
 										</table>
 									</div>
 
-									{#if getTotalPages(selectedEntity) > 1}
+									{#if currentPage > 1 || hasNextPage(selectedEntity)}
 										<div class="flex justify-between items-center mt-3 text-xs">
 											<button
 												class="px-3 py-1 bg-gray-100 border border-gray-300 rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
 												disabled={currentPage === 1}
 												onclick={() => changePage(selectedEntity, Math.max(1, currentPage - 1))}
 											>Previous</button>
-											<span class="text-gray-500">Page {currentPage} of {getTotalPages(selectedEntity)}</span>
+											<span class="text-gray-500">Page {currentPage}</span>
 											<button
 												class="px-3 py-1 bg-gray-100 border border-gray-300 rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
-												disabled={currentPage === getTotalPages(selectedEntity)}
-												onclick={() => changePage(selectedEntity, Math.min(getTotalPages(selectedEntity), currentPage + 1))}
+												disabled={!hasNextPage(selectedEntity)}
+												onclick={() => changePage(selectedEntity, currentPage + 1)}
 											>Next</button>
 										</div>
 									{/if}

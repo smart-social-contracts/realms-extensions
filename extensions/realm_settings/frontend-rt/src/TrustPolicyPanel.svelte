@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { configureChange, neededPermission } from './realm';
 
 	let {
 		ctx,
@@ -22,14 +23,7 @@
 	let approversText = $state('');
 	let effectiveApprovers: string[] = $state([]);
 	let marketplaceCanisterId = $state('');
-
-	let voteConfirm: {
-		summary: string;
-		governedBy: string;
-		policy: string;
-		run: () => Promise<void>;
-	} | null = $state(null);
-	let voteConfirmBusy = $state(false);
+	let status = $state('');
 
 	const trustedApprovers = $derived(
 		approversText
@@ -42,87 +36,59 @@
 		if (addToast) addToast(msg, type);
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
-
-	function applyStatus(data: any) {
-		canChange = !!data?.caller_can_change;
-		requireApproval = !!data?.require_marketplace_approval;
-		const trusted = Array.isArray(data?.trusted_approvers) ? data.trusted_approvers : [];
-		approversText = trusted.join('\n');
-		effectiveApprovers = Array.isArray(data?.effective_approvers) ? data.effective_approvers : [];
-		marketplaceCanisterId = data?.marketplace_canister_id || '';
-	}
-
 	async function load() {
 		loading = true;
 		error = '';
 		try {
-			const res = await callExt('get_trust_policy', {});
-			if (res?.success) {
-				applyStatus(res.data);
-			} else {
+			const [setup, me] = await Promise.all([ctx.run('setup_state'), ctx.read('me')]);
+			if (!setup.ok) {
 				canChange = false;
-				error = res?.error || 'Failed to load trust policy';
-				if (res?.denied_operation) {
-					error = `Requires permission: ${res.denied_operation}`;
-				}
+				const needed = neededPermission(setup.error);
+				error = needed ? `Requires permission: ${needed}` : setup.error || 'Failed to load trust policy';
+				return;
 			}
+			const held: string[] = me.ok ? me.permissions : [];
+			canChange = held.includes('all') || held.includes('realm.configure.trust_policy');
+			status = setup.status;
+			const realm = setup.realm;
+			requireApproval = !!realm.require_marketplace_approval;
+			const trusted: string[] = realm.trusted_approvers || [];
+			approversText = trusted.join('\n');
+			marketplaceCanisterId = realm.marketplace_canister_id || '';
+			const approvers = trusted.filter((a) => !a.startsWith('sha256:'));
+			effectiveApprovers = approvers.length ? approvers : marketplaceCanisterId ? [marketplaceCanisterId] : [];
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			error = op ? `Requires permission: ${op}` : e?.message || String(e);
+			error = e?.message || String(e);
 			canChange = false;
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function save(confirm = false) {
+	async function save() {
 		if (!canChange) return;
 		saving = true;
 		error = '';
 		try {
-			const res = await callExt('set_trust_policy', {
+			const change = configureChange(status, 'trust_policy', {
 				require_marketplace_approval: requireApproval,
 				trusted_approvers: [...trustedApprovers],
-				confirm,
 			});
-			if (res?.success && res.data?.requires_confirmation) {
-				voteConfirm = {
-					summary: res.data.summary || 'Update marketplace approval policy',
-					governedBy: res.data.governed_by || 'root',
-					policy: res.data.policy || '',
-					run: async () => {
-						voteConfirmBusy = true;
-						try {
-							await save(true);
-							voteConfirm = null;
-						} finally {
-							voteConfirmBusy = false;
-						}
-					},
-				};
+			const res = await ctx.run(change.op, change.args);
+			if (!res.ok) {
+				const needed = neededPermission(res.error);
+				error = needed ? `Requires permission: ${needed}` : res.error || 'Failed to save trust policy';
+				notify(error, 'error');
 				return;
 			}
-			if (res?.success) {
-				if (res.data?.applied === 'proposal') {
-					notify(
-						`Proposal ${res.data.proposal_id || ''} created — vote in Governance → Voting`,
-						'success',
-					);
-				} else {
-					notify(res.data?.summary || 'Approval policy saved', 'success');
-					if (res.data?.warning) notify(res.data.warning, 'error');
-				}
-				await load();
+			if (res.proposal) {
+				notify(`Proposal ${res.proposal} created — vote in Governance → Voting`, 'success');
 			} else {
-				error = res?.error || 'Failed to save trust policy';
-				notify(error, 'error');
+				notify('Approval policy saved', 'success');
 			}
+			await load();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			error = op ? `Requires permission: ${op}` : e?.message || String(e);
+			error = e?.message || String(e);
 			notify(error, 'error');
 		} finally {
 			saving = false;
@@ -131,43 +97,6 @@
 
 	onMount(load);
 </script>
-
-{#if voteConfirm}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-		<div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-			<h3 class="text-lg font-semibold text-gray-900 mb-2">Governance vote required</h3>
-			<p class="text-sm text-gray-600 mb-1">
-				This approval policy change cannot be applied directly — the policy of
-				<strong>{voteConfirm.governedBy}</strong> ({voteConfirm.policy}) requires a vote.
-			</p>
-			<div class="my-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800">
-				{voteConfirm.summary}
-			</div>
-			<p class="text-sm text-gray-600 mb-4">
-				Create a proposal? Members will vote on it in <strong>Voting</strong>.
-			</p>
-			<div class="flex justify-end gap-3">
-				<button
-					onclick={() => (voteConfirm = null)}
-					disabled={voteConfirmBusy}
-					class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={() => voteConfirm?.run()}
-					disabled={voteConfirmBusy}
-					class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40"
-				>
-					{#if voteConfirmBusy}
-						<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-					{/if}
-					Create proposal
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 <section class="bg-white shadow-sm rounded-lg p-6 mb-6">
 	<div class="flex items-start justify-between gap-4 mb-1">
@@ -305,7 +234,7 @@
 
 			<div class="flex items-center gap-3 pt-2 border-t border-gray-100">
 				<button
-					onclick={() => save(false)}
+					onclick={save}
 					disabled={!canChange || saving}
 					class={cn(
 						'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',

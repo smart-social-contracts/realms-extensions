@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
-	import { exportCsv } from '../../../_shared/frontend/csv-export';
+	import { buildCsvBlob, triggerDownload } from '../../../_shared/frontend/csv-export';
 	import { isNarrowViewport, subscribeNarrowViewport } from '../../../_shared/frontend/mobile-chrome';
 	import { SvelteSet } from 'svelte/reactivity';
 
@@ -21,14 +21,23 @@
 		unsubNarrow();
 	});
 
+	interface Line {
+		kind: string;
+		category: string;
+		debit: number;
+		credit: number;
+		symbol: string;
+	}
+
 let budgets: any[] = $state([]);
 let ledgerEntries: any[] = $state([]);
 let funds: any[] = $state([]);
 let fiscalPeriods: any[] = $state([]);
 let tokens: any[] = $state([]);
-let realms: any[] = $state([]);
+let accountingSymbol = $state('');
 let financialReports: any[] = $state([]);
 let selectedReport = $state('working');
+let selectedReportFull: any = $state(null);
 let draftBusy = $state(false);
 let draftError = $state('');
 let loading = $state(true);
@@ -43,37 +52,28 @@ let accessDeniedOp = $state('');
 		operating: '#93C5FD', general: '#1E40AF', special_revenue: '#2563EB', capital_projects: '#60A5FA',
 	};
 
-	const BATCH_SIZE = 50;
+	const BATCH_SIZE = 500;
 
-	async function loadPaginated(entity: string, limit = 100, order = 'desc') {
-		const allItems: any[] = [];
-		let page = 0;
-		let totalPages = 1;
+	function neededPermission(reply: { error?: string }): string | null {
+		return / needs (\S+)$/.exec(reply.error ?? '')?.[1] ?? null;
+	}
 
-		while (page < totalPages && allItems.length < limit) {
-			const batchLimit = Math.min(BATCH_SIZE, limit - allItems.length);
-			const raw = await ctx.backend.get_objects_paginated(entity, page, batchLimit, order);
-			const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-
-			if (parsed?.success && parsed?.data?.objectsListPaginated) {
-				const objects = parsed.data.objectsListPaginated.objects;
-				const batch = Array.isArray(objects)
-					? objects.map((s: string) => (typeof s === 'string' ? JSON.parse(s) : s))
-					: [];
-				allItems.push(...batch);
-				const pag = parsed.data.objectsListPaginated.pagination;
-				totalPages = Number(pag?.total_pages ?? 1);
-				if (batch.length < batchLimit) break;
-			} else {
-				const fallback = parsed?.data;
-				if (Array.isArray(fallback)) allItems.push(...fallback);
-				else if (Array.isArray(parsed)) allItems.push(...parsed);
-				break;
-			}
-			page++;
+	/** Up to ``limit`` items of a paginated read, following ``next``; throws the reply when it fails. */
+	async function readPages(name: string, key: string, args: Record<string, unknown> = {}, limit = Infinity) {
+		const items: any[] = [];
+		let from: number | null = 1;
+		while (from && items.length < limit) {
+			const reply = await ctx.read(name, { ...args, from, count: BATCH_SIZE });
+			if (!reply.ok) throw reply;
+			items.push(...reply[key]);
+			from = reply.next;
 		}
+		return items.slice(0, limit);
+	}
 
-		return allItems;
+	/** Raw rows of ``entity``; empty when the caller may not export them. */
+	function exportRows(entity: string, limit = Infinity) {
+		return readPages('realm_export', 'rows', { entity }, limit).catch(() => []);
 	}
 
 	async function loadData() {
@@ -81,30 +81,30 @@ let accessDeniedOp = $state('');
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const [b, l, f, fp, t, r, fr] = await Promise.all([
-				loadPaginated('Budget', 100, 'asc'),
-				loadPaginated('LedgerEntry', 1000, 'desc'),
-				loadPaginated('Fund', 100, 'asc'),
-				loadPaginated('FiscalPeriod', 100, 'desc'),
-				loadPaginated('Token', 100, 'asc'),
-				loadPaginated('Realm', 10, 'asc'),
-				loadPaginated('FinancialReport', 200, 'desc').catch(() => []),
+			const [l, treasury, info, fr, b, f, fp] = await Promise.all([
+				readPages('ledger_view', 'entries', {}, 1000),
+				ctx.read('treasury_view', { count: 1 }),
+				ctx.read('realm_info'),
+				readPages('report_view', 'reports', {}, 200),
+				exportRows('Budget', 100),
+				exportRows('Fund', 100),
+				exportRows('FiscalPeriod', 100),
 			]);
-			budgets = b;
 			ledgerEntries = l;
+			tokens = treasury.ok ? treasury.tokens : [];
+			accountingSymbol = info.ok ? (info.realm.accounting_currency || '').trim() : '';
+			financialReports = fr;
+			budgets = b;
 			funds = f;
 			fiscalPeriods = fp;
-			tokens = t;
-			realms = r;
-			financialReports = fr;
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
+			const op = e?.ok === false ? neededPermission(e) : null;
 			if (op != null) {
 				accessDeniedOp = op;
 				error = '';
 			} else {
 				accessDeniedOp = '';
-				error = e?.message ?? String(e);
+				error = e?.error ?? e?.message ?? String(e);
 			}
 		} finally {
 			loading = false;
@@ -113,23 +113,19 @@ let accessDeniedOp = $state('');
 
 	$effect(() => { void loadData(); });
 
-	// The realm is the source of truth; an empty value there means no treasury
-	// ledger has resolved yet, so nothing is shown rather than a guessed symbol.
-	// The enabled token is consulted only when the realm itself is unreadable.
-	let accountingSymbol = $derived.by(() => {
-		if (realms.length > 0) {
-			return (realms[0]?.accounting_currency || '').toString().trim();
-		}
-		const enabled = tokens.find(
-			(t) => t.enabled === true || t.enabled === 'true' || t._prop_enabled === 'true'
-		);
-		return enabled ? (enabled.symbol || enabled.name || '').toString().trim() : '';
+	$effect(() => {
+		const id = selectedReport;
+		selectedReportFull = null;
+		if (id === 'working') return;
+		void ctx.read('report_view', { report: id }).then((reply: any) => {
+			if (selectedReport === id) selectedReportFull = reply.ok ? reply.report : { error: reply.error };
+		});
 	});
 
 	let ledgerCurrencies = $derived.by(() => {
 		const found: string[] = [];
 		for (const e of ledgerEntries) {
-			const c = (e.currency || '').toString().trim();
+			const c = (e.symbol || '').toString().trim();
 			if (c && !found.includes(c)) found.push(c);
 		}
 		return found.sort();
@@ -142,21 +138,9 @@ let accessDeniedOp = $state('');
 		return false;
 	});
 
-	let tokenDecimalsByCurrency = $derived.by(() => {
-		const map: Record<string, number> = {};
-		for (const t of tokens) {
-			const symbol = (t.symbol || t.name || '').toString().trim();
-			if (!symbol) continue;
-			let decimals = 8;
-			if (t.decimals != null) {
-				const parsed = Number(t.decimals);
-				if (!isNaN(parsed) && parsed >= 0) decimals = parsed;
-			}
-			map[symbol] = decimals;
-			if (t.name && t.name !== symbol) map[t.name] = decimals;
-		}
-		return map;
-	});
+	let tokenDecimalsByCurrency = $derived(
+		Object.fromEntries(tokens.map((t) => [t.id, Number(t.decimals ?? 8)])) as Record<string, number>,
+	);
 
 	function toHumanAmount(amount: number, currency: string): number {
 		if (amount == null || isNaN(Number(amount))) return 0;
@@ -188,17 +172,10 @@ let accessDeniedOp = $state('');
 		return cat.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 	}
 
-	function reportRefId(ref: unknown): string {
-		if (!ref) return '';
-		if (typeof ref === 'string') return ref;
-		if (typeof ref === 'object' && ref !== null && 'id' in ref) return String((ref as { id: unknown }).id);
-		return '';
-	}
-
-	function formatHumanDate(iso: unknown): string {
-		if (!iso) return '—';
-		const d = new Date(String(iso));
-		if (isNaN(d.getTime())) return String(iso);
+	function formatHumanDate(seconds: unknown): string {
+		if (!seconds) return '—';
+		const d = new Date(Number(seconds) * 1000);
+		if (isNaN(d.getTime())) return String(seconds);
 		return d.toLocaleString(undefined, {
 			year: 'numeric',
 			month: 'short',
@@ -208,187 +185,68 @@ let accessDeniedOp = $state('');
 		});
 	}
 
-	function parseStatements(raw: unknown): Record<string, any> {
-		if (raw == null) throw new Error('missing statements');
-		if (typeof raw === 'object') return raw as Record<string, any>;
-		if (typeof raw === 'string') return JSON.parse(raw);
-		throw new Error('invalid statements');
+	/** A report's frozen accounts ("kind:category:symbol" totals) as ledger lines. */
+	function reportLines(report: any): Line[] {
+		return Object.entries(report.statements?.accounts ?? {}).map(([key, account]: [string, any]) => {
+			const [kind, category, symbol] = key.split(':');
+			return { kind, category, symbol, debit: account.debit, credit: account.credit };
+		});
 	}
 
-	function sumItems(items: Record<string, number>): number {
-		return Object.values(items).reduce((a, b) => a + b, 0);
-	}
-
-	function cloneRawStatements(src: Record<string, any>): Record<string, any> {
-		const bs = src.balance_sheet ?? {};
-		const is = src.income_statement ?? {};
-		const cf = src.cash_flow ?? {};
-		return {
-			summary: { ...(src.summary ?? {}) },
-			balance_sheet: {
-				assets: { items: { ...(bs.assets?.items ?? {}) }, total: bs.assets?.total ?? 0 },
-				liabilities: { items: { ...(bs.liabilities?.items ?? {}) }, total: bs.liabilities?.total ?? 0 },
-				equity: { items: { ...(bs.equity?.items ?? {}) }, total: bs.equity?.total ?? 0 },
-				net_position: bs.net_position ?? 0,
-			},
-			income_statement: {
-				revenues: { items: { ...(is.revenues?.items ?? {}) }, total: is.revenues?.total ?? 0 },
-				expenses: { items: { ...(is.expenses?.items ?? {}) }, total: is.expenses?.total ?? 0 },
-				net_income: is.net_income ?? 0,
-			},
-			cash_flow: {
-				operating: cf.operating ?? 0,
-				investing: cf.investing ?? 0,
-				financing: cf.financing ?? 0,
-				net_change: cf.net_change ?? 0,
-			},
-		};
-	}
-
-	function applyLedgerEntryRaw(statements: Record<string, any>, e: any) {
-		const cat = e.category || 'other';
-		const d = Number(e.debit || 0);
-		const c = Number(e.credit || 0);
-		const bs = statements.balance_sheet;
-		const is = statements.income_statement;
-		const cf = statements.cash_flow;
-
-		switch (e.entry_type) {
-			case 'asset':
-				bs.assets.items[cat] = (bs.assets.items[cat] || 0) + d - c;
-				break;
-			case 'liability':
-				bs.liabilities.items[cat] = (bs.liabilities.items[cat] || 0) + c - d;
-				break;
-			case 'equity':
-				bs.equity.items[cat] = (bs.equity.items[cat] || 0) + c - d;
-				break;
-			case 'revenue':
-				is.revenues.items[cat] = (is.revenues.items[cat] || 0) + c - d;
-				break;
-			case 'expense':
-				is.expenses.items[cat] = (is.expenses.items[cat] || 0) + d - c;
-				break;
-		}
-
-		if (cat === 'cash') {
-			const amt = d - c;
-			const tags = e.tags || '';
-			if (tags.includes('investing') || tags.includes('capital')) cf.investing += amt;
-			else if (tags.includes('financing') || tags.includes('bond')) cf.financing += amt;
-			else cf.operating += amt;
-		}
-	}
-
-	function recomputeTotalsRaw(statements: Record<string, any>) {
-		const bs = statements.balance_sheet;
-		bs.assets.total = sumItems(bs.assets.items);
-		bs.liabilities.total = sumItems(bs.liabilities.items);
-		bs.equity.total = sumItems(bs.equity.items);
-		bs.net_position = bs.assets.total - bs.liabilities.total;
-
-		const is = statements.income_statement;
-		is.revenues.total = sumItems(is.revenues.items);
-		is.expenses.total = sumItems(is.expenses.items);
-		is.net_income = is.revenues.total - is.expenses.total;
-
-		const cf = statements.cash_flow;
-		cf.net_change = cf.operating + cf.investing + cf.financing;
-
-		statements.summary = {
-			total_assets: bs.assets.total,
-			total_liabilities: bs.liabilities.total,
-			net_position: bs.net_position,
-			net_income: is.net_income,
-		};
-	}
-
-	function isAfterAsOf(entryDate: unknown, asOf: unknown): boolean {
-		if (!entryDate || !asOf) return false;
-		const e = new Date(String(entryDate)).getTime();
-		const a = new Date(String(asOf)).getTime();
-		if (isNaN(e) || isNaN(a)) return false;
-		return e > a;
-	}
-
-	function mapBalanceSheetFromRaw(stmts: Record<string, any>, currency: string) {
-		const bs = stmts.balance_sheet ?? {};
+	function statementsOf(lines: Line[]) {
 		const assets: Record<string, number> = {};
 		const liabilities: Record<string, number> = {};
 		const equity: Record<string, number> = {};
-		for (const [cat, amt] of Object.entries(bs.assets?.items ?? {})) {
-			assets[cat] = toHumanAmount(Number(amt), currency);
-		}
-		for (const [cat, amt] of Object.entries(bs.liabilities?.items ?? {})) {
-			liabilities[cat] = toHumanAmount(Number(amt), currency);
-		}
-		for (const [cat, amt] of Object.entries(bs.equity?.items ?? {})) {
-			equity[cat] = toHumanAmount(Number(amt), currency);
-		}
-		const totalAssets = toHumanAmount(bs.assets?.total ?? 0, currency);
-		const totalLiabilities = toHumanAmount(bs.liabilities?.total ?? 0, currency);
-		const totalEquity = toHumanAmount(bs.equity?.total ?? 0, currency);
-		const netPosition = toHumanAmount(bs.net_position ?? totalAssets - totalLiabilities, currency);
-		return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity, netPosition };
-	}
-
-	function mapIncomeStatementFromRaw(stmts: Record<string, any>, currency: string) {
-		const is = stmts.income_statement ?? {};
 		const revenues: Record<string, number> = {};
 		const expenses: Record<string, number> = {};
-		for (const [cat, amt] of Object.entries(is.revenues?.items ?? {})) {
-			revenues[cat] = toHumanAmount(Number(amt), currency);
+		let operating = 0;
+		for (const l of lines) {
+			const cat = l.category || 'other';
+			const d = toHumanAmount(l.debit || 0, l.symbol);
+			const c = toHumanAmount(l.credit || 0, l.symbol);
+			switch (l.kind) {
+				case 'asset': assets[cat] = (assets[cat] || 0) + d - c; break;
+				case 'liability': liabilities[cat] = (liabilities[cat] || 0) + c - d; break;
+				case 'equity': equity[cat] = (equity[cat] || 0) + c - d; break;
+				case 'revenue': revenues[cat] = (revenues[cat] || 0) + c - d; break;
+				case 'expense': expenses[cat] = (expenses[cat] || 0) + d - c; break;
+			}
+			if (l.kind === 'asset' && cat === 'cash') operating += d - c;
 		}
-		for (const [cat, amt] of Object.entries(is.expenses?.items ?? {})) {
-			expenses[cat] = toHumanAmount(Number(amt), currency);
-		}
-		const totalRevenues = toHumanAmount(is.revenues?.total ?? 0, currency);
-		const totalExpenses = toHumanAmount(is.expenses?.total ?? 0, currency);
-		const netIncome = toHumanAmount(is.net_income ?? totalRevenues - totalExpenses, currency);
-		return { revenues, expenses, totalRevenues, totalExpenses, netIncome };
-	}
-
-	function mapCashFlowFromRaw(stmts: Record<string, any>, currency: string) {
-		const cf = stmts.cash_flow ?? {};
-		const operating = toHumanAmount(cf.operating ?? 0, currency);
-		const investing = toHumanAmount(cf.investing ?? 0, currency);
-		const financing = toHumanAmount(cf.financing ?? 0, currency);
-		const netChange = toHumanAmount(cf.net_change ?? operating + investing + financing, currency);
-		return { operating, investing, financing, netChange };
+		const sum = (items: Record<string, number>) => Object.values(items).reduce((a, b) => a + b, 0);
+		const totalAssets = sum(assets);
+		const totalLiabilities = sum(liabilities);
+		const totalRevenues = sum(revenues);
+		const totalExpenses = sum(expenses);
+		return {
+			balanceSheet: {
+				assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity: sum(equity),
+				netPosition: totalAssets - totalLiabilities,
+			},
+			incomeStatement: { revenues, expenses, totalRevenues, totalExpenses, netIncome: totalRevenues - totalExpenses },
+			cashFlow: { operating, investing: 0, financing: 0, netChange: operating },
+		};
 	}
 
 	let supersededReportIds = $derived.by(() => {
 		const ids = new SvelteSet<string>();
 		for (const r of financialReports) {
-			const sup = reportRefId(r.supersedes);
-			if (sup) ids.add(sup);
+			if (r.supersedes) ids.add(r.supersedes);
 		}
 		return ids;
 	});
 
 	let officialReportsSorted = $derived.by(() =>
-		[...financialReports].sort(
-			(a, b) => new Date(String(b.issued_at)).getTime() - new Date(String(a.issued_at)).getTime()
-		)
+		[...financialReports].sort((a, b) => Number(b.as_of) - Number(a.as_of))
 	);
 
-	let latestOfficialReport = $derived.by(() => {
-		const candidates = financialReports
-			.filter((r) => r.kind !== 'draft' && !supersededReportIds.has(r.id))
-			.sort((a, b) => new Date(String(b.issued_at)).getTime() - new Date(String(a.issued_at)).getTime());
-		return candidates[0] ?? null;
-	});
-
 	function reportOptionLabel(report: any): string {
-		const issued = formatHumanDate(report.issued_at);
+		const issued = formatHumanDate(report.as_of);
 		let label: string;
 		if (report.kind === 'draft') {
 			label = `Draft · ${issued}`;
 		} else if (report.kind === 'period_close') {
-			const periodId = reportRefId(report.period) || report.as_of || report.id;
-			label = `Period ${periodId} · issued ${issued}`;
-		} else if (report.kind === 'as_of') {
-			label = `As-of ${formatHumanDate(report.as_of)} · issued ${issued}`;
+			label = `Period ${report.id} · issued ${issued}`;
 		} else {
 			label = `${report.id} · issued ${issued}`;
 		}
@@ -396,245 +254,88 @@ let accessDeniedOp = $state('');
 		return label;
 	}
 
-	let statementParseError = $derived.by(() => {
-		if (selectedReport === 'working') return '';
-		const report = financialReports.find((r) => r.id === selectedReport);
-		if (!report) return '';
-		try {
-			parseStatements(report.statements);
-			return '';
-		} catch {
-			return 'Could not read this report\'s statement data.';
-		}
-	});
+	let statementParseError = $derived(
+		selectedReportFull?.error ? 'Could not read this report\'s statement data.' : '',
+	);
 
 	let reportStatusLine = $derived.by(() => {
 		if (selectedReport === 'working') return 'Unofficial working books. Not an issued report.';
 		const report = financialReports.find((r) => r.id === selectedReport);
 		if (!report) return '';
 		if (report.kind === 'draft') {
-			return `Draft snapshot · generated ${formatHumanDate(report.issued_at)}`;
+			return `Draft snapshot · generated ${formatHumanDate(report.as_of)}`;
 		}
-		const kindLabel =
-			report.kind === 'period_close' ? 'Period close' :
-			report.kind === 'as_of' ? 'As-of' :
-			String(report.kind || 'Report');
-		return `Official · issued ${formatHumanDate(report.issued_at)} · ${kindLabel}`;
+		const kindLabel = report.kind === 'period_close' ? 'Period close' : String(report.kind || 'Report');
+		return `Official · issued ${formatHumanDate(report.as_of)} · ${kindLabel}`;
 	});
+
+	/** The open fiscal period covering now, or else the latest open one. */
+	function currentPeriod(): any {
+		const now = Date.now() / 1000;
+		const open = fiscalPeriods.filter((p) => p.status === 'open');
+		return open.find((p) => p.starts_at <= now && now < p.ends_at) ?? open[open.length - 1];
+	}
 
 	async function generateDraftSnapshot() {
 		draftBusy = true;
 		draftError = '';
 		try {
-			const res = await ctx.callSync('issue_draft', {});
-			if (res?.success === false) {
-				const msg = res?.error ?? 'Failed to generate draft snapshot.';
-				draftError = msg;
+			const period = currentPeriod();
+			if (!period) {
+				draftError = 'There is no open fiscal period to snapshot.';
+				return;
+			}
+			const res = await ctx.run('report_issue', { period: period.id, kind: 'draft' });
+			if (!res.ok) {
+				const op = neededPermission(res);
+				if (op != null) {
+					accessDeniedOp = op;
+					return;
+				}
+				draftError = res.error || 'Failed to generate draft snapshot.';
 				if (typeof ctx.notify === 'function') {
-					ctx.notify('error', msg);
+					ctx.notify('error', draftError);
 				}
 				return;
 			}
-			const id = res?.data?.id ?? res?.id;
-			if (!id) {
-				const msg = 'Draft created but no report id was returned.';
-				draftError = msg;
+			if (res.proposal) {
 				if (typeof ctx.notify === 'function') {
-					ctx.notify('error', msg);
+					ctx.notify('success', `Proposal ${res.proposal} created — the snapshot is taken after the vote passes.`);
 				}
 				return;
 			}
 			await loadData();
-			selectedReport = id;
+			selectedReport = res.report;
 			if (typeof ctx.notify === 'function') {
 				ctx.notify('success', 'Draft snapshot generated.');
 			}
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				draftError = '';
-			} else {
-				accessDeniedOp = '';
-				draftError = e?.message ?? String(e);
-				if (typeof ctx.notify === 'function') {
-					ctx.notify('error', draftError);
-				}
+			draftError = e?.message ?? String(e);
+			if (typeof ctx.notify === 'function') {
+				ctx.notify('error', draftError);
 			}
 		} finally {
 			draftBusy = false;
 		}
 	}
 
-	let workingBooksRollForwardNote = $derived.by(() => {
-		if (selectedReport !== 'working' || !latestOfficialReport?.as_of) return '';
-		return `Includes activity since ${formatHumanDate(latestOfficialReport.as_of)}.`;
-	});
-
 	// --- Financial statement computations (accounting tab display) ---
-	let balanceSheet = $derived.by(() => {
-		if (selectedReport !== 'working') {
-			const report = financialReports.find((r) => r.id === selectedReport);
-			if (!report || statementParseError) {
-				return { assets: {}, liabilities: {}, equity: {}, totalAssets: 0, totalLiabilities: 0, totalEquity: 0, netPosition: 0 };
-			}
-			const stmts = parseStatements(report.statements);
-			const currency = (report.currency || accountingSymbol || '').toString().trim();
-			return mapBalanceSheetFromRaw(stmts, currency);
-		}
-
-		if (!latestOfficialReport) {
-			const assets: Record<string, number> = {};
-			const liabilities: Record<string, number> = {};
-			const equity: Record<string, number> = {};
-			for (const e of ledgerEntries) {
-				const cat = e.category || 'other';
-				const d = toHumanAmount(e.debit || 0, e.currency);
-				const c = toHumanAmount(e.credit || 0, e.currency);
-				switch (e.entry_type) {
-					case 'asset': assets[cat] = (assets[cat] || 0) + d - c; break;
-					case 'liability': liabilities[cat] = (liabilities[cat] || 0) + c - d; break;
-					case 'equity': equity[cat] = (equity[cat] || 0) + c - d; break;
-				}
-			}
-			const totalAssets = Object.values(assets).reduce((a, b) => a + b, 0);
-			const totalLiabilities = Object.values(liabilities).reduce((a, b) => a + b, 0);
-			const totalEquity = Object.values(equity).reduce((a, b) => a + b, 0);
-			return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity, netPosition: totalAssets - totalLiabilities };
-		}
-
-		try {
-			const report = latestOfficialReport;
-			const currency = (report.currency || accountingSymbol || '').toString().trim();
-			const stmts = cloneRawStatements(parseStatements(report.statements));
-			for (const e of ledgerEntries) {
-				if (!isAfterAsOf(e.entry_date, report.as_of)) continue;
-				applyLedgerEntryRaw(stmts, e);
-			}
-			recomputeTotalsRaw(stmts);
-			return mapBalanceSheetFromRaw(stmts, currency);
-		} catch {
-			const assets: Record<string, number> = {};
-			const liabilities: Record<string, number> = {};
-			const equity: Record<string, number> = {};
-			for (const e of ledgerEntries) {
-				const cat = e.category || 'other';
-				const d = toHumanAmount(e.debit || 0, e.currency);
-				const c = toHumanAmount(e.credit || 0, e.currency);
-				switch (e.entry_type) {
-					case 'asset': assets[cat] = (assets[cat] || 0) + d - c; break;
-					case 'liability': liabilities[cat] = (liabilities[cat] || 0) + c - d; break;
-					case 'equity': equity[cat] = (equity[cat] || 0) + c - d; break;
-				}
-			}
-			const totalAssets = Object.values(assets).reduce((a, b) => a + b, 0);
-			const totalLiabilities = Object.values(liabilities).reduce((a, b) => a + b, 0);
-			const totalEquity = Object.values(equity).reduce((a, b) => a + b, 0);
-			return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity, netPosition: totalAssets - totalLiabilities };
-		}
-	});
-
-	let incomeStatement = $derived.by(() => {
-		if (selectedReport !== 'working') {
-			const report = financialReports.find((r) => r.id === selectedReport);
-			if (!report || statementParseError) {
-				return { revenues: {}, expenses: {}, totalRevenues: 0, totalExpenses: 0, netIncome: 0 };
-			}
-			const stmts = parseStatements(report.statements);
-			const currency = (report.currency || accountingSymbol || '').toString().trim();
-			return mapIncomeStatementFromRaw(stmts, currency);
-		}
-
-		if (!latestOfficialReport) {
-			const revenues: Record<string, number> = {};
-			const expenses: Record<string, number> = {};
-			for (const e of ledgerEntries) {
-				const cat = e.category || 'other';
-				if (e.entry_type === 'revenue') revenues[cat] = (revenues[cat] || 0) + toHumanAmount(e.credit || 0, e.currency) - toHumanAmount(e.debit || 0, e.currency);
-				else if (e.entry_type === 'expense') expenses[cat] = (expenses[cat] || 0) + toHumanAmount(e.debit || 0, e.currency) - toHumanAmount(e.credit || 0, e.currency);
-			}
-			const totalRevenues = Object.values(revenues).reduce((a, b) => a + b, 0);
-			const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
-			return { revenues, expenses, totalRevenues, totalExpenses, netIncome: totalRevenues - totalExpenses };
-		}
-
-		try {
-			const report = latestOfficialReport;
-			const currency = (report.currency || accountingSymbol || '').toString().trim();
-			const stmts = cloneRawStatements(parseStatements(report.statements));
-			for (const e of ledgerEntries) {
-				if (!isAfterAsOf(e.entry_date, report.as_of)) continue;
-				applyLedgerEntryRaw(stmts, e);
-			}
-			recomputeTotalsRaw(stmts);
-			return mapIncomeStatementFromRaw(stmts, currency);
-		} catch {
-			const revenues: Record<string, number> = {};
-			const expenses: Record<string, number> = {};
-			for (const e of ledgerEntries) {
-				const cat = e.category || 'other';
-				if (e.entry_type === 'revenue') revenues[cat] = (revenues[cat] || 0) + toHumanAmount(e.credit || 0, e.currency) - toHumanAmount(e.debit || 0, e.currency);
-				else if (e.entry_type === 'expense') expenses[cat] = (expenses[cat] || 0) + toHumanAmount(e.debit || 0, e.currency) - toHumanAmount(e.credit || 0, e.currency);
-			}
-			const totalRevenues = Object.values(revenues).reduce((a, b) => a + b, 0);
-			const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0);
-			return { revenues, expenses, totalRevenues, totalExpenses, netIncome: totalRevenues - totalExpenses };
-		}
-	});
-
-	let cashFlow = $derived.by(() => {
-		if (selectedReport !== 'working') {
-			const report = financialReports.find((r) => r.id === selectedReport);
-			if (!report || statementParseError) {
-				return { operating: 0, investing: 0, financing: 0, netChange: 0 };
-			}
-			const stmts = parseStatements(report.statements);
-			const currency = (report.currency || accountingSymbol || '').toString().trim();
-			return mapCashFlowFromRaw(stmts, currency);
-		}
-
-		if (!latestOfficialReport) {
-			let operating = 0, investing = 0, financing = 0;
-			for (const e of ledgerEntries.filter((e) => e.category === 'cash')) {
-				const amt = toHumanAmount((e.debit || 0) - (e.credit || 0), e.currency);
-				const tags = e.tags || '';
-				if (tags.includes('investing') || tags.includes('capital')) investing += amt;
-				else if (tags.includes('financing') || tags.includes('bond')) financing += amt;
-				else operating += amt;
-			}
-			return { operating, investing, financing, netChange: operating + investing + financing };
-		}
-
-		try {
-			const report = latestOfficialReport;
-			const currency = (report.currency || accountingSymbol || '').toString().trim();
-			const stmts = cloneRawStatements(parseStatements(report.statements));
-			for (const e of ledgerEntries) {
-				if (!isAfterAsOf(e.entry_date, report.as_of)) continue;
-				applyLedgerEntryRaw(stmts, e);
-			}
-			recomputeTotalsRaw(stmts);
-			return mapCashFlowFromRaw(stmts, currency);
-		} catch {
-			let operating = 0, investing = 0, financing = 0;
-			for (const e of ledgerEntries.filter((e) => e.category === 'cash')) {
-				const amt = toHumanAmount((e.debit || 0) - (e.credit || 0), e.currency);
-				const tags = e.tags || '';
-				if (tags.includes('investing') || tags.includes('capital')) investing += amt;
-				else if (tags.includes('financing') || tags.includes('bond')) financing += amt;
-				else operating += amt;
-			}
-			return { operating, investing, financing, netChange: operating + investing + financing };
-		}
-	});
+	let statements = $derived(
+		statementsOf(
+			selectedReport === 'working' ? ledgerEntries : selectedReportFull?.statements ? reportLines(selectedReportFull) : [],
+		),
+	);
+	let balanceSheet = $derived(statements.balanceSheet);
+	let incomeStatement = $derived(statements.incomeStatement);
+	let cashFlow = $derived(statements.cashFlow);
 
 	// --- Visualization data ---
 	let taxAllocationData = $derived(
 		budgets
-			.filter(b => b.budget_type === 'expense' && (b.actual_amount || 0) > 0)
+			.filter(b => b.kind === 'expense' && (b.actual || 0) > 0)
 			.map((b, i) => ({
-				label: b.name || b.category || 'Other',
-				amount: b.actual_amount || 0,
+				label: b.category || 'Other',
+				amount: toHumanAmount(b.actual || 0, accountingSymbol),
 				color: categoryColors[b.category] || `hsl(217, 91%, ${30 + i * 10}%)`,
 			}))
 	);
@@ -642,12 +343,11 @@ let accessDeniedOp = $state('');
 	let assetPortfolioData = $derived.by(() => {
 		const balances: Record<string, { name: string; balance: number; color: string }> = {};
 		for (const f of funds) {
-			balances[f.code] = { name: f.name || f.code, balance: 0, color: categoryColors[f.fund_type] || '#3B82F6' };
+			balances[f.id] = { name: f.name || f.id, balance: 0, color: categoryColors[f.kind] || '#3B82F6' };
 		}
 		for (const e of ledgerEntries) {
-			if (e.fund && e.category === 'cash') {
-				const code = typeof e.fund === 'string' ? e.fund : e.fund.code;
-				if (balances[code]) balances[code].balance += toHumanAmount((e.debit || 0) - (e.credit || 0), e.currency);
+			if (e.fund && e.category === 'cash' && balances[e.fund]) {
+				balances[e.fund].balance += toHumanAmount((e.debit || 0) - (e.credit || 0), e.symbol);
 			}
 		}
 		return Object.entries(balances).filter(([, v]) => v.balance > 0).map(([k, v]) => ({ symbol: k, ...v }));
@@ -655,7 +355,7 @@ let accessDeniedOp = $state('');
 
 	let taxContributionData = $derived.by(() => {
 		const contribs: Record<string, { name: string; type: string; contribution: number; color: string }> = {};
-		for (const e of ledgerEntries.filter(e => e.entry_type === 'revenue' && (e.credit || 0) > 0)) {
+		for (const e of ledgerEntries.filter(e => e.kind === 'revenue' && (e.credit || 0) > 0)) {
 			const name = e.description || e.category || 'Other';
 			if (!contribs[name]) {
 				contribs[name] = {
@@ -665,7 +365,7 @@ let accessDeniedOp = $state('');
 					color: e.category === 'tax' ? '#3B82F6' : '#10B981',
 				};
 			}
-			contribs[name].contribution += toHumanAmount(e.credit || 0, e.currency);
+			contribs[name].contribution += toHumanAmount(e.credit || 0, e.symbol);
 		}
 		return Object.values(contribs);
 	});
@@ -674,12 +374,12 @@ let accessDeniedOp = $state('');
 		const revByCat: Record<string, number> = {};
 		const expByCat: Record<string, number> = {};
 		for (const e of ledgerEntries) {
-			if (e.entry_type === 'revenue' && (e.credit || 0) > 0) {
+			if (e.kind === 'revenue' && (e.credit || 0) > 0) {
 				const cat = e.category || 'other';
-				revByCat[cat] = (revByCat[cat] || 0) + toHumanAmount(e.credit || 0, e.currency);
-			} else if (e.entry_type === 'expense' && (e.debit || 0) > 0) {
+				revByCat[cat] = (revByCat[cat] || 0) + toHumanAmount(e.credit || 0, e.symbol);
+			} else if (e.kind === 'expense' && (e.debit || 0) > 0) {
 				const cat = e.category || 'other';
-				expByCat[cat] = (expByCat[cat] || 0) + toHumanAmount(e.debit || 0, e.currency);
+				expByCat[cat] = (expByCat[cat] || 0) + toHumanAmount(e.debit || 0, e.symbol);
 			}
 		}
 		const income = Object.entries(revByCat).map(([cat, amt]) => ({ category: formatCategory(cat), amount: amt }));
@@ -700,9 +400,10 @@ let accessDeniedOp = $state('');
 
 	let recEntity = $state<string>('LedgerEntry');
 	let recPage = $state(0);
+	// The row each visited page starts at; realm_export pages by id range.
+	let recPageStarts: number[] = $state([1]);
+	let recNext: number | null = $state(null);
 	let recItems: any[] = $state([]);
-	let recTotalPages = $state(0);
-	let recTotalItems = $state(0);
 	let recLoading = $state(false);
 	let recError = $state('');
 	let recColumns: string[] = $state([]);
@@ -714,22 +415,22 @@ let accessDeniedOp = $state('');
 		recLoading = true;
 		recError = '';
 		try {
-			const raw = await ctx.backend.get_objects_paginated(recEntity, recPage, PAGE_SIZE, 'desc');
-			const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (parsed?.success && parsed?.data?.objectsListPaginated) {
-				const objs = parsed.data.objectsListPaginated.objects.map((s: string) => JSON.parse(s));
-				const pag = parsed.data.objectsListPaginated.pagination;
-				recItems = objs;
-				recTotalItems = Number(pag?.total_items_count ?? 0);
-				recTotalPages = Number(pag?.total_pages ?? 1);
-				if (objs.length > 0) {
-					recColumns = Object.keys(objs[0]).filter(k => !k.startsWith('_'));
-				}
-			} else {
+			const reply = await ctx.read('realm_export', {
+				entity: recEntity,
+				from: recPageStarts[recPage],
+				count: PAGE_SIZE,
+			});
+			if (!reply.ok) {
+				recError = reply.error;
 				recItems = [];
-				recTotalItems = 0;
-				recTotalPages = 0;
 				recColumns = [];
+				return;
+			}
+			recItems = reply.rows;
+			recNext = reply.next;
+			if (reply.next) recPageStarts[recPage + 1] = reply.next;
+			if (recItems.length > 0) {
+				recColumns = Object.keys(recItems[0]);
 			}
 		} catch (e: any) {
 			recError = e?.message || String(e);
@@ -746,6 +447,7 @@ let accessDeniedOp = $state('');
 	function recChangeEntity(entity: string) {
 		recEntity = entity;
 		recPage = 0;
+		recPageStarts = [1];
 		loadRecordsPage();
 	}
 
@@ -753,14 +455,21 @@ let accessDeniedOp = $state('');
 		csvBusy = true;
 		csvProgress = 'Starting...';
 		try {
-			const count = await exportCsv({
-				backend: ctx.backend,
-				entity: recEntity,
-				pageSize: PAGE_SIZE,
-				order: 'desc',
-				onProgress: (msg) => { csvProgress = msg; },
-			});
-			if (count === 0) csvProgress = 'No data to export.';
+			const records: any[] = [];
+			let from: number | null = 1;
+			while (from) {
+				csvProgress = `Fetching from row ${from}...`;
+				const reply = await ctx.read('realm_export', { entity: recEntity, from, count: BATCH_SIZE });
+				if (!reply.ok) throw new Error(reply.error);
+				records.push(...reply.rows);
+				from = reply.next;
+			}
+			if (records.length === 0) {
+				csvProgress = 'No data to export.';
+				return;
+			}
+			triggerDownload(buildCsvBlob(records), `${recEntity}_${new Date().toISOString().slice(0, 10)}.csv`);
+			csvProgress = `Exported ${records.length} records.`;
 		} catch (e: any) {
 			csvProgress = 'Error: ' + (e?.message || String(e));
 		} finally {
@@ -892,9 +601,6 @@ let accessDeniedOp = $state('');
 				<p class="text-sm text-red-600 dark:text-red-400 mt-1">{draftError}</p>
 			{/if}
 			<p class="text-sm text-gray-500 dark:text-gray-400 mt-2">{reportStatusLine}</p>
-			{#if workingBooksRollForwardNote}
-				<p class="text-xs text-amber-700 dark:text-amber-400/90 mt-1">{workingBooksRollForwardNote}</p>
-			{/if}
 			{#if statementParseError}
 				<p class="text-sm text-red-600 dark:text-red-400 mt-1">{statementParseError}</p>
 			{/if}
@@ -1111,13 +817,12 @@ let accessDeniedOp = $state('');
 					</div>
 					<div class={panelBodyClass}>
 						<div class={narrow ? 'divide-y divide-gray-200 dark:divide-gray-700' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'}>
-							{#each funds as fund (fund.code ?? fund.id ?? fund.name)}
+							{#each funds as fund (fund.id)}
 								<div class={narrow ? 'py-3' : 'p-4 bg-gray-50 dark:bg-gray-750 rounded-lg border border-gray-200 dark:border-gray-600'}>
 									<div class="flex items-center justify-between mb-2">
-										<span class="font-semibold text-gray-800 dark:text-gray-200">{fund.name || fund.code}</span>
-										<span class="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full">{fund.fund_type || 'general'}</span>
+										<span class="font-semibold text-gray-800 dark:text-gray-200">{fund.name || fund.id}</span>
+										<span class="text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full">{fund.kind || 'general'}</span>
 									</div>
-									<p class="text-sm text-gray-600 dark:text-gray-400">{fund.description || 'No description'}</p>
 								</div>
 							{/each}
 						</div>
@@ -1137,14 +842,16 @@ let accessDeniedOp = $state('');
 					<div class={narrow ? 'px-3 py-1' : 'p-6 overflow-x-auto'}>
 						{#if narrow}
 							<div class="divide-y divide-gray-200 dark:divide-gray-700">
-								{#each budgets as budget (budget.id ?? budget.name ?? budget.category)}
-									{@const variance = (budget.actual_amount || 0) - (budget.planned_amount || 0)}
-									{@const variancePercent = budget.planned_amount ? ((variance / budget.planned_amount) * 100).toFixed(1) : '0'}
+								{#each budgets as budget (budget.id)}
+									{@const planned = toHumanAmount(budget.planned || 0, accountingSymbol)}
+									{@const actual = toHumanAmount(budget.actual || 0, accountingSymbol)}
+									{@const variance = actual - planned}
+									{@const variancePercent = planned ? ((variance / planned) * 100).toFixed(1) : '0'}
 									<article class="py-3">
 										<div class="flex items-start justify-between gap-2">
 											<div class="min-w-0">
-												<div class="font-medium text-gray-800 dark:text-gray-200">{budget.name || budget.category}</div>
-												<div class="text-xs text-gray-500 dark:text-gray-400">{budget.budget_type || 'expense'}</div>
+												<div class="font-medium text-gray-800 dark:text-gray-200">{budget.category}</div>
+												<div class="text-xs text-gray-500 dark:text-gray-400">{budget.kind || 'expense'}</div>
 											</div>
 											<span class={cn(
 												'shrink-0 text-xs px-2 py-0.5',
@@ -1160,13 +867,13 @@ let accessDeniedOp = $state('');
 												<dt class="text-gray-500 dark:text-gray-400">
 													Planned{#if accountingSymbol && !ledgerCurrencyMixed}<span> ({accountingSymbol})</span>{/if}
 												</dt>
-												<dd class="text-gray-600 dark:text-gray-300 tabular-nums">{fmtCompact(budget.planned_amount || 0)}</dd>
+												<dd class="text-gray-600 dark:text-gray-300 tabular-nums">{fmtCompact(planned)}</dd>
 											</div>
 											<div class="flex justify-between gap-3">
 												<dt class="text-gray-500 dark:text-gray-400">
 													Actual{#if accountingSymbol && !ledgerCurrencyMixed}<span> ({accountingSymbol})</span>{/if}
 												</dt>
-												<dd class="text-gray-800 dark:text-gray-200 font-medium tabular-nums">{fmtCompact(budget.actual_amount || 0)}</dd>
+												<dd class="text-gray-800 dark:text-gray-200 font-medium tabular-nums">{fmtCompact(actual)}</dd>
 											</div>
 											<div class="flex justify-between gap-3">
 												<dt class="text-gray-500 dark:text-gray-400">
@@ -1198,16 +905,18 @@ let accessDeniedOp = $state('');
 									</tr>
 								</thead>
 								<tbody>
-									{#each budgets as budget (budget.id ?? budget.name ?? budget.category)}
-										{@const variance = (budget.actual_amount || 0) - (budget.planned_amount || 0)}
-										{@const variancePercent = budget.planned_amount ? ((variance / budget.planned_amount) * 100).toFixed(1) : '0'}
+									{#each budgets as budget (budget.id)}
+										{@const planned = toHumanAmount(budget.planned || 0, accountingSymbol)}
+										{@const actual = toHumanAmount(budget.actual || 0, accountingSymbol)}
+										{@const variance = actual - planned}
+										{@const variancePercent = planned ? ((variance / planned) * 100).toFixed(1) : '0'}
 										<tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
 											<td class="py-3 px-4">
-												<div class="font-medium text-gray-800 dark:text-gray-200">{budget.name || budget.category}</div>
-												<div class="text-xs text-gray-500 dark:text-gray-400">{budget.budget_type || 'expense'}</div>
+												<div class="font-medium text-gray-800 dark:text-gray-200">{budget.category}</div>
+												<div class="text-xs text-gray-500 dark:text-gray-400">{budget.kind || 'expense'}</div>
 											</td>
-											<td class="py-3 px-4 text-right text-gray-600 dark:text-gray-400">{fmtCompact(budget.planned_amount || 0)}</td>
-											<td class="py-3 px-4 text-right text-gray-800 dark:text-gray-200 font-medium">{fmtCompact(budget.actual_amount || 0)}</td>
+											<td class="py-3 px-4 text-right text-gray-600 dark:text-gray-400">{fmtCompact(planned)}</td>
+											<td class="py-3 px-4 text-right text-gray-800 dark:text-gray-200 font-medium">{fmtCompact(actual)}</td>
 											<td class={cn('py-3 px-4 text-right', variance >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-red-500 dark:text-red-400')}>
 												{variance >= 0 ? '+' : ''}{fmtCompact(variance)} ({variancePercent}%)
 											</td>
@@ -1273,7 +982,6 @@ let accessDeniedOp = $state('');
 			{#if csvProgress && !csvBusy}
 				<span class="text-sm text-gray-500 dark:text-gray-400">{csvProgress}</span>
 			{/if}
-			<span class="ml-auto text-sm text-gray-500 dark:text-gray-400">{recTotalItems} total records</span>
 		</div>
 
 		{#if recError}
@@ -1355,17 +1063,12 @@ let accessDeniedOp = $state('');
 					disabled={recPage === 0}
 					class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
 				>Prev</button>
-				<span class="text-sm text-gray-600 dark:text-gray-400 px-2">Page {recPage + 1} of {recTotalPages}</span>
+				<span class="text-sm text-gray-600 dark:text-gray-400 px-2">Page {recPage + 1}</span>
 				<button
 					onclick={() => recGoTo(recPage + 1)}
-					disabled={recPage >= recTotalPages - 1}
+					disabled={!recNext}
 					class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
 				>Next</button>
-				<button
-					onclick={() => recGoTo(recTotalPages - 1)}
-					disabled={recPage >= recTotalPages - 1}
-					class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
-				>Last</button>
 			</div>
 		{/if}
 

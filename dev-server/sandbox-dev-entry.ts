@@ -5,6 +5,7 @@
  * with manifest-driven capabilities and entry_access enforcement.
  */
 import { createBridgeServer, type HostState } from '@realmsgos/extension-bridge';
+import { backendCaller, connectRealm } from './realm-client';
 
 declare const __EXT_ID__: string;
 declare const __EXT_IFRAME_URL__: string;
@@ -13,8 +14,14 @@ declare const __MANIFEST__: {
 	sdk_version?: string;
 	capabilities?: string[];
 	entry_access?: { functions?: Record<string, string> };
+	operations?: string[];
 };
 declare const __DEV_LOCALE__: string;
+declare const __BACKEND_CANISTER_ID__: string;
+declare const __TEST_IDENTITY_INDEX__: number;
+
+const realm = connectRealm(__BACKEND_CANISTER_ID__, __TEST_IDENTITY_INDEX__);
+const callExtension = backendCaller(realm, __EXT_ID__);
 
 function resolveDevLocale(): string {
 	const fromQuery = new URLSearchParams(window.location.search).get('locale');
@@ -48,7 +55,7 @@ const modalQueue: QueuedModal[] = [];
 let modalOpen = false;
 
 const mockState = (): HostState => ({
-	principal: 'aaaaa-aa-dev-mock-principal',
+	principal: realm.principal,
 	locale: resolveDevLocale(),
 	theme: hostTheme,
 	realmInfo: {
@@ -126,16 +133,17 @@ const server = createBridgeServer(iframe, {
 	requiredSdkVersion: __MANIFEST__.sdk_version ?? '1',
 	capabilities: __MANIFEST__.capabilities ?? [],
 	entryAccessFunctions: __MANIFEST__.entry_access?.functions,
+	operations: __MANIFEST__.operations ?? [],
 	getState: mockState,
 	onHandshakeComplete: () => appendLog(bridgeLog, 'handshake complete'),
 	onHandshakeFailed: (reason) => appendLog(bridgeLog, `handshake failed: ${reason}`),
-	onCallExtension: async (fn, args) => {
+	onCallOperation: (name, args, read) => {
+		appendLog(bridgeLog, `${read ? 'read' : 'run'}(${name}, ${JSON.stringify(args)})`);
+		return read ? realm.read(name, args) : realm.run(name, args);
+	},
+	onCallExtension: (fn, args) => {
 		appendLog(bridgeLog, `call_extension(${fn}, ${JSON.stringify(args)})`);
-		if (fn === 'greet') {
-			const name = typeof args.name === 'string' ? args.name : 'World';
-			return { message: `Hello, ${name}!` };
-		}
-		throw new Error(`Unknown function: ${fn}`);
+		return callExtension(fn, args);
 	},
 	onNavigate: (path) => {
 		appendLog(navigateLog, path);

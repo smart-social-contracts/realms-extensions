@@ -2,7 +2,9 @@
 
 ## What is an extension?
 
-An extension is a self-contained frontend (Svelte) + optional backend (Python `entry.py`) module that runs inside a realm. The frontend is mounted by the main realm shell; the backend runs as a Python module inside the realm canister.
+An extension is a self-contained frontend (Svelte) + optional backend (Python `entry.py`) module that runs inside a realm. The frontend is mounted by the main realm shell (in-process with a `ctx`, or sandboxed in an iframe); the backend runs sandboxed in the realm canister.
+
+Everything an extension does goes through realm **operations** called by name: `ctx.read` / `ctx.run` (or `client.read` / `client.run` in a sandboxed frontend), and `rpc(op, **args)` in a backend. The manifest's `operations` lists every operation the extension calls; the realm refuses the rest. There is no `ggg_sdk`, no bridge verb and no in-process backend. See `README.md` for the manifest, frontend and backend contract, `extensions/hello_world` (a frontend calling an operation) and `extensions/hello_sandboxed` (a backend function using `rpc`).
 
 ---
 
@@ -23,12 +25,18 @@ Then open `http://localhost:5555/`.
 
 **How it works:**
 
-- Proxies `/api` to the test canister, so backend calls are real (not mocked)
+- Proxies `/api` to the test canister, so realm calls are real (not mocked)
 - Proxies `/custom` and `/images` to the test canister, so realm assets (logo, background) load correctly
-- Provides a real `RealmExtensionContext` (backend actor, `callSync`, `callAsync`, realm info, etc.)
+- Provides a real `RealmExtensionContext` (`read` / `run` limited to the manifest's `operations`, `callSync` for the extension's backend, realm info, etc.); sandboxed extensions get a mock host whose bridge calls the same realm
 - Signs canister calls as the deterministic test identity (index 0 by default — Identity 1 / Creator; override via `testIdentityIndex` in `dev-config.json`). That principal must already be a member/admin of the target realm
 
 **No changes to extension code are needed** — extensions run in the dev server exactly as they would in production.
+
+## Testing a backend
+
+`testing/realm_harness.py` runs an extension's backend against the realm's own operations,
+in-process, from a realms-gos checkout next to this repository (or `REALMS_GOS`). See
+`extensions/demo_simulator/tests` and `testing/README.md`.
 
 ---
 
@@ -42,7 +50,7 @@ cd extensions/<ext_id>/frontend-rt && npm run build && cd -
 
 # 2. Publish the bundle to file_registry, then install it on the realm
 realms files publish --network test --extensions-only --extensions <ext_id>
-# then call install_extension_from_registry on the target realm backend
+# then run the realm's extension_install operation: {"extension": "<ext_id>", "version": "<version>"}
 ```
 
 See the root `AGENTS.md` ("Fast Remote Extension Deploy") for the install call and full

@@ -1,9 +1,8 @@
 {
   "name": "department_docs",
-  "version": "1.3.1",
+  "version": "2.0.0",
   "description": "Write and share private documents with everyone in your department; only people in that department can read what you publish.",
   "author": "Smart Social Contracts",
-  "ggg_api_version": 1,
   "categories": [
     "people_access"
   ],
@@ -17,73 +16,6 @@
     "ca-valencia": "Documents del Departament"
   },
   "permissions": [],
-  "functions": [
-    "list_departments",
-    "create_document",
-    "update_document",
-    "list_documents",
-    "get_document",
-    "delete_document",
-    "reshare_list",
-    "reshare_dismiss",
-    "reshare_complete"
-  ],
-  "capabilities": [
-    "department.list",
-    "dept_doc.list",
-    "dept_doc.get",
-    "dept_doc.create",
-    "dept_doc.update",
-    "dept_doc.delete",
-    "dept_doc.reshare_list",
-    "dept_doc.reshare_dismiss",
-    "dept_doc.reshare_complete"
-  ],
-  "entities": {
-    "DepartmentDocument": {
-      "fields": {
-        "department": {
-          "type": "String",
-          "max_length": 256
-        },
-        "title": {
-          "type": "String",
-          "max_length": 512
-        },
-        "ciphertext": {
-          "type": "String"
-        },
-        "scope": {
-          "type": "String",
-          "max_length": 512
-        },
-        "created_by": {
-          "type": "String",
-          "max_length": 128
-        }
-      }
-    },
-    "ReshareJob": {
-      "fields": {
-        "department": {
-          "type": "String",
-          "max_length": 256
-        },
-        "new_member_principal": {
-          "type": "String",
-          "max_length": 128
-        },
-        "status": {
-          "type": "String",
-          "max_length": 32
-        },
-        "created_at": {
-          "type": "String",
-          "max_length": 64
-        }
-      }
-    }
-  },
   "profiles": [
     "member",
     "admin"
@@ -91,9 +23,17 @@
   "show_in_sidebar": true,
   "icon": "folder-open",
   "entry_access": {
-    "default": "document.manage",
-    "functions": {
-      "delete_document": "document.manage"
-    }
-  }
+    "default": "document.manage"
+  },
+  "operations": [
+    "me",
+    "department_list",
+    "department_get",
+    "user_list",
+    "document_list",
+    "document_get",
+    "document_store",
+    "document_delete",
+    "crypto_scopes"
+  ]
 }

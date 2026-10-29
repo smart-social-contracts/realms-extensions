@@ -1,6 +1,6 @@
 {
   "name": "market_place",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "deprecated": true,
   "description": "No longer used — browsing and installing extensions is now in Package Manager.",
   "author": "Smart Social Contracts",
@@ -25,5 +25,6 @@
     "it": "Mercato",
     "zh-CN": "市场",
     "ca-valencia": "Mercat"
-  }
+  },
+  "operations": []
 }

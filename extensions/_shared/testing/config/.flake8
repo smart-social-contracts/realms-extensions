@@ -1,4 +1,6 @@
 [flake8]
 ignore = E501, W503, E704, E402, F401, W293, F841, E203, F541
 max-line-length = 88
+# Sandboxed backends get rpc(op, **args) from the realm.
+builtins = rpc
 exclude = .git,__pycache__,build,dist,src/realm_backend/extension_packages,.realms

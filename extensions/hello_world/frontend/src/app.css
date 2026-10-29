@@ -1,4 +1,0 @@
-@import "tailwindcss";
-
-@source "./**/*.{html,js,svelte,ts}";
-@source "../node_modules/@realmsgos/extension-ui/dist/**/*.{html,js,svelte,ts}";

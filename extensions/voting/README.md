@@ -1,26 +1,23 @@
 # Voting Extension
 
-A governance voting system that allows users to submit and vote on proposals to execute Python code within the realm.
+Submit and vote on the realm's proposals. The extension has no backend: it calls the realm's own
+proposal operations (`proposal_create`, `proposal_vote`, `proposal_list`, `proposal_get`) and its
+federal vote operations.
 
 ## Features
 
-- **Proposal Submission**: Create proposals with Python code to be executed if approved
+- **Proposal Submission**: Polls, transfers from a fund, and upgrades (codex, extension or a Casals core action) that run once accepted
 - **Voting System**: Members can vote YES, NO, or ABSTAIN on proposals
-- **Proposal Management**: View proposal details including code, checksum, and voting status
-- **Security**: Code verification through checksums and review process
+- **Department ballots**: Proposals scoped to a department are voted by its seat holders under its policy
+- **Realm-wide votes**: Federal votes held in every quarter
 
 ## Proposal Lifecycle
 
-1. **Pending Review**: Initial submission awaiting review
-2. **Pending Vote**: Approved for voting by reviewers
-3. **Voting**: Active voting period
-4. **Accepted**: Proposal passed and ready for execution
-5. **Rejected**: Proposal failed to meet voting threshold
+1. **Voting**: Open from submission until the realm's voting deadline
+2. **Accepted / Rejected**: Recorded by `proposal_finalize`
+3. **Executed / Failed**: The accepted action, run once by `proposal_execute`
 
-## Usage
+## Power of attorney
 
-Navigate to the Voting section in the sidebar to:
-- View all proposals and their current status
-- Submit new proposals with Python code
-- Vote on active proposals
-- Review proposal details and code
+A delegate votes or proposes for a grantor by passing `on_behalf_of` to `proposal_vote` or
+`proposal_create`; the realm checks the delegation and records both.

@@ -14,6 +14,7 @@
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LINTER_SCRIPT="$SCRIPT_DIR/extensions/_shared/testing/scripts/run_linters.sh"
+FLAKE8_CONFIG="$SCRIPT_DIR/extensions/_shared/testing/config/.flake8"
 
 # Check if linter script exists
 if [ ! -f "$LINTER_SCRIPT" ]; then
@@ -83,9 +84,9 @@ for ext in "${EXTENSIONS[@]}"; do
     echo "📦 Linting extension: $ext"
     echo "----------------------------------------"
     
-    cd "$SCRIPT_DIR/$ext"
+    cd "$SCRIPT_DIR/extensions/$ext"
     
-    if "$LINTER_SCRIPT" $FIX_MODE; then
+    if "$LINTER_SCRIPT" $FIX_MODE --config "$FLAKE8_CONFIG"; then
         ((SUCCESS_COUNT++))
         echo "✅ $ext passed linting"
     else

@@ -1,15 +1,15 @@
 # hello_sandboxed — frontend
 
-Reference sandboxed extension for the Realms bridge protocol. See `../manifest.json` for capabilities and `entry_access`.
+Reference sandboxed extension for the Realms bridge protocol. See `../manifest.json` for capabilities, `operations` and `entry_access`, and `../backend/entry.py` for the `greet` function it calls with `callExtension`.
 
 ## Build
 
 ```bash
-npm install
+# @realmsgos/extension-bridge 0.3.0 is not on npm yet: install it from a realms-gos checkout
+# (this installs the other dependencies too; plain `npm install` works once 0.3.0 is published)
+npm install --no-save ../../../../realms-gos/packages/extension-bridge
 npm run build   # emits dist/index.html with relative ./assets/ paths
 ```
-
-Ensure `@realmsgos/extension-bridge` and `@realmsgos/extension-ui` are built in the monorepo (`packages/extension-bridge`, `packages/extension-ui`) before installing.
 
 ## Local development (mock host)
 

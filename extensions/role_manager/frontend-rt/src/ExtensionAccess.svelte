@@ -23,18 +23,19 @@
 	let extLoading = $state(false);
 	let expandedExt: string | null = $state(null);
 	let grantTarget = $state('');
-	let grantType: 'user' | 'department' | 'profile' = $state('user');
-
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		const raw = await ctx.callSync(fn, args);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
-	}
+	let grantType: 'department' | 'profile' = $state('profile');
 
 	async function loadExtensions() {
 		extLoading = true;
 		try {
-			const res = await callExt('list_extensions');
-			extensions = res?.data?.extensions ?? [];
+			const rows: any[] = [];
+			for (let from: number | null = 1; from; ) {
+				const page = await ctx.read('extension_list', { from, count: 100 });
+				if (!page.ok) throw new Error(page.error);
+				rows.push(...page.extensions);
+				from = page.next;
+			}
+			extensions = rows;
 		} catch (e: any) {
 			addToast(e?.message || 'Failed to load extensions', 'error');
 		} finally {
@@ -42,45 +43,41 @@
 		}
 	}
 
-	async function grantExtension(extName: string) {
-		if (!grantTarget.trim()) return;
-		let fn = '';
-		let args: Record<string, string> = { extension: extName };
-		if (grantType === 'user') {
-			fn = 'grant_extension_to_user';
-			args.user_principal = grantTarget.trim();
-		} else if (grantType === 'department') {
-			fn = 'grant_extension_to_department';
-			args.department = grantTarget.trim();
-		} else {
-			fn = 'grant_extension_to_profile';
-			args.profile = grantTarget.trim();
-		}
+	async function setAccess(ext: any, profiles: string[], departments: string[], done: string) {
 		try {
-			const res = await callExt(fn, args);
-			if (res?.success) {
-				addToast('Access granted');
-				grantTarget = '';
-				await loadExtensions();
-			} else {
-				addToast(res?.error || 'Failed', 'error');
+			const res = await ctx.run('extension_set_access', { extension: ext.id, profiles, departments });
+			if (!res.ok) {
+				addToast(res.error, 'error');
+				return;
 			}
+			addToast(res.requires_vote ? `A vote on this change was opened (${res.proposal})` : done);
+			await loadExtensions();
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
 		}
 	}
 
-	async function revokeAccess(fn: string, args: Record<string, string>) {
-		try {
-			const res = await callExt(fn, args);
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
+	async function grantExtension(ext: any) {
+		const target = grantTarget.trim();
+		if (!target) return;
+		const { profiles, departments } = ext.access;
+		await setAccess(
+			ext,
+			grantType === 'profile' ? [...profiles, target] : profiles,
+			grantType === 'department' ? [...departments, target] : departments,
+			'Access granted',
+		);
+		grantTarget = '';
 	}
 
-	function shortPrincipal(p: string): string {
-		if (!p || p.length < 12) return p;
-		return p.slice(0, 5) + '...' + p.slice(-5);
+	function revokeAccess(ext: any, kind: 'profiles' | 'departments', name: string) {
+		const { profiles, departments } = ext.access;
+		void setAccess(
+			ext,
+			kind === 'profiles' ? profiles.filter((p: string) => p !== name) : profiles,
+			kind === 'departments' ? departments.filter((d: string) => d !== name) : departments,
+			'Revoked',
+		);
 	}
 
 	onMount(() => {
@@ -118,34 +115,34 @@
 	{:else if extensions.length === 0}
 		<p class="text-center text-gray-500 py-8">No Extension entities found. Extensions are seeded when installed.</p>
 	{:else}
-		{#each extensions as ext (ext.name)}
+		{#each extensions as ext (ext.id)}
 			<div class="border-y border-gray-200 sm:border sm:rounded-xl overflow-hidden">
 				<button
-					onclick={() => expandedExt = expandedExt === ext.name ? null : ext.name}
+					onclick={() => expandedExt = expandedExt === ext.id ? null : ext.id}
 					class="w-full px-0 py-3 sm:px-4 flex items-center justify-between bg-white hover:bg-gray-50 text-left"
 				>
 					<div class="min-w-0">
-						<span class="font-medium text-gray-900">{ext.name}</span>
-						{#if ext.description}
-							<span class="block sm:inline sm:ml-2 text-sm text-gray-500">{narrow ? '' : '— '}{ext.description}</span>
+						<span class="font-medium text-gray-900">{ext.id}</span>
+						{#if ext.manifest.description}
+							<span class="block sm:inline sm:ml-2 text-sm text-gray-500">{narrow ? '' : '— '}{ext.manifest.description}</span>
 						{/if}
 					</div>
-					<span class="text-xs text-gray-500 shrink-0 ml-2">{expandedExt === ext.name ? '▲' : '▼'}</span>
+					<span class="text-xs text-gray-500 shrink-0 ml-2">{expandedExt === ext.id ? '▲' : '▼'}</span>
 				</button>
 
-				{#if expandedExt === ext.name}
+				{#if expandedExt === ext.id}
 					<div class="px-4 py-3 border-t border-gray-100 bg-gray-50 space-y-3">
 						<!-- Profiles -->
 						<div>
 							<div class="text-sm font-medium text-gray-700 mb-1">Profile-level access (from manifest):</div>
-							{#if ext.profiles.length === 0}
+							{#if ext.access.profiles.length === 0}
 								<span class="text-sm text-gray-400">None</span>
 							{:else}
 								<div class="flex flex-wrap gap-1">
-									{#each ext.profiles as p}
+									{#each ext.access.profiles as p}
 										<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full">
 											{p}
-											<button onclick={() => revokeAccess('revoke_extension_from_profile', { extension: ext.name, profile: p })} class="text-blue-400 hover:text-blue-600">&times;</button>
+											<button onclick={() => revokeAccess(ext, 'profiles', p)} class="text-blue-400 hover:text-blue-600">&times;</button>
 										</span>
 									{/each}
 								</div>
@@ -155,14 +152,14 @@
 						<!-- Departments -->
 						<div>
 							<div class="text-sm font-medium text-gray-700 mb-1">Department access:</div>
-							{#if ext.departments.length === 0}
+							{#if ext.access.departments.length === 0}
 								<span class="text-sm text-gray-400">None</span>
 							{:else}
 								<div class="flex flex-wrap gap-1">
-									{#each ext.departments as d}
+									{#each ext.access.departments as d}
 										<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full">
 											{d}
-											<button onclick={() => revokeAccess('revoke_extension_from_department', { extension: ext.name, department: d })} class="text-purple-400 hover:text-purple-600">&times;</button>
+											<button onclick={() => revokeAccess(ext, 'departments', d)} class="text-purple-400 hover:text-purple-600">&times;</button>
 										</span>
 									{/each}
 								</div>
@@ -172,18 +169,7 @@
 						<!-- Users -->
 						<div>
 							<div class="text-sm font-medium text-gray-700 mb-1">Direct user access:</div>
-							{#if ext.users.length === 0}
-								<span class="text-sm text-gray-400">None</span>
-							{:else}
-								<div class="flex flex-wrap gap-1">
-									{#each ext.users as u}
-										<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">
-											{u.nickname || shortPrincipal(u.principal)}
-											<button onclick={() => revokeAccess('revoke_extension_from_user', { extension: ext.name, user_principal: u.principal })} class="text-green-400 hover:text-green-600">&times;</button>
-										</span>
-									{/each}
-								</div>
-							{/if}
+							<span class="text-sm text-gray-400">Not supported by this realm version.</span>
 						</div>
 
 						<!-- Grant form -->
@@ -191,16 +177,15 @@
 							<div class="text-sm font-medium text-gray-700 mb-2">Grant access:</div>
 							<div class="flex gap-2 flex-wrap">
 								<select bind:value={grantType} class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
-									<option value="user">User</option>
 									<option value="department">Department</option>
 									<option value="profile">Profile</option>
 								</select>
 								<input
 									bind:value={grantTarget}
-									placeholder={grantType === 'user' ? 'Principal' : grantType === 'department' ? 'Dept name' : 'Profile name'}
+									placeholder={grantType === 'department' ? 'Dept name' : 'Profile name'}
 									class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
 								/>
-								<button onclick={() => grantExtension(ext.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
+								<button onclick={() => grantExtension(ext)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
 							</div>
 						</div>
 					</div>

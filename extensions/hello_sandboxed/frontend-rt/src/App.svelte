@@ -243,13 +243,9 @@
 			{#if greetResult}
 				<div class="mt-4 rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-900">
 					{#if greetResult.ok}
-						<p class="font-medium text-gray-700 dark:text-gray-300">greet result (dev-server mock)</p>
+						<p class="font-medium text-gray-700 dark:text-gray-300">greet result</p>
 						<pre
 							class="mt-1 overflow-x-auto font-mono text-xs text-gray-600 dark:text-gray-400">{formatValue(greetResult.data)}</pre>
-						<p class="mt-2 text-xs text-gray-500 dark:text-gray-500">
-							In a deployed realm without a backend canister, this call fails at the host checkpoint with a
-							typed error instead.
-						</p>
 					{:else}
 						<p class="font-medium text-gray-700 dark:text-gray-300">
 							expected: typed denial/failure demonstrates the checkpoint

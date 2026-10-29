@@ -24,7 +24,7 @@ flowchart LR
 | **Award** | Approver picks winner from scored results | Approver |
 | **Contract execution** | Contract recorded; work / payment proceeds | Approver |
 
-Every stage change is written to an **append-only audit log** (`RfpTransition`) — who moved the RFP forward, when, and from which state.
+Every stage change is a realm operation, recorded in the realm's **event log** — who moved the RFP forward and when.
 
 ### Who does what
 
@@ -77,7 +77,7 @@ No single person creates the need, reads all bids, scores them, and awards the c
 
 3. **Closed** — Friday 17:00: bidding ends. No one could see competitors’ prices during the week.
 
-4. **Evaluation** — Each agency clicks **Share with evaluators**. The procurement panel decrypts and scores:
+4. **Evaluation** — Each agency sends IT its bid's opening; IT reveals the bids. The procurement panel decrypts and scores:
 
    | Bidder | Price (40) | Design (35) | Timeline (25) | **Total** |
    |--------|------------|-------------|---------------|-----------|
@@ -132,64 +132,43 @@ This mirrors real **public procurement** law: competition, transparency *after* 
 
 ## Sealed bidding (vetKeys)
 
-Bids are encrypted in the browser with a per-bid DEK wrapped via vetKeys IBE:
+A bid is the vendor's price, a random nonce, a description and technical notes, encrypted in the browser
+for the vendor and the requesting department's staff. The realm stores it as the bid's `payload_ref` with
+the commitment `sha256:` of `price:nonce`, and shows neither until the reveal.
 
-1. **Submit:** vendor-only envelope during the open window
-2. **After close:** vendor clicks **Share with evaluators** to grant evaluator principals access
-3. **Evaluators** decrypt via `ctx.crypto.decryptScope` once shared
-
-The canister stores only opaque `enc:v=2:...` ciphertext.
-
-```mermaid
-sequenceDiagram
-    participant V as Vendor browser
-    participant C as Canister
-    participant E as Evaluator
-
-    Note over V,C: While bidding is OPEN
-    V->>C: Upload encrypted bid ciphertext
-    Note over C: Stores opaque blob only
-
-    Note over V,E: After bidding CLOSED
-    V->>E: Share decryption scope
-    E->>C: Fetch ciphertext
-    E->>E: Decrypt locally & score
-```
+1. **Submit:** the vendor (an organization you represent) bids; the UI shows the bid's opening (price and nonce).
+2. **After close:** the vendor sends the requester that opening; the requester enters the openings and reveals
+   all bids at once (`bids_reveal`), which checks each against its commitment.
+3. **Evaluation:** the requesting department decrypts the revealed bids; evaluators score each criterion 0–10.
 
 ---
 
 ## Roles
 
-Grant extension-local permission strings via `role_manager` / `access_manager` (no realms repo `Operations` change required):
+Realm permissions, held through profiles or department seats:
 
 | Permission | Role |
 |---|---|
-| `procurement.rfp.create` | Requester |
-| `procurement.rfp.publish` | Requester |
-| `procurement.bid.submit` | Vendor |
-| `procurement.evaluate` | Evaluator (or `Procurement` department membership) |
-| `procurement.award` | Approver |
-| `procurement.execute` | Approver |
-
-Realm admins (`Operations.ALL`) bypass procurement-specific checks.
+| `tender.manage` | Requester and approver: draft, open, close, reveal, award (governed by the requesting department) |
+| `bid.submit` | Vendor |
+| `bid.evaluate` | Evaluator (never for a vendor they hold a seat in) |
 
 ---
 
 ## Lifecycle
 
 ```
-draft → open → closed → evaluation → award → contract_execution
+draft → open → closed → evaluation → contracted   (or cancelled)
 ```
 
-Every transition is logged in `RfpTransition` (append-only).
+Every transition is a realm operation, recorded in the realm's event log. The award signs the contract.
 
 ---
 
-## Backend RPC
+## Realm operations
 
-Callable via `extension_sync_call('procurement', '<function>', args)`.
-
-See [issue #12](https://github.com/smart-social-contracts/realms-extensions/issues/12) for the full API.
+`me`, `department_list`, `department_get`, `tender_list`, `tender_get`, `tender_create`, `tender_open`,
+`tender_close`, `bid_submit`, `bids_reveal`, `bid_score`, `tender_award`. The extension has no backend.
 
 ---
 

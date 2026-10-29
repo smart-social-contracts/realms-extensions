@@ -1,6 +1,6 @@
 {
   "name": "voting",
-  "version": "1.4.2",
+  "version": "2.0.0",
   "description": "Submit proposals that change how your realm works, read what each one would do, and vote yes, no, or abstain while voting is open.",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -23,15 +23,17 @@
     "zh-CN": "投票",
     "ca-valencia": "Votació"
   },
-  "entry_access": {
-    "default": "realm.data_view",
-    "functions": {
-      "submit_proposal": "proposal.create",
-      "cast_vote": "proposal.vote",
-      "get_user_vote": "self.data_view",
-      "start_voting": "proposal.manage",
-      "finalize_proposal": "proposal.manage",
-      "execute_proposal": "proposal.manage"
-    }
-  }
+  "operations": [
+    "proposal_list",
+    "proposal_get",
+    "proposal_create",
+    "proposal_vote",
+    "department_list",
+    "treasury_view",
+    "realm_export",
+    "status",
+    "federal_vote_propose",
+    "federal_vote_finalize",
+    "federal_vote_cancel"
+  ]
 }

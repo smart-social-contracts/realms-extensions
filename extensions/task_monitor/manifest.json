@@ -1,7 +1,13 @@
 {
   "name": "task_monitor",
-  "version": "1.0.6",
-  "runtime": "in_process",
+  "version": "2.0.0",
+  "operations": [
+    "task_list",
+    "task_logs",
+    "task_run",
+    "task_cancel",
+    "task_delete"
+  ],
   "description": "Watch background jobs across your realm: see what is running, start or stop tasks, set schedules, and read execution logs when something fails.",
   "author": "Realms Team",
   "categories": [
@@ -23,14 +29,5 @@
     "it": "Monitor Attività",
     "zh-CN": "任务监视器",
     "ca-valencia": "Monitor de Tasques"
-  },
-  "entry_access": {
-    "default": "task.view",
-    "functions": {
-      "toggle_schedule": "task.schedule",
-      "run_task_now": "task.run",
-      "stop_task": "task.cancel",
-      "delete_task": "task.delete"
-    }
   }
 }

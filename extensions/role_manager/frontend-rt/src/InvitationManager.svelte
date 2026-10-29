@@ -13,13 +13,12 @@
 	const cn = $derived(ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')));
 
 	interface RegistrationCode {
-		code_hash: string;
+		id: string;
 		profile: string;
-		uses_count: number;
+		uses: number;
 		max_uses: number;
 		revoked: boolean;
-		expires_at: string | null;
-		created_at?: string;
+		expires_at: number;
 	}
 
 	interface ProfileDef {
@@ -46,13 +45,6 @@
 	let listLoading = $state(false);
 	let revokingHash: string | null = $state(null);
 
-	// Inhabitant join-link email (host notification queue)
-	let inhabitantEmails = $state('');
-	let sendingJoinLink = $state(false);
-	let joinLinkHref = $state('');
-	let joinLinkMessage = $state('');
-	let joinLinkError = $state('');
-
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const level = type === 'error' ? 'error' : 'success';
 		if (typeof ctx.notify === 'function') {
@@ -62,65 +54,6 @@
 		console.warn('[extension]', level, message);
 	}
 
-	function generateRandomCode(length: number): string {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		const values = crypto.getRandomValues(new Uint8Array(length));
-		return Array.from(values, v => chars[v % chars.length]).join('');
-	}
-
-	async function hashCode(code: string): Promise<string> {
-		const encoder = new TextEncoder();
-		const data = encoder.encode(code);
-		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-		const hashArray = Array.from(new Uint8Array(hashBuffer));
-		return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-	}
-
-	function parseExtensionEnvelope(raw: unknown) {
-		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		return envelope?.response
-			? typeof envelope.response === 'string'
-				? JSON.parse(envelope.response)
-				: envelope.response
-			: envelope;
-	}
-
-	async function sendInhabitantJoinLink() {
-		joinLinkMessage = '';
-		joinLinkError = '';
-		joinLinkHref = '';
-		const emails = inhabitantEmails
-			.split(/[\n,;]+/)
-			.map((value) => value.trim())
-			.filter(Boolean);
-		if (emails.length === 0) {
-			joinLinkError = 'Enter one or more inhabitant email addresses.';
-			return;
-		}
-		sendingJoinLink = true;
-		try {
-			const raw = await ctx.backend.extension_sync_call(
-				'notifications',
-				'send_join_link',
-				JSON.stringify({ emails }),
-			);
-			const res = parseExtensionEnvelope(raw);
-			if (res?.success) {
-				const data = res.data || {};
-				const queued = data.queued ?? emails.length;
-				joinLinkHref = data.href || '';
-				joinLinkMessage = `Join link queued to ${queued} inhabitant${queued === 1 ? '' : 's'}.`;
-				addToast(joinLinkMessage);
-			} else {
-				joinLinkError = res?.error || 'Failed to queue join-link emails';
-			}
-		} catch (e: any) {
-			joinLinkError = e?.message || String(e);
-		} finally {
-			sendingJoinLink = false;
-		}
-	}
-
 	async function generateInvitation() {
 		generating = true;
 		generatedLink = null;
@@ -128,20 +61,10 @@
 		linkCopied = false;
 
 		try {
-			const code = generateRandomCode(16);
-			const codeHash = await hashCode(code);
+			const res = await ctx.run('invite_create', { profile, max_uses: maxUses, expires_in: expiresInHours * 3600 });
+			if (!res.ok) throw new Error(res.error);
 
-			await ctx.callSync('generate_registration_url', {
-				code_hash: codeHash,
-				profile,
-				max_uses: maxUses,
-				expires_in_hours: expiresInHours,
-				user_id: 'admin',
-				created_by: 'admin',
-				frontend_url: '',
-			});
-
-			const link = `${window.location.origin}/join?invite=${code}`;
+			const link = `${window.location.origin}/join?invite=${encodeURIComponent(res.invite.code)}`;
 			generatedLink = link;
 			qrSvg = generateQrSvg(link);
 			addToast('Invitation code generated successfully');
@@ -208,9 +131,14 @@
 	async function loadCodes() {
 		listLoading = true;
 		try {
-			const result = await ctx.callSync('get_registration_codes', { include_used: true });
-			const data = result?.data ?? result;
-			codes = Array.isArray(data) ? data : (data?.codes ?? []);
+			const all: RegistrationCode[] = [];
+			for (let from: number | null = 1; from; ) {
+				const page = await ctx.run('invite_list', { from, count: 100 });
+				if (!page.ok) throw new Error(page.error);
+				all.push(...page.invites);
+				from = page.next;
+			}
+			codes = all;
 		} catch (e: any) {
 			addToast(`Failed to load codes: ${e?.message || String(e)}`, 'error');
 			codes = [];
@@ -222,7 +150,8 @@
 	async function revokeCode(codeHash: string) {
 		revokingHash = codeHash;
 		try {
-			await ctx.callSync('revoke_registration_code', { code_hash: codeHash });
+			const res = await ctx.run('invite_revoke', { invite: codeHash });
+			if (!res.ok) throw new Error(res.error);
 			addToast('Invitation revoked');
 			await loadCodes();
 		} catch (e: any) {
@@ -234,14 +163,14 @@
 
 	function getStatus(code: RegistrationCode): { label: string; color: string } {
 		if (code.revoked) return { label: 'Revoked', color: 'bg-red-100 text-red-700' };
-		if (code.max_uses > 0 && code.uses_count >= code.max_uses) return { label: 'Used', color: 'bg-gray-100 text-gray-700' };
-		if (code.expires_at && new Date(code.expires_at) < new Date()) return { label: 'Expired', color: 'bg-yellow-100 text-yellow-700' };
+		if (code.uses >= code.max_uses) return { label: 'Used', color: 'bg-gray-100 text-gray-700' };
+		if (code.expires_at && code.expires_at * 1000 < Date.now()) return { label: 'Expired', color: 'bg-yellow-100 text-yellow-700' };
 		return { label: 'Active', color: 'bg-green-100 text-green-700' };
 	}
 
-	function formatExpiry(expiresAt: string | null): string {
+	function formatExpiry(expiresAt: number): string {
 		if (!expiresAt) return 'Never';
-		const date = new Date(expiresAt);
+		const date = new Date(expiresAt * 1000);
 		const now = new Date();
 		const diff = date.getTime() - now.getTime();
 
@@ -261,18 +190,19 @@
 	async function loadProfiles() {
 		profilesLoading = true;
 		try {
-			const res = await ctx.callSync('get_available_profiles');
-			if (res?.success) {
-				profiles = res.data?.profiles ?? [];
-				if (profiles.length > 0) {
-					const hasMember = profiles.some((p) => p.name === 'member');
-					if (!profiles.some((p) => p.name === profile)) {
-						profile = hasMember ? 'member' : profiles[0].name;
-					}
+			const rows: any[] = [];
+			for (let from: number | null = 1; from; ) {
+				const page = await ctx.read('realm_export', { entity: 'UserProfile', from, count: 100 });
+				if (!page.ok) throw new Error(page.error);
+				rows.push(...page.rows);
+				from = page.next;
+			}
+			profiles = rows.map((p) => ({ name: p.id, allowed_to: p.allowed_to }));
+			if (profiles.length > 0) {
+				const hasMember = profiles.some((p) => p.name === 'member');
+				if (!profiles.some((p) => p.name === profile)) {
+					profile = hasMember ? 'member' : profiles[0].name;
 				}
-			} else {
-				profiles = [];
-				addToast('Failed to load profiles', 'error');
 			}
 		} catch (e: any) {
 			profiles = [];
@@ -296,37 +226,7 @@
 			Email the public realm join URL to inhabitants (citizens), including people who are not members yet.
 			This is not limited to civil servants.
 		</p>
-		<label for="inv-inhabitant-emails" class="block text-sm font-medium text-gray-700 mb-1">
-			Inhabitant email addresses
-		</label>
-		<textarea
-			id="inv-inhabitant-emails"
-			bind:value={inhabitantEmails}
-			rows="4"
-			placeholder="one@example.com&#10;two@example.com"
-			class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-		></textarea>
-		<p class="mt-1 text-xs text-gray-500">Separate addresses with commas, semicolons, or new lines.</p>
-		<button
-			type="button"
-			onclick={sendInhabitantJoinLink}
-			disabled={sendingJoinLink || !inhabitantEmails.trim()}
-			class="mt-3 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-		>
-			{sendingJoinLink ? 'Sending…' : 'Send link'}
-		</button>
-		{#if joinLinkMessage}
-			<p class="mt-2 text-sm text-green-700">{joinLinkMessage}</p>
-		{/if}
-		{#if joinLinkError}
-			<p class="mt-2 text-sm text-red-600">{joinLinkError}</p>
-		{/if}
-		{#if joinLinkHref}
-			<p class="mt-1 text-xs text-gray-600">
-				Queued path: <code class="font-mono">{joinLinkHref}</code>
-				(the mail worker prefixes the public realm URL).
-			</p>
-		{/if}
+		<p class="text-sm text-gray-600">Sending join links by email is not supported by this realm version.</p>
 	</div>
 
 	<!-- Generate New Invitation -->
@@ -463,16 +363,16 @@
 			</div>
 		{:else if narrow}
 			<div class="divide-y divide-gray-200">
-				{#each codes as code (code.code_hash)}
+				{#each codes as code (code.id)}
 					{@const status = getStatus(code)}
 					<article class="py-3">
 						<div class="flex items-start justify-between gap-3">
 							<div class="min-w-0">
 								<span
 									class="font-mono text-xs bg-gray-100 px-2 py-1 rounded cursor-help"
-									title={code.code_hash}
+									title={code.id}
 								>
-									{code.code_hash.slice(0, 12)}…
+									{code.id.slice(0, 12)}…
 								</span>
 								<div class="mt-2 flex flex-wrap items-center gap-1.5">
 									<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
@@ -483,16 +383,16 @@
 									</span>
 								</div>
 								<div class="mt-1 text-xs text-gray-500">
-									{code.uses_count} / {code.max_uses || '∞'} uses · {formatExpiry(code.expires_at)}
+									{code.uses} / {code.max_uses} uses · {formatExpiry(code.expires_at)}
 								</div>
 							</div>
-							{#if !code.revoked && !(code.max_uses > 0 && code.uses_count >= code.max_uses)}
+							{#if !code.revoked && code.uses < code.max_uses}
 								<button
-									onclick={() => revokeCode(code.code_hash)}
-									disabled={revokingHash === code.code_hash}
+									onclick={() => revokeCode(code.id)}
+									disabled={revokingHash === code.id}
 									class="shrink-0 px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 								>
-									{revokingHash === code.code_hash ? 'Revoking…' : 'Revoke'}
+									{revokingHash === code.id ? 'Revoking…' : 'Revoke'}
 								</button>
 							{/if}
 						</div>
@@ -513,15 +413,15 @@
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-200">
-						{#each codes as code (code.code_hash)}
+						{#each codes as code (code.id)}
 							{@const status = getStatus(code)}
 							<tr class="hover:bg-gray-50 transition-colors">
 								<td class="px-4 py-3">
 									<span
 										class="font-mono text-xs bg-gray-100 px-2 py-1 rounded cursor-help"
-										title={code.code_hash}
+										title={code.id}
 									>
-										{code.code_hash.slice(0, 12)}…
+										{code.id.slice(0, 12)}…
 									</span>
 								</td>
 								<td class="px-4 py-3">
@@ -530,7 +430,7 @@
 									</span>
 								</td>
 								<td class="px-4 py-3 text-gray-700">
-									{code.uses_count} / {code.max_uses || '∞'}
+									{code.uses} / {code.max_uses}
 								</td>
 								<td class="px-4 py-3">
 									<span class={cn('px-2 py-0.5 rounded-full text-xs font-medium', status.color)}>
@@ -541,13 +441,13 @@
 									{formatExpiry(code.expires_at)}
 								</td>
 								<td class="px-4 py-3 text-right">
-									{#if !code.revoked && !(code.max_uses > 0 && code.uses_count >= code.max_uses)}
+									{#if !code.revoked && code.uses < code.max_uses}
 										<button
-											onclick={() => revokeCode(code.code_hash)}
-											disabled={revokingHash === code.code_hash}
+											onclick={() => revokeCode(code.id)}
+											disabled={revokingHash === code.id}
 											class="px-3 py-1 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 										>
-											{revokingHash === code.code_hash ? 'Revoking…' : 'Revoke'}
+											{revokingHash === code.id ? 'Revoking…' : 'Revoke'}
 										</button>
 									{/if}
 								</td>
