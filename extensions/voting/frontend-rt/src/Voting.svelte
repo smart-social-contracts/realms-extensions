@@ -894,6 +894,8 @@
 	}
 
 	function formatVotingStatusLabel(proposal: any, now = Date.now()): string {
+		// No deadline (a voting window of 0): the vote closes once its outcome is certain.
+		if ((proposal?.status || '').toLowerCase() === 'voting' && !proposal.voting_deadline) return 'Open until decided';
 		if (isVotingDeadlinePassed(proposal, now)) {
 			return getVotingClosedReason(proposal, now);
 		}
@@ -1618,7 +1620,7 @@
 			{:else}
 			<div class="divide-y divide-gray-100">
 					{#each pagedProposals as proposal}
-						<div class="p-4 transition-colors {isProposalEnded(proposal, nowMs) ? 'opacity-55 bg-gray-50/80 hover:bg-gray-50/90' : 'hover:bg-gray-50'}">
+						<div data-proposal-id={proposal.id} class="p-4 transition-colors {isProposalEnded(proposal, nowMs) ? 'opacity-55 bg-gray-50/80 hover:bg-gray-50/90' : 'hover:bg-gray-50'}">
 							<div class="flex items-start justify-between mb-2">
 								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2 min-w-0">

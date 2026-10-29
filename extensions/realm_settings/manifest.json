@@ -1,6 +1,6 @@
 {
   "name": "realm_settings",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "operations": [
     "appoint",
     "department_create",

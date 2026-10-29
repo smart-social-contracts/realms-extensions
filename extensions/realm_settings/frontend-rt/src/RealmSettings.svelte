@@ -814,11 +814,12 @@
 				<input
 					id="rs-voting-window"
 					type="number"
-					min="0.0001"
+					min="0"
 					step="any"
 					bind:value={governanceVotingWindowDays}
 					class="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 				/>
+				<p class="mt-1 text-xs text-gray-500">0: a realm-wide vote stays open until its outcome is certain.</p>
 				{#if governanceVotingWindowDays != null && Number.isFinite(governanceVotingWindowDays)}
 					<p class="mt-2 text-xs text-gray-500">
 						{#if governanceDirty}
