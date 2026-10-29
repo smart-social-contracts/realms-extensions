@@ -20,16 +20,91 @@
 		console.warn('[extension]', level, text);
 	}
 
+	async function call(name: string, args: Record<string, unknown> = {}, read = true) {
+		const res = await (read ? ctx.read(name, args) : ctx.run(name, args));
+		if (!res.ok) throw new Error(res.error);
+		return res;
+	}
+
+	async function pages(name: string, key: string, read = true): Promise<any[]> {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const res = await call(name, { from, count: 500 }, read);
+			out.push(...res[key]);
+			from = res.next;
+		}
+		return out;
+	}
+
+	function projectInvite(i: any) {
+		const now = Date.now() / 1000;
+		return {
+			id: i.id,
+			code_hash: i.id.slice(0, 8),
+			profile: i.profile,
+			position: i.position,
+			url: '',
+			uses_count: i.uses,
+			max_uses: i.max_uses,
+			is_valid: !i.revoked && i.uses < i.max_uses && (!i.expires_at || now < i.expires_at),
+			revoked: i.revoked,
+		};
+	}
+
 	async function load() {
 		loading = true;
 		error = null;
 		try {
-			const res = await ctx.callSync('get_console_data', {});
-			if (res?.success) {
-				data = res.data;
-			} else {
-				error = res?.error || 'Failed to load console data';
-			}
+			const [info, setup, directory, departments, invites, users] = await Promise.all([
+				call('realm_info'),
+				call('setup_state', {}, false),
+				call('quarter_directory'),
+				pages('department_list', 'departments'),
+				pages('invite_list', 'invites', false),
+				pages('user_list', 'users'),
+			]);
+			let profiles: string[] = [];
+			ctx.userProfiles?.subscribe?.((v: string[]) => (profiles = v || []))?.();
+			const nick = new Map(users.map((u) => [u.id, u.nickname]));
+			const person = (principal: string) => ({ principal, nickname: nick.get(principal) || '' });
+			const details = await Promise.all(departments.map((d) => call('department_get', { department: d.id })));
+			const checklist = [...setup.done.map((id: string) => [id, true]), ...setup.todo.map((id: string) => [id, false])].map(
+				([id, done]) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1).replace('_', ' '), detail: '', done }),
+			);
+			data = {
+				realm: { name: info.realm.name, status: info.realm.status },
+				checklist,
+				checklist_done: setup.done.length,
+				checklist_total: checklist.length,
+				quarters: directory.quarters.map((q: any) => ({ ...q, canister_id: q.id })),
+				is_admin: profiles.includes('admin'),
+				organizations: details
+					.map(({ department, positions }) => {
+						const holders = positions.flatMap((p: any) => p.holders.map((h: any) => h.user));
+						const members = [...new Set([department.head, ...holders].filter(Boolean))].map(person);
+						return {
+							name: department.id,
+							description: department.description,
+							is_root: department.is_root,
+							member_count: members.length,
+							members,
+							policy: { threshold_m: department.policy.m, threshold_n: department.policy.n },
+							invites: invites.filter((i) => i.department === department.id).map(projectInvite),
+							positions: positions.map((p: any) => ({
+								key: p.id,
+								title: p.title,
+								profile: p.profile,
+								headcount: p.headcount,
+								filled: p.filled,
+								salary_amount: p.salary,
+								salary_period: p.salary_period,
+								holders: p.holders.map((h: any) => person(h.user)),
+							})),
+						};
+					})
+					.sort((a, b) => Number(b.is_root) - Number(a.is_root) || a.name.localeCompare(b.name)),
+			};
 		} catch (e: any) {
 			error = e?.message || 'Failed to load console data';
 		} finally {
@@ -87,18 +162,28 @@
 		}
 	}
 
+	/** Revoke the department's invites for ``profile`` and mint one replacement; its code is shown only now. */
 	async function regenerate(orgName: string, profile: string) {
 		regenerating = `${orgName}/${profile}`;
 		try {
-			const res = await ctx.callSync('regenerate_invite', { department: orgName, profile });
-			if (res?.success) {
-				addToast(`New invite generated for ${profile}`);
-				await load();
-			} else {
-				addToast(res?.error || 'Failed to regenerate invite', 'error');
-			}
+			const old = data.organizations
+				.find((o: any) => o.name === orgName)
+				.invites.filter((i: any) => i.profile === profile);
+			for (const i of old.filter((i: any) => !i.revoked)) await call('invite_revoke', { invite: i.id }, false);
+			const { invite } = await call(
+				'invite_create',
+				{ profile, department: orgName, position: old[0]?.position || '', max_uses: 100, expires_in: 720 * 3600 },
+				false,
+			);
+			const url = `${location.origin}/join?invite=${invite.code}`;
+			addToast(
+				(await copyTextToClipboard(url))
+					? `New invite generated for ${profile}; its URL is copied and will not be shown again`
+					: `New invite generated for ${profile}: ${url} (it will not be shown again)`,
+			);
+			await load();
 		} catch (e: any) {
-			addToast(e?.message || 'Error', 'error');
+			addToast(e?.message || 'Failed to regenerate invite', 'error');
 		} finally {
 			regenerating = null;
 		}
@@ -111,84 +196,6 @@
 
 	// --- Citizen import ---
 	let importJson = $state('');
-	let importing = $state(false);
-	let importReport: any = $state(null);
-	let pendingInvites: any[] = $state([]);
-	let pendingTotal = $state(0);
-	let pendingLoading = $state(false);
-	let showPending = $state(false);
-
-	async function runImport() {
-		let records: any;
-		try {
-			records = JSON.parse(importJson);
-		} catch {
-			addToast('Invalid JSON — expected an array of citizen records', 'error');
-			return;
-		}
-		if (!Array.isArray(records)) {
-			addToast('Expected a JSON array of citizen records', 'error');
-			return;
-		}
-		importing = true;
-		importReport = null;
-		try {
-			const res = await ctx.callSync('import_citizens', { citizens: records });
-			if (res?.success) {
-				importReport = res.data;
-				addToast(`${res.data.created_count} citizens imported, ${res.data.skipped_count} skipped`);
-				importJson = '';
-				await load();
-				if (showPending) await loadPending();
-			} else {
-				addToast(res?.error || 'Import failed', 'error');
-			}
-		} catch (e: any) {
-			addToast(e?.message || 'Import failed', 'error');
-		} finally {
-			importing = false;
-		}
-	}
-
-	async function loadPending() {
-		pendingLoading = true;
-		try {
-			const res = await ctx.callSync('list_citizen_invites', { only_pending: true, limit: 50 });
-			if (res?.success) {
-				pendingInvites = res.data.citizens ?? [];
-				pendingTotal = res.data.total ?? 0;
-			} else {
-				addToast(res?.error || 'Failed to load pending invites', 'error');
-			}
-		} catch (e: any) {
-			addToast(e?.message || 'Failed to load pending invites', 'error');
-		} finally {
-			pendingLoading = false;
-		}
-	}
-
-	async function togglePending() {
-		showPending = !showPending;
-		if (showPending && pendingInvites.length === 0) await loadPending();
-	}
-
-	async function copyCitizenUrl(row: any) {
-		if (!row.url) {
-			addToast('No URL available (frontend URL not configured)', 'error');
-			return;
-		}
-		if (await copyTextToClipboard(row.url)) {
-			addToast(`Invite URL for ${row.name || row.id} copied`);
-		} else {
-			addToast('Could not copy to clipboard', 'error');
-		}
-	}
-
-	const claimPercent = $derived(
-		data?.citizen_import?.total > 0
-			? Math.round((data.citizen_import.claimed / data.citizen_import.total) * 100)
-			: 0,
-	);
 
 	const progressPercent = $derived(
 		data && data.checklist_total > 0
@@ -259,18 +266,7 @@
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
 			<div class="border border-gray-200 rounded-xl p-4">
 				<h3 class="text-sm font-semibold text-gray-700 mb-2">Citizen import</h3>
-				{#if data.citizen_import?.total > 0}
-					<p class="text-2xl font-bold text-gray-900">
-						{data.citizen_import.claimed}
-						<span class="text-sm font-normal text-gray-400">of {data.citizen_import.total} claimed</span>
-					</p>
-					<div class="w-full bg-gray-100 rounded-full h-1.5 mt-2">
-						<div class="bg-blue-500 h-1.5 rounded-full transition-all" style="width: {claimPercent}%"></div>
-					</div>
-					<p class="text-xs text-gray-400 mt-1">{data.citizen_import.pending} pending</p>
-				{:else}
-					<p class="text-sm text-gray-400">No citizens imported yet.</p>
-				{/if}
+				<p class="text-sm text-gray-400">Citizen import progress is not supported by this realm version.</p>
 			</div>
 			<div class="border border-gray-200 rounded-xl p-4">
 				<h3 class="text-sm font-semibold text-gray-700 mb-2">Quarters</h3>
@@ -294,12 +290,6 @@
 			<div class="border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">
 				<div class="flex items-center justify-between mb-2">
 					<h2 class="text-lg font-semibold text-gray-800">Import citizens</h2>
-					<button
-						class="px-3 py-1.5 text-xs border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-						onclick={togglePending}
-					>
-						{showPending ? 'Hide pending invites' : 'Show pending invites'}
-					</button>
 				</div>
 				<p class="text-xs text-gray-500 mb-3">
 					Paste a JSON array of citizen records:
@@ -316,55 +306,15 @@
 				<div class="mt-2 flex items-center gap-3">
 					<button
 						class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
-						disabled={importing || !importJson.trim()}
-						onclick={runImport}
+						disabled
 					>
-						{importing ? 'Importing…' : 'Import'}
+						Import
 					</button>
-					{#if importReport}
-						<span class="text-xs text-gray-500">
-							{importReport.created_count} created · {importReport.skipped_count} skipped ·
-							{importReport.error_count} errors
-						</span>
-					{/if}
+					<span class="text-xs text-amber-700">
+						Importing citizens is not supported by this realm version: generate registration letters in
+						Import &amp; Export, which mints one invite per citizen.
+					</span>
 				</div>
-				{#if importReport?.errors?.length > 0}
-					<ul class="mt-2 text-xs text-red-600 space-y-0.5">
-						{#each importReport.errors as err, idx (idx)}
-							<li>Record {err.index}{err.id ? ` (${err.id})` : ''}: {err.error}</li>
-						{/each}
-					</ul>
-				{/if}
-
-				{#if showPending}
-					<div class="mt-4 border-t border-gray-100 pt-3">
-						<h3 class="text-sm font-semibold text-gray-700 mb-2">
-							Pending invites {pendingTotal > 50 ? `(first 50 of ${pendingTotal})` : `(${pendingTotal})`}
-						</h3>
-						{#if pendingLoading}
-							<p class="text-sm text-gray-400">Loading…</p>
-						{:else if pendingInvites.length === 0}
-							<p class="text-sm text-gray-400">Every imported citizen has claimed their record.</p>
-						{:else}
-							<div class="space-y-1 max-h-64 overflow-y-auto">
-								{#each pendingInvites as row (row.id)}
-									<div class="flex items-center justify-between gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded">
-										<span class="text-xs text-gray-700 truncate">
-											{row.id}{row.name ? ` — ${row.name}` : ''}{row.quarter ? ` · ${row.quarter}` : ''}
-										</span>
-										<button
-											class="px-2 py-0.5 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 shrink-0"
-											disabled={!row.url}
-											onclick={() => copyCitizenUrl(row)}
-										>
-											Copy URL
-										</button>
-									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/if}
 			</div>
 		{/if}
 

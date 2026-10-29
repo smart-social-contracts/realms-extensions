@@ -1,14 +1,6 @@
 {
   "name": "migration_console",
-  "version": "0.3.8",
-  "ggg_api_version": 1,
-  "capabilities": [
-    "console.overview",
-    "console.regenerate_invite",
-    "console.import_citizens",
-    "console.list_citizen_invites",
-    "log.write"
-  ],
+  "version": "1.0.0",
   "description": "No longer used — bulk citizen import and realm migration tasks are now handled in Import & Export.",
   "author": "Smart Social Contracts",
   "deprecated": true,
@@ -31,12 +23,17 @@
     "ca-valencia": "Consola de Migració"
   },
   "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "get_console_data": "user.view",
-      "list_citizen_invites": "invite.manage",
-      "regenerate_invite": "invite.manage",
-      "import_citizens": "user.add"
-    }
-  }
+    "default": "realm.admin"
+  },
+  "operations": [
+    "realm_info",
+    "setup_state",
+    "quarter_directory",
+    "department_list",
+    "department_get",
+    "user_list",
+    "invite_list",
+    "invite_create",
+    "invite_revoke"
+  ]
 }

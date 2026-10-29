@@ -11,11 +11,12 @@ import {
 	canRestartFlow,
 	decimalEventId,
 	formatJsonApiErrors,
-	interpretIdentityStatus,
 	interpretVerificationLinkResult,
 	interpretVerificationStatus,
 	rarimeAppUrl,
+	realmEventId,
 	requestGoHome,
+	testModeVerification,
 	showNotYetVerifiedModal,
 	verifiedHeading,
 } from './verificator.ts';
@@ -88,6 +89,18 @@ describe('helpers', () => {
 		assert.match(decimalEventId('not-a-number'), /^\d+$/);
 	});
 
+	it('derives a stable decimal event id per realm', async () => {
+		const id = await realmEventId('rrkah-fqaaa-aaaaa-aaaaq-cai');
+		assert.equal(id, await realmEventId('rrkah-fqaaa-aaaaa-aaaaq-cai'));
+		assert.notEqual(id, await realmEventId('ryjl3-tyaaa-aaaaa-aaaba-cai'));
+		assert.equal(decimalEventId(id), id);
+	});
+
+	it('reads the test-mode verification as verified', () => {
+		const result = interpretVerificationLinkResult(testModeVerification('alice'));
+		assert.equal(result.ok && result.testMode, true);
+	});
+
 	it('formats JSON:API field errors', () => {
 		assert.equal(
 			formatJsonApiErrors([
@@ -126,8 +139,6 @@ describe('already-verified lock and back rules', () => {
 		assert.equal(canRestartFlow('idle'), true);
 		assert.equal(canRestartFlow('pending'), true);
 		assert.equal(verifiedHeading(true), 'You are already verified');
-		assert.equal(interpretIdentityStatus({ verified: true }).verified, true);
-		assert.equal(interpretIdentityStatus({ verified: false }).verified, false);
 	});
 
 	it('allows back from Scan to Start, but not from Verified', () => {

@@ -1,16 +1,9 @@
 {
   "name": "passport_verification",
-  "version": "1.0.13",
-  "runtime": "in_process",
+  "version": "2.0.0",
   "description": "Prove your identity with your passport using the RariMe app on your phone. Your passport details stay on your device.",
   "author": "Realms Team",
   "permissions": [],
-  "functions": [
-    "get_verification_link",
-    "check_verification_status",
-    "create_passport_identity",
-    "get_identity_status"
-  ],
   "profiles": [
     "member",
     "admin"
@@ -36,19 +29,7 @@
     "logo": "rarime.png",
     "description": "Verified passport identity using the RariMe phone app"
   },
-  "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "register_entities": "realm.admin",
-      "initialize": "realm.admin",
-      "set_application_id": "realm.configure",
-      "get_session_id": "self.data_view",
-      "get_event_id": "self.data_view",
-      "get_current_application_id": "self.data_view",
-      "get_verification_link": "identity.submit",
-      "check_verification_status": "identity.submit",
-      "get_identity_status": "self.data_view",
-      "create_passport_identity": "identity.submit"
-    }
-  }
+  "operations": [
+    "identity_submit"
+  ]
 }

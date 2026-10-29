@@ -29,26 +29,22 @@
 		return t(`tab_${tabKey}`);
 	}
 
+	interface Identity {
+		kind: string;
+		status: string;
+	}
+
 	interface MemberSummary {
 		principal: string;
 		nickname: string;
 		avatar: string;
-		human_name: string;
+		home_quarter: string;
+		status: string;
 		profiles: string[];
-		has_member: boolean;
+		date_of_birth: string;
+		identities: Identity[];
 		identity_verification: string;
-		tax_compliance: string;
 		is_active: boolean;
-	}
-
-	interface NotificationItem {
-		id: string;
-		topic: string;
-		title: string;
-		message: string;
-		sender: string;
-		timestamp_ms: number;
-		read: boolean;
 	}
 
 	let members = $state<MemberSummary[]>([]);
@@ -59,8 +55,6 @@
 
 	let selected = $state<string | null>(null);
 	let profile = $state<any>(null);
-	let loadingProfile = $state(false);
-	let profileError = $state('');
 	let tab = $state<'profile' | 'status' | 'messages'>('profile');
 
 	// Shared private data (consent-based decryption)
@@ -69,8 +63,6 @@
 	let sharedError = $state('');
 
 	// Notifications
-	let notifications = $state<NotificationItem[]>([]);
-	let loadingNotifs = $state(false);
 	let notifTitle = $state('');
 	let notifMessage = $state('');
 	let sending = $state(false);
@@ -82,8 +74,7 @@
 			const matchesSearch =
 				!q ||
 				m.principal.toLowerCase().includes(q) ||
-				m.nickname.toLowerCase().includes(q) ||
-				m.human_name.toLowerCase().includes(q);
+				m.nickname.toLowerCase().includes(q);
 			let matchesStatus = true;
 			if (statusFilter === 'active') matchesStatus = m.is_active;
 			else if (statusFilter === 'inactive') matchesStatus = !m.is_active;
@@ -93,12 +84,52 @@
 		})
 	);
 
+	async function pages(name: string, key: string, args: Record<string, unknown> = {}) {
+		const rows: any[] = [];
+		for (let from: number | null = 1; from; ) {
+			const page = await ctx.read(name, { ...args, from, count: 500 });
+			if (!page.ok) throw new Error(page.error);
+			rows.push(...page[key]);
+			from = page.next;
+		}
+		return rows;
+	}
+
 	async function loadMembers() {
 		loadingList = true;
 		listError = '';
 		try {
-			const res: any = await ctx.callSync('list_members');
-			members = res?.data?.members ?? [];
+			const [users, humans, identities] = await Promise.all([
+				pages('user_list', 'users'),
+				pages('realm_export', 'rows', { entity: 'Human' }),
+				pages('realm_export', 'rows', { entity: 'Identity' })
+			]);
+			const userOf = new Map<string, string>(humans.map((h) => [h.id, h.user]));
+			const birth = new Map<string, string>(humans.map((h) => [h.user, h.date_of_birth]));
+			const held = new Map<string, Identity[]>();
+			for (const i of identities) {
+				const user = userOf.get(i.human) ?? '';
+				held.set(user, [...(held.get(user) ?? []), { kind: i.kind, status: i.status }]);
+			}
+			members = users.map((u) => {
+				const ids = held.get(u.id) ?? [];
+				return {
+					principal: u.id,
+					nickname: u.nickname,
+					avatar: u.avatar,
+					home_quarter: u.home_quarter,
+					status: u.status,
+					profiles: u.profiles,
+					date_of_birth: birth.get(u.id) ?? '',
+					identities: ids,
+					identity_verification: ids.some((i) => i.status === 'verified')
+						? 'verified'
+						: ids.some((i) => i.status === 'pending')
+							? 'pending'
+							: '',
+					is_active: u.status === 'active'
+				};
+			});
 		} catch (e: any) {
 			listError = String(e?.message ?? e);
 		} finally {
@@ -106,42 +137,38 @@
 		}
 	}
 
-	async function selectMember(principal: string) {
+	async function privateData(principal: string): Promise<string> {
+		for (let from: number | null = 1; from; ) {
+			const page = await ctx.read('realm_export', { entity: 'User', from, count: 100 });
+			if (!page.ok) throw new Error(page.error);
+			const row = page.rows.find((u: any) => u.id === principal);
+			if (row) return row.private_data;
+			from = page.next;
+		}
+		return '';
+	}
+
+	function selectMember(principal: string) {
 		selected = principal;
 		tab = 'profile';
-		profile = null;
-		profileError = '';
 		sharedData = null;
 		sharedState = 'idle';
-		loadingProfile = true;
-		try {
-			const res: any = await ctx.callSync('get_member_profile', { principal });
-			if (res?.success === false) throw new Error(res.error || 'Failed to load profile');
-			profile = res?.data ?? null;
-			void loadSharedData();
-			void loadNotifications();
-		} catch (e: any) {
-			profileError = String(e?.message ?? e);
-		} finally {
-			loadingProfile = false;
-		}
+		profile = members.find((m) => m.principal === principal) ?? null;
+		void loadSharedData();
 	}
 
 	async function loadSharedData() {
 		if (!profile) return;
-		const ciphertext: string = profile.private_data_ciphertext || '';
-		if (!ciphertext) {
-			sharedState = 'no_access';
-			return;
-		}
 		sharedState = 'loading';
 		sharedError = '';
 		try {
-			const env: any = await ctx.callSync('get_member_private_data_envelope', {
-				principal: profile.principal
-			});
-			if (!env?.success) throw new Error(env?.error || 'envelope lookup failed');
-			if (!env.has_access || !env.wrapped_dek) {
+			const ciphertext = await privateData(profile.principal);
+			if (!ciphertext) {
+				sharedState = 'no_access';
+				return;
+			}
+			const env = await ctx.read('crypto_envelope', { scope: `user:${profile.principal}:private` });
+			if (!env.ok || !env.wrapped_dek) {
 				sharedState = 'no_access';
 				return;
 			}
@@ -159,34 +186,22 @@
 		}
 	}
 
-	async function loadNotifications() {
-		if (!selected) return;
-		loadingNotifs = true;
-		try {
-			const res: any = await ctx.callSync('get_member_notifications', { principal: selected });
-			notifications = res?.data?.notifications ?? [];
-		} catch {
-			notifications = [];
-		} finally {
-			loadingNotifs = false;
-		}
-	}
-
 	async function sendNotification() {
 		if (!selected || !notifTitle.trim() || !notifMessage.trim()) return;
 		sending = true;
 		sendResult = '';
 		try {
-			const res: any = await ctx.callSync('send_member_notification', {
-				principal: selected,
+			const res = await ctx.run('notification_send', {
+				recipient: `User:${selected}`,
 				title: notifTitle.trim(),
-				message: notifMessage.trim()
+				body: notifMessage.trim(),
+				topic: 'admin',
+				href: '/notifications'
 			});
-			if (res?.success === false) throw new Error(res.error || 'send failed');
+			if (!res.ok) throw new Error(res.error);
 			sendResult = 'Sent.';
 			notifTitle = '';
 			notifMessage = '';
-			await loadNotifications();
 		} catch (e: any) {
 			sendResult = `Error: ${String(e?.message ?? e)}`;
 		} finally {
@@ -194,8 +209,8 @@
 		}
 	}
 
-	function initials(m: { nickname: string; human_name: string; principal: string }): string {
-		const base = m.human_name || m.nickname || m.principal;
+	function initials(m: { nickname: string; principal: string }): string {
+		const base = m.nickname || m.principal;
 		return base.slice(0, 2).toUpperCase();
 	}
 
@@ -207,15 +222,6 @@
 		if (value === 'suspended' || value === 'revoked')
 			return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
 		return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
-	}
-
-	function fmtTime(ms: number): string {
-		if (!ms) return '';
-		try {
-			return new Date(ms).toLocaleString();
-		} catch {
-			return '';
-		}
 	}
 
 	function copy(text: string) {
@@ -283,7 +289,7 @@
 								</span>
 								<span class="min-w-0 flex-1">
 									<span class="block truncate text-sm font-medium text-gray-900 dark:text-white">
-										{m.nickname || m.human_name || 'Unnamed'}
+										{m.nickname || 'Unnamed'}
 									</span>
 									<span class="block truncate text-xs font-mono text-gray-400">{m.principal}</span>
 								</span>
@@ -309,10 +315,6 @@
 				>
 					{t('select_member')}
 				</div>
-			{:else if loadingProfile}
-				<p class="text-sm text-gray-500">{t('loading_profile')}</p>
-			{:else if profileError}
-				<p class="text-sm text-red-600">{profileError}</p>
 			{:else if profile}
 				<div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
 					<!-- Tabs -->
@@ -347,12 +349,8 @@
 									<dd class="text-gray-900 dark:text-white">{profile.nickname || '—'}</dd>
 								</div>
 								<div>
-									<dt class="text-gray-500 dark:text-gray-400">Name</dt>
-									<dd class="text-gray-900 dark:text-white">{profile.human?.name || '—'}</dd>
-								</div>
-								<div>
 									<dt class="text-gray-500 dark:text-gray-400">Date of birth</dt>
-									<dd class="text-gray-900 dark:text-white">{profile.human?.date_of_birth || '—'}</dd>
+									<dd class="text-gray-900 dark:text-white">{profile.date_of_birth || '—'}</dd>
 								</div>
 								<div>
 									<dt class="text-gray-500 dark:text-gray-400">Home quarter</dt>
@@ -371,10 +369,10 @@
 								<div class="sm:col-span-2">
 									<dt class="text-gray-500 dark:text-gray-400">Verified identities</dt>
 									<dd class="flex flex-wrap gap-1 mt-1">
-										{#each profile.identities ?? [] as id}
+										{#each profile.identities.filter((i: Identity) => i.status === 'verified') as id}
 											<span
 												class="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-												>{id.type}</span
+												>{id.kind}</span
 											>
 										{:else}
 											<span class="text-gray-400">None</span>
@@ -421,18 +419,18 @@
 								{/if}
 							</div>
 						{:else if tab === 'status'}
-							{#if profile.member}
+							{#if profile.status}
 								<div
-									class="mb-4 p-3 rounded-lg {profile.member.is_active
+									class="mb-4 p-3 rounded-lg {profile.is_active
 										? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
 										: 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700'}"
 								>
-									<p class="text-sm font-medium {profile.member.is_active ? 'text-green-800 dark:text-green-200' : 'text-gray-600 dark:text-gray-300'}">
-										{profile.member.is_active ? t('active_member') : t('inactive_member')}
+									<p class="text-sm font-medium {profile.is_active ? 'text-green-800 dark:text-green-200' : 'text-gray-600 dark:text-gray-300'}">
+										{profile.is_active ? t('active_member') : t('inactive_member')}
 									</p>
 								</div>
 								<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-									{#each [['Identity verification', profile.member.identity_verification], ['Tax compliance', profile.member.tax_compliance], ['Residence permit', profile.member.residence_permit], ['Voting eligibility', profile.member.voting_eligibility], ['Public benefits', profile.member.public_benefits_eligibility]] as [label, value]}
+									{#each [['Membership status', profile.status], ['Identity verification', profile.identity_verification]] as [label, value]}
 										<div>
 											<dt class="text-gray-500 dark:text-gray-400">{label}</dt>
 											<dd class="mt-1">
@@ -471,23 +469,9 @@
 								</div>
 							</div>
 
-							{#if loadingNotifs}
-								<p class="text-sm text-gray-500">{t('loading_messages')}</p>
-							{:else if notifications.length === 0}
-								<p class="text-sm text-gray-500">{t('no_messages')}</p>
-							{:else}
-								<ul class="space-y-2">
-									{#each notifications as n (n.id)}
-										<li class="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-											<div class="flex items-center justify-between">
-												<span class="text-sm font-medium text-gray-900 dark:text-white">{n.title}</span>
-												<span class="text-xs text-gray-400">{fmtTime(n.timestamp_ms)}</span>
-											</div>
-											<p class="text-sm text-gray-600 dark:text-gray-300 mt-1">{n.message}</p>
-										</li>
-									{/each}
-								</ul>
-							{/if}
+							<p class="text-sm text-gray-500">
+								A member's message history is not supported by this realm version.
+							</p>
 						{/if}
 					</div>
 				</div>

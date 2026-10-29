@@ -81,9 +81,9 @@ realms-extension-vault/
    realms realm deploy --network local
    ```
 
-3. Verify changes:
+3. Verify changes (the realm's `run` endpoint takes an operation name and its JSON arguments):
    ```bash
-   dfx canister call realm_backend extension_call '("vault", "get_status", "{}")'
+   dfx canister call realm_backend run '("extension_call", "{\"extension\": \"vault\", \"function\": \"get_status\", \"args\": {}}")'
    ```
 
 ### Frontend Changes
@@ -106,33 +106,23 @@ pytest tests/ -v
 ## Code Style
 
 - **Python**: Follow PEP 8
-- **Logging**: Use `ic_python_logging` for all logging
-- **Error Handling**: Always catch exceptions and return JSON errors
+- **Backend sandbox**: `backend/entry.py` runs with CPython builtins only (no `json`, no `ggg`,
+  no third-party imports) and is the only backend file the realm installs
+- **Realm calls**: `rpc(op, **args)` for operations the manifest declares in `operations`;
+  each reply is `{"ok": True, ...}` or `{"ok": False, "error": ...}`
+- **Results**: take keyword arguments and return plain data; a failed operation's reply
+  carries its error, so pass it on rather than raising
 - **Documentation**: Add docstrings to all public functions
 
 ### Example Function
 
 ```python
-def get_balance(args: str) -> str:
-    """
-    Get balance for a principal.
-    
-    Args:
-        args: JSON string with {"principal_id": "xxx"}
-    
-    Returns:
-        JSON string with {"success": bool, "data": {...}}
-    
-    Raises:
-        No exceptions - errors are returned in JSON response
-    """
-    logger.info(f"get_balance called with args: {args}")
-    try:
-        # Implementation
-        pass
-    except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        return json.dumps({"success": False, "error": str(e)})
+def get_balance(fund):
+    """The balance of ``fund`` per token, read with the ``treasury_view`` operation."""
+    reply = rpc("treasury_view", count=100)
+    if not reply["ok"]:
+        return reply
+    return next((f for f in reply["funds"] if f["id"] == fund), None)
 ```
 
 ## Commit Messages

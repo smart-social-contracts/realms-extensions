@@ -7,33 +7,14 @@
  * The extension ID is passed via the __EXT_ID__ define replacement
  * injected by the CLI launcher.
  */
-import { Actor, HttpAgent } from '@dfinity/agent';
-import { Ed25519KeyIdentity } from '@dfinity/identity';
-import { idlFactory } from './realm_backend.did.js';
+import { backendCaller, connectRealm, declaredOperations } from './realm-client';
 
 declare const __EXT_ID__: string;
+declare const __OPERATIONS__: string[];
 declare const __BACKEND_CANISTER_ID__: string;
 declare const __FILE_REGISTRY_CANISTER_ID__: string;
 declare const __DEV_LOCALE__: string;
 declare const __TEST_IDENTITY_INDEX__: number;
-
-/** Matches src/realm_frontend/src/lib/test-identities.js seed layout. */
-function testIdentitySeed(index: number): Uint8Array {
-	const seed = new Uint8Array(32);
-	seed[0] = 0xed;
-	seed[1] = 0x57;
-	seed[2] = index & 0xff;
-	seed[3] = (index >>> 8) & 0xff;
-	seed[4] = (index >>> 16) & 0xff;
-	seed[5] = (index >>> 24) & 0xff;
-	return seed;
-}
-
-function normalizeTestIdentityIndex(index: number): number {
-	const parsed = Math.floor(Number(index));
-	if (!Number.isFinite(parsed)) return 0;
-	return Math.max(0, Math.min(0xffffffff, parsed));
-}
 
 function resolveDevLocale(): string {
 	const fromQuery = new URLSearchParams(window.location.search).get('locale');
@@ -121,41 +102,18 @@ function readableOf<T>(value: T) {
 }
 
 async function main() {
-	const identityIndex = normalizeTestIdentityIndex(__TEST_IDENTITY_INDEX__);
-	const identity = Ed25519KeyIdentity.generate(testIdentitySeed(identityIndex));
-	const principalText = identity.getPrincipal().toText();
-
-	const agent = new HttpAgent({ identity, verifyQuerySignatures: false });
-	const backend = Actor.createActor(idlFactory, {
-		agent,
-		canisterId: __BACKEND_CANISTER_ID__,
-	});
+	const realm = connectRealm(__BACKEND_CANISTER_ID__, __TEST_IDENTITY_INDEX__);
+	const callExtension = backendCaller(realm, __EXT_ID__);
 
 	const ctx = {
 		extensionId: __EXT_ID__,
 		version: 'dev',
-		backend,
+		backend: { read: realm.read, run: realm.run },
+		...declaredOperations(realm, __EXT_ID__, __OPERATIONS__),
+		callSync: callExtension,
+		callAsync: callExtension,
 
-		async callSync(fn: string, args?: Record<string, unknown>) {
-			const raw = await (backend as any).extension_sync_call(
-				__EXT_ID__, fn, JSON.stringify(args || {}),
-			);
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success === false) throw new Error(res.response ?? 'extension_sync_call failed');
-			if (!res?.response) return res;
-			try { return JSON.parse(res.response); } catch { return res.response; }
-		},
-		async callAsync(fn: string, args?: Record<string, unknown>) {
-			const raw = await (backend as any).extension_async_call(
-				__EXT_ID__, fn, JSON.stringify(args || {}),
-			);
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success === false) throw new Error(res.response ?? 'extension_async_call failed');
-			if (!res?.response) return res;
-			try { return JSON.parse(res.response); } catch { return res.response; }
-		},
-
-		principal: readableOf(principalText),
+		principal: readableOf(realm.principal),
 		isAuthenticated: readableOf(true),
 		userProfiles: readableOf([] as string[]),
 

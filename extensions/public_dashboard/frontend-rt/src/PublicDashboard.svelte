@@ -53,26 +53,53 @@
 		terminated: { bg: '#f9fafb', border: '#e5e7eb', accent: '#6b7280', dot: '#9ca3af', text: '#374151' },
 	};
 
-	function parseEntities(response: any): any[] {
-		if (response?.success && response?.data?.objectsListPaginated) {
-			return (response.data.objectsListPaginated.objects || []).map((s: string) => JSON.parse(s));
+	const MAX_ZONES = 200;
+	const LATEST_USERS = 50;
+
+	async function loadZones(): Promise<any[]> {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from !== null && out.length < MAX_ZONES) {
+			const res = await ctx.read('land_map', { w: 1, h: 1, from, count: MAX_ZONES - out.length });
+			if (!res.ok) break;
+			out.push(...res.zones.map((z: any) => ({ h3_index: z.id, name: z.name, description: z.kind })));
+			from = res.next;
 		}
-		return [];
+		return out;
 	}
 
 	async function loadData() {
 		loading = true;
-		const backend = ctx.backend;
 
-		const [statusResp, realmResp, zonesResp, latestResp] = await Promise.all([
-			backend.status().catch((e: any) => { console.warn('status() failed:', e); return null; }),
-			backend.get_objects_paginated('Realm', 0, 1, 'asc').catch((e: any) => { console.warn('Realm fetch failed:', e); return null; }),
-			backend.get_objects_paginated('Zone', 0, 200, 'asc').catch((e: any) => { console.warn('Zone fetch failed:', e); return null; }),
-			backend.get_objects_paginated('User', 0, 50, 'desc').catch((e: any) => { console.warn('User fetch failed:', e); return null; }),
+		const [infoRes, directoryRes, monitorRes, allZones] = await Promise.all([
+			ctx.read('realm_info'),
+			ctx.read('quarter_directory'),
+			ctx.read('realm_monitor'),
+			loadZones(),
 		]);
 
-		if (statusResp?.success && statusResp?.data?.status) {
-			statusData = statusResp.data.status;
+		if (infoRes.ok) {
+			realmData = infoRes.realm;
+			const quarters = directoryRes.ok
+				? directoryRes.quarters.map((q: any) => ({
+						canister_id: q.id,
+						name: q.name,
+						index: q.index,
+						population: q.population,
+						status: q.status,
+						is_capital: q.capital,
+					}))
+				: [];
+			const counts = monitorRes.ok ? monitorRes.rows : {};
+			const here = quarters.find((q: any) => q.canister_id === ctx.config?.canisterId);
+			statusData = {
+				...realmData,
+				realm_stage: realmData.status,
+				users_count: counts.User ?? here?.population,
+				organizations_count: counts.Organization,
+				proposals_count: counts.Proposal,
+				quarters,
+			};
 			brandingLogo = resolvePublicAssetUrl(statusData.logo_url, brandingLogo);
 			brandingBackground = resolvePublicAssetUrl(
 				statusData.background_image_url,
@@ -83,64 +110,29 @@
 			}
 		}
 
-		const realms = parseEntities(realmResp);
-		if (realms.length > 0) {
-			realmData = realms[0];
-		}
+		zones = allZones;
+		await loadLatestUsers(monitorRes.ok ? monitorRes.rows.User : undefined);
 
-		const allZones = parseEntities(zonesResp);
-		zones = allZones.filter((z: any) => z.h3_index);
-		latestUsers = parseEntities(latestResp);
-
-		await loadLifecycleData(backend);
-		await loadQuartersInfo(backend);
+		loadLifecycleData();
+		await loadQuartersInfo();
 
 		loading = false;
 	}
 
-	async function loadQuartersInfo(backend: any) {
-		// Expansion policy is a public query; member's home quarter requires auth.
-		try {
-			const raw = await backend.get_scale_status();
-			const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (res?.success) scaleStatus = res;
-		} catch (e) {
-			console.warn('get_scale_status failed:', e);
-		}
-		try {
-			const resp = await backend.get_my_user_status();
-			if (resp?.success && resp?.data?.userGet) {
-				myQuarterId = resp.data.userGet.assigned_quarter || '';
-			}
-		} catch {
-			// Unauthenticated or not a member — no "your quarter" line.
-		}
+	async function loadLatestUsers(total: number | undefined) {
+		if (!total) return;
+		const res = await ctx.read('user_list', { from: Math.max(1, total - LATEST_USERS + 1), count: LATEST_USERS });
+		if (res.ok) latestUsers = res.users.map((u: any) => ({ id: u.id, name: u.nickname })).reverse();
 	}
 
-	function parseExtensionResponse(raw: any) {
-		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		return envelope?.response
-			? typeof envelope.response === 'string'
-				? JSON.parse(envelope.response)
-				: envelope.response
-			: envelope;
+	async function loadQuartersInfo() {
+		const scale = await ctx.read('scale_status');
+		if (scale.ok) scaleStatus = { auto_scale_enabled: scale.enabled, threshold: scale.scale_at, n: scale.capacity };
+		const me = await ctx.read('me');
+		if (me.ok) myQuarterId = me.user?.home_quarter || '';
 	}
 
-	async function loadLifecycleData(backend: any) {
-		try {
-			const raw = await backend.extension_sync_call('realm_settings', 'get_realm_stage', '{}');
-			const res = parseExtensionResponse(raw);
-			if (res?.success && res?.data) {
-				lifecycleData = res.data.lifecycle || {};
-				lifecycleStageIndex = res.data.stage_index ?? Math.max(0, STAGES.indexOf(res.data.stage || 'alpha'));
-				dashboardConfig = res.data.dashboard || {};
-				departments = res.data.departments || [];
-				return;
-			}
-		} catch (e) {
-			console.warn('get_realm_stage failed, using status fallback:', e);
-		}
-
+	function loadLifecycleData() {
 		const stage = statusData?.realm_stage || realmData?.status || 'alpha';
 		lifecycleStageIndex = Math.max(0, STAGES.indexOf(stage));
 		lifecycleData = {
@@ -267,7 +259,7 @@
 					{ label: 'Votes', value: Number(statusData.votes_count), color: '#10b981', icon: 'vote' },
 					{ label: 'Transfers', value: Number(statusData.transfers_count), color: '#f43f5e', icon: 'transfer' },
 					{ label: 'Zones', value: zones.length, color: '#06b6d4', icon: 'zone' },
-				]
+				].filter((card) => Number.isFinite(card.value))
 			: [],
 	);
 
@@ -882,12 +874,14 @@
 									{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()}
 								</div>
 							</div>
-							<div class="realm-status-metric">
-								<div class="realm-status-metric-label">Governance Activity</div>
-								<div class="realm-status-metric-value">
-									{Number(statusData.proposals_count ?? 0).toLocaleString()} proposals · {Number(statusData.votes_count ?? 0).toLocaleString()} votes
+							{#if statusData.proposals_count !== undefined}
+								<div class="realm-status-metric">
+									<div class="realm-status-metric-label">Governance Activity</div>
+									<div class="realm-status-metric-value">
+										{Number(statusData.proposals_count).toLocaleString()} proposals
+									</div>
 								</div>
-							</div>
+							{/if}
 							<div class="realm-status-metric">
 								<div class="realm-status-metric-label">{quarterCount === 1 && statusData.quarters?.[0]?.is_capital ? 'Capital Quarter' : 'Quarters'}</div>
 								<div class="realm-status-metric-value">

@@ -7,14 +7,6 @@
 
 	type TabId = 'overview' | 'access';
 
-	interface ExtManifest {
-		name: string;
-		version: string;
-		description?: string;
-		icon?: string;
-		categories?: string[];
-	}
-
 	let activeTab: TabId = $state('overview');
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
@@ -32,19 +24,13 @@
 	let accessDeniedOp = $state('');
 	let extensionCount = $state(0);
 	let codexCount = $state(0);
-	let extensionManifests: Record<string, ExtManifest> = $state({});
-	let codexManifests: Record<string, ExtManifest> = $state({});
 
 	// Access Control
 	let extensions: any[] = $state([]);
 	let extLoading = $state(false);
 	let expandedExt: string | null = $state(null);
 	let grantTarget = $state('');
-	let grantType: 'user' | 'department' | 'profile' = $state('user');
-
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
-	}
+	let grantType: 'department' | 'profile' = $state('profile');
 
 	function registryBaseUrl(canisterId: string): string | null {
 		if (typeof window === 'undefined') return null;
@@ -69,61 +55,63 @@
 		return false;
 	}
 
+	/** Every row of a paginated read, following ``next``; throws the reply when it fails. */
+	async function readAll(name: string, key: string, args: Record<string, unknown> = {}) {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const reply = await ctx.read(name, { ...args, from, count: 100 });
+			if (!reply.ok) throw reply;
+			rows.push(...reply[key]);
+			from = reply.next;
+		}
+		return rows;
+	}
+
+	function fail(e: any) {
+		const op = e?.ok === false ? / needs (\S+)$/.exec(e.error)?.[1] : null;
+		accessDeniedOp = op ?? '';
+		error = op ? '' : e?.error ?? e?.message ?? String(e);
+	}
+
 	async function loadPackages() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const [extRaw, codexRaw, statusResp] = await Promise.all([
-				ctx.backend.list_runtime_extensions().catch(() => '{}'),
-				ctx.backend.list_codex_packages().catch(() => '{}'),
-				ctx.backend.status().catch(() => null),
+			const [installed, codexStatus, registries] = await Promise.all([
+				readAll('extension_list', 'extensions'),
+				ctx.read('codex_status', { count: 1 }),
+				readAll('realm_export', 'rows', { entity: 'Registry' }).catch(() => []),
 			]);
-
-			const extParsed = typeof extRaw === 'string' ? JSON.parse(extRaw) : extRaw;
-			const codexParsed = typeof codexRaw === 'string' ? JSON.parse(codexRaw) : codexRaw;
-			const installedExt = extParsed?.success ? (extParsed.runtime_extensions ?? []) : [];
-			const installedCodex = codexParsed?.success ? (codexParsed.codex_packages ?? []) : [];
-			const extMfsts = extParsed?.success ? (extParsed.all_manifests ?? {}) : {};
-			const codexMfsts = codexParsed?.success ? (codexParsed.manifests ?? {}) : {};
-			extensionManifests = extMfsts;
-			codexManifests = codexMfsts;
-			extensionCount = Object.keys(extMfsts).length || installedExt.length;
-			codexCount = Array.isArray(installedCodex) ? installedCodex.length : Object.keys(codexMfsts).length;
+			const versions: Record<string, string> = Object.fromEntries(installed.map((e) => [e.id, e.version]));
+			const codex = codexStatus.ok ? codexStatus.codex : null;
+			extensionCount = installed.length;
+			codexCount = codex ? 1 : 0;
 			pkgInstalledCount = extensionCount + codexCount;
 
-			const registries = (statusResp?.success && statusResp?.data?.status?.registries) || [];
 			let updates = 0;
 			for (const reg of registries) {
 				try {
-					const base = registryBaseUrl(reg.canister_id);
+					const base = registryBaseUrl(reg.id);
 					if (!base) continue;
 					const [extResp, codexResp] = await Promise.all([
 						fetch(`${base}/api/extensions`, { headers: { Accept: 'application/json' } }).then(r => r.ok ? r.json() : []).catch(() => []),
 						fetch(`${base}/api/codices`, { headers: { Accept: 'application/json' } }).then(r => r.ok ? r.json() : []).catch(() => []),
 					]);
 					for (const e of extResp) {
-						if (!installedExt.includes(e.ext_id)) continue;
-						const installedVersion = extMfsts?.[e.ext_id]?.version;
+						const installedVersion = versions[e.ext_id];
 						if (installedVersion && e.latest && versionGreater(e.latest, installedVersion)) updates++;
 					}
 					for (const c of codexResp) {
-						if (!installedCodex.includes(c.codex_id)) continue;
-						const installedVersion = codexMfsts?.[c.codex_id]?.version;
-						if (installedVersion && c.latest && versionGreater(c.latest, installedVersion)) updates++;
+						if (!codex || codex.id.split('@')[0] !== c.codex_id) continue;
+						if (c.latest && versionGreater(c.latest, codex.version)) updates++;
 					}
 				} catch { /* unreachable registry */ }
 			}
 			pkgUpdateCount = updates;
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			fail(e);
 		} finally {
 			loading = false;
 		}
@@ -133,70 +121,52 @@
 	async function loadExtensions() {
 		extLoading = true;
 		try {
-			const res = await callExt('list_extensions');
-			extensions = res?.data?.extensions ?? [];
+			const rows = await readAll('extension_list', 'extensions');
+			extensions = rows.map((e) => ({
+				name: e.id,
+				description: e.manifest?.description,
+				profiles: e.access?.profiles ?? [],
+				departments: e.access?.departments ?? [],
+			}));
 		} catch (e: any) {
-			addToast(e?.message || 'Failed to load extensions', 'error');
+			addToast(e?.error || e?.message || 'Failed to load extensions', 'error');
 		} finally {
 			extLoading = false;
 		}
 	}
 
-	async function grantExtension(extName: string) {
-		if (!grantTarget.trim()) return;
-		let fn = '';
-		let args: Record<string, string> = { extension: extName };
-		if (grantType === 'user') {
-			fn = 'grant_extension_to_user';
-			args.user_principal = grantTarget.trim();
-		} else if (grantType === 'department') {
-			fn = 'grant_extension_to_department';
-			args.department = grantTarget.trim();
-		} else {
-			fn = 'grant_extension_to_profile';
-			args.profile = grantTarget.trim();
-		}
+	/** Replace who gets ``ext``; the realm may turn the change into a proposal. */
+	async function setAccess(ext: any, profiles: string[], departments: string[], done: string) {
 		try {
-			const res = await callExt(fn, args);
-			if (res?.success) {
-				addToast('Access granted');
-				grantTarget = '';
-				await loadExtensions();
-			} else {
-				addToast(res?.error || 'Failed', 'error');
+			const res = await ctx.run('extension_set_access', { extension: ext.name, profiles, departments });
+			if (!res.ok) {
+				addToast(res.error || 'Failed', 'error');
+				return false;
 			}
+			addToast(res.proposal ? `Proposal ${res.proposal} created — the change applies after the vote passes` : done);
+			await loadExtensions();
+			return true;
 		} catch (e: any) {
 			addToast(e?.message || 'Error', 'error');
+			return false;
 		}
 	}
 
-	async function revokeExtUser(extName: string, principal: string) {
-		try {
-			const res = await callExt('revoke_extension_from_user', { extension: extName, user_principal: principal });
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
+	async function grantExtension(ext: any) {
+		const target = grantTarget.trim();
+		if (!target) return;
+		const granted = grantType === 'profile'
+			? await setAccess(ext, [...new Set([...ext.profiles, target])], ext.departments, 'Access granted')
+			: await setAccess(ext, ext.profiles, [...new Set([...ext.departments, target])], 'Access granted');
+		if (granted) grantTarget = '';
 	}
 
-	async function revokeExtDept(extName: string, deptName: string) {
-		try {
-			const res = await callExt('revoke_extension_from_department', { extension: extName, department: deptName });
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
+	function revokeExtDept(ext: any, deptName: string) {
+		return setAccess(ext, ext.profiles, ext.departments.filter((d: string) => d !== deptName), 'Revoked');
 	}
 
-	async function revokeExtProfile(extName: string, profileName: string) {
-		try {
-			const res = await callExt('revoke_extension_from_profile', { extension: extName, profile: profileName });
-			if (res?.success) { addToast('Revoked'); await loadExtensions(); }
-			else addToast(res?.error || 'Failed', 'error');
-		} catch (e: any) { addToast(e?.message || 'Error', 'error'); }
-	}
-
-	function shortPrincipal(p: string): string {
-		if (!p || p.length < 12) return p;
-		return p.slice(0, 5) + '...' + p.slice(-5);
+	function revokeExtProfile(ext: any, profileName: string) {
+		return setAccess(ext, ext.profiles.filter((p: string) => p !== profileName), ext.departments, 'Revoked');
 	}
 
 	$effect(() => {
@@ -343,7 +313,7 @@
 											{#each ext.profiles as p}
 												<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full">
 													{p}
-													<button onclick={() => revokeExtProfile(ext.name, p)} class="text-blue-400 hover:text-blue-600">&times;</button>
+													<button onclick={() => revokeExtProfile(ext, p)} class="text-blue-400 hover:text-blue-600">&times;</button>
 												</span>
 											{/each}
 										</div>
@@ -360,7 +330,7 @@
 											{#each ext.departments as d}
 												<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 text-xs rounded-full">
 													{d}
-													<button onclick={() => revokeExtDept(ext.name, d)} class="text-purple-400 hover:text-purple-600">&times;</button>
+													<button onclick={() => revokeExtDept(ext, d)} class="text-purple-400 hover:text-purple-600">&times;</button>
 												</span>
 											{/each}
 										</div>
@@ -370,18 +340,7 @@
 								<!-- Users -->
 								<div>
 									<div class="text-sm font-medium text-gray-700 mb-1">Direct user access:</div>
-									{#if ext.users.length === 0}
-										<span class="text-sm text-gray-400">None</span>
-									{:else}
-										<div class="flex flex-wrap gap-1">
-											{#each ext.users as u}
-												<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">
-													{u.nickname || shortPrincipal(u.principal)}
-													<button onclick={() => revokeExtUser(ext.name, u.principal)} class="text-green-400 hover:text-green-600">&times;</button>
-												</span>
-											{/each}
-										</div>
-									{/if}
+									<span class="text-sm text-gray-400">Not supported by this realm version.</span>
 								</div>
 
 								<!-- Grant form -->
@@ -389,16 +348,15 @@
 									<div class="text-sm font-medium text-gray-700 mb-2">Grant access:</div>
 									<div class="flex gap-2 flex-wrap">
 										<select bind:value={grantType} class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
-											<option value="user">User</option>
 											<option value="department">Department</option>
 											<option value="profile">Profile</option>
 										</select>
 										<input
 											bind:value={grantTarget}
-											placeholder={grantType === 'user' ? 'Principal' : grantType === 'department' ? 'Dept name' : 'Profile name'}
+											placeholder={grantType === 'department' ? 'Dept name' : 'Profile name'}
 											class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
 										/>
-										<button onclick={() => grantExtension(ext.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
+										<button onclick={() => grantExtension(ext)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
 									</div>
 								</div>
 							</div>

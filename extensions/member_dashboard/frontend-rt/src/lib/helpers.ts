@@ -10,8 +10,6 @@ export function bridgeErrorFields(err: unknown): { code: string; message: string
 	return { code: 'failed', message: String(err) };
 }
 
-export type ExtEnvelope<T = unknown> = { success: boolean; data?: T; error?: string };
-
 export function getGreeting(): string {
 	const hour = new Date().getHours();
 	if (hour < 12) return 'Good morning';
@@ -142,16 +140,8 @@ export function formatFullDate(timestampMs: number): string {
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function formatInvoicePaidDate(paidOn: string | null | undefined): string {
-	if (!paidOn) return '—';
-	if (paidOn.startsWith('1970-01-01')) return '—';
-	try {
-		const d = new Date(paidOn);
-		if (Number.isNaN(d.getTime()) || d.getTime() <= 0) return '—';
-		return formatFullDate(d.getTime());
-	} catch {
-		return '—';
-	}
+export function formatInvoicePaidDate(paidAt: number): string {
+	return paidAt ? formatFullDate(paidAt * 1000) : '—';
 }
 
 export function getStatusColor(status: string): string {
@@ -171,11 +161,9 @@ export function getStatusColor(status: string): string {
 
 export function getPaymentCliCommand(info: Record<string, unknown> | null): string {
 	if (!info) return '';
-	if (info.amount_raw != null) {
-		const token = String(info.currency || 'token').toLowerCase();
-		return `dfx canister call ${token}_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}" }; amount = ${info.amount_raw} })' --network ic`;
-	}
-	return `dfx canister call token_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}"; subaccount = opt blob "${info.subaccount}" }; amount = ${info.amount_raw || 0} })' --network ic`;
+	const token = String(info.currency || 'token').toLowerCase();
+	const subaccount = String(info.subaccount).replace(/../g, '\\$&');
+	return `dfx canister call ${token}_backend icrc1_transfer '(record { to = record { owner = principal "${info.principal}"; subaccount = opt blob "${subaccount}" }; amount = ${info.amount_raw} })' --network ic`;
 }
 
 export function entries(obj: unknown): [string, unknown][] {

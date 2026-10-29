@@ -3,14 +3,16 @@
 		CHECKING_COPY,
 		canGoBack,
 		canRestartFlow,
-		interpretIdentityStatus,
 		interpretVerificationLinkResult,
 		interpretVerificationStatus,
 		readPrincipal,
+		realmEventId,
 		requestGoHome,
 		requestVerificationLink,
 		requestVerificationStatus,
 		showNotYetVerifiedModal,
+		testModeVerification,
+		verificationStatusUrl,
 		verifiedHeading,
 	} from './verificator';
 
@@ -29,8 +31,7 @@
 	let checkingStatus = $state(false);
 	let showDetails = $state(false);
 	let showGetApp = $state(false);
-	let alreadyVerifiedOnLoad = $state(false);
-	let identityStatusLoaded = $state(false);
+	let submittedIdentity = $state('');
 
 	let currentStepIndex = $derived(
 		step === 'idle' ? 0
@@ -45,54 +46,23 @@
 		{ label: 'Verified', index: 3 },
 	];
 
-	async function callSync(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	function skipZkProof(): boolean {
+		let skip = false;
+		ctx.realmInfo?.subscribe?.((info: any) => (skip = !!info?.testModeSkipPassportZkproof))?.();
+		return skip;
 	}
-
-	async function callAsync(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callAsync(fn, args);
-	}
-
-	async function loadExistingIdentity() {
-		try {
-			const status = interpretIdentityStatus(await callSync('get_identity_status'));
-			if (status.verified) {
-				alreadyVerifiedOnLoad = true;
-				step = 'verified';
-			}
-		} catch {
-			/* stay on Start if status is unavailable */
-		} finally {
-			identityStatusLoaded = true;
-		}
-	}
-
-	loadExistingIdentity();
 
 	async function generateVerificationLink() {
-		if (!canRestartFlow(step) || alreadyVerifiedOnLoad) return;
+		if (!canRestartFlow(step)) return;
 		try {
 			step = 'generating';
 			errorMessage = '';
 
-			const eventIdData = await callSync('get_current_application_id');
-			eventId = eventIdData?.application_id ?? eventIdData?.data?.application_id ?? '';
-			const skipZk = !!(
-				eventIdData?.skip_passport_zkproof ?? eventIdData?.data?.skip_passport_zkproof
-			);
-
+			eventId = await realmEventId(ctx.config.canisterId);
 			const userId = readPrincipal(ctx);
-			let result: unknown;
-			if (skipZk) {
-				result = await callAsync('get_verification_link', { user_id: userId });
-			} else {
-				try {
-					result = await requestVerificationLink({ userId, eventId });
-				} catch {
-					// CSP or canister-only environments still go through the outcall.
-					result = await callAsync('get_verification_link', { user_id: userId });
-				}
-			}
+			const result = skipZkProof()
+				? testModeVerification(userId)
+				: await requestVerificationLink({ userId, eventId });
 
 			const parsed = interpretVerificationLinkResult(result, userId);
 			if (!parsed.ok) {
@@ -104,7 +74,7 @@
 				sessionId = parsed.id || userId;
 				step = 'verified';
 				verificationResult = parsed.attributes;
-				await createPassportIdentity(result);
+				await submitPassportIdentity(userId);
 				return;
 			}
 			verificationLink = parsed.url;
@@ -122,19 +92,14 @@
 		try {
 			checkingStatus = true;
 			const userId = readPrincipal(ctx);
-			let result: unknown;
-			try {
-				result = await requestVerificationStatus(userId);
-			} catch {
-				result = await callAsync('check_verification_status', { user_id: userId });
-			}
+			const result = await requestVerificationStatus(userId);
 
 			const outcome = interpretVerificationStatus(result);
 			const payload = result as any;
 			if (outcome === 'verified') {
 				step = 'verified';
 				verificationResult = payload?.data?.attributes ?? payload;
-				await createPassportIdentity(payload);
+				await submitPassportIdentity(userId);
 				return;
 			}
 			if (outcome === 'failed') {
@@ -151,12 +116,14 @@
 		}
 	}
 
-	async function createPassportIdentity(verificationData: any) {
-		try {
-			await callSync('create_passport_identity', verificationData);
-		} catch (e: any) {
-			console.error('Error creating passport identity:', e);
-		}
+	async function submitPassportIdentity(userId: string) {
+		const res = await ctx.run('identity_submit', {
+			kind: 'passport',
+			issuer: 'rarime',
+			ref: verificationStatusUrl(userId),
+		});
+		if (res.ok) submittedIdentity = res.identity;
+		else console.error('Error submitting passport identity:', res.error);
 	}
 
 	async function copyToClipboard() {
@@ -186,12 +153,12 @@
 	}
 
 	function goBackToStart() {
-		if (!canGoBack(step) || alreadyVerifiedOnLoad) return;
+		if (!canGoBack(step)) return;
 		clearFlowFields();
 	}
 
 	function tryAgain() {
-		if (!canRestartFlow(step) || alreadyVerifiedOnLoad) return;
+		if (!canRestartFlow(step)) return;
 		clearFlowFields();
 	}
 
@@ -233,18 +200,8 @@
 		</div>
 	{/if}
 
-	<!-- LOADING EXISTING IDENTITY -->
-	{#if !identityStatusLoaded}
-		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center">
-			<svg class="animate-spin h-8 w-8 text-gray-700 dark:text-gray-300 mx-auto mb-4" viewBox="0 0 24 24">
-				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
-				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
-			</svg>
-			<p class="text-gray-600 dark:text-gray-400 font-medium">Checking whether you are already verified…</p>
-		</div>
-
 	<!-- IDLE STATE -->
-	{:else if step === 'idle'}
+	{#if step === 'idle'}
 		<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 sm:p-6">
 			<div class="flex flex-col gap-2">
 				<button
@@ -409,7 +366,7 @@
 			<div class="w-16 h-16 mx-auto mb-4 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-md">
 				<svg class="w-8 h-8 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
 			</div>
-			<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">{verifiedHeading(alreadyVerifiedOnLoad)}</h2>
+			<h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">{verifiedHeading(false)}</h2>
 
 			{#if verificationResult}
 				<div class="bg-white/60 dark:bg-gray-800/60 rounded-lg p-4 mb-4 max-w-sm mx-auto text-left space-y-2">
@@ -431,6 +388,11 @@
 			<p class="text-sm text-gray-600 dark:text-gray-400 max-w-md mx-auto">
 				Your passport has been verified. This realm only received a confirmation — not your passport details.
 			</p>
+			{#if submittedIdentity}
+				<p class="mt-2 text-sm text-gray-600 dark:text-gray-400 max-w-md mx-auto">
+					Submitted to the realm as {submittedIdentity}; it is pending until a reviewer confirms it.
+				</p>
+			{/if}
 
 			<button
 				type="button"

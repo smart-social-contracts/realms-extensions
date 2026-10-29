@@ -1,21 +1,9 @@
 {
   "name": "erd_explorer",
-  "version": "1.0.4",
-  "ggg_api_version": 1,
-  "capabilities": [
-    "schema.entities",
-    "entity.list",
-    "entity.read:Land",
-    "entity.read:Zone",
-    "entity.read:Codex"
-  ],
+  "version": "2.0.0",
   "description": "Browse how your realm's records connect: see data types as a diagram, their fields and links, and page through sample records.",
   "author": "Realms Team",
   "permissions": [],
-  "entry_points": [
-    "get_entity_schema",
-    "get_entity_data"
-  ],
   "profiles": [
     "developer"
   ],
@@ -34,7 +22,8 @@
     "zh-CN": "ERD 浏览器",
     "ca-valencia": "Explorador ERD"
   },
-  "entry_access": {
-    "default": "db.export"
-  }
+  "operations": [
+    "realm_export",
+    "realm_monitor"
+  ]
 }

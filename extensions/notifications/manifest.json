@@ -1,25 +1,6 @@
 {
   "name": "notifications",
-  "version": "1.1.5",
-  "ggg_api_version": 1,
-  "capabilities": [
-    "notification.list",
-    "notification.departments",
-    "notification.create",
-    "notification.mark_read",
-    "notification.delete",
-    "notification.email_settings",
-    "notification.set_email",
-    "notification.set_email_unverified",
-    "notification.request_email_verification",
-    "notification.verify_email_code",
-    "notification.set_email_preferences",
-    "notification.pending_emails",
-    "notification.mark_email_sent",
-    "notification.send_test_email",
-    "notification.send_join_link",
-    "log.write"
-  ],
+  "version": "2.0.0",
   "description": "See alerts about activity in your realm, mark them as read, and set which notifications you receive by email.",
   "sidebar_label": {
     "en": "Notifications",
@@ -31,23 +12,6 @@
     "ca-valencia": "Notificacions"
   },
   "permissions": [],
-  "entry_points": [
-    "get_notifications",
-    "mark_as_read",
-    "delete_notification",
-    "create_notification",
-    "list_departments",
-    "get_user_email",
-    "set_user_email",
-    "get_user_email_preferences",
-    "set_user_email_preferences",
-    "request_email_verification",
-    "verify_email_code",
-    "get_pending_email_notifications",
-    "mark_email_sent",
-    "send_test_email",
-    "send_join_link"
-  ],
   "profiles": [
     "member",
     "admin"
@@ -59,22 +23,10 @@
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/notifications",
   "show_in_sidebar": false,
   "entry_access": {
-    "default": "self.data_view",
-    "functions": {
-      "mark_as_read": "self.data_manage",
-      "delete_notification": "self.data_manage",
-      "list_departments": "realm.data_view",
-      "create_notification": "notification.send",
-      "get_user_email": "self.data_view",
-      "set_user_email": "self.data_manage",
-      "get_user_email_preferences": "self.data_view",
-      "set_user_email_preferences": "self.data_manage",
-      "request_email_verification": "self.data_manage",
-      "verify_email_code": "self.data_manage",
-      "get_pending_email_notifications": "notification.send",
-      "mark_email_sent": "notification.send",
-      "send_test_email": "realm.admin",
-      "send_join_link": "realm.admin"
-    }
-  }
+    "default": "self.data_view"
+  },
+  "operations": [
+    "notification_list",
+    "notification_read"
+  ]
 }

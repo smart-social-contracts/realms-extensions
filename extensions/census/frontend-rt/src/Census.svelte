@@ -16,11 +16,11 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const result = await ctx.callSync('get_user_count');
-			if (result?.success) {
-				userCount = result.data?.user_count ?? 0;
+			const result = await ctx.read('realm_monitor');
+			if (result.ok) {
+				userCount = result.rows.User;
 			} else {
-				error = result?.error || 'Failed to load user count';
+				error = result.error;
 			}
 		} catch (e: any) {
 			const op = ctx.ui?.accessDeniedOperation?.(e);

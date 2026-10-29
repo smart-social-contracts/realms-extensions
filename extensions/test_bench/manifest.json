@@ -1,10 +1,8 @@
 {
   "name": "test_bench",
-  "version": "0.1.4",
-  "ggg_api_version": 1,
-  "capabilities": [
-    "log.write"
-  ],
+  "version": "1.0.0",
+  "backend": true,
+  "operations": [],
   "description": "Run sample extension checks and inspect your session details to confirm extensions are connected and responding in this realm.",
   "author": "Smart Social Contracts Team",
   "permissions": [

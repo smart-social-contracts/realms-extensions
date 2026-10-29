@@ -9,14 +9,11 @@ Allow users to set their "zones of influence" via browser geolocation or manual 
 - **Zone Management**: View, add, and remove your zones
 - **H3 Integration**: Uses Uber's H3 hexagonal hierarchical geospatial indexing system
 
-## Backend Entry Points
+## Realm operations
 
-| Function | Description |
-|----------|-------------|
-| `get_my_zones` | Get all zones for the current user |
-| `add_zone` | Add a new zone at coordinates or H3 index |
-| `remove_zone` | Remove a zone by ID |
-| `get_all_zones` | Get all zones (for map visualization) |
+The extension has no backend. It pages through the realm's zones with `land_map` and draws them on the map.
+Editing zones (painting, retyping, renaming, removing) is not supported by this realm version: the realm's
+`Zone` is a member's home cell, set with `zone_set` / `zone_clear`, and has no operation for territory zoning.
 
 ## Usage
 

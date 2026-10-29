@@ -8,16 +8,14 @@
 	let aiAssistantEnabled = $derived(ctx.config?.aiAssistantEnabled !== false);
 
 	interface Codex {
-		_id: string;
-		id?: string;
+		id: string;
+		/** Its row in realm_export's Codex pages. */
+		row: number;
 		name: string;
 		description?: string;
-		code_preview?: string;
 		code?: string;
-		source?: string;
 		version?: string;
-		created_at?: number | null;
-		updated_at?: number | null;
+		status?: string;
 	}
 
 	const MONACO_THEME = 'vs';
@@ -92,7 +90,7 @@
 
 	let editorCode = $derived(
 		selectedCodex
-			? unescapeCode(selectedCodex.code || selectedCodex.source || selectedCodex.code_preview)
+			? selectedCodex.code ?? ''
 			: '',
 	);
 
@@ -100,12 +98,12 @@
 		currentSelection?.text?.trim() ? 'Explain selection' : 'Explain codex',
 	);
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	function getCodexId(codex: Codex): string {
+		return codex.id;
 	}
 
-	function getCodexId(codex: Codex): string {
-		return codex._id || codex.id || codex.name || '';
+	function deniedPermission(error: string | undefined): string | null {
+		return / needs (\S+)$/.exec(error ?? '')?.[1] ?? null;
 	}
 
 	function parseLinesParam(lines: string | null): LineRange | null {
@@ -225,21 +223,35 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const res = await callExt('get_all_codexes');
-			codexes = res?.codexes ?? res?.data ?? (Array.isArray(res) ? res : []);
+			const rows: Codex[] = [];
+			let from: number | null = 1;
+			while (from) {
+				const res = await ctx.read('codex_status', { from, count: 100 });
+				if (!res.ok) {
+					accessDeniedOp = deniedPermission(res.error) ?? '';
+					error = accessDeniedOp ? '' : res.error;
+					return;
+				}
+				const start = from;
+				rows.push(
+					...res.history.map((h: any, i: number) => ({
+						id: h.id,
+						row: start + i,
+						name: h.id.split('@')[0],
+						version: h.version,
+						status: h.status,
+					})),
+				);
+				from = res.next;
+			}
+			codexes = rows;
 			await applyUrlState();
 			if (!selectedCodex && codexes.length > 0) {
 				await selectCodex(codexes[0]);
 			}
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			accessDeniedOp = '';
+			error = e?.message ?? String(e);
 		} finally {
 			loading = false;
 		}
@@ -268,14 +280,11 @@
 		}
 
 		try {
-			const codexId = getCodexId(codex);
-			const res = await callExt('get_codex_details', { codex_id: codexId });
-			const detail = res?.codex ?? res?.data ?? res;
-			if (detail && typeof detail === 'object' && (detail.code || detail.name)) {
-				selectedCodex = detail;
-			} else {
-				selectedCodex = codex;
-			}
+			const res = await ctx.read('realm_export', { entity: 'Codex', from: codex.row, count: 1 });
+			const row = res.ok ? res.rows.find((r: any) => r.id === codex.id) : null;
+			selectedCodex = row
+				? { ...codex, code: row.source, description: row.manifest?.description }
+				: { ...codex, code: `# Cannot read this codex's source: ${res.ok ? 'not found' : res.error}` };
 		} catch {
 			selectedCodex = codex;
 		} finally {
@@ -290,15 +299,6 @@
 		if (!pendingExplainOnLoad || !aiAssistantEnabled) return;
 		pendingExplainOnLoad = false;
 		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
-	}
-
-	function unescapeCode(code: string | undefined | null): string {
-		if (!code) return '';
-		return code
-			.replace(/\\n/g, '\n')
-			.replace(/\\t/g, '\t')
-			.replace(/\\"/g, '"')
-			.replace(/\\\\/g, '\\');
 	}
 
 	function isSelected(codex: Codex): boolean {

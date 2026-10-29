@@ -1,30 +1,9 @@
 {
   "name": "land_registry",
-  "version": "1.4.1",
+  "version": "2.0.0",
   "ggg_api_version": 1,
-  "capabilities": [
-    "land.list",
-    "land.get",
-    "land.map",
-    "land.create",
-    "land.update",
-    "land.set_owner",
-    "land.prepare_nft",
-    "land.set_nft_token",
-    "log.write"
-  ],
   "description": "Browse parcels on a map, register new land, assign owners, update parcel details, and see who holds each plot in your realm.",
   "permissions": [],
-  "entry_points": [
-    "get_lands",
-    "get_land",
-    "create_land",
-    "update_land",
-    "update_land_ownership",
-    "get_land_map",
-    "register_land_nft",
-    "update_land_nft_token"
-  ],
   "profiles": [
     "member",
     "admin"
@@ -44,29 +23,13 @@
     "zh-CN": "土地登记",
     "ca-valencia": "Registre de Terres"
   },
-  "entry_access": {
-    "default": "realm.data_view",
-    "functions": {
-      "create_land": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "update_land_ownership": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "update_land": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "register_land_nft": {
-        "level": "realm.admin",
-        "governed": true
-      },
-      "update_land_nft_token": {
-        "level": "realm.admin",
-        "governed": true
-      }
-    }
-  }
+  "operations": [
+    "land_list",
+    "land_map",
+    "land_register",
+    "land_transfer",
+    "land_freeze",
+    "land_unfreeze",
+    "land_mint_nft"
+  ]
 }

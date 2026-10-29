@@ -121,7 +121,7 @@ test.describe('Vault Extension E2E Tests', () => {
 		test.setTimeout(TIMEOUT);
 
 		await expect(
-			page.getByText("On-chain ledger balance for this realm's vault"),
+			page.getByText("Balance booked across this realm's treasury funds"),
 		).toBeVisible();
 	});
 
@@ -175,7 +175,7 @@ test.describe('Vault Extension E2E Tests', () => {
 		}
 	});
 
-	test('should display user-friendly error message for insufficient funds', async ({ page }) => {
+	test('should report a fund that cannot cover the transfer', async ({ page }) => {
 		test.setTimeout(TIMEOUT);
 
 		await page.getByRole('button', { name: 'Send' }).first().click();
@@ -196,7 +196,7 @@ test.describe('Vault Extension E2E Tests', () => {
 
 		const errorMessage = page
 			.locator('.bg-red-50, [class*="error"]')
-			.filter({ hasText: /Insufficient funds/i });
+			.filter({ hasText: /holds .* less than/i });
 		await expect(errorMessage).toBeVisible({ timeout: 10000 });
 	});
 

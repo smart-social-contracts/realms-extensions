@@ -25,12 +25,18 @@
 		ctx?.reportHeight(document.body.scrollHeight);
 	}
 
-	function bridgeErrorFields(err: unknown): { code: string; message: string } {
-		if (err instanceof Error) {
-			const code = (err as Error & { code?: string }).code ?? 'failed';
-			return { code, message: err.message };
+	async function installedExtensions(client: ExtensionClient) {
+		const rows: { name: string; version: string; description?: string }[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const page = await client.read<any>('extension_list', { from, count: 100 });
+			if (!page.ok) break;
+			rows.push(
+				...page.extensions.map((e: any) => ({ name: e.id, version: e.version, description: e.manifest?.description })),
+			);
+			from = page.next;
 		}
-		return { code: 'failed', message: String(err) };
+		return rows;
 	}
 
 	async function fetchSystemInfo() {
@@ -39,17 +45,28 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			data = (await ctx.callExtension('get_system_info', {})) as SystemInfoData;
+			const [status, monitor] = await Promise.all([ctx.read<any>('status'), ctx.read<any>('realm_monitor')]);
+			if (!monitor.ok) {
+				const needed = / needs (\S+)$/.exec(monitor.error)?.[1];
+				if (needed) accessDeniedOp = needed;
+				else error = monitor.error;
+				return;
+			}
+			const counts: Record<string, number> = monitor.rows;
+			const extensions = await installedExtensions(ctx);
+			data = {
+				realms: { version: monitor.version },
+				canister: { canisters: status.ok ? { realm_backend: status.canister } : {} },
+				db: {
+					counts,
+					total_entities: Object.values(counts).reduce((sum, n) => sum + n, 0),
+					entity_types: Object.keys(counts).length,
+				},
+				extensions: { count: extensions.length, extensions },
+			};
 			lastRefresh = new Date().toLocaleString();
 		} catch (e) {
-			const { code, message } = bridgeErrorFields(e);
-			if (code === 'denied') {
-				accessDeniedOp = message;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = message;
-			}
+			error = e instanceof Error ? e.message : String(e);
 		} finally {
 			loading = false;
 			queueMicrotask(reportHeight);
@@ -74,27 +91,9 @@
 		}
 	}
 
-	function formatCycles(tc: number): string {
-		if (tc >= 1) return `${tc.toFixed(2)} TC`;
-		return `${(tc * 1000).toFixed(1)} GC`;
-	}
-
-	function formatBytes(bytes: number): string {
-		if (!bytes && bytes !== 0) return '—';
-		if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-		if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-		if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${bytes} B`;
-	}
-
 	function formatNumber(n: number): string {
 		if (n == null) return '0';
 		return n.toLocaleString();
-	}
-
-	function formatTimestamp(ns: number): string {
-		if (!ns) return 'N/A';
-		return new Date(ns / 1_000_000).toLocaleString();
 	}
 
 	function entries(obj: unknown): [string, unknown][] {
@@ -164,7 +163,7 @@
 		<Card>
 			{#snippet children()}
 				<AccessDenied
-					operation="get_system_info"
+					operation="realm_monitor"
 					message="You need additional permissions to view this page ({accessDeniedOp})."
 				>
 					{#snippet children()}
@@ -187,26 +186,6 @@
 		<div class="grid grid-cols-2 gap-4 md:grid-cols-4">
 			<Card>
 				{#snippet children()}
-					<p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Cycles</p>
-					<p class="mt-1 text-xl font-bold text-indigo-600 dark:text-indigo-400">
-						{formatCycles(data.canister?.cycles_tc || 0)}
-					</p>
-					<p class="mt-0.5 text-xs text-gray-400">{formatNumber(data.canister?.cycles || 0)}</p>
-				{/snippet}
-			</Card>
-			<Card>
-				{#snippet children()}
-					<p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Stable Memory</p>
-					<p class="mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">
-						{data.canister?.stable_memory_mb || 0} MB
-					</p>
-					<p class="mt-0.5 text-xs text-gray-400">
-						{formatNumber(data.canister?.stable_memory_pages || 0)} pages
-					</p>
-				{/snippet}
-			</Card>
-			<Card>
-				{#snippet children()}
 					<p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Entities</p>
 					<p class="mt-1 text-xl font-bold text-amber-600 dark:text-amber-400">
 						{formatNumber(data.db?.total_entities || 0)}
@@ -214,56 +193,23 @@
 					<p class="mt-0.5 text-xs text-gray-400">{data.db?.entity_types || 0} types</p>
 				{/snippet}
 			</Card>
-			<Card>
-				{#snippet children()}
-					<p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Files</p>
-					<p class="mt-1 text-xl font-bold text-rose-600 dark:text-rose-400">
-						{formatNumber(data.files?.total_files || 0)}
-					</p>
-					<p class="mt-0.5 text-xs text-gray-400">{formatBytes(data.files?.total_size_bytes || 0)}</p>
-				{/snippet}
-			</Card>
 		</div>
+		<p class="text-xs text-gray-400 dark:text-gray-500">
+			Cycles, memory, files, runtime versions, token balances and dependencies are not supported by this realm version.
+		</p>
 
 		<Card title="Versions">
 			{#snippet children()}
 				<div class="divide-y divide-gray-100 dark:divide-gray-700">
 					<div class="flex items-center justify-between py-3 first:pt-0 last:pb-0">
 						<div class="flex items-center gap-2">
-							<span class="h-2 w-2 rounded-full bg-yellow-400"></span>
-							<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Python</span>
-						</div>
-						<span class="font-mono text-sm text-gray-500 dark:text-gray-400">{data.python?.version || 'N/A'}</span>
-					</div>
-					<div class="flex items-center justify-between py-3">
-						<div class="flex items-center gap-2">
-							<span class="h-2 w-2 rounded-full bg-green-400"></span>
-							<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Basilisk</span>
-						</div>
-						<div class="text-right">
-							<span class="font-mono text-sm text-gray-500 dark:text-gray-400">{data.basilisk?.version || 'N/A'}</span>
-							{#if data.basilisk?.rust_version}
-								<span class="ml-2 text-xs text-gray-400 dark:text-gray-500">(Rust {data.basilisk.rust_version})</span>
-							{/if}
-						</div>
-					</div>
-					<div class="flex items-center justify-between py-3">
-						<div class="flex items-center gap-2">
 							<span class="h-2 w-2 rounded-full bg-blue-400"></span>
 							<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Realms</span>
 						</div>
 						<div class="text-right">
 							<span class="font-mono text-sm text-gray-500 dark:text-gray-400">{data.realms?.version || 'N/A'}</span>
-							{#if data.realms?.commit && !data.realms.commit.includes('PLACEHOLDER')}
-								<span class="ml-2 text-xs text-gray-400 dark:text-gray-500">({data.realms.commit.slice(0, 7)})</span>
-							{/if}
 						</div>
 					</div>
-					{#if data.realms?.commit_datetime && !data.realms.commit_datetime.includes('PLACEHOLDER')}
-						<div class="flex justify-end py-2">
-							<span class="text-xs text-gray-400 dark:text-gray-500">Built: {data.realms.commit_datetime}</span>
-						</div>
-					{/if}
 				</div>
 			{/snippet}
 		</Card>
@@ -276,33 +222,6 @@
 							<div class="flex items-center justify-between py-3 first:pt-0 last:pb-0">
 								<span class="text-sm font-medium capitalize text-gray-700 dark:text-gray-300">{role}</span>
 								<span class="font-mono text-sm text-gray-500 dark:text-gray-400">{id}</span>
-							</div>
-						{/each}
-					</div>
-					{#if data.canister?.time_ns}
-						<p class="mt-3 border-t border-gray-200 pt-2 text-xs text-gray-400 dark:border-gray-700 dark:text-gray-500">
-							Canister time: {formatTimestamp(data.canister.time_ns)}
-						</p>
-					{/if}
-				{/snippet}
-			</Card>
-		{/if}
-
-		{#if data.tokens?.tokens?.length > 0}
-			<Card title="Token Balances">
-				{#snippet children()}
-					<div class="divide-y divide-gray-100 dark:divide-gray-700">
-						{#each data.tokens.tokens as token}
-							<div class="flex items-center justify-between py-3 first:pt-0 last:pb-0">
-								<div>
-									<span class="text-sm font-medium text-gray-700 dark:text-gray-300">{token.name}</span>
-									<span class="ml-2 font-mono text-xs text-gray-400 dark:text-gray-500">{token.ledger?.slice(0, 10)}…</span>
-								</div>
-								<span class="font-mono text-sm text-gray-600 dark:text-gray-400">
-									{(token.balance_raw / Math.pow(10, token.decimals || 8)).toFixed(
-										token.decimals > 4 ? 4 : token.decimals || 8,
-									)}
-								</span>
 							</div>
 						{/each}
 					</div>
@@ -328,11 +247,6 @@
 								</div>
 								{#if ext.description}
 									<p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{ext.description}</p>
-								{/if}
-								{#if ext.commit && !ext.commit.includes('PLACEHOLDER')}
-									<p class="mt-0.5 font-mono text-xs text-gray-400 dark:text-gray-500">
-										{ext.commit.slice(0, 7)} — {ext.commit_datetime}
-									</p>
 								{/if}
 							</div>
 						{/each}
@@ -362,41 +276,6 @@
 									{formatNumber(count)}
 								</span>
 							</div>
-						{/each}
-					</div>
-				{/snippet}
-			</Card>
-		{/if}
-
-		{#if data.files?.top_extensions}
-			<Card>
-				{#snippet header()}
-					<div class="flex items-center justify-between">
-						<h2 class="text-base font-semibold text-gray-900 dark:text-white">Filesystem</h2>
-						<span class="text-xs text-gray-400 dark:text-gray-500">
-							{formatNumber(data.files.total_files)} files, {formatBytes(data.files.total_size_bytes)}
-						</span>
-					</div>
-				{/snippet}
-				{#snippet children()}
-					<div class="grid grid-cols-2 gap-px bg-gray-100 md:grid-cols-5 dark:bg-gray-700">
-						{#each sortedEntries(data.files.top_extensions) as [ext, count]}
-							<div class="bg-white px-3 py-2 text-center dark:bg-gray-800">
-								<p class="font-mono text-xs text-gray-500 dark:text-gray-400">{ext}</p>
-								<p class="text-sm font-semibold text-gray-700 dark:text-gray-300">{formatNumber(count)}</p>
-							</div>
-						{/each}
-					</div>
-				{/snippet}
-			</Card>
-		{/if}
-
-		{#if data.dependencies?.length > 0}
-			<Card title="Dependencies">
-				{#snippet children()}
-					<div class="flex flex-wrap gap-x-4 gap-y-1">
-						{#each data.dependencies as dep}
-							<span class="font-mono text-xs text-gray-500 dark:text-gray-400">{dep}</span>
 						{/each}
 					</div>
 				{/snippet}

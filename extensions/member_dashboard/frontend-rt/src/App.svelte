@@ -20,18 +20,16 @@
 		getStatusColor,
 		mdToHtml,
 		clipboardCopy,
-		type ExtEnvelope,
 	} from './lib/helpers';
 	import { loadExtensionI18n, t } from './lib/i18n';
 
 	type NotificationItem = {
 		id: string;
-		title?: string;
-		message?: string;
-		body?: string;
-		sender?: string;
-		timestamp_ms?: number;
-		read?: boolean;
+		title: string;
+		body: string;
+		sender: string;
+		timestamp_ms: number;
+		read: boolean;
 	};
 
 	let bridgeReady = $state(false);
@@ -40,7 +38,8 @@
 	let isAuthenticated = $derived(!!principal);
 
 	let summary: Record<string, unknown> | null = $state(null);
-	let citizenship: Record<string, unknown> | null = $state(null);
+	let profiles: string[] = $state([]);
+	let installed: string[] = $state([]);
 	let notifications: NotificationItem[] = $state([]);
 	let notificationsUnavailable = $state(false);
 	let loading = $state(true);
@@ -49,15 +48,13 @@
 	let notificationsLoading = $state(true);
 	let expandedId: string | null = $state(null);
 
-	let invoiceData: { invoices?: Record<string, unknown>[]; summary?: Record<string, unknown> } | null =
-		$state(null);
+	let invoiceData: { invoices: Record<string, any>[] } | null = $state(null);
 	let invoiceLoading = $state(true);
 	let invoiceError = $state('');
 	let refreshingInvoiceId = $state<string | null>(null);
 
 	let showPaymentModal = $state(false);
 	let paymentInfo: Record<string, unknown> | null = $state(null);
-	let paymentLoading = $state(false);
 	let selectedRecord: Record<string, unknown> | null = $state(null);
 	let copied = $state(false);
 
@@ -68,6 +65,22 @@
 	let unreadCount = $derived(notifications.filter((n) => !n.read).length);
 	let firstName = $derived(displayFirstName(summary, principal));
 	let greetingLine = $derived(firstName ? `${getGreeting()}, ${firstName}` : getGreeting());
+	let citizenship = $derived.by(() => {
+		if (!summary || !invoiceData) return null;
+		const activeCitizen = profiles.includes('active_citizen');
+		const invoices = invoiceData.invoices;
+		const paid = invoices.filter((i) => i.status === 'paid').length;
+		const invoicePaid = activeCitizen || (invoices.length > 0 && paid === invoices.length);
+		const passportRequired = installed.includes('passport_verification');
+		return {
+			status: invoicePaid && (activeCitizen || !passportRequired) ? 'active' : 'pending',
+			invoice_paid: invoicePaid,
+			passport_verified: activeCitizen,
+			installed_extensions: installed,
+			total_invoices: invoices.length,
+			paid_invoices: paid,
+		} as Record<string, unknown>;
+	});
 	let citizenshipContext = $derived({
 		installed: Array.isArray(citizenship?.installed_extensions)
 			? (citizenship.installed_extensions as string[])
@@ -87,22 +100,15 @@
 		ctx?.reportHeight(document.body.scrollHeight);
 	}
 
-	async function callExt<T>(fn: string, args: Record<string, unknown> = {}): Promise<ExtEnvelope<T>> {
-		if (!ctx) return { success: false, error: 'Bridge not ready' };
-		const raw = await ctx.callExtension<ExtEnvelope<T> | T>(fn, args);
-		if (raw && typeof raw === 'object' && 'success' in raw) {
-			return raw as ExtEnvelope<T>;
+	async function pages(name: string, key: string): Promise<any[]> {
+		const rows: any[] = [];
+		for (let from: number | null = 1; from; ) {
+			const page: any = await ctx!.read(name, { from, count: 500 });
+			if (!page.ok) throw new Error(page.error);
+			rows.push(...page[key]);
+			from = page.next;
 		}
-		return { success: true, data: raw as T };
-	}
-
-	async function callExtAsync<T>(fn: string, args: Record<string, unknown> = {}): Promise<ExtEnvelope<T>> {
-		if (!ctx) return { success: false, error: 'Bridge not ready' };
-		const raw = await ctx.callExtensionAsync<ExtEnvelope<T> | T>(fn, args);
-		if (raw && typeof raw === 'object' && 'success' in raw) {
-			return raw as ExtEnvelope<T>;
-		}
-		return { success: true, data: raw as T };
+		return rows;
 	}
 
 	async function loadDashboard() {
@@ -111,17 +117,11 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const args = { user_id: principal };
-			const [sum, cit] = await Promise.all([
-				callExt<Record<string, unknown>>('get_dashboard_summary', args).catch(() => ({
-					success: false,
-				})),
-				callExt<Record<string, unknown>>('get_citizenship_status', args).catch(() => ({
-					success: false,
-				})),
-			]);
-			summary = (sum.data ?? sum) as Record<string, unknown> | null;
-			citizenship = (cit.data ?? cit) as Record<string, unknown> | null;
+			const [me, extensions] = await Promise.all([ctx.read<any>('me'), pages('extension_list', 'extensions')]);
+			if (!me.ok) throw new Error(me.error);
+			summary = { user_name: me.user.nickname };
+			profiles = me.user.profiles ?? [];
+			installed = extensions.map((e) => e.id);
 		} catch (e) {
 			const { code, message } = bridgeErrorFields(e);
 			if (code === 'denied') {
@@ -138,11 +138,26 @@
 	}
 
 	async function loadNotifications() {
+		if (!ctx || !principal) return;
 		notificationsLoading = true;
-		notificationsUnavailable = true;
-		notifications = [];
-		notificationsLoading = false;
-		queueMicrotask(reportHeight);
+		notificationsUnavailable = false;
+		try {
+			const rows = await pages('notification_list', 'notifications');
+			notifications = rows.reverse().map((n) => ({
+				id: n.id,
+				title: n.title,
+				body: n.body,
+				sender: n.sender,
+				timestamp_ms: n.at * 1000,
+				read: n.read,
+			}));
+		} catch {
+			notificationsUnavailable = true;
+			notifications = [];
+		} finally {
+			notificationsLoading = false;
+			queueMicrotask(reportHeight);
+		}
 	}
 
 	async function loadInvoices() {
@@ -150,15 +165,7 @@
 		invoiceLoading = true;
 		invoiceError = '';
 		try {
-			const result = await callExt<{ invoices?: Record<string, unknown>[]; summary?: Record<string, unknown> }>(
-				'get_invoice_information',
-				{ user_id: principal },
-			);
-			if (result.success && result.data) {
-				invoiceData = result.data;
-			} else {
-				invoiceError = result.error || 'Failed to load invoices';
-			}
+			invoiceData = { invoices: await pages('my_invoices', 'invoices') };
 		} catch (e) {
 			invoiceError = bridgeErrorFields(e).message;
 		} finally {
@@ -195,18 +202,20 @@
 	});
 
 	async function toggleRead(notif: NotificationItem) {
-		try {
-			const newRead = !notif.read;
-			notifications = notifications.map((n) =>
-				n.id === notif.id ? { ...n, read: newRead } : n,
-			);
-		} catch {
-			/* cross-extension notifications unavailable in sandbox */
+		if (notif.read) {
+			ctx?.notify('info', 'Marking a notification unread is not supported by this realm version.');
+			return;
 		}
+		const res = await ctx!.run('notification_read', { notification: notif.id });
+		if (!res.ok) {
+			ctx!.notify('error', res.error);
+			return;
+		}
+		notifications = notifications.map((n) => (n.id === notif.id ? { ...n, read: true } : n));
 	}
 
-	async function deleteNotification(notif: NotificationItem) {
-		notifications = notifications.filter((n) => n.id !== notif.id);
+	function deleteNotification(_notif: NotificationItem) {
+		ctx?.notify('info', 'Deleting notifications is not supported by this realm version.');
 	}
 
 	function toggleExpand(notif: NotificationItem) {
@@ -218,22 +227,17 @@
 		}
 	}
 
-	async function openPaymentModal(record: Record<string, unknown>) {
+	function openPaymentModal(record: Record<string, any>) {
 		selectedRecord = record;
 		showPaymentModal = true;
-		paymentLoading = true;
-		paymentInfo = null;
-		try {
-			const result = await callExt<Record<string, unknown>>('get_invoice_deposit_address', {
-				invoice_id: record.id,
-			});
-			if (result.success && result.data) paymentInfo = result.data;
-		} catch {
-			/* shown as empty state in modal */
-		} finally {
-			paymentLoading = false;
-			queueMicrotask(reportHeight);
-		}
+		paymentInfo = {
+			invoice_id: record.id,
+			currency: record.symbol,
+			principal: record.pay_to.owner,
+			subaccount: record.pay_to.subaccount,
+			amount_raw: record.amount,
+		};
+		queueMicrotask(reportHeight);
 	}
 
 	async function copyCliCommand(text: string) {
@@ -247,11 +251,11 @@
 	}
 
 	function invoicePaidBody(record: Record<string, unknown>, alreadyPaid: boolean): string {
-		const desc = String(record.metadata || t('invoice_unnamed')).trim() || t('invoice_unnamed');
+		const desc = String(record.reason || t('invoice_unnamed')).trim() || t('invoice_unnamed');
 		const amount = record.amount != null && record.amount !== '' ? String(record.amount) : '';
-		const currency = record.currency ? String(record.currency) : '';
+		const currency = record.symbol ? String(record.symbol) : '';
 		const amountBit = [amount, currency].filter(Boolean).join(' ');
-		const paidOn = formatInvoicePaidDate(record.paid_on as string | null | undefined);
+		const paidOn = formatInvoicePaidDate(record.paid_at as number);
 		const when = paidOn !== '—' ? t('invoice_paid_on', { date: paidOn }) : '';
 		const key = alreadyPaid
 			? amountBit
@@ -281,42 +285,21 @@
 		const invoiceId = String(record.id);
 		refreshingInvoiceId = invoiceId;
 		try {
-			const result = await callExtAsync<Record<string, unknown>>('check_invoice_payment', {
-				invoice_id: record.id,
-			});
-			if (result.success) {
+			const result = await ctx.run<any>('invoice_check', { invoice: invoiceId });
+			if (!result.ok) {
+				ctx.notify('error', result.error);
+			} else if (result.status === 'paid') {
 				await loadInvoices();
-				const data = result.data ?? {};
-				if (data.already_paid || data.paid) {
-					const refreshed =
-						invoiceData?.invoices?.find((inv) => String(inv.id) === invoiceId) ?? record;
-					await showInvoicePaidNotice(refreshed, Boolean(data.already_paid));
-				} else {
-					const scanned = data.scanned_transactions;
-					ctx.notify(
-						'info',
-						scanned == null
-							? 'Payment not found yet. Wait a moment and try again.'
-							: `Payment not found in the last ${scanned} treasury transfers.`,
-					);
-				}
+				const refreshed = invoiceData?.invoices.find((inv) => String(inv.id) === invoiceId) ?? record;
+				await showInvoicePaidNotice(refreshed, false);
 			} else {
-				ctx.notify('error', result.error || 'Failed to check payment');
+				ctx.notify('info', 'Payment not found yet. Wait a moment and try again.');
 			}
 		} catch (e) {
 			ctx.notify('error', bridgeErrorFields(e).message);
 		} finally {
 			refreshingInvoiceId = null;
 			queueMicrotask(reportHeight);
-		}
-	}
-
-	async function demoMarkAsPaid(record: Record<string, unknown>) {
-		try {
-			const result = await callExt('demo_mark_invoice_paid', { invoice_id: record.id });
-			if (result.success) await loadInvoices();
-		} catch {
-			/* access denied surfaced on next load */
 		}
 	}
 
@@ -498,7 +481,7 @@
 								<p class="mt-0.5 text-xs leading-snug text-slate-500 dark:text-slate-400">
 									{steps.passport
 										? t('citizenship_passport_done')
-										: `${t('citizenship_passport_todo')} · ${t('citizenship_passport_hint')}`}
+										: `${t('citizenship_passport_todo')} · ${t('citizenship_passport_hint')} · Checking a verified passport is not supported by this realm version.`}
 								</p>
 							</div>
 						</li>
@@ -638,11 +621,11 @@
 													</button>
 												</div>
 											</div>
-											{#if expandedId === notif.id && (notif.message || notif.body)}
+											{#if expandedId === notif.id && notif.body}
 												<div
 													class="mt-3 border-t border-gray-100 pt-3 text-sm leading-relaxed text-gray-700 dark:border-gray-700 dark:text-gray-300"
 												>
-													{@html mdToHtml(notif.message || notif.body || '')}
+													{@html mdToHtml(notif.body)}
 												</div>
 											{/if}
 										</article>
@@ -688,11 +671,11 @@
 													>
 														{notif.title || 'Notification'}
 													</div>
-													{#if expandedId === notif.id && (notif.message || notif.body)}
+													{#if expandedId === notif.id && notif.body}
 														<div
 															class="mt-3 border-t border-gray-100 pt-3 text-sm leading-relaxed text-gray-700 dark:border-gray-700 dark:text-gray-300"
 														>
-															{@html mdToHtml(notif.message || notif.body || '')}
+															{@html mdToHtml(notif.body)}
 														</div>
 													{/if}
 												</td>
@@ -773,15 +756,15 @@
 											<div class="flex items-start justify-between gap-3">
 												<div class="min-w-0">
 													<div class="text-sm font-medium text-gray-900 dark:text-white">
-														{String(record.metadata || 'Invoice')}
+														{String(record.reason || 'Invoice')}
 													</div>
 													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-														{formatInvoicePaidDate(record.paid_on as string | null | undefined)}
+														{formatInvoicePaidDate(record.paid_at)}
 													</div>
 												</div>
 												<div class="shrink-0 text-right">
 													<div class="font-semibold text-gray-900 dark:text-white">
-														{record.amount} {record.currency}
+														{record.amount} {record.symbol}
 													</div>
 													<span
 														class={cn(
@@ -792,7 +775,7 @@
 												</div>
 											</div>
 											<div class="mt-2">
-												{#if record.status === 'Pending' || record.status === 'Overdue'}
+												{#if record.status === 'pending' || record.status === 'overdue'}
 													<div class="flex flex-wrap items-center gap-2">
 														<Button tone="primary" size="sm" onclick={() => openPaymentModal(record)}>
 															💳 Pay
@@ -805,11 +788,11 @@
 														>
 															{refreshingInvoiceId === String(record.id) ? 'Refreshing…' : '↻ Refresh'}
 														</Button>
-														<Button tone="secondary" size="sm" onclick={() => demoMarkAsPaid(record)}>
-															Demo Pay
-														</Button>
+														<span title="Not supported by this realm version">
+															<Button tone="secondary" size="sm" disabled>Demo Pay</Button>
+														</span>
 													</div>
-												{:else if record.status === 'Paid'}
+												{:else if record.status === 'paid'}
 													<span class="text-xs text-green-600 dark:text-green-400">Paid</span>
 												{:else}
 													<span class="text-xs text-gray-400 dark:text-gray-500">—</span>
@@ -837,11 +820,11 @@
 											>
 												<td class="px-4 py-3">
 													<div class="text-sm font-medium text-gray-900 dark:text-white">
-														{String(record.metadata || 'Invoice')}
+														{String(record.reason || 'Invoice')}
 													</div>
 												</td>
 												<td class="px-4 py-3 font-semibold text-gray-900 dark:text-white">{record.amount}</td>
-												<td class="px-4 py-3 text-gray-700 dark:text-gray-300">{record.currency}</td>
+												<td class="px-4 py-3 text-gray-700 dark:text-gray-300">{record.symbol}</td>
 												<td class="px-4 py-3">
 													<span
 														class={cn(
@@ -851,10 +834,10 @@
 													>
 												</td>
 												<td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
-													{formatInvoicePaidDate(record.paid_on as string | null | undefined)}
+													{formatInvoicePaidDate(record.paid_at)}
 												</td>
 												<td class="px-4 py-3">
-													{#if record.status === 'Pending' || record.status === 'Overdue'}
+													{#if record.status === 'pending' || record.status === 'overdue'}
 														<div class="flex flex-wrap items-center gap-2">
 															<Button tone="primary" size="sm" onclick={() => openPaymentModal(record)}>
 																💳 Pay
@@ -867,11 +850,11 @@
 															>
 																{refreshingInvoiceId === String(record.id) ? 'Refreshing…' : '↻ Refresh'}
 															</Button>
-															<Button tone="secondary" size="sm" onclick={() => demoMarkAsPaid(record)}>
-																Demo Pay
-															</Button>
+															<span title="Not supported by this realm version">
+																<Button tone="secondary" size="sm" disabled>Demo Pay</Button>
+															</span>
 														</div>
-													{:else if record.status === 'Paid'}
+													{:else if record.status === 'paid'}
 														<span class="text-xs text-green-600 dark:text-green-400">Paid</span>
 													{:else}
 														<span class="text-xs text-gray-400 dark:text-gray-500">—</span>
@@ -919,11 +902,7 @@
 							>
 						</div>
 						<div class="space-y-5 p-6">
-							{#if paymentLoading}
-								<div class="flex justify-center py-8">
-									<div class="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
-								</div>
-							{:else if paymentInfo}
+							{#if paymentInfo}
 								<div class="rounded-lg bg-gray-50 p-4 dark:bg-gray-750">
 									<div class="grid grid-cols-2 gap-4 text-sm">
 										<div>
@@ -951,40 +930,17 @@
 												>{paymentInfo.principal}</code
 											>
 										</div>
-										{#if paymentInfo.amount_human != null}
-											<div>
-												<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-													>Exact Amount to Send</label
-												>
-												<code
-													class="block rounded border border-blue-200 bg-blue-50 px-3 py-2 font-mono text-lg font-bold text-blue-800 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200"
-													>{paymentInfo.amount_human} {paymentInfo.currency}</code
-												>
-												<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-													The unique last digits identify your invoice — send this <strong>exact</strong> amount.
-												</p>
-											</div>
-										{/if}
-										{#if paymentInfo.subaccount}
-											<div>
-												<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-													>Subaccount (Hex)</label
-												>
-												<code
-													class="block break-all rounded bg-gray-100 px-3 py-2 font-mono text-xs text-gray-800 dark:bg-gray-700 dark:text-gray-200"
-													>{paymentInfo.subaccount}</code
-												>
-											</div>
-										{/if}
+										<div>
+											<label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+												>Subaccount (Hex)</label
+											>
+											<code
+												class="block break-all rounded bg-gray-100 px-3 py-2 font-mono text-xs text-gray-800 dark:bg-gray-700 dark:text-gray-200"
+												>{paymentInfo.subaccount}</code
+											>
+										</div>
 									</div>
 								</div>
-								{#if paymentInfo.note}
-									<div
-										class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20"
-									>
-										<p class="text-sm text-amber-800 dark:text-amber-200">{paymentInfo.note}</p>
-									</div>
-								{/if}
 								<div>
 									<h4 class="mb-2 font-semibold text-gray-900 dark:text-white">DFX CLI Command</h4>
 									<div class="relative rounded-lg bg-gray-900 p-4">
@@ -998,8 +954,6 @@
 										>
 									</div>
 								</div>
-							{:else}
-								<p class="py-4 text-center text-red-600 dark:text-red-400">Failed to load payment details.</p>
 							{/if}
 						</div>
 						<div

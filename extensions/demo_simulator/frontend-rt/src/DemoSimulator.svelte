@@ -6,43 +6,60 @@
 	interface EntityTypeMeta {
 		key: string;
 		label: string;
-		stat_field: string;
 	}
 
-	interface Stats {
-		users: number;
-		organizations: number;
-		proposals: number;
-		transfers: number;
-		disputes: number;
-		votes?: number;
-		lands?: number;
-		courts?: number;
-		cases?: number;
-		funds?: number;
-		fiscal_periods?: number;
-		budgets?: number;
-		ledger_entries?: number;
-		messages?: number;
-		departments?: number;
-	}
-
-	interface Status {
-		running: boolean;
+	interface Config {
 		interval_seconds: number;
 		batch_size: number;
 		max_entities: number | null;
-		batch_number: number;
 		seed: number;
 		rotation_mode: string;
-		rotation_modes: string[];
 		enabled_types: Record<string, boolean>;
-		type_counts: Record<string, number | null>;
-		resolved_type_counts: Record<string, number>;
-		entity_types: EntityTypeMeta[];
-		stats: Stats;
-		demo_mode_active: boolean;
+		type_counts: Record<string, number>;
 	}
+
+	interface Status extends Config {
+		running: boolean;
+		batch_number: number;
+		stats: Record<string, number | undefined>;
+	}
+
+	const TASK = 'demo_simulator';
+	const ROTATION_MODES = ['round_robin', 'random', 'all'];
+	const ENTITY_TYPES: EntityTypeMeta[] = [
+		{ key: 'users', label: 'Users' },
+		{ key: 'organizations', label: 'Organizations' },
+		{ key: 'proposals', label: 'Proposals' },
+		{ key: 'transfers', label: 'Transfers' },
+		{ key: 'disputes', label: 'Disputes' },
+		{ key: 'votes', label: 'Votes' },
+		{ key: 'lands', label: 'Land parcels' },
+		{ key: 'courts', label: 'Courts' },
+		{ key: 'cases', label: 'Cases' },
+		{ key: 'funds', label: 'Funds' },
+		{ key: 'fiscal_periods', label: 'Fiscal periods' },
+		{ key: 'budgets', label: 'Budget lines' },
+		{ key: 'ledger_entries', label: 'Ledger entries' },
+		{ key: 'messages', label: 'Messages' },
+		{ key: 'departments', label: 'Departments' }
+	];
+	const UNSUPPORTED = new Set(['transfers', 'votes', 'cases', 'ledger_entries']);
+	const REALM_ROWS: Record<string, string> = {
+		users: 'User',
+		organizations: 'Organization',
+		proposals: 'Proposal',
+		messages: 'Notification',
+		departments: 'Department'
+	};
+	const DEFAULTS: Config = {
+		interval_seconds: 30,
+		batch_size: 5,
+		max_entities: null,
+		seed: 0,
+		rotation_mode: 'round_robin',
+		enabled_types: Object.fromEntries(ENTITY_TYPES.map((et) => [et.key, !UNSUPPORTED.has(et.key)])),
+		type_counts: {}
+	};
 
 	const ROTATION_LABELS: Record<string, string> = {
 		round_robin: 'Round robin — one type per batch',
@@ -72,16 +89,16 @@
 		users: 'Demo member accounts with generated names and profile data.',
 		organizations: 'Cooperatives, agencies, and other organization entities.',
 		proposals: 'Governance proposals with titles, descriptions, and codex references.',
-		transfers: 'Token transfers between members.',
+		transfers: 'Token transfers between members. Not supported by this realm version.',
 		disputes: 'Legal disputes for the justice module.',
-		votes: 'Vote records linked to proposals.',
+		votes: 'Vote records linked to proposals. Not supported by this realm version.',
 		lands: 'Land parcels with coordinates, zones, and ownership.',
 		courts: 'Court institutions with judges and specializations.',
-		cases: 'Legal cases filed in courts.',
+		cases: 'Legal cases filed in courts. Not supported by this realm version.',
 		funds: 'Treasury funds used by finance and metrics extensions.',
 		fiscal_periods: 'Fiscal year periods for budgeting and reporting.',
 		budgets: 'Budget line items (revenue and expense categories).',
-		ledger_entries: 'Double-entry ledger transactions across funds.',
+		ledger_entries: 'Double-entry ledger transactions across funds. Not supported by this realm version.',
 		messages: 'In-app notifications sent to members.',
 		departments: 'Government departments and member assignments.'
 	};
@@ -104,7 +121,9 @@
 		departments: '#9333ea'
 	};
 
-	let status: Status | null = $state(null);
+	let status = $state<Status | null>(null);
+	let task: any = null;
+	let saved: Config = DEFAULTS;
 	let loading = $state(true);
 	let toggling = $state(false);
 	let saving = $state(false);
@@ -123,7 +142,7 @@
 
 	let totalEntities = $derived(
 		status
-			? Object.values(status.stats).reduce((sum, v) => sum + (v ?? 0), 0)
+			? Object.values(status.stats).reduce((sum: number, v) => sum + (v ?? 0), 0)
 			: 0
 	);
 
@@ -137,9 +156,8 @@
 		Object.values(editEnabledTypes).filter(Boolean).length
 	);
 
-	function statValue(key: string): number {
-		if (!status) return 0;
-		return (status.stats as Record<string, number | undefined>)[key] ?? 0;
+	function statValue(key: string): number | string {
+		return status?.stats[key] ?? '–';
 	}
 
 	function shortLabel(label: string): string {
@@ -163,32 +181,76 @@
 		editRotationMode = data.rotation_mode ?? 'round_robin';
 		editEnabledTypes = { ...data.enabled_types };
 		const counts: Record<string, string> = {};
-		for (const et of data.entity_types ?? []) {
+		for (const et of ENTITY_TYPES) {
 			const override = data.type_counts?.[et.key];
 			counts[et.key] = override != null ? String(override) : '';
 		}
 		editTypeCounts = counts;
 	}
 
+	function fail(e: any) {
+		const op = ctx.ui?.accessDeniedOperation?.(e);
+		accessDeniedOp = op ?? '';
+		error = op != null ? '' : (e?.message ?? String(e));
+	}
+
+	async function call(name: string, args: Record<string, unknown> = {}, read = false) {
+		const reply = await (read ? ctx.read(name, args) : ctx.run(name, args));
+		if (!reply.ok) throw new Error(reply.error);
+		return reply;
+	}
+
+	async function findTask() {
+		for (let from: number | null = 1; from != null; ) {
+			const page = await call('task_list', { from, count: 100 }, true);
+			const found = page.tasks.find((t: any) => t.name === TASK);
+			if (found) return found;
+			from = page.next;
+		}
+		return null;
+	}
+
+	function steps(config: Config) {
+		return [
+			{
+				op: 'extension_call',
+				args: { extension: ctx.extensionId, function: 'run_batch', args: { config } },
+				wait: 0
+			}
+		];
+	}
+
+	/** A new simulator task holding ``config``: deleting the old one also clears its run history. */
+	async function createTask(config: Config, schedule: boolean) {
+		if (task) {
+			while ((await call('task_delete', { task: TASK })).remaining > 0);
+		}
+		await call('task_create', { name: TASK, steps: steps(config) });
+		if (schedule) await call('task_schedule', { task: TASK, repeat_every: config.interval_seconds });
+	}
+
+	function randomSeed(): number {
+		return Math.floor(Math.random() * 999999) + 1;
+	}
+
 	async function fetchStatus() {
 		try {
-			const raw = await ctx.callSync('get_status', {});
-			const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (data.success) {
-				status = data;
-				applyStatusToForm(data);
-			} else {
-				error = data.error || 'Failed to fetch status';
-			}
+			const [found, monitor] = await Promise.all([findTask(), call('realm_monitor', {}, true)]);
+			task = found;
+			saved = task ? task.steps[0].args.args.config : DEFAULTS;
+			const runs = task ? (await call('task_logs', { task: TASK, count: 1 }, true)).runs : [];
+			const data: Status = {
+				...saved,
+				running: !!task && task.status !== 'cancelled' && task.schedules.some((s: any) => !s.disabled),
+				batch_number: runs.length ? Number(runs[0].name.split('#').pop()) : 0,
+				stats: Object.fromEntries(
+					Object.entries(REALM_ROWS).map(([key, entity]) => [key, monitor.rows[entity]])
+				)
+			};
+			status = data;
+			applyStatusToForm(data);
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			fail(e);
 		} finally {
 			loading = false;
 		}
@@ -200,48 +262,36 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.callSync('toggle', { enabled: !status.running });
-			const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (data.success) {
-				await fetchStatus();
-			} else {
-				error = data.error || 'Toggle failed';
-			}
+			if (status.running) await call('task_cancel', { task: TASK });
+			else if (task && task.status !== 'cancelled')
+				await call('task_schedule', { task: TASK, repeat_every: saved.interval_seconds });
+			else await createTask(saved, true);
+			await fetchStatus();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			fail(e);
 		} finally {
 			toggling = false;
 		}
 	}
 
-	function buildConfigPayload(): Record<string, unknown> {
-		const maxVal = editMaxEntities.toString().trim();
-		const config: Record<string, unknown> = {
-			interval_seconds: editInterval,
-			batch_size: editBatchSize,
-			max_entities: maxVal ? parseInt(maxVal, 10) : null,
-			rotation_mode: editRotationMode,
-			enabled_types: editEnabledTypes
-		};
-		if (editSeed.trim()) {
-			config.seed = parseInt(editSeed, 10);
-		}
+	function buildConfigPayload(): Config {
+		const maxEntities = parseInt(editMaxEntities.toString().trim(), 10);
 		const typeCounts: Record<string, number> = {};
 		for (const [key, val] of Object.entries(editTypeCounts)) {
 			const trimmed = val.trim();
 			if (trimmed) {
-				typeCounts[key] = parseInt(trimmed, 10);
+				typeCounts[key] = Math.max(0, Math.min(100, parseInt(trimmed, 10)));
 			}
 		}
-		config.type_counts = typeCounts;
-		return config;
+		return {
+			interval_seconds: Math.max(10, editInterval),
+			batch_size: Math.max(1, Math.min(20, editBatchSize)),
+			max_entities: maxEntities ? Math.max(10, maxEntities) : null,
+			seed: editSeed.trim() ? parseInt(editSeed, 10) : randomSeed(),
+			rotation_mode: editRotationMode,
+			enabled_types: editEnabledTypes,
+			type_counts: typeCounts
+		};
 	}
 
 	async function saveConfig() {
@@ -249,22 +299,14 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.callSync('update_config', buildConfigPayload());
-			const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (data.success) {
-				await fetchStatus();
-			} else {
-				error = data.error || 'Save failed';
-			}
+			const config = buildConfigPayload();
+			if (!task) await createTask(config, false);
+			else if (status?.running && config.interval_seconds !== saved.interval_seconds)
+				await createTask(config, true);
+			else await call('task_edit', { task: TASK, steps: steps(config) });
+			await fetchStatus();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			fail(e);
 		} finally {
 			saving = false;
 		}
@@ -275,22 +317,17 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.callSync('run_once', {});
-			const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			if (!task || task.status === 'cancelled') await createTask(saved, false);
+			await call('task_run', { task: TASK });
+			const [run] = (await call('task_logs', { task: TASK, count: 1 }, true)).runs;
+			const reply = JSON.parse(run.result);
 			await fetchStatus();
-			if (data.error) error = data.error;
-			if (data.reason === 'no_enabled_types') {
+			if (!reply.ok) error = reply.error;
+			else if (reply.result.reason === 'no_enabled_types') {
 				error = 'No entity types are enabled. Enable at least one type below.';
 			}
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			fail(e);
 		} finally {
 			runningOnce = false;
 		}
@@ -300,30 +337,18 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.callSync('reset', {});
-			const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (data.success) {
-				await fetchStatus();
-			} else {
-				error = data.error || 'Reset failed';
-			}
+			await createTask({ ...saved, seed: randomSeed() }, !!status?.running);
+			await fetchStatus();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			fail(e);
 		}
 	}
 
 	function setAllTypes(enabled: boolean) {
 		if (!status) return;
 		const next = { ...editEnabledTypes };
-		for (const et of status.entity_types) {
-			next[et.key] = enabled;
+		for (const et of ENTITY_TYPES) {
+			next[et.key] = enabled && !UNSUPPORTED.has(et.key);
 		}
 		editEnabledTypes = next;
 	}
@@ -335,8 +360,29 @@
 		};
 	}
 
+	function defaultCount(key: string, batchSize: number): number {
+		const bs = Math.max(1, batchSize);
+		const half = Math.max(1, Math.floor(bs / 2));
+		const third = Math.max(1, Math.floor(bs / 3));
+		const counts: Record<string, number> = {
+			organizations: half,
+			proposals: half,
+			disputes: third,
+			lands: half,
+			courts: third,
+			cases: half,
+			funds: 5,
+			fiscal_periods: 2,
+			budgets: Math.max(2, bs),
+			ledger_entries: bs * 2,
+			departments: Math.max(2, bs)
+		};
+		return counts[key] ?? bs;
+	}
+
 	function resolvedCount(key: string): number {
-		return status?.resolved_type_counts?.[key] ?? 0;
+		if (!status) return 0;
+		return status.type_counts[key] ?? defaultCount(key, status.batch_size);
 	}
 
 	$effect(() => {
@@ -384,20 +430,8 @@
 	{#if loading}
 		<div class="text-center py-12 text-gray-500 dark:text-gray-400">Loading...</div>
 	{:else if status}
-		{#if !status.demo_mode_active}
-			<div
-				class="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg"
-			>
-				<p class="text-sm text-amber-800 dark:text-amber-300">
-					<strong>Note:</strong> TEST_MODE and TEST_MODE_DEMO_DATA are not both enabled in backend
-					config. The simulator will not auto-activate on canister start, but can still be toggled
-					manually.
-				</p>
-			</div>
-		{/if}
-
 		<div class="ds-stats-grid mb-4">
-			{#each status.entity_types as et (et.key)}
+			{#each ENTITY_TYPES as et (et.key)}
 				<div class="ds-stat">
 					<span class="ds-stat-val" style="color:{STAT_COLORS[et.key] ?? '#374151'}"
 						>{statValue(et.key)}</span
@@ -506,7 +540,7 @@
 				<div class="col-span-2">
 					{@render FieldLabel('ds-rotation', 'Rotation mode', CONFIG_HELP.rotation_mode)}
 					<select id="ds-rotation" bind:value={editRotationMode} class="ds-input">
-						{#each status.rotation_modes as mode (mode)}
+						{#each ROTATION_MODES as mode (mode)}
 							<option value={mode}>{ROTATION_LABELS[mode] ?? mode}</option>
 						{/each}
 					</select>
@@ -534,12 +568,13 @@
 					</div>
 				</div>
 				<div class="ds-type-grid">
-					{#each status.entity_types as et (et.key)}
+					{#each ENTITY_TYPES as et (et.key)}
 						<label class="ds-type-toggle" class:ds-type-off={!editEnabledTypes[et.key]}>
 							<div class="ds-type-header">
 								<input
 									type="checkbox"
 									checked={editEnabledTypes[et.key]}
+									disabled={UNSUPPORTED.has(et.key)}
 									onchange={() => toggleType(et.key)}
 								/>
 								<span class="ds-type-name">{et.label}</span>
@@ -580,7 +615,7 @@
 				</div>
 				{#if showAdvanced}
 					<div class="ds-type-grid mt-2">
-						{#each status.entity_types as et (et.key)}
+						{#each ENTITY_TYPES as et (et.key)}
 							<div>
 								{@render FieldLabel(
 									`count-${et.key}`,

@@ -4,10 +4,7 @@
 	let { ctx }: { ctx: any } = $props();
 
 	let greetName = $state('Tester');
-	let greetResult = $state('');
 	let asyncResult = $state('');
-	let universeData = $state('');
-	let snapshotsData = $state('');
 	let loading = $state<Record<string, boolean>>({});
 	let error = $state('');
 	let accessDeniedOp = $state('');
@@ -22,8 +19,8 @@
 		return () => unsubs.forEach((u) => u());
 	});
 
-	const extensionId = ctx.config?.extensionId ?? 'test_bench';
-	const version = ctx.config?.version ?? '';
+	const extensionId = ctx.extensionId;
+	const version = ctx.version;
 
 	async function runTest(key: string, fn: () => Promise<void>) {
 		loading = { ...loading, [key]: true };
@@ -45,35 +42,13 @@
 		}
 	}
 
-	async function doGreet() {
-		await runTest('greet', async () => {
-			const raw = await ctx.backend.greet(greetName);
-			greetResult = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
-		});
-	}
-
 	async function doAsync() {
 		await runTest('async', async () => {
-			const data = await ctx.callAsync('get_data', { data: 'from frontend-rt' });
+			const data = await ctx.callSync('get_data', { data: 'from frontend-rt' });
 			asyncResult = JSON.stringify(data, null, 2);
 		});
 	}
 
-	async function doUniverse() {
-		await runTest('universe', async () => {
-			const raw = await ctx.backend.get_universe();
-			const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			universeData = JSON.stringify(parsed, null, 2);
-		});
-	}
-
-	async function doSnapshots() {
-		await runTest('snapshots', async () => {
-			const raw = await ctx.backend.get_snapshots();
-			const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			snapshotsData = JSON.stringify(parsed, null, 2);
-		});
-	}
 </script>
 
 <div class="w-full py-6 space-y-4">
@@ -105,19 +80,17 @@
 				type="text"
 				bind:value={greetName}
 				placeholder="Name"
+				disabled
 				class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 			/>
 			<button
-				onclick={doGreet}
-				disabled={loading.greet}
+				disabled
 				class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 			>
-				{loading.greet ? '...' : 'Greet'}
+				Greet
 			</button>
 		</div>
-		{#if greetResult}
-			<pre class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs font-mono whitespace-pre-wrap break-words max-h-72 overflow-y-auto">{greetResult}</pre>
-		{/if}
+		<p class="mt-3 text-xs text-gray-500">Not supported by this realm version.</p>
 	</div>
 
 	<!-- Async Extension Call Card -->
@@ -139,30 +112,24 @@
 	<div class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
 		<h3 class="text-base font-semibold text-gray-900 mb-3">Universe</h3>
 		<button
-			onclick={doUniverse}
-			disabled={loading.universe}
+			disabled
 			class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 		>
-			{loading.universe ? 'Loading...' : 'Get Universe'}
+			Get Universe
 		</button>
-		{#if universeData}
-			<pre class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs font-mono whitespace-pre-wrap break-words max-h-72 overflow-y-auto">{universeData}</pre>
-		{/if}
+		<p class="mt-3 text-xs text-gray-500">Not supported by this realm version.</p>
 	</div>
 
 	<!-- Snapshots Card -->
 	<div class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
 		<h3 class="text-base font-semibold text-gray-900 mb-3">Snapshots</h3>
 		<button
-			onclick={doSnapshots}
-			disabled={loading.snapshots}
+			disabled
 			class="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
 		>
-			{loading.snapshots ? 'Loading...' : 'Get Snapshots'}
+			Get Snapshots
 		</button>
-		{#if snapshotsData}
-			<pre class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs font-mono whitespace-pre-wrap break-words max-h-72 overflow-y-auto">{snapshotsData}</pre>
-		{/if}
+		<p class="mt-3 text-xs text-gray-500">Not supported by this realm version.</p>
 	</div>
 
 	<!-- Context Info Card -->

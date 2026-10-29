@@ -13,12 +13,7 @@
   },
 
   "backend_tests": {
-    "enabled": true,
-    "execution": "host",
-    "test_files": [
-      "tests/test_passport_verification.py"
-    ],
-    "test_directory": "tests"
+    "enabled": false
   },
 
   "e2e_tests": {

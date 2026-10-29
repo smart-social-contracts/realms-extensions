@@ -11,15 +11,9 @@
 
 	type View = 'list' | 'create' | 'detail';
 
-	interface RubricCriterion {
-		id: string;
-		label: string;
-		weight: number;
-		max_score: number;
-	}
-
 	interface BidPayload {
-		amount?: string;
+		price?: number;
+		nonce?: string;
 		description?: string;
 		technical?: string;
 	}
@@ -43,38 +37,28 @@
 		{
 			status: 'evaluation',
 			label: 'Evaluation',
-			tip: 'Evaluators score bids. Vendors share decryption keys so evaluators can read bid contents.',
+			tip: 'The requester reveals the bids with the openings vendors sent them, then evaluators score each bid.',
 		},
 		{
-			status: 'award',
+			status: 'contracted',
 			label: 'Award',
-			tip: 'The approver selects the winning bid based on scores and records the award.',
-		},
-		{
-			status: 'contract_execution',
-			label: 'Contract',
-			tip: 'The contract is recorded and execution begins (vault integration pending).',
+			tip: 'The approver awards the best-scored bid, or justifies another, which signs the contract.',
 		},
 	];
 
-	const DEMO_ADVANCE_KEY = 'procurement_demo_advance';
 	const LIFECYCLE_KEY = 'procurement-lifecycle-open';
-	const TEST_FLAGS_KEY = 'procurement-test-flags-open';
+	const RUBRIC = { price: 50, quality: 50 };
+	const MAX_MARK = 10;
+	const PAGE = 500;
 
 	let { ctx }: { ctx: any } = $props();
 
 	let me = $state('');
 	ctx.principal?.subscribe?.((v: string) => (me = v || ''));
 
-	let profiles = $state<string[]>([]);
-	ctx.userProfiles?.subscribe?.((v: string[]) => (profiles = v ?? []));
-
-	let testMode = $state(false);
-	ctx.realmInfo?.subscribe?.((info: { testMode?: boolean }) => {
-		testMode = !!info?.testMode;
-	});
-
-	let isAdmin = $derived(profiles.includes('admin'));
+	let permissions = $state<string[]>([]);
+	let canManage = $derived(permissions.includes('tender.manage'));
+	let canEvaluate = $derived(permissions.includes('bid.evaluate'));
 	let hasCrypto = $derived(!!ctx.crypto?.encryptForRecipients);
 
 	let view: View = $state('list');
@@ -83,62 +67,39 @@
 	let actionMsg = $state('');
 	let actionError = $state('');
 	let busy = $state(false);
-	let demoAdvanceEnabled = $state(false);
 	let narrow = $state(isNarrowViewport());
 	let lifecycleOpen = $state(readSessionFlag(LIFECYCLE_KEY) ?? !isNarrowViewport());
-	let testFlagsOpen = $state(readSessionFlag(TEST_FLAGS_KEY) === true);
 	let unsubNarrow = subscribeNarrowViewport((value) => {
 		narrow = value;
 	});
 
 	let rfps = $state<any[]>([]);
+	let departments = $state<any[]>([]);
 	let selected = $state<any | null>(null);
 	let bids = $state<any[]>([]);
-	let transitions = $state<any[]>([]);
-	let scores = $state<any[]>([]);
 	let decryptedBids = $state<Record<string, BidPayload | null>>({});
 
 	let formTitle = $state('');
 	let formDescription = $state('');
+	let formRequester = $state('');
 	let formOpens = $state('');
 	let formCloses = $state('');
 
+	let bidVendor = $state('');
 	let bidAmount = $state('');
 	let bidDescription = $state('');
 	let bidTechnical = $state('');
 
+	let openings = $state<Record<string, { price: string; nonce: string }>>({});
 	let scoreInputs = $state<Record<string, Record<string, number>>>({});
 	let winningBidId = $state('');
+	let justification = $state('');
 
-	let isCreator = $derived(!!selected && selected.requester_id === me);
-	let canDemoAdvance = $derived(
-		testMode &&
-			demoAdvanceEnabled &&
-			isCreator &&
-			selected &&
-			selected.status !== 'contract_execution',
-	);
 	let detailStatus = $derived(selected?.status ?? 'draft');
-
-	$effect(() => {
-		if (typeof sessionStorage !== 'undefined') {
-			demoAdvanceEnabled = sessionStorage.getItem(DEMO_ADVANCE_KEY) === '1';
-		}
-	});
-
-	function setDemoAdvanceEnabled(enabled: boolean) {
-		demoAdvanceEnabled = enabled;
-		persistSessionFlag(DEMO_ADVANCE_KEY, enabled);
-	}
 
 	function toggleLifecycle() {
 		lifecycleOpen = !lifecycleOpen;
 		persistSessionFlag(LIFECYCLE_KEY, lifecycleOpen);
-	}
-
-	function toggleTestFlags() {
-		testFlagsOpen = !testFlagsOpen;
-		persistSessionFlag(TEST_FLAGS_KEY, testFlagsOpen);
 	}
 
 	function shortPrincipal(p: string) {
@@ -166,49 +127,55 @@
 		return epochToLocalInput(Math.floor(Date.now() / 1000) + 7 * 86400);
 	}
 
-	function parseRubric(json: string): RubricCriterion[] {
-		try {
-			return JSON.parse(json || '[]');
-		} catch {
-			return [];
-		}
-	}
-
 	function statusLabel(status: string) {
 		const labels: Record<string, string> = {
 			draft: 'Draft',
 			open: 'Open bidding',
 			closed: 'Closed',
 			evaluation: 'Evaluation',
-			award: 'Award',
-			contract_execution: 'Contract',
+			contracted: 'Contracted',
+			cancelled: 'Cancelled',
 		};
 		return labels[status] ?? status;
 	}
 
-	function nextStageLabel(status: string) {
-		const next: Record<string, string> = {
-			draft: 'Open bidding',
-			open: 'Evaluation',
-			closed: 'Evaluation',
-			evaluation: 'Award',
-			award: 'Contract',
-		};
-		return next[status] ?? 'Next stage';
+	function hex(bytes: ArrayBuffer | Uint8Array) {
+		return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('');
 	}
 
-	async function callSync(fn: string, args: Record<string, unknown> = {}) {
-		const raw = await ctx.callSync(fn, args);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
+	async function seal(price: number, nonce: string) {
+		return 'sha256:' + hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${price}:${nonce}`)));
+	}
+
+	async function readAll(op: string, key: string) {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from !== null) {
+			const res = await ctx.read(op, { from, count: PAGE });
+			if (!res.ok) throw new Error(res.error);
+			out.push(...res[key]);
+			from = res.next;
+		}
+		return out;
+	}
+
+	async function run(op: string, args: Record<string, unknown>) {
+		const res = await ctx.run(op, args);
+		if (!res.ok) throw new Error(res.error);
+		return res;
+	}
+
+	function outcome(res: any, message: string) {
+		actionMsg = res.requires_vote ? `Submitted for a vote as ${res.proposal}` : message;
 	}
 
 	async function loadRfps() {
 		loading = true;
 		error = '';
 		try {
-			const res: any = await callSync('list_rfps');
-			if (!res?.success) throw new Error(res?.error || 'Failed to load requests');
-			rfps = res.rfps ?? [];
+			const [list, mine] = await Promise.all([readAll('tender_list', 'tenders'), ctx.read('me')]);
+			rfps = list;
+			if (mine.ok) permissions = mine.permissions;
 		} catch (e: any) {
 			error = e?.message ?? String(e);
 		} finally {
@@ -216,24 +183,16 @@
 		}
 	}
 
-	async function loadDetail(rfpId: string) {
+	async function loadDetail(tenderId: string) {
 		busy = true;
 		actionError = '';
 		decryptedBids = {};
 		try {
-			const res: any = await callSync('get_rfp', { rfp_id: rfpId });
-			if (!res?.success) throw new Error(res?.error || 'Failed to load request');
-			selected = res.rfp;
-			transitions = res.rfp?.transitions ?? [];
-
-			const bres: any = await callSync('list_bids', { rfp_id: rfpId });
-			bids = bres?.success ? bres.bids ?? [] : [];
-
-			if (['evaluation', 'award', 'contract_execution'].includes(selected?.status)) {
-				const sres: any = await callSync('list_scores', { rfp_id: rfpId });
-				scores = sres?.success ? sres.scores ?? [] : [];
-				await decryptVisibleBids();
-			}
+			const res = await ctx.read('tender_get', { tender: tenderId });
+			if (!res.ok) throw new Error(res.error);
+			selected = res.tender;
+			bids = res.tender.bids;
+			await decryptVisibleBids();
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
 		} finally {
@@ -244,17 +203,12 @@
 	async function decryptVisibleBids() {
 		if (!ctx.crypto?.decryptScope) return;
 		for (const bid of bids) {
-			if (!bid.bid_id) continue;
+			if (bid.sealed) continue;
 			try {
-				const pres: any = await callSync('get_bid_payload', { bid_id: bid.bid_id });
-				if (!pres?.success || !pres.ciphertext) {
-					decryptedBids[bid.bid_id] = null;
-					continue;
-				}
-				const plain = await ctx.crypto.decryptScope<BidPayload>(pres.scope, pres.ciphertext);
-				decryptedBids[bid.bid_id] = plain;
+				const { scope, ciphertext } = JSON.parse(bid.payload_ref);
+				decryptedBids[bid.id] = await ctx.crypto.decryptScope<BidPayload>(scope, ciphertext);
 			} catch {
-				decryptedBids[bid.bid_id] = null;
+				decryptedBids[bid.id] = null;
 			}
 		}
 	}
@@ -262,7 +216,20 @@
 	async function openDetail(rfp: any) {
 		selected = rfp;
 		view = 'detail';
-		await loadDetail(rfp.rfp_id);
+		openings = {};
+		await loadDetail(rfp.id);
+	}
+
+	async function openCreate() {
+		view = 'create';
+		actionError = '';
+		actionMsg = '';
+		try {
+			departments = await readAll('department_list', 'departments');
+			formRequester = formRequester || departments[0]?.id || '';
+		} catch (e: any) {
+			actionError = e?.message ?? String(e);
+		}
 	}
 
 	async function createRfp() {
@@ -273,20 +240,16 @@
 		busy = true;
 		actionError = '';
 		actionMsg = '';
-		const rubric = [
-			{ id: 'price', label: 'Price', weight: 0.5, max_score: 100 },
-			{ id: 'quality', label: 'Quality', weight: 0.5, max_score: 100 },
-		];
 		try {
-			const res: any = await callSync('create_rfp', {
+			const res = await run('tender_create', {
 				title: formTitle.trim(),
 				description: formDescription.trim(),
+				requester: formRequester,
 				opens_at: localInputToEpoch(formOpens),
 				closes_at: localInputToEpoch(formCloses),
-				rubric_json: rubric,
+				rubric: RUBRIC,
 			});
-			if (!res?.success) throw new Error(res?.error || 'Create failed');
-			actionMsg = `Created ${res.rfp?.rfp_id}`;
+			outcome(res, `Created ${res.tender}`);
 			view = 'list';
 			await loadRfps();
 		} catch (e: any) {
@@ -296,15 +259,13 @@
 		}
 	}
 
-	async function publishRfp() {
+	async function transition(op: string, message: string) {
 		if (!selected) return;
 		busy = true;
 		actionError = '';
 		try {
-			const res: any = await callSync('publish_rfp', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Publish failed');
-			actionMsg = 'Request For Proposal published for bidding';
-			await loadDetail(selected.rfp_id);
+			outcome(await run(op, { tender: selected.id }), message);
+			await loadDetail(selected.id);
 			await loadRfps();
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
@@ -313,68 +274,45 @@
 		}
 	}
 
-	async function closeRfp() {
-		if (!selected) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('close_rfp', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Close failed');
-			actionMsg = 'Bidding closed — bids marked for evaluation';
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function demoAdvanceStage() {
-		if (!selected || !canDemoAdvance) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('demo_advance_rfp', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Demo advance failed');
-			actionMsg = `Advanced to ${statusLabel(res.rfp?.status ?? '')}`;
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
+	async function requesterStaff(department: string): Promise<string[]> {
+		const res = await ctx.read('department_get', { department });
+		if (!res.ok) throw new Error(res.error);
+		return [res.department.head, ...res.positions.flatMap((p: any) => p.holders.map((h: any) => h.user))].filter(
+			Boolean,
+		);
 	}
 
 	async function submitBid() {
 		if (!selected || !hasCrypto) return;
+		const price = Number(bidAmount);
+		if (!Number.isInteger(price) || price < 0) {
+			actionError = 'The amount must be a whole number';
+			return;
+		}
 		busy = true;
 		actionError = '';
 		try {
-			const shell: any = await callSync('create_bid_shell', { rfp_id: selected.rfp_id });
-			if (!shell?.success) throw new Error(shell?.error || 'Could not create bid');
-
-			const payload = {
-				amount: bidAmount,
+			const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
+			const scope = `user:${me}:bid:${selected.id}`;
+			const recipients = [me, ...(await requesterStaff(selected.requester))];
+			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(recipients, {
+				price,
+				nonce,
 				description: bidDescription,
 				technical: bidTechnical,
-			};
-			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients([me], payload);
-			await ctx.crypto.grantScope(shell.scope, wrappedDeks, { keep: [me] });
-
-			const setRes: any = await callSync('set_bid_payload', {
-				bid_id: shell.bid_id,
-				ciphertext,
-				encryption_mode: 'vetkeys',
 			});
-			if (!setRes?.success) throw new Error(setRes?.error || 'Failed to store bid');
-
-			actionMsg = `Sealed bid ${shell.bid_id} submitted (vetKeys — only you can read until shared)`;
+			await ctx.crypto.grantScope(scope, wrappedDeks, { keep: [me] });
+			const res = await run('bid_submit', {
+				tender: selected.id,
+				vendor: bidVendor.trim(),
+				payload_ref: JSON.stringify({ scope, ciphertext }),
+				payload_hash: await seal(price, nonce),
+			});
+			actionMsg = `Sealed bid ${res.bid} submitted. Once bidding closes, send the requester its opening: price ${price}, nonce ${nonce}.`;
 			bidAmount = '';
 			bidDescription = '';
 			bidTechnical = '';
-			await loadDetail(selected.rfp_id);
+			await loadDetail(selected.id);
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
 		} finally {
@@ -382,30 +320,18 @@
 		}
 	}
 
-	async function shareBidWithEvaluators(bid: any) {
-		if (!selected || !ctx.crypto?.encryptForRecipients) return;
+	async function revealBids() {
+		if (!selected) return;
 		busy = true;
 		actionError = '';
 		try {
-			const evRes: any = await callSync('get_evaluator_principals');
-			const evaluators: string[] = evRes?.principals ?? [];
-			const recipients = Array.from(new Set([me, ...evaluators].filter(Boolean)));
-
-			const pres: any = await callSync('get_bid_payload', { bid_id: bid.bid_id });
-			if (!pres?.success) throw new Error(pres?.error || 'No payload');
-			const plain = await ctx.crypto.decryptScope<BidPayload>(pres.scope, pres.ciphertext);
-			if (!plain) throw new Error('Cannot decrypt your bid — missing key envelope');
-
-			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(recipients, plain);
-			await callSync('set_bid_payload', {
-				bid_id: bid.bid_id,
-				ciphertext,
-				encryption_mode: 'vetkeys',
-			});
-			await ctx.crypto.grantScope(pres.scope, wrappedDeks, { keep: [me] });
-
-			actionMsg = `Bid shared with ${evaluators.length} evaluator(s)`;
-			await loadDetail(selected.rfp_id);
+			const given = Object.entries(openings)
+				.filter(([, o]) => o.nonce.trim())
+				.map(([id, o]) => [id, { price: Number(o.price), nonce: o.nonce.trim() }]);
+			const res = await run('bids_reveal', { tender: selected.id, openings: Object.fromEntries(given) });
+			outcome(res, `Revealed ${res.revealed} bid(s)`);
+			await loadDetail(selected.id);
+			await loadRfps();
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
 		} finally {
@@ -417,26 +343,9 @@
 		busy = true;
 		actionError = '';
 		try {
-			const res: any = await callSync('submit_scores', { bid_id: bidId, scores: scoreInputs[bidId] ?? {} });
-			if (!res?.success) throw new Error(res?.error || 'Scoring failed');
-			actionMsg = `Scores saved for ${bidId}`;
-			await loadDetail(selected!.rfp_id);
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function computeTotals() {
-		if (!selected) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('compute_totals', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Compute failed');
-			actionMsg = 'Totals computed';
-			await loadDetail(selected.rfp_id);
+			const res = await run('bid_score', { bid: bidId, scores: scoreInputs[bidId] ?? {} });
+			actionMsg = `Scores saved for ${bidId}: ${res.score}/100`;
+			await loadDetail(selected!.id);
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
 		} finally {
@@ -445,37 +354,17 @@
 	}
 
 	async function awardRfp() {
-		if (!selected || !winningBidId) {
-			actionError = 'Select a winning bid';
-			return;
-		}
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('award_rfp', {
-				rfp_id: selected.rfp_id,
-				winning_bid_id: winningBidId,
-			});
-			if (!res?.success) throw new Error(res?.error || 'Award failed');
-			actionMsg = `Awarded to ${winningBidId}`;
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function executeContract() {
 		if (!selected) return;
 		busy = true;
 		actionError = '';
 		try {
-			const res: any = await callSync('execute_contract', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Execute failed');
-			actionMsg = 'Contract execution recorded (vault integration pending)';
-			await loadDetail(selected.rfp_id);
+			const res = await run('tender_award', {
+				tender: selected.id,
+				...(winningBidId && { bid: winningBidId }),
+				...(justification.trim() && { justification: justification.trim() }),
+			});
+			outcome(res, `Awarded to ${res.winner} — contract ${res.contract}`);
+			await loadDetail(selected.id);
 			await loadRfps();
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
@@ -490,8 +379,8 @@
 			open: 'bg-green-100 text-green-800',
 			closed: 'bg-yellow-100 text-yellow-800',
 			evaluation: 'bg-blue-100 text-blue-800',
-			award: 'bg-purple-100 text-purple-800',
-			contract_execution: 'bg-emerald-100 text-emerald-800',
+			contracted: 'bg-emerald-100 text-emerald-800',
+			cancelled: 'bg-red-100 text-red-800',
 		};
 		return map[status] ?? 'bg-gray-100 text-gray-700';
 	}
@@ -575,11 +464,7 @@
 			{#if view === 'list'}
 				<button
 					class="chrome-btn chrome-primary"
-					onclick={() => {
-						view = 'create';
-						actionError = '';
-						actionMsg = '';
-					}}
+					onclick={openCreate}
 					title="New request for proposal"
 					aria-label="New request for proposal"
 				>
@@ -605,44 +490,8 @@
 					<span class="chrome-label">Lifecycle</span>
 				</button>
 			{/if}
-			{#if testMode}
-				<button
-					type="button"
-					class="chrome-btn"
-					class:is-on={testFlagsOpen}
-					onclick={toggleTestFlags}
-					title={testFlagsOpen ? 'Hide test flags' : 'Test flags'}
-					aria-label={testFlagsOpen ? 'Hide test flags' : 'Test flags'}
-					aria-pressed={testFlagsOpen}
-				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-					</svg>
-					<span class="chrome-label">Test flags</span>
-				</button>
-			{/if}
 		</div>
 	</header>
-
-	{#if testMode && testFlagsOpen}
-		<div class="border-y border-gray-200 py-3 text-sm dark:border-gray-700">
-			<label class="flex cursor-pointer items-start gap-2">
-				<input
-					type="checkbox"
-					class="mt-1"
-					checked={demoAdvanceEnabled}
-					onchange={(e) => setDemoAdvanceEnabled((e.target as HTMLInputElement).checked)}
-				/>
-				<span>
-					<span class="font-medium">Demo: manual stage advance</span>
-					<span class="mt-0.5 block text-xs text-gray-500">
-						When enabled, the creator of a request can jump to the next lifecycle stage at any time
-						(test mode only).
-					</span>
-				</span>
-			</label>
-		</div>
-	{/if}
 
 	{#if !hasCrypto}
 		<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -681,7 +530,7 @@
 							<div class="flex items-start justify-between gap-2">
 								<div class="min-w-0">
 									<div class="font-medium text-gray-900 dark:text-white">{rfp.title}</div>
-									<div class="mt-0.5 font-mono text-xs text-gray-400">{rfp.rfp_id}</div>
+									<div class="mt-0.5 font-mono text-xs text-gray-400">{rfp.id}</div>
 								</div>
 								<span class="shrink-0 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
 							</div>
@@ -707,7 +556,7 @@
 						<tbody>
 							{#each rfps as rfp}
 								<tr class="border-t border-gray-100 dark:border-gray-700">
-									<td class="px-4 py-3 font-mono text-xs">{rfp.rfp_id}</td>
+									<td class="px-4 py-3 font-mono text-xs">{rfp.id}</td>
 									<td class="truncate px-4 py-3">{rfp.title}</td>
 									<td class="px-4 py-3">
 										<span class="rounded-full px-2 py-0.5 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
@@ -742,6 +591,14 @@
 					<span class="text-sm text-gray-600">Description</span>
 					<textarea class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" rows="3" bind:value={formDescription}></textarea>
 				</label>
+				<label class="block md:col-span-2">
+					<span class="text-sm text-gray-600">Requesting department</span>
+					<select class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={formRequester}>
+						{#each departments as d (d.id)}
+							<option value={d.id}>{d.id}</option>
+						{/each}
+					</select>
+				</label>
 				<label class="block">
 					<span class="text-sm text-gray-600">Opens</span>
 					<input type="datetime-local" class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={formOpens} />
@@ -755,10 +612,10 @@
 				<p class="font-medium text-gray-700 dark:text-gray-200">Default scoring rubric</p>
 				<p class="mt-1">
 					Evaluators score each bid on <strong>Price</strong> and <strong>Quality</strong>. Each criterion is rated
-					from 0 to 100. Price counts for 50% of the total score and Quality for 50% (weighted average).
+					from 0 to {MAX_MARK}. Price counts for 50% of the total score and Quality for 50% (weighted average).
 				</p>
 			</div>
-			<button class="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50" disabled={busy} onclick={createRfp}>
+			<button class="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50" disabled={busy || !formRequester} onclick={createRfp}>
 				{busy ? 'Creating…' : 'Create draft'}
 			</button>
 		</section>
@@ -774,38 +631,34 @@
 			<div class="flex flex-wrap items-center gap-2">
 				<h2 class="text-lg font-medium">{selected.title}</h2>
 				<span class="rounded-full px-2 py-0.5 text-xs {statusClass(selected.status)}">{statusLabel(selected.status)}</span>
-				<span class="font-mono text-xs text-gray-500">{selected.rfp_id}</span>
+				<span class="font-mono text-xs text-gray-500">{selected.id}</span>
 			</div>
 			<p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{selected.description}</p>
 			<p class="mt-1 text-xs text-gray-500">
-				Requester {shortPrincipal(selected.requester_id)} · Opens {new Date((selected.opens_at || 0) * 1000).toLocaleString()} · Closes
+				Requester {selected.requester} · Opens {new Date((selected.opens_at || 0) * 1000).toLocaleString()} · Closes
 				{new Date((selected.closes_at || 0) * 1000).toLocaleString()}
 			</p>
+			{#if selected.contract}
+				<p class="mt-1 text-xs text-gray-500">Awarded to {selected.winner} · contract {selected.contract}</p>
+			{/if}
 
-			<div class="mt-4 flex flex-wrap gap-2">
-				{#if canDemoAdvance}
-					<button
-						class="rounded border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100"
-						disabled={busy}
-						onclick={demoAdvanceStage}
-					>
-						Demo: advance to {nextStageLabel(selected.status)}
-					</button>
+			<div class="mt-4 flex flex-wrap items-center gap-2">
+				{#if selected.status === 'draft' && canManage}
+					<button class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={() => transition('tender_open', 'Request For Proposal published for bidding')}>Publish</button>
 				{/if}
-				{#if selected.status === 'draft' && (isAdmin || selected.requester_id === me)}
-					<button class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={publishRfp}>Publish</button>
+				{#if selected.status === 'open' && canManage}
+					<button class="rounded bg-yellow-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={() => transition('tender_close', 'Bidding closed')}>Close bidding</button>
 				{/if}
-				{#if selected.status === 'open' && isAdmin}
-					<button class="rounded bg-yellow-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={closeRfp}>Close bidding</button>
+				{#if ['open', 'closed'].includes(selected.status) && canManage && bids.length > 0}
+					<button class="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={revealBids}>Reveal bids</button>
 				{/if}
-				{#if selected.status === 'evaluation'}
-					<button class="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={computeTotals}>Compute totals</button>
-				{/if}
-				{#if selected.status === 'evaluation' && isAdmin}
+				{#if selected.status === 'evaluation' && canManage}
+					<input
+						class="rounded border px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-900"
+						placeholder="Justification (if not the best score)"
+						bind:value={justification}
+					/>
 					<button class="rounded bg-purple-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={awardRfp}>Award</button>
-				{/if}
-				{#if selected.status === 'award' && isAdmin}
-					<button class="rounded bg-emerald-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={executeContract}>Execute contract</button>
 				{/if}
 			</div>
 		</section>
@@ -813,8 +666,14 @@
 		{#if selected.status === 'open'}
 			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 				<h3 class="font-medium">Submit sealed bid</h3>
-				<p class="text-xs text-gray-500">Encrypted with vetKeys — only you can read until you share after close.</p>
+				<p class="text-xs text-gray-500">
+					Encrypted with vetKeys for you and the requesting department; the realm keeps it sealed until the reveal.
+				</p>
 				<div class="mt-3 grid gap-3 md:grid-cols-2">
+					<label class="block">
+						<span class="text-sm">Vendor organization</span>
+						<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidVendor} />
+					</label>
 					<label class="block">
 						<span class="text-sm">Amount (quote)</span>
 						<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidAmount} />
@@ -828,7 +687,7 @@
 						<textarea class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" rows="2" bind:value={bidTechnical}></textarea>
 					</label>
 				</div>
-				<button class="mt-3 rounded bg-green-600 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={busy || !hasCrypto} onclick={submitBid}>
+				<button class="mt-3 rounded bg-green-600 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={busy || !hasCrypto || !bidVendor.trim()} onclick={submitBid}>
 					Submit sealed bid
 				</button>
 			</section>
@@ -843,53 +702,72 @@
 					{#each bids as bid}
 						<li class="rounded-lg border border-gray-100 p-3 dark:border-gray-700">
 							<div class="flex flex-wrap items-center justify-between gap-2">
-								<span class="font-mono text-xs">{bid.bid_id}</span>
-								<span class="text-xs text-gray-500">vendor {shortPrincipal(bid.vendor_id)} · {bid.seal_status}</span>
-								{#if bid.total_score}
-									<span class="text-sm font-medium">Score {bid.total_score}</span>
+								<span class="font-mono text-xs">{bid.id}</span>
+								<span class="text-xs text-gray-500">vendor {shortPrincipal(bid.vendor)} · {bid.sealed ? 'sealed' : 'revealed'}</span>
+								{#if !bid.sealed}
+									<span class="text-sm font-medium">Price {bid.price} · Score {bid.score}</span>
 								{/if}
 							</div>
 
-							{#if selected.status === 'evaluation' && bid.vendor_id === me && bid.seal_status === 'revealed'}
-								<button class="mt-2 rounded border border-blue-300 px-2 py-1 text-xs text-blue-700" disabled={busy} onclick={() => shareBidWithEvaluators(bid)}>
-									Share with evaluators
-								</button>
+							{#if bid.sealed && ['open', 'closed'].includes(selected.status) && canManage}
+								<div class="mt-2 grid gap-2 md:grid-cols-2">
+									<label class="block text-xs">
+										Opening price
+										<input
+											type="number"
+											min="0"
+											class="mt-1 w-full rounded border px-2 py-1 dark:border-gray-600 dark:bg-gray-900"
+											oninput={(e) => {
+												openings[bid.id] = { nonce: '', ...openings[bid.id], price: (e.target as HTMLInputElement).value };
+											}}
+										/>
+									</label>
+									<label class="block text-xs">
+										Opening nonce
+										<input
+											class="mt-1 w-full rounded border px-2 py-1 dark:border-gray-600 dark:bg-gray-900"
+											oninput={(e) => {
+												openings[bid.id] = { price: '', ...openings[bid.id], nonce: (e.target as HTMLInputElement).value };
+											}}
+										/>
+									</label>
+								</div>
 							{/if}
 
-							{#if ['evaluation', 'award', 'contract_execution'].includes(selected.status)}
-								{#if decryptedBids[bid.bid_id]}
+							{#if ['evaluation', 'contracted'].includes(selected.status)}
+								{#if decryptedBids[bid.id]}
 									<div class="mt-2 rounded bg-gray-50 p-2 text-sm dark:bg-gray-800">
-										<div>Amount: {decryptedBids[bid.bid_id]?.amount ?? '—'}</div>
-										<div>{decryptedBids[bid.bid_id]?.description ?? ''}</div>
+										<div>Amount: {decryptedBids[bid.id]?.price ?? '—'}</div>
+										<div>{decryptedBids[bid.id]?.description ?? ''}</div>
 									</div>
-								{:else if decryptedBids[bid.bid_id] === null}
-									<p class="mt-2 text-xs text-amber-700">Encrypted — waiting for vendor to share with evaluators.</p>
+								{:else if decryptedBids[bid.id] === null}
+									<p class="mt-2 text-xs text-amber-700">Encrypted — not shared with you.</p>
 								{/if}
 
-								{#if selected.status === 'evaluation' && (isAdmin || profiles.includes('member'))}
+								{#if selected.status === 'evaluation' && canEvaluate && !bid.sealed}
 									<div class="mt-2 grid gap-2 md:grid-cols-2">
-										{#each parseRubric(selected.rubric_json) as crit}
+										{#each Object.keys(selected.rubric) as crit}
 											<label class="block text-xs">
-												{crit.label} (0–{crit.max_score})
+												{crit} (0–{MAX_MARK})
 												<input
 													type="number"
 													min="0"
-													max={crit.max_score}
+													max={MAX_MARK}
 													class="mt-1 w-full rounded border px-2 py-1 dark:border-gray-600 dark:bg-gray-900"
 													oninput={(e) => {
 														const val = Number((e.target as HTMLInputElement).value);
-														scoreInputs[bid.bid_id] = { ...(scoreInputs[bid.bid_id] ?? {}), [crit.id]: val };
+														scoreInputs[bid.id] = { ...(scoreInputs[bid.id] ?? {}), [crit]: val };
 													}}
 												/>
 											</label>
 										{/each}
 									</div>
-									<button class="mt-2 text-xs text-blue-600 hover:underline" onclick={() => submitScoresForBid(bid.bid_id)}>Save scores</button>
+									<button class="mt-2 text-xs text-blue-600 hover:underline" onclick={() => submitScoresForBid(bid.id)}>Save scores</button>
 								{/if}
 
-								{#if selected.status === 'evaluation' && isAdmin}
+								{#if selected.status === 'evaluation' && canManage && !bid.sealed}
 									<label class="mt-2 flex items-center gap-2 text-sm">
-										<input type="radio" name="winner" value={bid.bid_id} bind:group={winningBidId} />
+										<input type="radio" name="winner" value={bid.id} bind:group={winningBidId} />
 										Select as winner
 									</label>
 								{/if}
@@ -902,14 +780,7 @@
 
 		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 			<h3 class="font-medium">Audit log</h3>
-			<ul class="mt-2 space-y-1 text-xs">
-				{#each transitions as t}
-					<li class="font-mono text-gray-600 dark:text-gray-300">
-						{t.timestamp ? new Date(t.timestamp * 1000).toISOString() : '—'} · {t.from_status || '∅'} → {t.to_status} ·
-						{shortPrincipal(t.actor_id)} · {t.note}
-					</li>
-				{/each}
-			</ul>
+			<p class="mt-2 text-xs text-gray-500">The audit log of a request is not supported by this realm version.</p>
 		</section>
 	{/if}
 </div>

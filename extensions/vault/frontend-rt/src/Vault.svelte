@@ -25,17 +25,10 @@
 		maxRefreshAgeMs: number;
 	}
 
-	interface DirectoryEntry {
-		kind: string;
-		principal: string;
-		label: string;
-	}
-
 	const DEFAULT_MAX_REFRESH_AGE_MS = 60 * 60 * 1000;
 	const SETTINGS_KEY = 'vault_settings';
 	const LAST_REFRESH_KEY = 'vault_last_refresh';
 	const PRINCIPAL_RE = /^[a-z0-9]{5}(-[a-z0-9]{3,5})+$/;
-	const SUBACCOUNT_RE = /^[0-9a-fA-F]{64}$/;
 
 	let activeTab = $state<TabId>('activity');
 	let loading = $state(false);
@@ -45,18 +38,25 @@
 	let profiles = $state<string[]>([]);
 	let isAdmin = $derived(profiles.includes('admin'));
 
-	let vaultPrincipal = $state('');
+	const vaultPrincipal: string = ctx.config?.canisterId ?? '';
 
 	let ledgerCanisters = $state<Record<string, TokenInfo>>({});
 	let tokenBalances = $state<Record<string, number>>({});
 	let tokensLoaded = $state(false);
+	let sourceFund = $state('');
+	let sourceBalances = $state<Record<string, number>>({});
 
 	let allBalances = $state<any[]>([]);
 
-	let transactions = $state<any[]>([]);
-	let transferPagination = $state<any>(null);
+	let activity = $state.raw<any[]>([]);
 	let currentPage = $state(0);
 	const pageSize = 10;
+	let transactions = $derived(activity.slice(currentPage * pageSize, (currentPage + 1) * pageSize));
+	let transferPagination = $derived(
+		activity.length
+			? { total_items_count: activity.length, total_pages: Math.ceil(activity.length / pageSize) }
+			: null,
+	);
 
 	let lastRefreshTime = $state<Date | null>(null);
 	let copiedText = $state('');
@@ -67,24 +67,13 @@
 	let transferToken = $state('');
 	let transferTo = $state('');
 	let transferAmountHuman = $state('');
-	let transferToSubaccount = $state('');
-	let transferFromSubaccount = $state('');
-
-	let lookupMode = $state<'user' | 'invoice' | 'raw'>('user');
-	let lookupPrincipal = $state('');
-	let lookupInvoiceId = $state('');
-	let lookupRawHex = $state('');
-	let lookupResult = $state<{ label: string; subaccount_hex: string; balances: Record<string, number> } | null>(null);
-	let lookupLoading = $state(false);
 
 	let directoryLabels = $state<Record<string, string>>({});
-	let directoryEntries = $state<DirectoryEntry[]>([]);
 
 	let tokenSymbols = $derived(Object.keys(ledgerCanisters));
-	let directoryUsers = $derived(directoryEntries.filter((e) => e.kind === 'user'));
 
 	let selectedTokenInfo = $derived(transferToken ? ledgerCanisters[transferToken] : undefined);
-	let availableBalance = $derived(transferToken ? tokenBalances[transferToken] || 0 : 0);
+	let availableBalance = $derived(transferToken ? sourceBalances[transferToken] || 0 : 0);
 	let transferFee = $derived(selectedTokenInfo?.fee ?? 0);
 	let parsedTransferAmount = $derived(
 		toBaseUnits(transferAmountHuman, selectedTokenInfo?.decimals ?? 8),
@@ -92,35 +81,9 @@
 	let recipientTrimmed = $derived(transferTo.trim());
 	let recipientValid = $derived(recipientTrimmed !== '' && PRINCIPAL_RE.test(recipientTrimmed));
 	let recipientLabel = $derived(directoryLabels[recipientTrimmed] || '');
-	let toSubaccountValid = $derived(
-		transferToSubaccount.trim() === '' || SUBACCOUNT_RE.test(transferToSubaccount.trim()),
-	);
-	let fromSubaccountValid = $derived(
-		transferFromSubaccount.trim() === '' || SUBACCOUNT_RE.test(transferFromSubaccount.trim()),
-	);
 	let canSubmitTransfer = $derived(
-		recipientValid &&
-			parsedTransferAmount != null &&
-			parsedTransferAmount > 0 &&
-			toSubaccountValid &&
-			fromSubaccountValid &&
-			!loading,
+		recipientValid && parsedTransferAmount != null && parsedTransferAmount > 0 && !loading,
 	);
-
-	function parseRaw(raw: any): any {
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
-	}
-
-	function unwrapExtensionPayload(raw: any): any {
-		if (raw && typeof raw === 'object' && raw.success === true && raw.data != null) {
-			return raw.data;
-		}
-		return raw;
-	}
-
-	function walletTokenName(displayKey: string): string {
-		return ledgerCanisters[displayKey]?.name ?? displayKey;
-	}
 
 	function formatAmount(raw: number, decimals: number): string {
 		return (raw / Math.pow(10, decimals)).toLocaleString(undefined, {
@@ -161,9 +124,7 @@
 	}
 
 	function tokenInfoByName(name: string): TokenInfo {
-		const key = tokenSymbols.find((s) => ledgerCanisters[s]?.name === name);
-		if (key && ledgerCanisters[key]) return ledgerCanisters[key];
-		return { ledger: '', indexer: '', decimals: 8, symbol: name, name, fee: 0 };
+		return ledgerCanisters[name] ?? { ledger: '', indexer: '', decimals: 8, symbol: name, name, fee: 0 };
 	}
 
 	function loadVaultSettings(): VaultSettings {
@@ -195,24 +156,18 @@
 		saveVaultSettings(settings);
 	}
 
-	function loadLastRefresh(): { timestamp: number; balances: Record<string, number> } | null {
+	function loadLastRefresh(): number | null {
 		try {
-			const raw = localStorage.getItem(LAST_REFRESH_KEY);
-			if (raw) {
-				const parsed = JSON.parse(raw);
-				if (parsed && typeof parsed.timestamp === 'number' && parsed.balances) {
-					return { timestamp: parsed.timestamp, balances: parsed.balances };
-				}
-			}
+			const parsed = JSON.parse(localStorage.getItem(LAST_REFRESH_KEY) || 'null');
+			return typeof parsed?.timestamp === 'number' ? parsed.timestamp : null;
 		} catch {
-			// ignore
+			return null;
 		}
-		return null;
 	}
 
-	function saveLastRefresh(timestamp: number, balances: Record<string, number>) {
+	function saveLastRefresh(timestamp: number) {
 		try {
-			localStorage.setItem(LAST_REFRESH_KEY, JSON.stringify({ timestamp, balances }));
+			localStorage.setItem(LAST_REFRESH_KEY, JSON.stringify({ timestamp }));
 		} catch {
 			// ignore
 		}
@@ -236,14 +191,8 @@
 		return `${Math.floor(hours / 24)}d ago`;
 	}
 
-	function parseTimestamp(timestamp: string | number): Date {
-		const ts = String(timestamp);
-		if (ts.includes('T') || ts.includes('-') || ts.includes(':')) return new Date(ts);
-		try {
-			return new Date(Number(BigInt(ts) / BigInt(1000000)));
-		} catch {
-			return new Date();
-		}
+	function parseTimestamp(seconds: number): Date {
+		return new Date(seconds * 1000);
 	}
 
 	function shortPrincipalMiddle(p: string, total = 20): string {
@@ -254,10 +203,9 @@
 
 	function partyLabel(p: string | undefined | null): { display: string; title: string; copyable: boolean } {
 		if (!p) return { display: '—', title: '', copyable: false };
-		if (p === 'minting_account') return { display: 'Mint', title: p, copyable: false };
-		if (p === 'burn') return { display: 'Burned', title: p, copyable: false };
 		if (p === vaultPrincipal) return { display: 'This vault', title: p, copyable: false };
 		if (directoryLabels[p]) return { display: directoryLabels[p], title: p, copyable: false };
+		if (!PRINCIPAL_RE.test(p)) return { display: p, title: p, copyable: false };
 		return { display: shortPrincipalMiddle(p), title: p, copyable: true };
 	}
 
@@ -301,28 +249,21 @@
 	}
 
 	function errorSummary(msg: string): string {
-		try {
-			const parsed = JSON.parse(msg);
-			if (parsed && typeof parsed.error === 'string') return parsed.error;
-		} catch {
-			// not a JSON payload
-		}
 		const rejected = msg.match(/Reject text:\s*([^\n]+?)(?:\s+Error code|\s+Call context|$)/);
 		if (rejected) return rejected[1].trim();
 		const firstLine = msg.split('\n')[0].trim();
 		return firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine;
 	}
 
-	function lookupResultHeading(): string {
-		if (!lookupResult) return '';
-		if (lookupMode === 'user') {
-			const label =
-				directoryLabels[lookupPrincipal.trim()] || shortPrincipalMiddle(lookupPrincipal.trim());
-			return `Member ${label}`;
+	function showError(e: any) {
+		const op = ctx.ui?.accessDeniedOperation?.(e);
+		if (op != null) {
+			accessDeniedOp = op;
+			error = '';
+		} else {
+			accessDeniedOp = '';
+			error = e?.message ?? String(e);
 		}
-		if (lookupMode === 'invoice') return `Invoice ${lookupInvoiceId.trim()}`;
-		const hex = lookupRawHex.trim();
-		return `Subaccount ${hex.substring(0, 16)}…`;
 	}
 
 	async function confirmModal(opts: {
@@ -364,185 +305,136 @@
 
 	// ── Data loading ─────────────────────────────────────────
 
+	async function read(name: string, args: Record<string, unknown> = {}) {
+		const res = await ctx.read(name, args);
+		if (!res.ok) throw new Error(res.error);
+		return res;
+	}
+
+	async function pages(name: string, args: Record<string, unknown>, key: string): Promise<any[]> {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const res = await read(name, { ...args, from, count: 500 });
+			out.push(...res[key]);
+			from = res.next;
+		}
+		return out;
+	}
+
 	async function loadDirectory() {
-		if (typeof ctx.backend?.directory_list !== 'function') return;
 		try {
-			const raw = await ctx.backend.directory_list();
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.message) {
-				const parsed = JSON.parse(resp.data.message);
-				const entries: DirectoryEntry[] = parsed.entries || [];
-				const map: Record<string, string> = {};
-				for (const entry of entries) {
-					if (entry.principal && entry.label) map[entry.principal] = entry.label;
-				}
-				directoryEntries = entries;
-				directoryLabels = map;
-			}
+			const users = await pages('user_list', {}, 'users');
+			directoryLabels = Object.fromEntries(
+				users.filter((u) => u.nickname).map((u) => [u.id, u.nickname]),
+			);
 		} catch {
 			// fail silently
 		}
 	}
 
-	async function loadTokens() {
-		try {
-			const resp = unwrapExtensionPayload(await ctx.callSync('get_active_tokens', {}));
-			const tokens = resp?.ActiveTokens || [];
-			const canisters: Record<string, TokenInfo> = {};
-			const bals: Record<string, number> = {};
-
-			for (const token of tokens) {
-				const symbol = token.symbol || token.name;
-				const ledger = token.ledger_canister_id ?? token.ledger ?? '';
-				const indexer = token.indexer_canister_id ?? token.indexer ?? '';
-				if (symbol) {
-					canisters[symbol] = {
-						ledger,
-						indexer,
-						decimals: token.decimals || 8,
-						symbol,
-						name: token.name,
-						fee: token.fee || 0,
-					};
-					bals[symbol] = 0;
-				}
-			}
-
-			ledgerCanisters = canisters;
-			tokenBalances = bals;
-
-			const last = loadLastRefresh();
-			if (last?.balances) {
-				for (const key of Object.keys(canisters)) {
-					if (key in last.balances) bals[key] = last.balances[key];
-				}
-				tokenBalances = bals;
-				lastRefreshTime = new Date(last.timestamp);
-			}
-
-			const syms = Object.keys(canisters);
-			if (syms.length > 0 && !transferToken) transferToken = syms[0];
-			tokensLoaded = true;
-		} catch (e: any) {
-			console.error('Failed to load tokens:', e);
+	/** The treasury's tokens (the accounting currency when it is registered) and each fund's balance. */
+	async function loadTreasury() {
+		const info = await read('realm_info');
+		const funds: Record<string, Record<string, number>> = {};
+		let treasury: any;
+		let from: number | null = 1;
+		while (from) {
+			treasury = await read('treasury_view', { from, count: 500 });
+			Object.assign(funds, treasury.funds);
+			from = treasury.next;
 		}
+		const currency = info.realm.accounting_currency;
+		const tokens = treasury.tokens.some((t: any) => t.id === currency)
+			? treasury.tokens.filter((t: any) => t.id === currency)
+			: treasury.tokens;
+
+		const canisters: Record<string, TokenInfo> = {};
+		const bals: Record<string, number> = {};
+		const rows: any[] = [];
+		for (const token of tokens) {
+			canisters[token.id] = {
+				ledger: token.ledger,
+				indexer: token.indexer,
+				decimals: token.decimals,
+				symbol: token.id,
+				name: token.id,
+				fee: token.fee,
+			};
+			bals[token.id] = 0;
+			for (const [fund, held] of Object.entries(funds)) {
+				const amount = held[token.id] ?? 0;
+				bals[token.id] += amount;
+				if (amount) rows.push({ _id: `${fund}:${token.id}`, principal: `Fund ${fund}`, token: token.id, amount });
+			}
+		}
+		ledgerCanisters = canisters;
+		tokenBalances = bals;
+		allBalances = rows;
+		sourceFund = treasury.config.source_fund;
+		sourceBalances = funds[sourceFund] ?? {};
+		const syms = Object.keys(canisters);
+		if (syms.length > 0 && !transferToken) transferToken = syms[0];
+		tokensLoaded = true;
 	}
 
-	async function loadBalance() {
+	/** One row per ledger transaction that moved cash in or out of the vault, newest first. */
+	async function loadActivity() {
+		const moves = new Map<string, any>();
+		for (const e of await pages('ledger_view', { kind: 'asset' }, 'entries')) {
+			if (e.category !== 'cash' || !(e.symbol in ledgerCanisters)) continue;
+			const tx = moves.get(e.transaction) ?? { net: 0, first: e };
+			tx.net += e.debit - e.credit;
+			moves.set(e.transaction, tx);
+		}
+		activity = [...moves.entries()]
+			.filter(([, tx]) => tx.net !== 0)
+			.reverse()
+			.map(([id, { net, first }]) => ({
+				tx_id: id,
+				kind: 'transfer',
+				token: first.symbol,
+				amount: Math.abs(net),
+				timestamp: first.at,
+				principal_from: net > 0 ? first.user || first.description : vaultPrincipal,
+				principal_to: net > 0 ? vaultPrincipal : first.description,
+			}));
+	}
+
+	async function loadAll() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const raw = await ctx.backend.get_objects_paginated('WalletBalance', 0, 100, 'asc');
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.objectsListPaginated) {
-				const data = resp.data.objectsListPaginated;
-				allBalances = data.objects.map((s: string) => JSON.parse(s));
-			} else {
-				allBalances = [];
-			}
+			await Promise.all([loadTreasury(), loadDirectory()]);
+			await loadActivity();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			showError(e);
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function loadTransactions(page: number = currentPage) {
-		loading = true;
-		error = '';
-		accessDeniedOp = '';
-		try {
-			if (!vaultPrincipal) {
-				try {
-					if (typeof ctx.backend.get_canister_id === 'function') {
-						const r = await ctx.backend.get_canister_id();
-						vaultPrincipal = r || '';
-					}
-				} catch {
-					vaultPrincipal = '';
-				}
-			}
-			const raw = await ctx.backend.get_objects_paginated('WalletTransfer', page, pageSize, 'desc');
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.objectsListPaginated) {
-				const data = resp.data.objectsListPaginated;
-				transferPagination = data.pagination;
-				transactions = data.objects.map((s: string) => JSON.parse(s));
-			} else {
-				transactions = [];
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			loading = false;
-		}
-	}
-
-	function displayKeyForTokenName(tokenName: string): string | undefined {
-		return tokenSymbols.find((s) => ledgerCanisters[s]?.name === tokenName);
-	}
-
-	function applyRefreshBalances(perToken: Record<string, any>) {
-		for (const [tokenName, tokenData] of Object.entries(perToken)) {
-			const key = displayKeyForTokenName(tokenName) || tokenName;
-			if (ledgerCanisters[key]) {
-				tokenBalances[key] = (tokenData as any)?.balance || 0;
-			}
-		}
-		tokenBalances = { ...tokenBalances };
-	}
-
-	async function loadVaultPrincipal() {
-		try {
-			if (typeof ctx.backend.get_canister_id === 'function') {
-				vaultPrincipal = (await ctx.backend.get_canister_id()) || vaultPrincipal;
-			}
-		} catch {
-			// keep existing value
 		}
 	}
 
 	// ── Mutations ────────────────────────────────────────────
 
+	/** Check the ledger for payments of every pending invoice, a batch at a time, then reload the books. */
 	async function refreshVault() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const refreshData = unwrapExtensionPayload(await ctx.callAsync('refresh', {}));
-			if (refreshData?.TransactionSummary == null) {
-				error = 'Failed to sync vault transactions';
-				return;
+			let from: number | null = 1;
+			while (from) {
+				const res = await ctx.run('invoice_refresh', { from, count: 20 });
+				if (!res.ok) throw new Error(res.error);
+				from = res.next;
 			}
-			applyRefreshBalances(refreshData.TransactionSummary.per_token || {});
-			await loadVaultPrincipal();
 			lastRefreshTime = new Date();
-			saveLastRefresh(lastRefreshTime.getTime(), tokenBalances);
-			await Promise.all([loadBalance(), loadTransactions(0)]);
+			saveLastRefresh(lastRefreshTime.getTime());
+			currentPage = 0;
+			await loadAll();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			showError(e);
 		} finally {
 			loading = false;
 		}
@@ -567,84 +459,35 @@
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const args: any = {
-				to_principal: recipientTrimmed,
+			const res = await ctx.run('transfer_create', {
+				fund: sourceFund,
+				to: recipientTrimmed,
 				amount: parsedTransferAmount,
-				token: walletTokenName(transferToken),
-			};
-			if (transferToSubaccount.trim()) args.to_subaccount = transferToSubaccount.trim();
-			if (transferFromSubaccount.trim()) args.from_subaccount = transferFromSubaccount.trim();
-
-			unwrapExtensionPayload(await ctx.callAsync('transfer', args));
-
-			if (typeof ctx.notify === 'function') {
-				ctx.notify('success', `Sent ${humanDisplay}`);
+				symbol,
+			});
+			if (!res.ok) throw new Error(res.error);
+			if (res.requires_vote) {
+				ctx.notify?.('success', `Proposal ${res.proposal} created — a vote is required to send ${humanDisplay}`);
+			} else if (res.status !== 'completed') {
+				throw new Error(res.error || `Transfer ${res.transfer} is ${res.status}`);
+			} else {
+				ctx.notify?.('success', `Sent ${humanDisplay}`);
 			}
 
 			transferTo = '';
 			transferAmountHuman = '';
-			transferToSubaccount = '';
-			transferFromSubaccount = '';
-			await loadBalance();
-			await loadTransactions();
+			await loadAll();
 		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			showError(e);
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function lookupSubaccountBalance() {
-		lookupLoading = true;
-		lookupResult = null;
-		error = '';
-		accessDeniedOp = '';
-		try {
-			const lookupArgs: any = {};
-			if (lookupMode === 'user' && lookupPrincipal.trim()) {
-				lookupArgs.principal = lookupPrincipal.trim();
-			} else if (lookupMode === 'invoice' && lookupInvoiceId.trim()) {
-				lookupArgs.invoice_id = lookupInvoiceId.trim();
-			} else if (lookupMode === 'raw' && lookupRawHex.trim()) {
-				lookupArgs.subaccount_hex = lookupRawHex.trim();
-			} else {
-				error = 'Please enter a value to look up';
-				lookupLoading = false;
-				return;
-			}
-
-			const data = unwrapExtensionPayload(await ctx.callAsync('lookup_balance', lookupArgs));
-			if (data?.LookupBalance) {
-				lookupResult = data.LookupBalance;
-			} else {
-				error = 'Lookup failed';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			lookupLoading = false;
-		}
-	}
-
 	// ── Pagination ───────────────────────────────────────────
 
-	async function goToPage(page: number) {
+	function goToPage(page: number) {
 		currentPage = page;
-		await loadTransactions(page);
 	}
 
 	function paginationPages(total: number, current: number): (number | '...')[] {
@@ -679,17 +522,10 @@
 		}
 
 		(async () => {
-			await Promise.all([loadTokens(), loadDirectory()]);
-			const vaultSettings = loadVaultSettings();
 			const last = loadLastRefresh();
-			const now = Date.now();
-			const shouldRefresh = !last || now - last.timestamp > vaultSettings.maxRefreshAgeMs;
-
-			if (shouldRefresh) {
-				await refreshVault();
-			} else {
-				await Promise.all([loadBalance(), loadTransactions(0)]);
-			}
+			if (last) lastRefreshTime = new Date(last);
+			await loadAll();
+			if (!last || Date.now() - last > loadVaultSettings().maxRefreshAgeMs) await refreshVault();
 		})();
 
 		return () => {
@@ -808,7 +644,7 @@
 				{/each}
 			</div>
 			<p class={cn('mt-3 text-xs text-indigo-600 dark:text-indigo-400 font-medium')}>
-				On-chain ledger balance for this realm's vault
+				Balance booked across this realm's treasury funds
 			</p>
 		</div>
 	{:else if tokensLoaded}
@@ -1397,61 +1233,10 @@
 						>
 							Advanced (subaccounts)
 						</summary>
-						<div class={cn('px-3 pb-3 space-y-3 border-t border-gray-200 dark:border-gray-700 pt-3')}>
-							<p class={cn('text-xs text-gray-500 dark:text-gray-400')}>
-								Optional 64-character hex subaccount values for source or destination.
-							</p>
-							<div>
-								<label
-									for="v-to-sub"
-									class={cn('block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1')}
-								>
-									To subaccount
-								</label>
-								<input
-									id="v-to-sub"
-									type="text"
-									bind:value={transferToSubaccount}
-									placeholder="64-character hex"
-									class={cn(
-										'w-full px-3 py-2 text-sm font-mono border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-										toSubaccountValid
-											? 'border-gray-300 dark:border-gray-600'
-											: 'border-red-400 dark:border-red-600',
-									)}
-								/>
-								{#if !toSubaccountValid}
-									<p class={cn('text-xs text-red-600 dark:text-red-400 mt-1')}>
-										Must be exactly 64 hex characters.
-									</p>
-								{/if}
-							</div>
-							<div>
-								<label
-									for="v-from-sub"
-									class={cn('block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1')}
-								>
-									From subaccount
-								</label>
-								<input
-									id="v-from-sub"
-									type="text"
-									bind:value={transferFromSubaccount}
-									placeholder="64-character hex"
-									class={cn(
-										'w-full px-3 py-2 text-sm font-mono border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-										fromSubaccountValid
-											? 'border-gray-300 dark:border-gray-600'
-											: 'border-red-400 dark:border-red-600',
-									)}
-								/>
-								{#if !fromSubaccountValid}
-									<p class={cn('text-xs text-red-600 dark:text-red-400 mt-1')}>
-										Must be exactly 64 hex characters.
-									</p>
-								{/if}
-							</div>
-						</div>
+						<p class={cn('px-3 pb-3 pt-3 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700')}>
+							Sending from or to a subaccount is not supported by this realm version. Payments leave
+							from the {sourceFund} fund, to the recipient's payout account when they registered one.
+						</p>
 					</details>
 
 					<button
@@ -1476,164 +1261,10 @@
 				<h2 class={cn('text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2')}>
 					Look up a balance
 				</h2>
-				<p class={cn('text-sm text-gray-500 dark:text-gray-400 mb-4')}>
-					The vault holds funds in separate compartments for each member and each invoice. Look up
-					the balance in one of them.
+				<p class={cn('text-sm text-amber-700 dark:text-amber-400')}>
+					Looking up a member's, an invoice's or a raw subaccount's balance is not supported by this
+					realm version.
 				</p>
-
-				<div class={cn('flex flex-wrap gap-2 mb-4')}>
-					{#if narrow}
-						<select
-							bind:value={lookupMode}
-							onchange={() => {
-								lookupResult = null;
-							}}
-							class={cn(
-								'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100',
-							)}
-							aria-label="Lookup mode"
-						>
-							<option value="user">Member</option>
-							<option value="invoice">Invoice</option>
-							<option value="raw">Advanced</option>
-						</select>
-					{:else}
-						{#each [{ id: 'user', label: 'Member' }, { id: 'invoice', label: 'Invoice' }, { id: 'raw', label: 'Advanced' }] as mode (mode.id)}
-							<button
-								type="button"
-								onclick={() => {
-									lookupMode = mode.id as 'user' | 'invoice' | 'raw';
-									lookupResult = null;
-								}}
-								class={cn(
-									'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-									lookupMode === mode.id
-										? 'bg-indigo-600 text-white'
-										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
-								)}
-							>
-								{mode.label}
-							</button>
-						{/each}
-					{/if}
-				</div>
-
-				{#if lookupMode === 'raw'}
-					<p class={cn('text-xs text-gray-500 dark:text-gray-400 mb-3')}>
-						Enter a raw 64-character hex subaccount. Member and invoice compartments are derived
-						from principal or invoice ID using internal prefixes.
-					</p>
-				{/if}
-
-				<form
-					onsubmit={(e) => {
-						e.preventDefault();
-						lookupSubaccountBalance();
-					}}
-					class={cn('flex gap-2 mb-4')}
-				>
-					{#if lookupMode === 'user'}
-						<input
-							type="text"
-							list="member-list"
-							bind:value={lookupPrincipal}
-							placeholder="Member principal or pick from list"
-							class={cn(
-								'flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-							)}
-						/>
-						<datalist id="member-list">
-							{#each directoryUsers as entry (entry.principal)}
-								<option value={entry.principal}>{entry.label}</option>
-							{/each}
-						</datalist>
-					{:else if lookupMode === 'invoice'}
-						<input
-							type="text"
-							bind:value={lookupInvoiceId}
-							placeholder="Invoice ID"
-							class={cn(
-								'flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-							)}
-						/>
-					{:else}
-						<input
-							type="text"
-							bind:value={lookupRawHex}
-							placeholder="64-character hex subaccount"
-							class={cn(
-								'flex-1 px-3 py-2 text-sm font-mono border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500/40',
-							)}
-						/>
-					{/if}
-					<button
-						type="submit"
-						disabled={lookupLoading}
-						class={cn(
-							'px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2',
-						)}
-					>
-						{#if lookupLoading}{@render spinner()}{/if}
-						{lookupLoading ? 'Looking up…' : 'Look up'}
-					</button>
-				</form>
-
-				{#if lookupResult}
-					<div
-						class={cn(
-							'bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4 space-y-3',
-						)}
-					>
-						<div class={cn('flex items-center justify-between gap-3')}>
-							<div>
-								<div class={cn('text-sm font-semibold text-gray-800 dark:text-gray-200')}>
-									{lookupResultHeading()}
-								</div>
-								{#if lookupMode === 'user' && directoryLabels[lookupPrincipal.trim()]}
-									<div class={cn('text-xs text-gray-500 dark:text-gray-400 mt-0.5')}>
-										{directoryLabels[lookupPrincipal.trim()]}
-									</div>
-								{/if}
-							</div>
-							<button
-								type="button"
-								onclick={() => copyToClipboard(lookupResult?.subaccount_hex || '')}
-								class={cn('text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-mono')}
-								title={lookupResult.subaccount_hex}
-							>
-								{lookupResult.subaccount_hex.substring(0, 16)}…
-							</button>
-						</div>
-						<div class={cn('space-y-2')}>
-							{#each Object.entries(lookupResult.balances) as [tokenName, bal] (tokenName)}
-								{@const info = tokenInfoByName(tokenName)}
-								<div
-									class={cn(
-										'flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg p-3',
-									)}
-									title={rawUnitsLabel(Number(bal))}
-								>
-									<span class={cn('text-sm font-semibold text-gray-700 dark:text-gray-300')}>
-										{info.symbol}
-									</span>
-									<div
-										class={cn(
-											'text-lg font-bold tabular-nums',
-											Number(bal) > 0
-												? 'text-green-700 dark:text-green-400'
-												: 'text-gray-400 dark:text-gray-500',
-										)}
-									>
-										{formatWithSymbol(Number(bal), info.decimals, info.symbol)}
-									</div>
-								</div>
-							{/each}
-						</div>
-						{#if Object.values(lookupResult.balances).every((b) => Number(b) === 0)}
-							<p class={cn('text-sm text-gray-500 italic')}>No balances found for this subaccount.</p>
-						{/if}
-					</div>
-				{/if}
 			</div>
 
 		{:else if activeTab === 'admin'}

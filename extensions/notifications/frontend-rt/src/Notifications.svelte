@@ -2,32 +2,29 @@
 	let { ctx }: { ctx: any } = $props();
 
 	let items = $state<any[]>([]);
-	let unreadCount = $state(0);
 	let loading = $state(true);
 	let selectedTab = $state<'all' | 'unread'>('all');
 	let expandedId = $state<string | null>(null);
 
-	$effect(() => {
-		const u = ctx.notifications?.items?.subscribe?.((v: any) => {
-			items = v ?? [];
-		});
-		return () => u?.();
-	});
+	async function load() {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const res = await ctx.read('notification_list', { from, count: 500 });
+			if (!res.ok) throw new Error(res.error);
+			for (const n of res.notifications) {
+				out.push({ id: n.id, title: n.title, message: n.body, timestamp_ms: n.at * 1000, read: n.read, href: n.href });
+			}
+			from = res.next;
+		}
+		items = out;
+	}
 
-	$effect(() => {
-		const u = ctx.notifications?.unreadCount?.subscribe?.((v: any) => {
-			unreadCount = v ?? 0;
-		});
-		return () => u?.();
-	});
-
-	$effect(() => {
-		ctx.notifications?.load?.().then(() => {
-			loading = false;
-		}).catch(() => {
+	load()
+		.catch((e) => ctx.notify?.('error', e?.message || 'Failed to load notifications'))
+		.finally(() => {
 			loading = false;
 		});
-	});
 
 	let filtered = $derived(
 		selectedTab === 'unread' ? items.filter((n) => !n.read) : items,
@@ -39,19 +36,27 @@
 		ctx.navigate(href);
 	}
 
-	async function handleMarkAsRead(id: string) {
-		await ctx.notifications?.markAsRead?.(id);
+	/** Mark notifications read, here and in the host's notification bell. */
+	async function markRead(args: Record<string, unknown>, ids: Set<string> | null) {
+		const res = await ctx.run('notification_read', args);
+		if (!res.ok) {
+			ctx.notify?.('error', res.error);
+			return null;
+		}
+		items = items.map((n) => (ids === null || ids.has(n.id) ? { ...n, read: true } : n));
+		await ctx.notifications?.load?.();
+		return res;
 	}
 
 	async function handleToggleRead(e: Event, notification: any) {
 		e.stopPropagation();
-		await ctx.notifications?.markAsRead?.(notification.id, !notification.read);
+		await markRead({ notification: notification.id }, new Set([notification.id]));
 	}
 
 	async function markAllAsRead() {
-		const unread = items.filter((n) => !n.read);
-		for (const n of unread) {
-			await ctx.notifications?.markAsRead?.(n.id);
+		let from: number | null = 1;
+		while (from) {
+			from = (await markRead({ all: true, from, count: 500 }, null))?.next ?? null;
 		}
 	}
 
@@ -249,6 +254,8 @@
 									</span>
 									<button
 										onclick={(e) => handleToggleRead(e, notification)}
+										disabled={notification.read}
+										title={notification.read ? 'Marking a notification unread is not supported by this realm version' : 'Mark as read'}
 										class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {notification.read
 											? 'bg-indigo-600'
 											: 'bg-gray-300 dark:bg-gray-600'}"

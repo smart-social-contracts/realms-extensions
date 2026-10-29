@@ -1,12 +1,13 @@
 /**
  * Reusable CSV export utility for realm extensions.
  *
- * Usage:
+ * Usage (the extension's manifest declares the `realm_export` operation):
  *   import { exportCsv } from '../../../_shared/frontend/csv-export';
- *   await exportCsv({ backend: ctx.backend, entity: 'LedgerEntry' });
+ *   await exportCsv({ backend: ctx, entity: 'LedgerEntry' });
  */
 
 export interface ExportCsvOptions {
+	/** Anything with `read(name, args)`: the extension's `ctx` (or a sandboxed bridge client). */
 	backend: any;
 	entity: string;
 	pageSize?: number;
@@ -35,26 +36,14 @@ export async function fetchAllRecords(
 	onProgress?: (message: string) => void,
 ): Promise<any[]> {
 	const allRows: any[] = [];
-	let page = 0;
-	let totalPages = 1;
-
-	while (page < totalPages) {
-		onProgress?.(`Fetching page ${page + 1}${totalPages > 1 ? ' of ' + totalPages : ''}...`);
-		const raw = await backend.get_objects_paginated(entity, page, pageSize, order);
-		const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-
-		if (parsed?.success && parsed?.data?.objectsListPaginated) {
-			const batch = parsed.data.objectsListPaginated.objects.map((s: string) => JSON.parse(s));
-			allRows.push(...batch);
-			totalPages = Number(parsed.data.objectsListPaginated.pagination?.total_pages ?? 1);
-			if (batch.length < pageSize) break;
-		} else {
-			break;
-		}
-		page++;
+	for (let from: number | null = 1, page = 1; from != null; page++) {
+		onProgress?.(`Fetching page ${page}...`);
+		const reply = await backend.read('realm_export', { entity, from, count: pageSize });
+		if (!reply.ok) throw new Error(reply.error);
+		allRows.push(...reply.rows);
+		from = reply.next;
 	}
-
-	return allRows;
+	return order === 'desc' ? allRows.reverse() : allRows;
 }
 
 export function buildCsvBlob(
