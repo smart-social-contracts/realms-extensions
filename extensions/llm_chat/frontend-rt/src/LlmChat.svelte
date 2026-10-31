@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, tick } from 'svelte';
+	import { AiSignInError, fetchAsUser } from './aiClient';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -82,6 +83,9 @@
 	let ASSISTANTS_API_URL = `${PRODUCTION_API_HOST}api/personas/assistants`;
 	let CONVERSATIONS_API_URL = `${PRODUCTION_API_HOST}api/conversations`;
 
+	// Everything but the public persona list needs the user signed in to the AI service.
+	const aiFetch = (url: string, init?: RequestInit) => fetchAsUser(ctx.ai, url, init);
+
 	function extractCodexIdFromUri(uri: string | undefined): string | null {
 		if (!uri) return null;
 		const match = uri.match(/^realms:\/\/codex_viewer\/codex\/([^?]+)/);
@@ -138,6 +142,7 @@
 	}
 
 	function classifyChatError(err: unknown, httpStatus?: number): string {
+		if (err instanceof AiSignInError) return err.message;
 		if (httpStatus === 503 && err instanceof Error && err.message) {
 			const msg = err.message.toLowerCase();
 			if (
@@ -301,7 +306,7 @@
 		try {
 			await fetchConversations();
 			await Promise.all(conversations.map(c =>
-				fetch(`${CONVERSATIONS_API_URL}/${c.conversation_id}`, { method: 'DELETE' })
+				aiFetch(`${CONVERSATIONS_API_URL}/${c.conversation_id}`, { method: 'DELETE' })
 			));
 			conversations = [];
 			messages = [];
@@ -444,11 +449,10 @@
 		isLoadingSuggestions = true;
 		try {
 			const params = new URLSearchParams({
-				user_principal: userPrincipal || '',
 				realm_principal: REALM_CANISTER_ID || '',
 				persona: selectedAssistant?.id || 'ashoka',
 			});
-			const response = await fetch(`${SUGGESTIONS_API_URL}?${params.toString()}`, {
+			const response = await aiFetch(`${SUGGESTIONS_API_URL}?${params.toString()}`, {
 				method: 'GET',
 				headers: { 'Content-Type': 'application/json' },
 			});
@@ -482,7 +486,6 @@
 			const payload: Record<string, any> = {
 				question: messageToSend,
 				realm_principal: REALM_CANISTER_ID,
-				user_principal: userPrincipal,
 				stream: true,
 				verbosity: 1,
 				persona: selectedAssistant?.id || 'ashoka',
@@ -516,7 +519,7 @@
 				};
 			}
 
-			const response = await fetch(API_URL, {
+			const response = await aiFetch(API_URL, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
 				body: JSON.stringify(payload),
@@ -620,8 +623,8 @@
 		if (!userPrincipal || !isAuthenticated) return;
 		isLoadingHistory = true;
 		try {
-			const params = new URLSearchParams({ user_principal: userPrincipal, realm_principal: REALM_CANISTER_ID });
-			const res = await fetch(`${CONVERSATIONS_API_URL}?${params}`, { headers: { 'Content-Type': 'application/json' } });
+			const params = new URLSearchParams({ realm_principal: REALM_CANISTER_ID });
+			const res = await aiFetch(`${CONVERSATIONS_API_URL}?${params}`, { headers: { 'Content-Type': 'application/json' } });
 			if (!res.ok) return;
 			const data = await res.json();
 			conversations = (data.conversations || []).sort((a: Conversation, b: Conversation) =>
@@ -639,7 +642,7 @@
 		const match = availableAssistants.find(a => a.id === conv.persona);
 		if (match) selectedAssistant = match;
 		try {
-			const res = await fetch(`${CONVERSATIONS_API_URL}/${conv.conversation_id}/messages`, { headers: { 'Content-Type': 'application/json' } });
+			const res = await aiFetch(`${CONVERSATIONS_API_URL}/${conv.conversation_id}/messages`, { headers: { 'Content-Type': 'application/json' } });
 			if (!res.ok) return;
 			const data = await res.json();
 			messages = normalizeHistoryMessages(data.messages || []);
@@ -663,7 +666,7 @@
 	async function deleteConversation(id: string, e: Event): Promise<void> {
 		e.stopPropagation();
 		try {
-			await fetch(`${CONVERSATIONS_API_URL}/${id}`, { method: 'DELETE' });
+			await aiFetch(`${CONVERSATIONS_API_URL}/${id}`, { method: 'DELETE' });
 			conversations = conversations.filter(c => c.conversation_id !== id);
 			if (conversationId === id) { messages = []; conversationId = null; }
 		} catch {}
@@ -688,10 +691,10 @@
 	async function ensureConversation(): Promise<void> {
 		if (conversationId || !userPrincipal || !isAuthenticated) return;
 		try {
-			const res = await fetch(CONVERSATIONS_API_URL, {
+			const res = await aiFetch(CONVERSATIONS_API_URL, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ user_principal: userPrincipal, realm_principal: REALM_CANISTER_ID, persona: selectedAssistant?.id || 'ashoka' })
+				body: JSON.stringify({ realm_principal: REALM_CANISTER_ID, persona: selectedAssistant?.id || 'ashoka' })
 			});
 			if (res.ok) {
 				const data = await res.json();
@@ -981,7 +984,7 @@
 				{#if isAuthenticated}
 					<p>Welcome back! I'm your AI assistant. Ask me anything about this realm — governance, proposals, codices, or general questions.</p>
 				{:else}
-					<p>Hello! I'm the realm's AI assistant. Feel free to ask me about this realm, its governance structure, or anything you'd like to know.</p>
+					<p>Hello! I'm the realm's AI assistant. Sign in to ask me about this realm, its governance structure, or anything you'd like to know.</p>
 				{/if}
 			</div>
 		</div>

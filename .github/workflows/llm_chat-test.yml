@@ -58,3 +58,15 @@ jobs:
           echo "ℹ️  No run_tests.sh found - skipping tests"
           echo "ℹ️  Add run_tests.sh to enable automated testing"
         fi
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Test the frontend bundle
+      run: |
+        cd extensions/llm_chat/frontend-rt
+        npm install
+        npm test
+        npm run build
