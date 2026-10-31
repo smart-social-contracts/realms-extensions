@@ -2,14 +2,11 @@
 	import { description as extensionDescription } from '../../manifest.json';
 	import {
 		isNarrowViewport,
-		persistSessionFlag,
-		readSessionFlag,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
 
 	let { ctx }: { ctx: any } = $props();
 
-	const ADVANCED_UPLOAD_KEY = 'package-manager-advanced-upload';
 	let narrow = $state(isNarrowViewport());
 	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
 
@@ -63,7 +60,7 @@
 		'welcome',
 	]);
 
-	const FILE_REGISTRY_FALLBACK = ctx.config?.fileRegistryCanisterId || '';
+	const FILE_REGISTRY_ID = ctx.config?.fileRegistryCanisterId || '';
 
 	let authState = $state(false);
 	let userProfilesState = $state<string[]>([]);
@@ -131,10 +128,6 @@
 		return a < b ? -1 : 1;
 	}
 
-	function parseRaw(raw: any): any {
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
-	}
-
 	function displayName(manifest: Record<string, any> | null | undefined, id: string): string {
 		const label = manifest?.sidebar_label;
 		if (typeof label === 'string' && label.trim()) return label;
@@ -177,18 +170,13 @@
 	let kindFilter = $state<KindFilter>('all');
 	let installedFilter = $state<InstalledFilter>('all');
 	let availableFilter = $state<AvailableFilter>('actionable');
-	let showAdvancedUpload = $state(readSessionFlag(ADVANCED_UPLOAD_KEY) === true);
-
-	function toggleAdvancedUpload() {
-		showAdvancedUpload = !showAdvancedUpload;
-		persistSessionFlag(ADVANCED_UPLOAD_KEY, showAdvancedUpload);
-	}
 	let openMenuKey = $state<string | null>(null);
 	let selectedVersions = $state<Record<string, string>>({});
 
-	let registries = $state<Registry[]>([]);
-	let registriesLoading = $state(true);
-	let registriesError = $state('');
+	// The slim realm has one file registry; the host hands its canister id over in ctx.config.
+	const registries: Registry[] = FILE_REGISTRY_ID
+		? [{ canister_id: FILE_REGISTRY_ID, canister_type: 'file_registry' }]
+		: [];
 
 	let installed = $state<InstalledItem[]>([]);
 	let installedLoading = $state(true);
@@ -199,13 +187,6 @@
 	let registryErrors = $state<string[]>([]);
 
 	let busy = $state<Record<string, string>>({});
-
-	let uploadKind = $state<Kind>('extension');
-	let uploadId = $state('');
-	let uploadFiles = $state<{ path: string; size: number; content: string }[]>([]);
-	let uploadRunInit = $state(true);
-	let uploadBusy = $state(false);
-	let fileInput = $state<HTMLInputElement | null>(null);
 
 	// Marketplace (merged from the deprecated market_place extension)
 	let mpAvailable = $derived(!!ctx.marketplace);
@@ -219,8 +200,6 @@
 	let mpPurchasing = $state(false);
 	let mpPurchasedIds = $derived(new Set(mpPurchases.map((p: any) => p.extension_id || p.id)));
 
-	let uploadTotalBytes = $derived(uploadFiles.reduce((acc, f) => acc + f.size, 0));
-	let uploadOverIngressLimit = $derived(uploadTotalBytes > 1.8 * 1024 * 1024);
 	let showRegistryColumn = $derived(registries.length > 1);
 
 	let updateCount = $derived(installed.filter((i) => statusFor(i) === 'outdated').length);
@@ -259,12 +238,6 @@
 		console.warn('[extension]', level, text);
 	}
 
-	function fmtSize(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-	}
-
 	function shortId(s: string, n = 8): string {
 		return s.length > n ? `${s.slice(0, n)}…` : s;
 	}
@@ -295,63 +268,34 @@
 		);
 	}
 
-	async function loadRegistriesFromBackend() {
-		registriesLoading = true;
-		registriesError = '';
-		try {
-			const raw = await ctx.backend.status();
-			const resp = parseRaw(raw);
-			if (resp?.success && resp?.data?.status) {
-				const canisters: { canister_id: string; canister_type: string }[] =
-					resp.data.status.canisters ?? [];
-				registries = canisters
-					.filter((c) => c.canister_type === 'file_registry')
-					.map((c) => ({ canister_id: c.canister_id, canister_type: c.canister_type }));
-			} else {
-				registries = [];
-				registriesError = 'status() did not return a success payload';
+	async function listInstalledExtensions(): Promise<InstalledItem[]> {
+		const items: InstalledItem[] = [];
+		let from: number | null = 1;
+		while (from !== null) {
+			const reply: any = await ctx.backend.read('extension_list', { from });
+			if (!reply.ok) throw new Error(reply.error);
+			for (const e of reply.extensions) {
+				items.push({ kind: 'extension', id: e.id, version: e.version ?? '', source: null, manifest: e.manifest ?? {} });
 			}
-		} catch (e: any) {
-			registriesError = e?.message ?? String(e);
-			registries = [];
-		} finally {
-			registriesLoading = false;
+			from = reply.next;
 		}
+		return items;
+	}
+
+	// A realm runs one codex at a time; its id is "<codex>@<version>".
+	async function listInstalledCodex(): Promise<InstalledItem[]> {
+		const reply: any = await ctx.backend.read('codex_status');
+		if (!reply.ok) throw new Error(reply.error);
+		if (!reply.codex) return [];
+		return [{ kind: 'codex', id: reply.codex.id.split('@')[0], version: reply.codex.version, source: null, manifest: {} }];
 	}
 
 	async function loadInstalled() {
 		installedLoading = true;
 		installedError = '';
 		try {
-			const [extRaw, codexRaw] = await Promise.all([
-				ctx.backend.list_runtime_extensions(),
-				ctx.backend.list_codex_packages(),
-			]);
-
-			const items: InstalledItem[] = [];
-
-			const extParsed = parseRaw(extRaw);
-			if (extParsed?.success) {
-				const ids: string[] = extParsed.runtime_extensions ?? [];
-				const manifests: Record<string, any> = extParsed.all_manifests ?? {};
-				const sources: Record<string, any> = extParsed.sources ?? {};
-				for (const id of ids) {
-					const m = manifests?.[id] ?? {};
-					items.push({ kind: 'extension', id, version: m?.version ?? '', source: sources?.[id] ?? null, manifest: m });
-				}
-			}
-
-			const codexParsed = parseRaw(codexRaw);
-			if (codexParsed?.success) {
-				const ids: string[] = codexParsed.codex_packages ?? [];
-				const manifests: Record<string, any> = codexParsed.manifests ?? {};
-				for (const id of ids) {
-					const m = manifests?.[id] ?? {};
-					items.push({ kind: 'codex', id, version: m?.version ?? '', source: null, manifest: m });
-				}
-			}
-
-			installed = items.sort((a, b) =>
+			const [extensions, codices] = await Promise.all([listInstalledExtensions(), listInstalledCodex()]);
+			installed = [...extensions, ...codices].sort((a, b) =>
 				displayName(a.manifest, a.id).localeCompare(displayName(b.manifest, b.id)),
 			);
 		} catch (e: any) {
@@ -366,14 +310,7 @@
 		registryErrors = [];
 		const out: CatalogEntry[] = [];
 
-		const regsToQuery =
-			registries.length > 0
-				? registries
-				: FILE_REGISTRY_FALLBACK
-					? [{ canister_id: FILE_REGISTRY_FALLBACK, canister_type: 'file_registry' }]
-					: [];
-
-		for (const reg of regsToQuery) {
+		for (const reg of registries) {
 			const errors: string[] = [];
 			const exts = await listRegistryExtensions(reg.canister_id).catch((e: any) => {
 				errors.push(`extensions: ${e?.message ?? String(e)}`);
@@ -418,7 +355,6 @@
 	}
 
 	async function refreshAll() {
-		await loadRegistriesFromBackend();
 		await Promise.all([loadInstalled(), loadRegistryCatalog()]);
 	}
 
@@ -491,35 +427,16 @@
 
 		setBusy(item.kind, item.id, `Uninstalling ${item.id}…`);
 		try {
-			const args = JSON.stringify(
-				item.kind === 'extension' ? { extension_id: item.id } : { codex_id: item.id },
-			);
-			const raw =
+			// The realm has one codex, so codex_uninstall takes no id.
+			const reply =
 				item.kind === 'extension'
-					? await ctx.backend.uninstall_extension(args)
-					: await ctx.backend.uninstall_codex(args);
-			const parsed = parseRaw(raw);
-			if (!parsed?.success) throw new Error(parsed?.error ?? 'Unknown error');
+					? await ctx.backend.run('extension_uninstall', { extension: item.id })
+					: await ctx.backend.run('codex_uninstall');
+			if (!reply.ok) throw new Error(reply.error);
 			pushToast('success', `Uninstalled ${label}`);
 			notifySidebarRefresh();
 			openMenuKey = null;
 			await Promise.all([loadInstalled(), loadRegistryCatalog()]);
-		} catch (e: any) {
-			pushToast('error', e?.message ?? String(e));
-		} finally {
-			clearBusy(item.kind, item.id);
-		}
-	}
-
-	async function reloadCodex(item: InstalledItem) {
-		setBusy(item.kind, item.id, `Reloading ${item.id}…`);
-		openMenuKey = null;
-		try {
-			const raw = await ctx.backend.reload_codex(JSON.stringify({ codex_id: item.id, run_init: false }));
-			const parsed = parseRaw(raw);
-			if (!parsed?.success) throw new Error(parsed?.error ?? 'Unknown error');
-			if (parsed.init_warning) pushToast('info', `Init warning: ${parsed.init_warning}`);
-			pushToast('success', `Reloaded ${displayName(item.manifest, item.id)}`);
 		} catch (e: any) {
 			pushToast('error', e?.message ?? String(e));
 		} finally {
@@ -543,24 +460,11 @@
 	async function installFromRegistry(entry: CatalogEntry, ver: string) {
 		setBusy(entry.kind, entry.id, `Installing ${entry.id}…`);
 		try {
-			let raw: string;
-			if (entry.kind === 'extension') {
-				raw = await ctx.backend.install_extension_from_registry(
-					JSON.stringify({ registry_canister_id: entry.registryCanisterId, ext_id: entry.id, version: ver }),
-				);
-			} else {
-				raw = await ctx.backend.install_codex_from_registry(
-					JSON.stringify({
-						registry_canister_id: entry.registryCanisterId,
-						codex_id: entry.id,
-						version: ver,
-						run_init: true,
-					}),
-				);
-			}
-			const parsed = parseRaw(raw);
-			if (!parsed?.success) throw new Error(parsed?.error ?? 'Unknown error');
-			if (parsed.init_warning) pushToast('info', `Init warning: ${parsed.init_warning}`);
+			const reply =
+				entry.kind === 'extension'
+					? await ctx.backend.run('extension_install', { extension: entry.id, version: ver })
+					: await ctx.backend.run('codex_install', { codex: entry.id, version: ver });
+			if (!reply.ok) throw new Error(reply.error);
 			pushToast('success', `Installed ${displayName(entry.manifest, entry.id)} (v${ver})`);
 			notifySidebarRefresh();
 			await Promise.all([loadInstalled(), loadRegistryCatalog()]);
@@ -568,64 +472,6 @@
 			pushToast('error', e?.message ?? String(e));
 		} finally {
 			clearBusy(entry.kind, entry.id);
-		}
-	}
-
-	async function readFileAsText(file: File): Promise<string> {
-		return await new Promise<string>((resolve, reject) => {
-			const r = new FileReader();
-			r.onload = () => resolve(String(r.result ?? ''));
-			r.onerror = () => reject(r.error);
-			r.readAsText(file);
-		});
-	}
-
-	async function onFilesSelected(evt: Event) {
-		const input = evt.target as HTMLInputElement;
-		if (!input.files) return;
-		const collected: typeof uploadFiles = [];
-		for (const f of Array.from(input.files)) {
-			const rel = (f as any).webkitRelativePath as string | undefined;
-			let path = rel && rel.length > 0 ? rel : f.name;
-			const slash = path.indexOf('/');
-			if (rel && slash >= 0) path = path.slice(slash + 1);
-			collected.push({ path, size: f.size, content: await readFileAsText(f) });
-		}
-		uploadFiles = collected;
-	}
-
-	function clearUpload() {
-		uploadFiles = [];
-		if (fileInput) fileInput.value = '';
-	}
-
-	async function performUpload() {
-		if (!uploadId || uploadFiles.length === 0) return;
-		uploadBusy = true;
-		try {
-			const filesMap: Record<string, string> = {};
-			for (const f of uploadFiles) filesMap[f.path] = f.content;
-
-			let raw: string;
-			if (uploadKind === 'extension') {
-				raw = await ctx.backend.install_extension(JSON.stringify({ extension_id: uploadId, files: filesMap }));
-			} else {
-				raw = await ctx.backend.install_codex(
-					JSON.stringify({ codex_id: uploadId, files: filesMap, run_init: uploadRunInit }),
-				);
-			}
-			const parsed = parseRaw(raw);
-			if (!parsed?.success) throw new Error(parsed?.error ?? 'Unknown error');
-			if (parsed.init_warning) pushToast('info', `Init warning: ${parsed.init_warning}`);
-			pushToast('success', `Installed ${uploadId}`);
-			notifySidebarRefresh();
-			clearUpload();
-			uploadId = '';
-			await loadInstalled();
-		} catch (e: any) {
-			pushToast('error', e?.message ?? String(e));
-		} finally {
-			uploadBusy = false;
 		}
 	}
 
@@ -781,17 +627,17 @@
 			<button
 				type="button"
 				onclick={refreshAll}
-				disabled={installedLoading || registryLoading || registriesLoading}
+				disabled={installedLoading || registryLoading}
 				class="chrome-btn self-start"
-				title={installedLoading || registryLoading || registriesLoading ? 'Loading' : 'Refresh'}
-				aria-label={installedLoading || registryLoading || registriesLoading ? 'Loading' : 'Refresh'}
+				title={installedLoading || registryLoading ? 'Loading' : 'Refresh'}
+				aria-label={installedLoading || registryLoading ? 'Loading' : 'Refresh'}
 			>
-				{#if installedLoading || registryLoading || registriesLoading}
+				{#if installedLoading || registryLoading}
 					<div class="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
 				{:else}
 					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
 				{/if}
-				<span class="chrome-label">{installedLoading || registryLoading || registriesLoading ? 'Loading…' : 'Refresh'}</span>
+				<span class="chrome-label">{installedLoading || registryLoading ? 'Loading…' : 'Refresh'}</span>
 			</button>
 		</div>
 
@@ -814,7 +660,7 @@
 				<div class={cn('px-3 py-2')}>
 					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
 					<div class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100')}>
-						{registries.length || (FILE_REGISTRY_FALLBACK ? 1 : 0)}
+						{registries.length}
 					</div>
 				</div>
 			</div>
@@ -837,7 +683,7 @@
 				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
 					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
 					<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>
-						{registries.length || (FILE_REGISTRY_FALLBACK ? 1 : 0)}
+						{registries.length}
 					</div>
 				</div>
 			</div>
@@ -904,16 +750,6 @@
 					Marketplace
 				</button>
 			{/if}
-			<button
-				type="button"
-				role="tab"
-				aria-selected={activeTab === 'advanced'}
-				onclick={() => (activeTab = 'advanced')}
-				class="chrome-tab {activeTab === 'advanced' ? 'is-on' : ''}"
-				title="Advanced"
-			>
-				Advanced
-			</button>
 		</nav>
 
 		{#if activeTab === 'installed'}
@@ -1022,14 +858,6 @@
 													'absolute right-0 top-full mt-1 z-20 min-w-[140px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg py-1 text-left',
 												)}
 											>
-												{#if item.kind === 'codex'}
-													<button
-														onclick={() => reloadCodex(item)}
-														class={cn('block w-full px-3 py-2 text-xs text-left hover:bg-gray-50 dark:hover:bg-gray-700')}
-													>
-														Reload codex
-													</button>
-												{/if}
 												{#if !PROTECTED_IDS.has(item.id)}
 													<button
 														onclick={() => uninstall(item)}
@@ -1130,14 +958,6 @@
 															'absolute right-4 top-full mt-1 z-20 min-w-[140px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg py-1 text-left',
 														)}
 													>
-														{#if item.kind === 'codex'}
-															<button
-																onclick={() => reloadCodex(item)}
-																class={cn('block w-full px-3 py-2 text-xs text-left hover:bg-gray-50 dark:hover:bg-gray-700')}
-															>
-																Reload codex
-															</button>
-														{/if}
 														{#if !PROTECTED_IDS.has(item.id)}
 															<button
 																onclick={() => uninstall(item)}
@@ -1186,13 +1006,7 @@
 					</button>
 				</div>
 
-				{#if registriesLoading}
-					<p class={cn('text-sm text-gray-500 text-center py-12')}>Loading realm info…</p>
-				{:else if registriesError}
-					<div class={cn('p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 mb-4')}>
-						Could not read realm registries: {registriesError}
-					</div>
-				{:else if registries.length === 0 && !FILE_REGISTRY_FALLBACK}
+				{#if registries.length === 0}
 					<p class={cn('text-sm text-gray-500 text-center py-12')}>
 						No file registry configured for this realm.
 					</p>
@@ -1513,109 +1327,6 @@
 						{/each}
 					</div>
 				{/if}
-			</div>
-		{/if}
-
-		{#if activeTab === 'advanced'}
-			<div class={cn('space-y-4 max-w-2xl')}>
-				<div class={cn('bg-white dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 py-4 sm:border sm:rounded-xl sm:p-5')}>
-					<h2 class={cn('text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1')}>Manual folder upload</h2>
-					<p class={cn('text-xs text-gray-500 mb-4')}>
-						For local development only. Production installs should be published to a file registry first.
-						Payloads over ~1.8 MB will be rejected by the IC ingress limit.
-					</p>
-
-					<button
-						onclick={toggleAdvancedUpload}
-						class={cn('text-sm font-medium text-indigo-600 hover:text-indigo-800 mb-4')}
-					>
-						{showAdvancedUpload ? 'Hide upload form' : 'Show upload form'}
-					</button>
-
-					{#if showAdvancedUpload}
-						<div class={cn('mb-4')}>
-							<span class={cn('block text-xs font-medium text-gray-500 mb-1.5')}>Package type</span>
-							<div class={cn('inline-flex border border-gray-300 rounded-lg overflow-hidden')}>
-								<button
-									onclick={() => (uploadKind = 'extension')}
-									class={cn(
-										'px-4 py-1.5 text-xs font-medium',
-										uploadKind === 'extension' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600',
-									)}
-								>
-									extension
-								</button>
-								<button
-									onclick={() => (uploadKind = 'codex')}
-									class={cn(
-										'px-4 py-1.5 text-xs font-medium',
-										uploadKind === 'codex' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600',
-									)}
-								>
-									codex
-								</button>
-							</div>
-						</div>
-
-						<div class={cn('mb-4')}>
-							<label for="pm-id" class={cn('block text-xs font-medium text-gray-500 mb-1.5')}>
-								{uploadKind === 'extension' ? 'Extension ID' : 'Codex ID'}
-							</label>
-							<input
-								id="pm-id"
-								type="text"
-								bind:value={uploadId}
-								placeholder="my_extension"
-								class={cn('w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white dark:bg-gray-800')}
-							/>
-						</div>
-
-						<div class={cn('mb-4')}>
-							<span class={cn('block text-xs font-medium text-gray-500 mb-1.5')}>Files (pick a folder)</span>
-							<input
-								bind:this={fileInput}
-								type="file"
-								multiple
-								webkitdirectory
-								onchange={onFilesSelected}
-								class={cn('block w-full text-sm text-gray-500')}
-							/>
-						</div>
-
-						{#if uploadFiles.length > 0}
-							<div class={cn('text-xs text-gray-500 mb-2')}>
-								{uploadFiles.length} files · {fmtSize(uploadTotalBytes)}
-								<button onclick={clearUpload} class={cn('ml-2 text-indigo-600 underline')}>clear</button>
-							</div>
-							{#if uploadOverIngressLimit}
-								<div class={cn('p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-3')}>
-									Payload exceeds the ~1.8 MB ingress safe limit. Publish via file registry instead.
-								</div>
-							{/if}
-						{/if}
-
-						{#if uploadKind === 'codex'}
-							<label class={cn('flex items-center gap-2 mb-4 text-sm text-gray-700')}>
-								<input type="checkbox" bind:checked={uploadRunInit} class={cn('w-4 h-4')} />
-								Run init.py after install
-							</label>
-						{/if}
-
-						<button
-							onclick={performUpload}
-							disabled={!uploadId || uploadFiles.length === 0 || uploadBusy}
-							class={cn(
-								'px-5 py-2.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50',
-							)}
-						>
-							{#if uploadBusy}
-								{@html spinnerSvg} Installing…
-							{:else}
-								Install from folder
-							{/if}
-						</button>
-					{/if}
-				</div>
 			</div>
 		{/if}
 	{/if}
