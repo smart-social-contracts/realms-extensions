@@ -411,13 +411,13 @@
 					? await ctx.backend.run('extension_uninstall', { extension: item.id })
 					: await ctx.backend.run('codex_uninstall');
 			if (!reply.ok) throw new Error(reply.error);
+			openMenuKey = null;
 			if (reply.proposal) {
 				pushToast('info', `Proposal ${reply.proposal} filed: ${label} is uninstalled once it is accepted`);
 				return;
 			}
 			pushToast('success', `Uninstalled ${label}`);
 			notifySidebarRefresh();
-			openMenuKey = null;
 			await Promise.all([loadInstalled(), loadRegistryCatalog()]);
 		} catch (e: any) {
 			pushToast('error', e?.message ?? String(e));
@@ -448,7 +448,7 @@
 					: await ctx.backend.run('codex_install', { codex: entry.id, version: ver });
 			if (!reply.ok) throw new Error(reply.error);
 			if (reply.proposal) {
-				pushToast('info', `Proposal ${reply.proposal} filed: ${entry.id} installs once it is accepted`);
+				pushToast('info', `Proposal ${reply.proposal} filed: ${displayName(entry.manifest, entry.id)} installs once it is accepted`);
 				return;
 			}
 			pushToast('success', `Installed ${displayName(entry.manifest, entry.id)} (v${ver})`);
