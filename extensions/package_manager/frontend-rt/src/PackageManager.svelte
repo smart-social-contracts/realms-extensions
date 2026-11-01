@@ -13,21 +13,15 @@
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
 
 	type Kind = 'extension' | 'codex';
-	type TabId = 'installed' | 'available' | 'marketplace' | 'advanced';
+	type TabId = 'installed' | 'available' | 'marketplace';
 	type KindFilter = 'all' | Kind;
 	type InstalledFilter = 'all' | 'updates';
 	type AvailableFilter = 'actionable' | 'all';
-
-	interface Registry {
-		canister_id: string;
-		canister_type: string;
-	}
 
 	interface InstalledItem {
 		kind: Kind;
 		id: string;
 		version: string;
-		source: { registry_canister_id?: string; version?: string } | null;
 		manifest: Record<string, any> | null;
 	}
 
@@ -50,7 +44,6 @@
 		versions: string[];
 		latest: string;
 		manifest: Record<string, any> | null;
-		registryCanisterId: string;
 	}
 
 	const PROTECTED_IDS = new Set([
@@ -60,6 +53,7 @@
 		'welcome',
 	]);
 
+	// The slim realm has one file registry; the host hands its canister id over in ctx.config.
 	const FILE_REGISTRY_ID = ctx.config?.fileRegistryCanisterId || '';
 
 	let authState = $state(false);
@@ -173,11 +167,6 @@
 	let openMenuKey = $state<string | null>(null);
 	let selectedVersions = $state<Record<string, string>>({});
 
-	// The slim realm has one file registry; the host hands its canister id over in ctx.config.
-	const registries: Registry[] = FILE_REGISTRY_ID
-		? [{ canister_id: FILE_REGISTRY_ID, canister_type: 'file_registry' }]
-		: [];
-
 	let installed = $state<InstalledItem[]>([]);
 	let installedLoading = $state(true);
 	let installedError = $state('');
@@ -199,8 +188,6 @@
 	let mpSelected = $state<any>(null);
 	let mpPurchasing = $state(false);
 	let mpPurchasedIds = $derived(new Set(mpPurchases.map((p: any) => p.extension_id || p.id)));
-
-	let showRegistryColumn = $derived(registries.length > 1);
 
 	let updateCount = $derived(installed.filter((i) => statusFor(i) === 'outdated').length);
 	let actionableCount = $derived(
@@ -275,19 +262,20 @@
 			const reply: any = await ctx.backend.read('extension_list', { from });
 			if (!reply.ok) throw new Error(reply.error);
 			for (const e of reply.extensions) {
-				items.push({ kind: 'extension', id: e.id, version: e.version ?? '', source: null, manifest: e.manifest ?? {} });
+				items.push({ kind: 'extension', id: e.id, version: e.version ?? '', manifest: e.manifest ?? {} });
 			}
 			from = reply.next;
 		}
 		return items;
 	}
 
-	// A realm runs one codex at a time; its id is "<codex>@<version>".
+	// A realm runs one codex at a time; its id is "<codex>@<version>". The codex's manifest id is assumed to equal
+	// its registry namespace id; if they differ, "update available" never shows.
 	async function listInstalledCodex(): Promise<InstalledItem[]> {
 		const reply: any = await ctx.backend.read('codex_status');
 		if (!reply.ok) throw new Error(reply.error);
 		if (!reply.codex) return [];
-		return [{ kind: 'codex', id: reply.codex.id.split('@')[0], version: reply.codex.version, source: null, manifest: {} }];
+		return [{ kind: 'codex', id: reply.codex.id.split('@')[0], version: reply.codex.version, manifest: {} }];
 	}
 
 	async function loadInstalled() {
@@ -306,48 +294,38 @@
 	}
 
 	async function loadRegistryCatalog() {
+		if (!FILE_REGISTRY_ID) return;
 		registryLoading = true;
 		registryErrors = [];
-		const out: CatalogEntry[] = [];
-
-		for (const reg of registries) {
-			const errors: string[] = [];
-			const exts = await listRegistryExtensions(reg.canister_id).catch((e: any) => {
-				errors.push(`extensions: ${e?.message ?? String(e)}`);
-				return [] as RegistryExtension[];
-			});
-			const codices = await listRegistryCodices(reg.canister_id).catch((e: any) => {
-				errors.push(`codices: ${e?.message ?? String(e)}`);
-				return [] as RegistryCodex[];
-			});
-			for (const e of exts) {
-				out.push({
-					kind: 'extension',
-					id: e.ext_id,
-					versions: e.versions ?? [],
-					latest: e.latest,
-					manifest: e.manifest as any,
-					registryCanisterId: reg.canister_id,
-				});
-			}
-			for (const c of codices) {
-				out.push({
-					kind: 'codex',
-					id: c.codex_id,
-					versions: c.versions ?? [],
-					latest: c.latest,
-					manifest: null,
-					registryCanisterId: reg.canister_id,
-				});
-			}
-			if (errors.length > 0 && exts.length === 0 && codices.length === 0) {
-				registryErrors = [
-					...registryErrors,
-					`Failed to load from registry ${shortId(reg.canister_id)}: ${errors.join('; ')}`,
-				];
-			}
+		const errors: string[] = [];
+		const exts = await listRegistryExtensions(FILE_REGISTRY_ID).catch((e: any) => {
+			errors.push(`extensions: ${e?.message ?? String(e)}`);
+			return [] as RegistryExtension[];
+		});
+		const codices = await listRegistryCodices(FILE_REGISTRY_ID).catch((e: any) => {
+			errors.push(`codices: ${e?.message ?? String(e)}`);
+			return [] as RegistryCodex[];
+		});
+		if (errors.length > 0 && exts.length === 0 && codices.length === 0) {
+			registryErrors = [`Failed to load from registry ${shortId(FILE_REGISTRY_ID)}: ${errors.join('; ')}`];
 		}
 
+		const out: CatalogEntry[] = [
+			...exts.map((e): CatalogEntry => ({
+				kind: 'extension',
+				id: e.ext_id,
+				versions: e.versions ?? [],
+				latest: e.latest,
+				manifest: e.manifest as any,
+			})),
+			...codices.map((c): CatalogEntry => ({
+				kind: 'codex',
+				id: c.codex_id,
+				versions: c.versions ?? [],
+				latest: c.latest,
+				manifest: null,
+			})),
+		];
 		registryEntries = dedupeCatalog(out).sort((a, b) =>
 			displayName(a.manifest, a.id).localeCompare(displayName(b.manifest, b.id)),
 		);
@@ -433,6 +411,10 @@
 					? await ctx.backend.run('extension_uninstall', { extension: item.id })
 					: await ctx.backend.run('codex_uninstall');
 			if (!reply.ok) throw new Error(reply.error);
+			if (reply.proposal) {
+				pushToast('info', `Proposal ${reply.proposal} filed: ${label} is uninstalled once it is accepted`);
+				return;
+			}
 			pushToast('success', `Uninstalled ${label}`);
 			notifySidebarRefresh();
 			openMenuKey = null;
@@ -465,6 +447,10 @@
 					? await ctx.backend.run('extension_install', { extension: entry.id, version: ver })
 					: await ctx.backend.run('codex_install', { codex: entry.id, version: ver });
 			if (!reply.ok) throw new Error(reply.error);
+			if (reply.proposal) {
+				pushToast('info', `Proposal ${reply.proposal} filed: ${entry.id} installs once it is accepted`);
+				return;
+			}
 			pushToast('success', `Installed ${displayName(entry.manifest, entry.id)} (v${ver})`);
 			notifySidebarRefresh();
 			await Promise.all([loadInstalled(), loadRegistryCatalog()]);
@@ -660,7 +646,7 @@
 				<div class={cn('px-3 py-2')}>
 					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
 					<div class={cn('text-xl font-semibold text-gray-900 dark:text-gray-100')}>
-						{registries.length}
+						{FILE_REGISTRY_ID ? 1 : 0}
 					</div>
 				</div>
 			</div>
@@ -683,7 +669,7 @@
 				<div class={cn('bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3')}>
 					<div class={cn('text-xs text-gray-500 uppercase tracking-wide')}>Registries</div>
 					<div class={cn('text-2xl font-semibold text-gray-900 dark:text-gray-100')}>
-						{registries.length}
+						{FILE_REGISTRY_ID ? 1 : 0}
 					</div>
 				</div>
 			</div>
@@ -814,11 +800,6 @@
 										{item.kind}
 									</span>
 									<span>{item.version || '—'}{cat?.latest ? ` → ${cat.latest}` : ''}</span>
-									{#if showRegistryColumn && item.source?.registry_canister_id}
-										<span class={cn('font-mono')} title={item.source.registry_canister_id}>
-											{shortId(item.source.registry_canister_id)}
-										</span>
-									{/if}
 								</div>
 								{#if displayDescription(item.manifest)}
 									<div class={cn('text-xs text-gray-500 mt-1')}>{displayDescription(item.manifest)}</div>
@@ -883,9 +864,6 @@
 									<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Installed</th>
 									<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Latest</th>
 									<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Status</th>
-									{#if showRegistryColumn}
-										<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Source</th>
-									{/if}
 									<th class={cn('px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase')}>Actions</th>
 								</tr>
 							</thead>
@@ -918,11 +896,6 @@
 												{stBadge.label}
 											</span>
 										</td>
-										{#if showRegistryColumn}
-											<td class={cn('px-4 py-3 font-mono text-xs text-gray-500')} title={item.source?.registry_canister_id ?? ''}>
-												{item.source?.registry_canister_id ? shortId(item.source.registry_canister_id) : '—'}
-											</td>
-										{/if}
 										<td class={cn('px-4 py-3 text-right whitespace-nowrap relative')}>
 											{#if rowBusy}
 												<span class={cn('inline-flex items-center gap-1.5 text-xs text-gray-500')}>
@@ -1006,7 +979,7 @@
 					</button>
 				</div>
 
-				{#if registries.length === 0}
+				{#if !FILE_REGISTRY_ID}
 					<p class={cn('text-sm text-gray-500 text-center py-12')}>
 						No file registry configured for this realm.
 					</p>
@@ -1029,7 +1002,7 @@
 						</p>
 					{:else if narrow}
 						<div class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
-							{#each filteredAvailable as entry (rowKey(entry.kind, entry.id) + ':' + entry.registryCanisterId)}
+							{#each filteredAvailable as entry (rowKey(entry.kind, entry.id))}
 								{@const installedItem = isInstalled(entry)}
 								{@const installedVersion = installedItem?.version ?? ''}
 								{@const isOutdated =
@@ -1083,11 +1056,6 @@
 										{:else}
 											<span>{entry.latest || '—'}</span>
 										{/if}
-										{#if showRegistryColumn}
-											<span class={cn('font-mono')} title={entry.registryCanisterId}>
-												{shortId(entry.registryCanisterId)}
-											</span>
-										{/if}
 									</div>
 									{#if displayDescription(entry.manifest)}
 										<div class={cn('text-xs text-gray-500 mt-1')}>{displayDescription(entry.manifest)}</div>
@@ -1128,15 +1096,12 @@
 										<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Package</th>
 										<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Type</th>
 										<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Version</th>
-										{#if showRegistryColumn}
-											<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Registry</th>
-										{/if}
 										<th class={cn('px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase')}>Status</th>
 										<th class={cn('px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase')}>Actions</th>
 									</tr>
 								</thead>
 								<tbody class={cn('divide-y divide-gray-100 dark:divide-gray-700')}>
-									{#each filteredAvailable as entry (rowKey(entry.kind, entry.id) + ':' + entry.registryCanisterId)}
+									{#each filteredAvailable as entry (rowKey(entry.kind, entry.id))}
 										{@const installedItem = isInstalled(entry)}
 										{@const installedVersion = installedItem?.version ?? ''}
 										{@const isOutdated =
@@ -1181,11 +1146,6 @@
 													{entry.latest || '—'}
 												{/if}
 											</td>
-											{#if showRegistryColumn}
-												<td class={cn('px-4 py-3 font-mono text-xs text-gray-500')} title={entry.registryCanisterId}>
-													{shortId(entry.registryCanisterId)}
-												</td>
-											{/if}
 											<td class={cn('px-4 py-3')}>
 												{#if isOutdated}
 													<span class={cn('inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800')}>
