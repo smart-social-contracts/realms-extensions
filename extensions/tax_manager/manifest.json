@@ -1,7 +1,7 @@
 {
   "name": "tax_manager",
   "version": "1.0.0",
-  "description": "Set the realm's taxes (what is taxed, brackets, thresholds and rates) and adopt them as the tax policy the codex uses to calculate and issue invoices.",
+  "description": "Set the realm's taxes (what is taxed, brackets, thresholds and rates), adopt them as the tax policy, bill members for a period, and declare the taxes you owe yourself.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [

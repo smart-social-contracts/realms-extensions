@@ -151,6 +151,7 @@
 			currency: view.currency,
 			decimals: view.decimals,
 			source_fund: sourceCode,
+			source_exists: !!source,
 			epoch_length: config.epoch,
 			anchor_month: config.anchor_month,
 			current_period: current?.id ?? '',
@@ -245,7 +246,7 @@
 		flows = status ? periodFlows(status) : null;
 		budgets = {
 			budgets: budgetRows
-				.filter((b) => b.period === selectedPeriod && (b.status === 'adopted' || b.status === 'closed'))
+				.filter((b) => b.period === selectedPeriod)
 				.map((b) => ({ ...b, variance: b.actual - b.planned }))
 				.sort((a, b) => a.fund.localeCompare(b.fund)),
 		};
@@ -336,6 +337,10 @@
 	}
 
 	async function saveRule() {
+		if (!overview.source_exists) {
+			addToast(`The source fund ${overview.source_fund} does not exist yet`, 'error');
+			return;
+		}
 		const lines = ruleRows.filter((r) => r.fund && parseFloat(r.percent) > 0);
 		if (lines.length === 0) {
 			addToast('Add at least one fund with a percentage', 'error');

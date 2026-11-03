@@ -863,7 +863,12 @@
 						<div class="space-y-3">
 							<div>
 								<label class={labelClass} for="declare-tax">Tax</label>
-								<select id="declare-tax" class={inputClass} bind:value={declareTax}>
+								<select
+									id="declare-tax"
+									class={inputClass}
+									value={declareTax || declaredTaxes[0]?.code}
+									onchange={(e) => (declareTax = (e.target as HTMLSelectElement).value)}
+								>
 									{#each declaredTaxes as t (t.code)}
 										<option value={t.code}>{t.label || t.code}</option>
 									{/each}
