@@ -5,7 +5,8 @@
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
-	import { applied, governorOf, type Governor } from '../../../_shared/frontend/governed';
+	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
+	import { formatUnits, toBaseUnits } from '../../../_shared/frontend/units';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -45,40 +46,7 @@
 	const canManage = $derived(can('tax.manage'));
 	const canAssess = $derived(can('tax.assess'));
 
-	// --- Vote confirmation (same flow as budget_manager) ---
-	let voteConfirm: {
-		summary: string;
-		governedBy: string;
-		governedPolicy: string;
-		policyReason: string;
-		run: () => Promise<void>;
-	} | null = $state(null);
-	let voteConfirmBusy = $state(false);
-
-	/** Run ``act`` at once under a direct policy; otherwise only once the user confirms that it opens a vote. */
-	async function governed(gov: Governor, summary: string, act: () => Promise<void>) {
-		if (gov.direct) {
-			await act();
-			return;
-		}
-		voteConfirm = {
-			summary,
-			governedBy: gov.name,
-			governedPolicy: gov.policy,
-			policyReason: `Tax policy is governed by ${gov.name}'s policy (${gov.policy}); a vote is required before this change can apply.`,
-			run: async () => {
-				voteConfirmBusy = true;
-				try {
-					await act();
-					voteConfirm = null;
-				} catch (e: any) {
-					addToast(e?.message || 'Error', 'error');
-				} finally {
-					voteConfirmBusy = false;
-				}
-			},
-		};
-	}
+	const { confirm: voteConfirm, busy: voteConfirmBusy, governed } = voteGate(addToast, 'Tax policy');
 
 	// --- Labels ---
 	const BASES = ['flat', 'land_area', 'declared'];
@@ -99,12 +67,29 @@
 	let loading = $state(true);
 	let busy = $state('');
 
-	const currency = $derived(overview?.adopted?.symbol || '');
+	const currency = $derived(overview?.currency ?? '');
+	const decimals = $derived(overview?.decimals ?? 0);
 
-	/** Amounts are whole units of the token's smallest denomination, as the realm bills them. */
+	/** The realm keeps amounts in the token's base units: shown in tokens, with at least two places. */
+	function human(n: number | null | undefined): string {
+		return Number(formatUnits(n ?? 0, decimals)).toLocaleString(undefined, {
+			minimumFractionDigits: Math.min(decimals, 2),
+			maximumFractionDigits: decimals,
+		});
+	}
+
 	function fmt(n: number | null | undefined): string {
-		const s = (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 6 });
-		return currency ? `${s} ${currency}` : s;
+		return currency ? `${human(n)} ${currency}` : human(n);
+	}
+
+	/** An amount the admin typed, in tokens, as base units; NaN when it is not an amount of this token. */
+	function toUnits(n: number | null | undefined): number {
+		return toBaseUnits(String(n ?? 0), decimals) ?? NaN;
+	}
+
+	/** Base units as the number an input shows, in tokens. */
+	function toTokens(n: number | null | undefined): number | null {
+		return n == null ? null : Number(formatUnits(n, decimals));
 	}
 
 	function pct(bp: number | null | undefined): string {
@@ -119,12 +104,12 @@
 		else if (t.method === 'proportional') how = `${pct(t.rate_bp)} of the value`;
 		else {
 			const parts = (t.brackets ?? []).map((b: any) =>
-				b.up_to == null ? `${pct(b.rate_bp)} above` : `${pct(b.rate_bp)} up to ${b.up_to.toLocaleString()}`,
+				b.up_to == null ? `${pct(b.rate_bp)} above` : `${pct(b.rate_bp)} up to ${human(b.up_to)}`,
 			);
 			how = parts.join(', ');
 		}
-		if (t.base === 'land_area') how += ` · value = area × ${t.unit_value}`;
-		if (t.exempt_below) how += ` · exempt below ${Number(t.exempt_below).toLocaleString()}`;
+		if (t.base === 'land_area') how += ` · value = area × ${human(t.unit_value)}`;
+		if (t.exempt_below) how += ` · exempt below ${human(t.exempt_below)}`;
 		return `${how} · due after ${t.due_days ?? 30} days`;
 	}
 
@@ -157,7 +142,7 @@
 	let baseline = $state('[]');
 
 	function bracketFrom(b: any): BracketRow {
-		return { uid: nextUid++, upTo: b.up_to ?? null, rate: (b.rate_bp ?? 0) / 100 };
+		return { uid: nextUid++, upTo: toTokens(b.up_to), rate: (b.rate_bp ?? 0) / 100 };
 	}
 
 	function rowFrom(t: any): TaxRow {
@@ -167,12 +152,12 @@
 			label: t.label ?? '',
 			enabled: t.enabled !== false,
 			base: t.base ?? 'flat',
-			unitValue: t.unit_value ?? 1,
+			unitValue: toTokens(t.unit_value ?? toUnits(1)),
 			method: t.method ?? 'fixed',
-			amount: t.amount ?? null,
+			amount: toTokens(t.amount),
 			rate: t.rate_bp != null ? t.rate_bp / 100 : null,
 			brackets: (t.brackets ?? []).map(bracketFrom),
-			exemptBelow: t.exempt_below || null,
+			exemptBelow: toTokens(t.exempt_below || null),
 			exemptProfiles: (t.exempt_profiles ?? []).join(', '),
 			dueDays: t.due_days ?? 30,
 		};
@@ -199,19 +184,24 @@
 			due_days: r.dueDays ?? 30,
 			exempt_profiles: names(r.exemptProfiles),
 		};
-		if (r.exemptBelow) t.exempt_below = Math.round(r.exemptBelow);
-		if (r.base === 'land_area') t.unit_value = Math.round(r.unitValue ?? 1);
-		if (t.method === 'fixed') t.amount = Math.round(r.amount ?? 0);
+		if (r.exemptBelow) t.exempt_below = toUnits(r.exemptBelow);
+		if (r.base === 'land_area') t.unit_value = toUnits(r.unitValue ?? 1);
+		if (t.method === 'fixed') t.amount = toUnits(r.amount);
 		else if (t.method === 'proportional') t.rate_bp = bp(r.rate);
 		else
 			t.brackets = r.brackets.map((b, i) => ({
-				up_to: i === r.brackets.length - 1 ? null : Math.round(b.upTo ?? 0),
+				up_to: i === r.brackets.length - 1 ? null : toUnits(b.upTo),
 				rate_bp: bp(b.rate),
 			}));
 		return t;
 	}
 
 	const documentTaxes = $derived(rows.map(taxFrom));
+	const badAmount = $derived(
+		documentTaxes.some((t: any) =>
+			[t.amount, t.exempt_below, t.unit_value, ...(t.brackets ?? []).map((b: any) => b.up_to)].some(Number.isNaN),
+		),
+	);
 	const dirty = $derived(JSON.stringify(documentTaxes) !== baseline);
 
 	function resetEditor() {
@@ -226,14 +216,14 @@
 		while (rows.some((r) => r.code === `tax_${n}`)) n++;
 		const row = rowFrom(
 			base === 'flat'
-				? { code: `tax_${n}`, label: 'Membership tax', base, method: 'fixed', amount: 10 }
+				? { code: `tax_${n}`, label: 'Membership tax', base, method: 'fixed', amount: toUnits(10) }
 				: {
 						code: `tax_${n}`,
 						label: base === 'land_area' ? 'Land tax' : 'Tax on declared amounts',
 						base,
 						method: 'proportional',
 						rate_bp: 100,
-						unit_value: 1,
+						unit_value: toUnits(1),
 					},
 		);
 		rows.push(row);
@@ -248,7 +238,7 @@
 		r.method = method;
 		if (method === 'progressive' && r.brackets.length === 0) {
 			r.brackets = [
-				{ uid: nextUid++, upTo: 10000, rate: r.rate ?? 0.5 },
+				{ uid: nextUid++, upTo: 100, rate: r.rate ?? 0.5 },
 				{ uid: nextUid++, upTo: null, rate: (r.rate ?? 0.5) * 2 },
 			];
 		}
@@ -257,7 +247,7 @@
 	function addBracket(r: TaxRow) {
 		const last = r.brackets[r.brackets.length - 1];
 		const prevTop = r.brackets.length > 1 ? (r.brackets[r.brackets.length - 2].upTo ?? 0) : 0;
-		if (last) last.upTo = prevTop ? prevTop * 2 : 10000;
+		if (last) last.upTo = prevTop ? prevTop * 2 : 100;
 		r.brackets.push({ uid: nextUid++, upTo: null, rate: last?.rate ?? 0 });
 	}
 
@@ -281,9 +271,10 @@
 		permissions = me.permissions;
 		const policy = view.policy;
 		overview = {
+			currency: view.currency,
+			decimals: view.decimals,
 			adopted: policy && {
 				id: policy.id,
-				symbol: policy.document.symbol ?? '',
 				taxes: policy.document.taxes,
 				adopted_at: policy.adopted_at,
 				proposal: policy.proposal,
@@ -309,27 +300,40 @@
 	void loadAll();
 
 	// --- Adopting a policy ---
+	/** Adopt the draft ``policy`` that is on the realm; under a voting policy this opens the second vote. */
+	async function adoptPolicy(policy: string) {
+		if (applied(await ctx.run('tax_policy_propose', { policy }), addToast, 'Could not adopt the tax policy')) {
+			addToast('Tax policy adopted');
+			await load();
+		}
+	}
+
 	/** Draft the edited taxes, then adopt the draft; each step may open a vote instead. */
 	async function onAdopt() {
+		if (badAmount) {
+			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
+			return;
+		}
 		busy = 'adopt';
 		try {
 			const taxes = documentTaxes;
 			await governed(overview.governor, `Adopt a tax policy of ${taxes.length} tax(es)`, async () => {
-				// Under a voting policy drafting is voted on too; the draft it leaves is adopted on the next save.
-				let policy = overview.drafts.find(
-					(d: any) => JSON.stringify(d.document.taxes) === JSON.stringify(taxes),
-				)?.id;
-				if (!policy) {
-					const document = { ...(currency ? { symbol: currency } : {}), taxes };
-					const drafted = await ctx.run('tax_policy_draft', { document, description });
-					if (!applied(drafted, addToast, 'Could not draft the tax policy', '; adopt the policy again once it passes')) return;
-					policy = drafted.policy;
-				}
-				if (applied(await ctx.run('tax_policy_propose', { policy }), addToast, 'Could not adopt the tax policy')) {
-					addToast('Tax policy adopted');
-					await load();
-				}
+				// Under a voting policy drafting is voted on too; the draft it leaves is adopted from the list of drafts.
+				const document = { ...(currency ? { symbol: currency } : {}), taxes };
+				const drafted = await ctx.run('tax_policy_draft', { document, description });
+				if (!applied(drafted, addToast, 'Could not draft the tax policy', '; adopt the draft from the list once it passes')) return;
+				await adoptPolicy(drafted.policy);
 			});
+		} finally {
+			busy = '';
+		}
+	}
+
+	/** Adopt a draft that is already on the realm, e.g. one a vote has passed. */
+	async function onAdoptDraft(draft: any) {
+		busy = 'adopt';
+		try {
+			await governed(overview.governor, `Adopt tax policy ${draft.id}`, () => adoptPolicy(draft.id));
 		} finally {
 			busy = '';
 		}
@@ -388,12 +392,17 @@
 	let declareOrganization = $state('');
 
 	async function onDeclare() {
+		const amount = toBaseUnits(String(declareAmount ?? 0), decimals);
+		if (amount == null) {
+			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
+			return;
+		}
 		busy = 'declare';
 		try {
 			const res = await ctx.run('tax_declare', {
 				base: declareTax || declaredTaxes[0]?.code,
 				period: declarePeriod.trim(),
-				amount: Math.round(declareAmount ?? 0),
+				amount,
 				...(declareOrganization.trim() ? { organization: declareOrganization.trim() } : {}),
 			});
 			if (!res.ok) {
@@ -481,6 +490,34 @@
 						</span>
 					</div>
 					<div class="text-xs text-gray-500">{describeTax(t)}</div>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+{/snippet}
+
+{#snippet draftList()}
+	{#if overview.drafts.length > 0}
+		<h3 class="mt-4 mb-2 text-xs font-semibold text-gray-500">Drafts</h3>
+		<ul class="divide-y divide-gray-100" aria-label="Policy drafts">
+			{#each overview.drafts as d (d.id)}
+				<li class="flex items-center justify-between gap-2 py-2 text-sm">
+					<span class="min-w-0 text-gray-600">
+						<span class="font-medium text-gray-900">{d.id}</span>
+						<span class="text-xs text-gray-400">
+							· {d.document.taxes.map((t: any) => t.label || t.code).join(', ')}{d.description ? ` · ${d.description}` : ''}
+						</span>
+					</span>
+					{#if canManage}
+						<button
+							class={secondaryClass}
+							disabled={busy !== ''}
+							aria-label="Adopt {d.id}"
+							onclick={() => onAdoptDraft(d)}
+						>
+							Adopt
+						</button>
+					{/if}
 				</li>
 			{/each}
 		</ul>
@@ -595,6 +632,7 @@
 						<p class="mt-3 text-xs text-gray-400">
 							Only those who hold tax.manage can change the tax policy.
 						</p>
+						{@render draftList()}
 					{:else}
 						<div class="space-y-2">
 							{#each rows as row (row.uid)}
@@ -683,7 +721,7 @@
 											{#if row.base === 'flat' || row.method === 'fixed'}
 												<div>
 													<label class={labelClass} for="amount-{row.uid}">
-														Amount{currency ? ` (${currency}, smallest unit)` : ''}
+														Amount{currency ? ` (${currency})` : ''}
 													</label>
 													<input
 														id="amount-{row.uid}"
@@ -844,9 +882,16 @@
 							Governed by {overview.governor.name} ({overview.governor.policy}).
 							{overview.governor.direct
 								? 'Adopting applies at once.'
-								: 'Adopting opens a vote; drafting the policy is voted on too.'}
-							Amounts are in the smallest unit of the token.
+								: 'Adopting opens a vote.'}
+							Amounts are in {currency || 'tokens'}.
 						</p>
+						{#if !overview.governor.direct}
+							<p class="mt-2 text-xs text-gray-400">
+								This realm votes on its tax policy: a change takes two votes, one to draft the policy and
+								one to adopt it.
+							</p>
+						{/if}
+						{@render draftList()}
 					{/if}
 				</div>
 			</div>
@@ -884,7 +929,7 @@
 									id="declare-amount"
 									type="number"
 									min="0"
-									step="1"
+									step="any"
 									class={inputClass}
 									bind:value={declareAmount}
 								/>
@@ -910,7 +955,8 @@
 
 				<!-- Declarations -->
 				<div class={panelClass}>
-					<h2 class="text-sm font-semibold text-gray-700 mb-3">Your declarations</h2>
+					<h2 class="text-sm font-semibold text-gray-700 mb-1">Your declarations</h2>
+					<p class="mb-3 text-xs text-gray-400">Declarations of an organization you administer are not listed here.</p>
 					{#if overview.declarations.length === 0}
 						<p class="text-sm text-gray-400 py-2">Nothing has been assessed or declared for you yet.</p>
 					{:else}
@@ -928,28 +974,28 @@
 		{/if}
 	{/if}
 
-	{#if voteConfirm}
+	{#if $voteConfirm}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
 			<div class="w-full max-w-md bg-white rounded-xl shadow-xl p-5">
 				<h3 class="text-base font-semibold text-gray-900 mb-1">A vote is required</h3>
-				<p class="text-sm text-gray-600 mb-3">{voteConfirm.summary}</p>
+				<p class="text-sm text-gray-600 mb-3">{$voteConfirm.summary}</p>
 				<div class="p-3 bg-gray-50 rounded-lg text-xs text-gray-600 mb-4">
 					<p class="mb-1">
 						<span class="font-medium text-gray-700">Governed by:</span>
-						{voteConfirm.governedBy} ({voteConfirm.governedPolicy})
+						{$voteConfirm.governedBy} ({$voteConfirm.governedPolicy})
 					</p>
-					<p>{voteConfirm.policyReason}</p>
+					<p>{$voteConfirm.policyReason}</p>
 				</div>
 				<div class="flex gap-2 justify-end">
 					<button
-						onclick={() => (voteConfirm = null)}
-						disabled={voteConfirmBusy}
+						onclick={() => voteConfirm.set(null)}
+						disabled={$voteConfirmBusy}
 						class={secondaryClass}
 					>
 						Cancel
 					</button>
-					<button onclick={() => voteConfirm?.run()} disabled={voteConfirmBusy} class={primaryClass}>
-						{#if voteConfirmBusy}{@render spinner(true)}{/if}
+					<button onclick={() => $voteConfirm?.run()} disabled={$voteConfirmBusy} class={primaryClass}>
+						{#if $voteConfirmBusy}{@render spinner(true)}{/if}
 						Create proposal
 					</button>
 				</div>

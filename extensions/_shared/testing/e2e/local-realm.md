@@ -14,6 +14,12 @@ realms local setup --codex <codex id>                 # launch it
 
 Every test records a screenshot and a video, and a trace; they land in `test-results/`.
 
+A governed extension (one that changes the realm through department-approved operations) is tested under both policies:
+`setRootPolicy(1, 1)` makes a change apply at once, `setRootPolicy(1, 2)` makes it a proposal, and
+`passTheOpenProposal()` votes it through as the local identity. Call `makeOneYesDecideAtOnce()` first, while the root
+still approves alone, so that one yes settles a vote. Under a voting root a login cannot add an admin (that is a
+proposal too): sign in first, then change the policy and `page.reload()`.
+
 `tax_manager` and `budget_manager` need a realm that has `tax_policy_view` and `budget_view`
 (smart-social-contracts/realms-gos#495), and their specs run once on a fresh realm: the tax spec starts with no tax
 policy, the budget spec opens a fiscal period. The codex needs `codex_api_version` 2 and a `backend/hooks.py`; one

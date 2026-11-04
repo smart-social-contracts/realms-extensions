@@ -7,7 +7,7 @@
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
-	import { applied, governorOf, type Governor } from '../../../_shared/frontend/governed';
+	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -41,12 +41,13 @@
 		return out;
 	}
 
-	/** Every page of ``budget_view``: the funds of all pages, and the rest of the first page. */
-	async function budgetView() {
-		const first = await read('budget_view');
+	/** Every page of ``budget_view`` for ``period`` (default: the one covering now): the funds of all pages, and the rest of the first page. */
+	async function budgetView(period = '') {
+		const args = period ? { period } : {};
+		const first = await read('budget_view', args);
 		const funds = [...first.funds];
 		for (let from = first.next; from; ) {
-			const page = await read('budget_view', { from });
+			const page = await read('budget_view', { ...args, from });
 			funds.push(...page.funds);
 			from = page.next;
 		}
@@ -64,40 +65,7 @@
 		permissions.includes('all') || permissions.includes(permission);
 	const hasLedger = $derived(can('treasury.view'));
 
-	// --- Vote confirmation (same flow as access_manager) ---
-	let voteConfirm: {
-		summary: string;
-		governedBy: string;
-		governedPolicy: string;
-		policyReason: string;
-		run: () => Promise<void>;
-	} | null = $state(null);
-	let voteConfirmBusy = $state(false);
-
-	/** Run ``act`` at once under a direct policy; otherwise only once the user confirms that it opens a vote. */
-	async function governed(gov: Governor, summary: string, act: () => Promise<void>) {
-		if (gov.direct) {
-			await act();
-			return;
-		}
-		voteConfirm = {
-			summary,
-			governedBy: gov.name,
-			governedPolicy: gov.policy,
-			policyReason: `Treasury actions are governed by ${gov.name}'s policy (${gov.policy}); a vote is required before this change can apply.`,
-			run: async () => {
-				voteConfirmBusy = true;
-				try {
-					await act();
-					voteConfirm = null;
-				} catch (e: any) {
-					addToast(e?.message || 'Error', 'error');
-				} finally {
-					voteConfirmBusy = false;
-				}
-			},
-		};
-	}
+	const { confirm: voteConfirm, busy: voteConfirmBusy, governed } = voteGate(addToast, 'Treasury');
 
 	// --- Data ---
 	let overview: any = $state.raw(null);
@@ -127,11 +95,16 @@
 	}
 
 	async function loadOverview() {
-		const [view, me, departments] = await Promise.all([
-			budgetView(),
+		let [view, me, departments] = await Promise.all([
+			budgetView(selectedPeriod),
 			read('me'),
 			pages('department_list', {}, 'departments'),
 		]);
+		if (!selectedPeriod) {
+			// The view reads the budgets of one period: the one covering now, or else the latest.
+			selectedPeriod = view.period ?? view.periods.at(-1)?.id ?? '';
+			if (selectedPeriod && selectedPeriod !== view.period) view = await budgetView(selectedPeriod);
+		}
 		permissions = me.permissions;
 		const config = view.config;
 		const sourceCode = config.source_fund ?? 'ROOT';
@@ -144,9 +117,7 @@
 		// The ledger is for those who may read it; everyone else sees the budgets and the rules.
 		entries = can('treasury.view') ? await ledgerEntries(view.currency) : [];
 		budgetRows = view.funds.flatMap((f: any) => f.budgets.map((b: any) => ({ ...b, fund: f.id })));
-		const now = Date.now() / 1000;
 		const periods = [...view.periods].sort((a: any, b: any) => a.starts_at - b.starts_at);
-		const current = periods.find((p: any) => p.starts_at <= now && now < p.ends_at) ?? periods.at(-1);
 		overview = {
 			currency: view.currency,
 			decimals: view.decimals,
@@ -154,7 +125,6 @@
 			source_exists: !!source,
 			epoch_length: config.epoch,
 			anchor_month: config.anchor_month,
-			current_period: current?.id ?? '',
 			periods,
 			rule: source?.rule
 				? {
@@ -179,7 +149,6 @@
 			ruleGovernor,
 			settingsGovernor,
 		};
-		if (!selectedPeriod) selectedPeriod = overview.current_period;
 		syncSettingsDraft();
 	}
 
@@ -291,13 +260,16 @@
 
 	void loadAll();
 
-	function selectPeriod(id: string) {
+	/** Show ``id``; the realm lists the budgets of one period at a time, so they are read again. */
+	async function selectPeriod(id: string) {
 		selectedPeriod = id;
-		loadPeriod();
-	}
-
-	async function onTimelineSelect(id: string) {
-		selectPeriod(id);
+		try {
+			const view = await budgetView(id);
+			budgetRows = view.funds.flatMap((f: any) => f.budgets.map((b: any) => ({ ...b, fund: f.id })));
+			loadPeriod();
+		} catch (e: any) {
+			addToast(e?.message || 'Failed to load the budgets', 'error');
+		}
 	}
 
 	// --- Allocation rule editor ---
@@ -331,9 +303,29 @@
 		ruleRows = ruleRows.filter((_, idx) => idx !== i);
 	}
 
-	function sameRules(a: Record<string, number>, b: Record<string, number>): boolean {
-		const keys = Object.keys(a);
-		return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+	async function adoptRule(rule: string) {
+		if (applied(await ctx.run('allocation_rule_propose', { rule }), addToast, 'Failed to adopt the rule')) {
+			addToast('Allocation rule adopted');
+			await loadAll();
+		}
+	}
+
+	/** Adopt a draft that is already on the realm, e.g. one a vote has passed. */
+	async function onAdoptDraft(draft: any) {
+		ruleBusy = true;
+		try {
+			await governed(overview.ruleGovernor, `Adopt allocation rule ${draft.id} (${describeRules(draft.rules)})`, () =>
+				adoptRule(draft.id),
+			);
+		} finally {
+			ruleBusy = false;
+		}
+	}
+
+	function describeRules(rules: Record<string, number>): string {
+		return Object.entries(rules)
+			.map(([fund, percent]) => `${fund}: ${percent}%`)
+			.join(', ');
 	}
 
 	async function saveRule() {
@@ -355,24 +347,16 @@
 			return;
 		}
 		const rules = Object.fromEntries(lines.map((r) => [r.fund, parseInt(r.percent)]));
-		const parts = lines.map((r) => `${r.fund}: ${parseInt(r.percent)}%`).join(', ');
 		ruleBusy = true;
 		try {
-			await governed(overview.ruleGovernor, `Adopt treasury allocation rule (${parts})`, async () => {
-				// Under a voting policy drafting is voted on too; the draft it leaves is adopted on the next save.
-				let rule = overview.drafts.find((d: any) => sameRules(d.rules, rules))?.id;
-				if (!rule) {
-					const drafted = await ctx.run('allocation_rule_draft', {
-						source_fund: overview.source_fund,
-						rules,
-					});
-					if (!applied(drafted, addToast, 'Failed to save rule', '; adopt the rule again once it passes')) return;
-					rule = drafted.rule;
-				}
-				if (applied(await ctx.run('allocation_rule_propose', { rule }), addToast, 'Failed to save rule')) {
-					addToast('Allocation rule adopted');
-					await loadAll();
-				}
+			await governed(overview.ruleGovernor, `Adopt treasury allocation rule (${describeRules(rules)})`, async () => {
+				// Under a voting policy drafting is voted on too; the draft it leaves is adopted from the list of drafts.
+				const drafted = await ctx.run('allocation_rule_draft', {
+					source_fund: overview.source_fund,
+					rules,
+				});
+				if (!applied(drafted, addToast, 'Failed to save rule', '; adopt the draft from the list once it passes')) return;
+				await adoptRule(drafted.rule);
 			});
 		} finally {
 			ruleBusy = false;
@@ -380,14 +364,8 @@
 	}
 
 	// --- Settings ---
-	let testMode = $state(false);
-	ctx.realmInfo?.subscribe?.((info: { testMode?: boolean }) => {
-		testMode = !!info?.testMode;
-	});
-
 	let epochDraft = $state('monthly');
 	let anchorDraft = $state('1');
-	let epochMinutesDraft = $state('60');
 	let epochBusy = $state(false);
 	let scheduleBusy = $state(false);
 
@@ -407,10 +385,6 @@
 	}
 
 	async function saveEpoch() {
-		if (epochDraft === 'minutes') {
-			addToast('Minute-based epochs are not supported by this realm version', 'error');
-			return;
-		}
 		epochBusy = true;
 		try {
 			await configure(
@@ -608,7 +582,7 @@
 						nowTs={timeline.now_ts ?? 0}
 						selected={selectedPeriod}
 						format={fmt}
-						onselect={onTimelineSelect}
+						onselect={selectPeriod}
 					/>
 					{#if selectedPeriod && status}
 						<div class={cn('mt-4 pt-4 border-t border-gray-100 grid gap-3 text-sm', narrow ? 'grid-cols-1' : 'grid-cols-3')}>
@@ -751,6 +725,34 @@
 							Only those who hold org.manage_budget can change the rule.
 						{/if}
 					</p>
+					{#if !overview?.ruleGovernor.direct}
+						<p class="mt-2 text-xs text-gray-400">
+							This realm votes on its allocation rule: a change takes two votes, one to draft the rule and
+							one to adopt it.
+						</p>
+					{/if}
+
+					{#if (overview?.drafts ?? []).length > 0}
+						<h3 class="mt-4 mb-2 text-xs font-semibold text-gray-500">Drafts</h3>
+						<ul class="divide-y divide-gray-100" aria-label="Rule drafts">
+							{#each overview.drafts as d (d.id)}
+								<li class="flex items-center justify-between gap-2 py-2 text-sm">
+									<span class="min-w-0 text-gray-600">
+										<span class="font-medium text-gray-900">{d.id}</span>
+										<span class="text-xs text-gray-400"> · {describeRules(d.rules)}</span>
+									</span>
+									<button
+										onclick={() => onAdoptDraft(d)}
+										disabled={ruleBusy || !can('org.manage_budget')}
+										aria-label="Adopt {d.id}"
+										class="shrink-0 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+									>
+										Adopt
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</div>
 			</div>
 		{:else if activeTab === 'budgets'}
@@ -835,23 +837,7 @@
 						<option value="quarterly">Quarterly</option>
 						<option value="semiannual">Semiannual</option>
 						<option value="annual">Annual</option>
-						{#if testMode}
-							<option value="minutes">Custom (minutes, test mode)</option>
-						{/if}
 					</select>
-					{#if epochDraft === 'minutes'}
-						<label class="block text-xs text-gray-500 mb-1" for="epoch-minutes">
-							Epoch length in minutes
-						</label>
-						<input
-							id="epoch-minutes"
-							type="number"
-							min="1"
-							max="10080"
-							bind:value={epochMinutesDraft}
-							class="w-32 px-2 py-1.5 text-sm border border-gray-300 rounded-lg mb-3"
-						/>
-					{/if}
 					{#if epochDraft === 'annual'}
 						<label class="block text-xs text-gray-500 mb-1" for="anchor-month">
 							Fiscal year starts in month
@@ -876,13 +862,8 @@
 						Apply epoch config
 					</button>
 					<p class="mt-2 text-xs text-gray-400">
-						{#if epochDraft === 'minutes'}
-							Minute-based epochs roll automatically and are only available while test mode is
-							active.
-						{:else}
-							Epochs stay calendar-aligned; a length change takes effect when the current epoch
-							ends.
-						{/if}
+						Epochs stay calendar-aligned; a length change takes effect when the current epoch
+						ends.
 					</p>
 				</div>
 
@@ -939,32 +920,32 @@
 	{/if}
 
 	<!-- Vote confirmation modal -->
-	{#if voteConfirm}
+	{#if $voteConfirm}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
 			<div class="w-full max-w-md bg-white rounded-xl shadow-xl p-5">
 				<h3 class="text-base font-semibold text-gray-900 mb-1">A vote is required</h3>
-				<p class="text-sm text-gray-600 mb-3">{voteConfirm.summary}</p>
+				<p class="text-sm text-gray-600 mb-3">{$voteConfirm.summary}</p>
 				<div class="p-3 bg-gray-50 rounded-lg text-xs text-gray-600 mb-4">
 					<p class="mb-1">
 						<span class="font-medium text-gray-700">Governed by:</span>
-						{voteConfirm.governedBy} ({voteConfirm.governedPolicy})
+						{$voteConfirm.governedBy} ({$voteConfirm.governedPolicy})
 					</p>
-					<p>{voteConfirm.policyReason}</p>
+					<p>{$voteConfirm.policyReason}</p>
 				</div>
 				<div class="flex gap-2 justify-end">
 					<button
-						onclick={() => (voteConfirm = null)}
-						disabled={voteConfirmBusy}
+						onclick={() => voteConfirm.set(null)}
+						disabled={$voteConfirmBusy}
 						class="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
 					>
 						Cancel
 					</button>
 					<button
-						onclick={() => voteConfirm?.run()}
-						disabled={voteConfirmBusy}
+						onclick={() => $voteConfirm?.run()}
+						disabled={$voteConfirmBusy}
 						class="inline-flex items-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
 					>
-						{#if voteConfirmBusy}
+						{#if $voteConfirmBusy}
 							<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
 						{/if}
 						Create proposal

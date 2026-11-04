@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
+	import { toBaseUnits } from '../../../_shared/frontend/units';
 	import {
 		isNarrowViewport,
 		subscribeNarrowViewport,
@@ -145,21 +146,6 @@
 
 	function rawUnitsLabel(raw: number): string {
 		return `${raw.toLocaleString()} base units`;
-	}
-
-	function toBaseUnits(input: string, decimals: number): number | null {
-		const trimmed = input.trim();
-		if (!trimmed) return null;
-		const parts = trimmed.split('.');
-		if (parts.length > 2) return null;
-		const whole = parts[0];
-		const frac = parts[1] ?? '';
-		if (!/^\d+$/.test(whole) || (frac && !/^\d+$/.test(frac))) return null;
-		if (frac.length > decimals) return null;
-		const padded = frac.padEnd(decimals, '0');
-		const combined = decimals > 0 ? whole + padded : whole;
-		const n = Number(combined);
-		return Number.isFinite(n) && n >= 0 ? n : null;
 	}
 
 	function baseUnitsToHumanInput(raw: number, decimals: number): string {

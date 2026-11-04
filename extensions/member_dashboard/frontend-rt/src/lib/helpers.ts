@@ -1,3 +1,5 @@
+import { formatUnits } from '../../../../_shared/frontend/units.ts';
+
 export function cn(...classes: (string | undefined | null | false)[]): string {
 	return classes.filter(Boolean).join(' ');
 }
@@ -30,14 +32,6 @@ export type RealmNotification = {
 	at?: number;
 	read?: boolean;
 };
-
-/** ``amount`` base units as a decimal string with ``decimals`` places, trailing zeros dropped. */
-export function formatUnits(amount: number | string, decimals: number): string {
-	const digits = BigInt(amount).toString().padStart(decimals + 1, '0');
-	if (!decimals) return digits;
-	const frac = digits.slice(-decimals).replace(/0+$/, '');
-	return frac ? `${digits.slice(0, -decimals)}.${frac}` : digits.slice(0, -decimals);
-}
 
 function capitalize(s: string): string {
 	return s ? s[0].toUpperCase() + s.slice(1) : s;
