@@ -5,6 +5,8 @@
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
+	import { formatUnits, toBaseUnits } from '../../../_shared/frontend/units';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -20,64 +22,44 @@
 		console.warn('[extension]', type, message);
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	async function read(name: string, args: Record<string, unknown> = {}) {
+		const res = await ctx.read(name, args);
+		if (!res.ok) throw new Error(res.error);
+		return res;
 	}
 
-	// --- Vote confirmation (same flow as budget_manager) ---
-	let voteConfirm: {
-		summary: string;
-		governedBy: string;
-		governedPolicy: string;
-		policyReason: string;
-		run: () => Promise<void>;
-	} | null = $state(null);
-	let voteConfirmBusy = $state(false);
-
-	async function callGated(
-		fn: string,
-		params: Record<string, unknown>,
-		handle: (res: any) => void | Promise<void>,
-	) {
-		const res = await callExt(fn, params);
-		if (res?.success && res.data?.requires_confirmation) {
-			voteConfirm = {
-				summary: res.data.summary || '',
-				governedBy: res.data.governed_by || '',
-				governedPolicy: res.data.governed_policy || res.data.policy || '',
-				policyReason: res.data.policy_reason || '',
-				run: async () => {
-					voteConfirmBusy = true;
-					try {
-						const confirmed = await callExt(fn, { ...params, confirm: true });
-						await handle(confirmed);
-						voteConfirm = null;
-					} catch (e: any) {
-						addToast(e?.message || 'Error', 'error');
-					} finally {
-						voteConfirmBusy = false;
-					}
-				},
-			};
-			return;
+	async function pages(name: string, args: Record<string, unknown>, key: string): Promise<any[]> {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const res = await read(name, { ...args, from, count: 500 });
+			out.push(...res[key]);
+			from = res.next;
 		}
-		await handle(res);
+		return out;
 	}
+
+	// What the viewer may do; "all" stands for every permission.
+	let permissions: string[] = $state([]);
+	const can = (permission: string) =>
+		permissions.includes('all') || permissions.includes(permission);
+	const canManage = $derived(can('tax.manage'));
+	const canAssess = $derived(can('tax.assess'));
+
+	const { confirm: voteConfirm, busy: voteConfirmBusy, governed } = voteGate(addToast, 'Tax policy');
 
 	// --- Labels ---
+	const BASES = ['flat', 'land_area', 'declared'];
+	const METHODS = ['fixed', 'proportional', 'progressive'];
 	const BASE_LABELS: Record<string, string> = {
 		flat: 'Per member (flat)',
 		land_area: 'Land parcels (area × value per unit)',
+		declared: 'Declared by the taxpayer',
 	};
 	const METHOD_LABELS: Record<string, string> = {
 		fixed: 'Fixed amount',
 		proportional: 'Percentage of value',
 		progressive: 'Progressive brackets',
-	};
-	const PERIOD_LABELS: Record<string, string> = {
-		monthly: 'Monthly',
-		quarterly: 'Quarterly',
-		annual: 'Annual',
 	};
 
 	// --- Data ---
@@ -85,12 +67,29 @@
 	let loading = $state(true);
 	let busy = $state('');
 
-	const currency = $derived(overview?.currency || '');
-	const canManage = $derived(Boolean(overview?.can_manage));
+	const currency = $derived(overview?.currency ?? '');
+	const decimals = $derived(overview?.decimals ?? 0);
+
+	/** The realm keeps amounts in the token's base units: shown in tokens, with at least two places. */
+	function human(n: number | null | undefined): string {
+		return Number(formatUnits(n ?? 0, decimals)).toLocaleString(undefined, {
+			minimumFractionDigits: Math.min(decimals, 2),
+			maximumFractionDigits: decimals,
+		});
+	}
 
 	function fmt(n: number | null | undefined): string {
-		const s = (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 6 });
-		return currency ? `${s} ${currency}` : s;
+		return currency ? `${human(n)} ${currency}` : human(n);
+	}
+
+	/** An amount the admin typed, in tokens, as base units; NaN when it is not an amount of this token. */
+	function toUnits(n: number | null | undefined): number {
+		return toBaseUnits(String(n ?? 0), decimals) ?? NaN;
+	}
+
+	/** Base units as the number an input shows, in tokens. */
+	function toTokens(n: number | null | undefined): number | null {
+		return n == null ? null : Number(formatUnits(n, decimals));
 	}
 
 	function pct(bp: number | null | undefined): string {
@@ -98,19 +97,20 @@
 	}
 
 	function describeTax(t: any): string {
-		const per = t.base === 'land_area' ? 'per parcel' : 'per member';
+		const per =
+			t.base === 'land_area' ? 'per parcel' : t.base === 'declared' ? 'per declaration' : 'per member';
 		let how = '';
 		if (t.method === 'fixed') how = `${fmt(t.amount)} ${per}`;
 		else if (t.method === 'proportional') how = `${pct(t.rate_bp)} of the value`;
 		else {
 			const parts = (t.brackets ?? []).map((b: any) =>
-				b.up_to == null ? `${pct(b.rate_bp)} above` : `${pct(b.rate_bp)} up to ${b.up_to.toLocaleString()}`,
+				b.up_to == null ? `${pct(b.rate_bp)} above` : `${pct(b.rate_bp)} up to ${human(b.up_to)}`,
 			);
 			how = parts.join(', ');
 		}
-		if (t.base === 'land_area') how += ` · value = area × ${t.unit_value}`;
-		if (t.exempt_below) how += ` · exempt below ${Number(t.exempt_below).toLocaleString()}`;
-		return `${how} · ${(PERIOD_LABELS[t.period] ?? t.period).toLowerCase()}`;
+		if (t.base === 'land_area') how += ` · value = area × ${human(t.unit_value)}`;
+		if (t.exempt_below) how += ` · exempt below ${human(t.exempt_below)}`;
+		return `${how} · due after ${t.due_days ?? 30} days`;
 	}
 
 	// --- Editor rows ---
@@ -131,9 +131,7 @@
 		rate: number | null;
 		brackets: BracketRow[];
 		exemptBelow: number | null;
-		appliesTo: string;
 		exemptProfiles: string;
-		period: string;
 		dueDays: number | null;
 	}
 
@@ -144,7 +142,7 @@
 	let baseline = $state('[]');
 
 	function bracketFrom(b: any): BracketRow {
-		return { uid: nextUid++, upTo: b.up_to ?? null, rate: (b.rate_bp ?? 0) / 100 };
+		return { uid: nextUid++, upTo: toTokens(b.up_to), rate: (b.rate_bp ?? 0) / 100 };
 	}
 
 	function rowFrom(t: any): TaxRow {
@@ -154,15 +152,13 @@
 			label: t.label ?? '',
 			enabled: t.enabled !== false,
 			base: t.base ?? 'flat',
-			unitValue: t.unit_value ?? 1,
+			unitValue: toTokens(t.unit_value ?? toUnits(1)),
 			method: t.method ?? 'fixed',
-			amount: t.amount ?? null,
+			amount: toTokens(t.amount),
 			rate: t.rate_bp != null ? t.rate_bp / 100 : null,
 			brackets: (t.brackets ?? []).map(bracketFrom),
-			exemptBelow: t.exempt_below || null,
-			appliesTo: (t.applies_to ?? ['member']).join(', '),
+			exemptBelow: toTokens(t.exempt_below || null),
 			exemptProfiles: (t.exempt_profiles ?? []).join(', '),
-			period: t.period ?? 'annual',
 			dueDays: t.due_days ?? 30,
 		};
 	}
@@ -185,49 +181,49 @@
 			enabled: r.enabled,
 			base: r.base,
 			method: r.base === 'flat' ? 'fixed' : r.method,
-			period: r.period,
-			due_days: r.dueDays,
-			applies_to: names(r.appliesTo),
+			due_days: r.dueDays ?? 30,
 			exempt_profiles: names(r.exemptProfiles),
 		};
-		if (r.exemptBelow) t.exempt_below = r.exemptBelow;
-		if (r.base === 'land_area') t.unit_value = r.unitValue;
-		if (t.method === 'fixed') t.amount = r.amount;
+		if (r.exemptBelow) t.exempt_below = toUnits(r.exemptBelow);
+		if (r.base === 'land_area') t.unit_value = toUnits(r.unitValue ?? 1);
+		if (t.method === 'fixed') t.amount = toUnits(r.amount);
 		else if (t.method === 'proportional') t.rate_bp = bp(r.rate);
 		else
 			t.brackets = r.brackets.map((b, i) => ({
-				up_to: i === r.brackets.length - 1 ? null : b.upTo,
+				up_to: i === r.brackets.length - 1 ? null : toUnits(b.upTo),
 				rate_bp: bp(b.rate),
 			}));
 		return t;
 	}
 
 	const documentTaxes = $derived(rows.map(taxFrom));
+	const badAmount = $derived(
+		documentTaxes.some((t: any) =>
+			[t.amount, t.exempt_below, t.unit_value, ...(t.brackets ?? []).map((b: any) => b.up_to)].some(Number.isNaN),
+		),
+	);
 	const dirty = $derived(JSON.stringify(documentTaxes) !== baseline);
 
 	function resetEditor() {
-		const source =
-			overview?.draft?.taxes ?? overview?.adopted?.taxes ?? overview?.effective_taxes ?? [];
-		rows = source.map(rowFrom);
-		description = overview?.draft?.description ?? '';
+		rows = (overview?.adopted?.taxes ?? []).map(rowFrom);
+		description = '';
 		baseline = JSON.stringify(rows.map(taxFrom));
 		expanded = null;
 	}
 
-	function addTax(base: 'flat' | 'land_area') {
+	function addTax(base: 'flat' | 'land_area' | 'declared') {
 		let n = rows.length + 1;
 		while (rows.some((r) => r.code === `tax_${n}`)) n++;
 		const row = rowFrom(
 			base === 'flat'
-				? { code: `tax_${n}`, label: 'Membership tax', base, method: 'fixed', amount: 10, period: 'monthly' }
+				? { code: `tax_${n}`, label: 'Membership tax', base, method: 'fixed', amount: toUnits(10) }
 				: {
 						code: `tax_${n}`,
-						label: 'Land tax',
+						label: base === 'land_area' ? 'Land tax' : 'Tax on declared amounts',
 						base,
 						method: 'proportional',
 						rate_bp: 100,
-						unit_value: 1,
-						period: 'annual',
+						unit_value: toUnits(1),
 					},
 		);
 		rows.push(row);
@@ -242,7 +238,7 @@
 		r.method = method;
 		if (method === 'progressive' && r.brackets.length === 0) {
 			r.brackets = [
-				{ uid: nextUid++, upTo: 10000, rate: r.rate ?? 0.5 },
+				{ uid: nextUid++, upTo: 100, rate: r.rate ?? 0.5 },
 				{ uid: nextUid++, upTo: null, rate: (r.rate ?? 0.5) * 2 },
 			];
 		}
@@ -251,7 +247,7 @@
 	function addBracket(r: TaxRow) {
 		const last = r.brackets[r.brackets.length - 1];
 		const prevTop = r.brackets.length > 1 ? (r.brackets[r.brackets.length - 2].upTo ?? 0) : 0;
-		if (last) last.upTo = prevTop ? prevTop * 2 : 10000;
+		if (last) last.upTo = prevTop ? prevTop * 2 : 100;
 		r.brackets.push({ uid: nextUid++, upTo: null, rate: last?.rate ?? 0 });
 	}
 
@@ -261,12 +257,32 @@
 
 	// --- Loading ---
 	async function load() {
-		const res = await callExt('get_tax_overview');
-		if (!res?.success) {
-			addToast(res?.error || 'Failed to load the tax policy', 'error');
-			return;
+		const [view, me, departments] = await Promise.all([
+			read('tax_policy_view'),
+			read('me'),
+			pages('department_list', {}, 'departments'),
+		]);
+		const declarations = [...view.declarations];
+		for (let from = view.next; from; ) {
+			const page = await read('tax_policy_view', { from });
+			declarations.push(...page.declarations);
+			from = page.next;
 		}
-		overview = res.data;
+		permissions = me.permissions;
+		const policy = view.policy;
+		overview = {
+			currency: view.currency,
+			decimals: view.decimals,
+			adopted: policy && {
+				id: policy.id,
+				taxes: policy.document.taxes,
+				adopted_at: policy.adopted_at,
+				proposal: policy.proposal,
+			},
+			drafts: view.drafts,
+			declarations,
+			governor: await governorOf(read, departments.find((d) => d.is_root).id),
+		};
 		resetEditor();
 	}
 
@@ -274,6 +290,8 @@
 		loading = true;
 		try {
 			await load();
+		} catch (e: any) {
+			addToast(e?.message || 'Failed to load the tax policy', 'error');
 		} finally {
 			loading = false;
 		}
@@ -281,58 +299,41 @@
 
 	void loadAll();
 
-	// --- Actions ---
-	async function saveDraft(quiet = false): Promise<boolean> {
-		const res = await callExt('save_tax_draft', {
-			document: { schema_version: 1, taxes: documentTaxes },
-			description,
-		});
-		if (!res?.success) {
-			addToast(res?.error || 'Could not save the draft', 'error');
-			return false;
-		}
-		if (!quiet) addToast('Draft saved');
-		await load();
-		return true;
-	}
-
-	async function onSave() {
-		busy = 'save';
-		try {
-			await saveDraft();
-		} finally {
-			busy = '';
-		}
-	}
-
-	async function onDiscard() {
-		busy = 'discard';
-		try {
-			const res = await callExt('discard_tax_draft');
-			if (!res?.success) addToast(res?.error || 'Could not discard the draft', 'error');
-			else addToast('Draft discarded');
+	// --- Adopting a policy ---
+	/** Adopt the draft ``policy`` that is on the realm; under a voting policy this opens the second vote. */
+	async function adoptPolicy(policy: string) {
+		if (applied(await ctx.run('tax_policy_propose', { policy }), addToast, 'Could not adopt the tax policy')) {
+			addToast('Tax policy adopted');
 			await load();
-		} finally {
-			busy = '';
 		}
 	}
 
+	/** Draft the edited taxes, then adopt the draft; each step may open a vote instead. */
 	async function onAdopt() {
+		if (badAmount) {
+			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
+			return;
+		}
 		busy = 'adopt';
 		try {
-			if ((dirty || !overview?.draft) && !(await saveDraft(true))) return;
-			await callGated('adopt_tax_policy', {}, async (res) => {
-				if (!res?.success) {
-					addToast(res?.error || 'Could not adopt the tax policy', 'error');
-					return;
-				}
-				if (res.data?.applied === 'proposal') {
-					addToast(`Proposal ${res.data.proposal_id} created — a vote is required`);
-				} else {
-					addToast('Tax policy adopted');
-				}
-				await load();
+			const taxes = documentTaxes;
+			await governed(overview.governor, `Adopt a tax policy of ${taxes.length} tax(es)`, async () => {
+				// Under a voting policy drafting is voted on too; the draft it leaves is adopted from the list of drafts.
+				const document = { ...(currency ? { symbol: currency } : {}), taxes };
+				const drafted = await ctx.run('tax_policy_draft', { document, description });
+				if (!applied(drafted, addToast, 'Could not draft the tax policy', '; adopt the draft from the list once it passes')) return;
+				await adoptPolicy(drafted.policy);
 			});
+		} finally {
+			busy = '';
+		}
+	}
+
+	/** Adopt a draft that is already on the realm, e.g. one a vote has passed. */
+	async function onAdoptDraft(draft: any) {
+		busy = 'adopt';
+		try {
+			await governed(overview.governor, `Adopt tax policy ${draft.id}`, () => adoptPolicy(draft.id));
 		} finally {
 			busy = '';
 		}
@@ -341,123 +342,88 @@
 	// --- Assessment ---
 	interface Assessment {
 		batches: number;
-		created: number;
-		already: number;
-		nothingDue: number;
-		notEligible: number;
-		total: number;
+		issued: number;
+		skipped: number;
 		done: boolean;
 		error: string;
 	}
 	let assessment: Assessment | null = $state.raw(null);
 	let confirmAssess = $state(false);
+	let assessPeriod = $state(new Date().toISOString().slice(0, 7));
 	const MAX_BATCHES = 2000;
 
 	async function runAssessment() {
 		confirmAssess = false;
 		busy = 'assess';
-		const acc: Assessment = {
-			batches: 0,
-			created: 0,
-			already: 0,
-			nothingDue: 0,
-			notEligible: 0,
-			total: 0,
-			done: false,
-			error: '',
-		};
-		let cursor = '';
+		const acc: Assessment = { batches: 0, issued: 0, skipped: 0, done: false, error: '' };
+		let from = 1;
 		try {
 			while (acc.batches < MAX_BATCHES) {
-				const res = await callExt('run_tax_assessment', { cursor });
-				if (!res?.success) {
-					acc.error = res?.error || 'The assessment failed';
+				const res = await ctx.run('tax_assess', { period: assessPeriod.trim(), from });
+				if (!res.ok) {
+					acc.error = res.error || 'The assessment failed';
 					break;
 				}
-				const d = res.data ?? {};
 				acc.batches += 1;
-				acc.created += d.invoices_created ?? 0;
-				acc.already += d.already_invoiced ?? 0;
-				acc.nothingDue += d.nothing_due ?? 0;
-				acc.notEligible += d.not_eligible ?? 0;
-				acc.total += d.total_amount ?? 0;
+				acc.issued += res.count;
+				acc.skipped += res.skipped;
 				assessment = { ...acc };
-				cursor = d.next_cursor || '';
-				if (!cursor) {
+				if (!res.next) {
 					acc.done = true;
 					break;
 				}
+				from = res.next;
 			}
 		} finally {
 			assessment = { ...acc };
 			busy = '';
 		}
 		if (acc.error) addToast(acc.error, 'error');
-		else if (acc.done) addToast(`${acc.created} invoice(s) issued`);
+		else if (acc.done) addToast(`${acc.issued} invoice(s) issued`);
 	}
 
-	// --- Preview ---
-	let previewUid: number | null = $state(null);
-	let previewQuantity: number | null = $state(1000);
-	let preview: any = $state.raw(null);
+	// --- Declaring a tax ---
+	const declaredTaxes = $derived(
+		(overview?.adopted?.taxes ?? []).filter((t: any) => t.base === 'declared' && t.enabled !== false),
+	);
+	let declareTax = $state('');
+	let declarePeriod = $state(new Date().toISOString().slice(0, 7));
+	let declareAmount: number | null = $state(null);
+	let declareOrganization = $state('');
 
-	const previewRow = $derived(rows.find((r) => r.uid === previewUid) ?? rows[0] ?? null);
-
-	async function runPreview() {
-		if (!previewRow) return;
-		busy = 'preview';
-		try {
-			const res = await callExt('preview_tax', {
-				tax: taxFrom(previewRow),
-				quantity: previewRow.base === 'flat' ? 1 : previewQuantity,
-			});
-			if (!res?.success) {
-				addToast(res?.error || 'Preview failed', 'error');
-				preview = null;
-				return;
-			}
-			preview = res.data;
-		} finally {
-			busy = '';
+	async function onDeclare() {
+		const amount = toBaseUnits(String(declareAmount ?? 0), decimals);
+		if (amount == null) {
+			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
+			return;
 		}
-	}
-
-	// --- History ---
-	let historyRows: any[] = $state.raw([]);
-	let historyNext: number | null = $state(1);
-	let historyLoaded = $state(false);
-
-	async function loadHistory(reset = false) {
-		const cursor = reset ? 1 : historyNext;
-		if (cursor == null) return;
-		busy = 'history';
+		busy = 'declare';
 		try {
-			const res = await callExt('get_tax_history', { cursor, count: 20 });
-			if (!res?.success) {
-				addToast(res?.error || 'Failed to load history', 'error');
+			const res = await ctx.run('tax_declare', {
+				base: declareTax || declaredTaxes[0]?.code,
+				period: declarePeriod.trim(),
+				amount,
+				...(declareOrganization.trim() ? { organization: declareOrganization.trim() } : {}),
+			});
+			if (!res.ok) {
+				addToast(res.error || 'Could not declare', 'error');
 				return;
 			}
-			historyRows = reset ? res.data.rows : [...historyRows, ...res.data.rows];
-			historyNext = res.data.next ?? null;
-			historyLoaded = true;
+			addToast(`Declared: you owe ${fmt(res.owed)}${res.invoice ? ' — pay it from your dashboard' : ''}`);
+			declareAmount = null;
+			await load();
 		} finally {
 			busy = '';
 		}
 	}
 
 	// --- Tabs / layout ---
-	type Tab = 'policy' | 'preview' | 'history';
+	type Tab = 'policy' | 'mine';
 	let activeTab: Tab = $state('policy');
 	const tabs: { id: Tab; label: string }[] = [
 		{ id: 'policy', label: 'Policy' },
-		{ id: 'preview', label: 'Preview' },
-		{ id: 'history', label: 'History' },
+		{ id: 'mine', label: 'My taxes' },
 	];
-
-	function selectTab(id: Tab) {
-		activeTab = id;
-		if (id === 'history' && !historyLoaded) void loadHistory(true);
-	}
 
 	let narrow = $state(isNarrowViewport());
 	const unsubNarrow = subscribeNarrowViewport((value) => {
@@ -530,6 +496,34 @@
 	{/if}
 {/snippet}
 
+{#snippet draftList()}
+	{#if overview.drafts.length > 0}
+		<h3 class="mt-4 mb-2 text-xs font-semibold text-gray-500">Drafts</h3>
+		<ul class="divide-y divide-gray-100" aria-label="Policy drafts">
+			{#each overview.drafts as d (d.id)}
+				<li class="flex items-center justify-between gap-2 py-2 text-sm">
+					<span class="min-w-0 text-gray-600">
+						<span class="font-medium text-gray-900">{d.id}</span>
+						<span class="text-xs text-gray-400">
+							· {d.document.taxes.map((t: any) => t.label || t.code).join(', ')}{d.description ? ` · ${d.description}` : ''}
+						</span>
+					</span>
+					{#if canManage}
+						<button
+							class={secondaryClass}
+							disabled={busy !== ''}
+							aria-label="Adopt {d.id}"
+							onclick={() => onAdoptDraft(d)}
+						>
+							Adopt
+						</button>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+	{/if}
+{/snippet}
+
 <div class={cn('w-full', narrow ? 'py-3' : 'py-6')}>
 	<div class="mb-4">
 		<h1 class="text-xl font-semibold text-gray-900">Taxes</h1>
@@ -545,7 +539,7 @@
 			{#each tabs as tab (tab.id)}
 				<button
 					type="button"
-					onclick={() => selectTab(tab.id)}
+					onclick={() => (activeTab = tab.id)}
 					class="chrome-tab {activeTab === tab.id ? 'is-on' : ''}"
 				>
 					{tab.label}
@@ -566,80 +560,60 @@
 					{#if overview.adopted}
 						{@render taxList(overview.adopted.taxes)}
 						<p class="mt-2 text-xs text-gray-400">
-							Adopted {overview.adopted.adopted_at?.slice(0, 10)}{overview.adopted.proposal_id
-								? ` by vote ${overview.adopted.proposal_id}`
+							Adopted {new Date(overview.adopted.adopted_at * 1000).toISOString().slice(0, 10)}{overview.adopted.proposal
+								? ` by vote ${overview.adopted.proposal}`
 								: ''}
 						</p>
-					{:else if overview.effective_source === 'codex'}
-						<p class="text-xs text-amber-700 mb-2">
-							No policy adopted yet; these are the codex defaults.
-						</p>
-						{@render taxList(overview.effective_taxes)}
 					{:else}
 						<p class="text-sm text-gray-400 py-2">No tax policy adopted yet.</p>
 					{/if}
 
-					{#each overview.proposed ?? [] as p (p.id)}
-						<div class="mt-3 p-2 text-xs bg-amber-50 text-amber-800 rounded-lg">
-							{p.id} is up for a vote{p.proposal_id ? ` (${p.proposal_id})` : ''}.
-						</div>
-					{/each}
-
-					<div class="mt-4 pt-3 border-t border-gray-100">
-						{#if overview.codex_assesses}
-							<p class="text-xs text-gray-500 mb-2">
-								The codex <span class="font-medium">{overview.codex}</span> issues the invoices.
-							</p>
-							{#if canManage}
-								{#if confirmAssess}
-									<p class="text-xs text-gray-600 mb-2">
-										Bill every taxpayer for the current period under {overview.adopted?.id}? Invoices
-										already issued for this period are skipped.
-									</p>
-									<div class="flex gap-2">
-										<button class={cn(primaryClass, 'flex-1')} onclick={runAssessment}>
-											Issue invoices
-										</button>
-										<button class={secondaryClass} onclick={() => (confirmAssess = false)}>
-											Cancel
-										</button>
-									</div>
-								{:else}
-									<button
-										class={cn(primaryClass, 'w-full')}
-										disabled={busy !== '' || !overview.adopted}
-										onclick={() => (confirmAssess = true)}
-									>
-										{#if busy === 'assess'}{@render spinner(true)}{/if}
-										Run assessment
+					{#if canAssess}
+						<div class="mt-4 pt-3 border-t border-gray-100">
+							{#if confirmAssess}
+								<p class="text-xs text-gray-600 mb-2">
+									Bill every taxpayer for {assessPeriod} under {overview.adopted?.id}? Invoices already
+									issued for this period are skipped.
+								</p>
+								<div class="flex gap-2">
+									<button class={cn(primaryClass, 'flex-1')} onclick={runAssessment}>
+										Issue invoices
 									</button>
-								{/if}
-							{/if}
-						{:else}
-							<p class="text-xs text-amber-700">
-								The active codex{overview.codex ? ` (${overview.codex})` : ''} does not assess taxes:
-								the policy is stored, but no invoices are issued.
-							</p>
-						{/if}
-
-						{#if assessment}
-							<div class="mt-3 p-2 text-xs bg-gray-50 rounded-lg text-gray-600 space-y-0.5">
-								<div class="font-medium text-gray-700">
-									{assessment.done
-										? 'Assessment finished'
-										: assessment.error
-											? 'Assessment stopped'
-											: `Batch ${assessment.batches}…`}
+									<button class={secondaryClass} onclick={() => (confirmAssess = false)}>
+										Cancel
+									</button>
 								</div>
-								<div>{assessment.created} invoice(s) issued, {fmt(assessment.total)}</div>
-								<div>{assessment.already} already invoiced this period</div>
-								<div>{assessment.nothingDue} owed nothing, {assessment.notEligible} not liable</div>
-								{#if assessment.error}
-									<div class="text-red-600">{assessment.error}</div>
-								{/if}
-							</div>
-						{/if}
-					</div>
+							{:else}
+								<label class={labelClass} for="assess-period">Period to bill</label>
+								<input id="assess-period" class={cn(inputClass, 'mb-2')} bind:value={assessPeriod} />
+								<button
+									class={cn(primaryClass, 'w-full')}
+									disabled={busy !== '' || !overview.adopted || !assessPeriod.trim()}
+									onclick={() => (confirmAssess = true)}
+								>
+									{#if busy === 'assess'}{@render spinner(true)}{/if}
+									Run assessment
+								</button>
+							{/if}
+
+							{#if assessment}
+								<div class="mt-3 p-2 text-xs bg-gray-50 rounded-lg text-gray-600 space-y-0.5">
+									<div class="font-medium text-gray-700">
+										{assessment.done
+											? 'Assessment finished'
+											: assessment.error
+												? 'Assessment stopped'
+												: `Batch ${assessment.batches}…`}
+									</div>
+									<div>{assessment.issued} invoice(s) issued</div>
+									<div>{assessment.skipped} already billed for this period</div>
+									{#if assessment.error}
+										<div class="text-red-600">{assessment.error}</div>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					{/if}
 				</div>
 
 				<!-- Editor -->
@@ -648,20 +622,17 @@
 						<h2 class="text-sm font-semibold text-gray-700">
 							{canManage ? 'Edit taxes' : 'Taxes'}
 						</h2>
-						{#if overview.draft}
-							<span class="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full">
-								draft {overview.draft.id}
-							</span>
-						{:else if dirty}
+						{#if dirty}
 							<span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">unsaved</span>
 						{/if}
 					</div>
 
 					{#if !canManage}
-						{@render taxList(documentTaxes)}
+						{@render taxList(overview.adopted?.taxes ?? [])}
 						<p class="mt-3 text-xs text-gray-400">
-							Only admins of {overview.governed_by || 'the realm'} can change the tax policy.
+							Only those who hold tax.manage can change the tax policy.
 						</p>
+						{@render draftList()}
 					{:else}
 						<div class="space-y-2">
 							{#each rows as row (row.uid)}
@@ -713,7 +684,7 @@
 											<div>
 												<label class={labelClass} for="base-{row.uid}">What is taxed</label>
 												<select id="base-{row.uid}" class={inputClass} bind:value={row.base}>
-													{#each overview.options?.bases ?? [] as b (b)}
+													{#each BASES as b (b)}
 														<option value={b}>{BASE_LABELS[b] ?? b}</option>
 													{/each}
 												</select>
@@ -727,7 +698,7 @@
 													disabled={row.base === 'flat'}
 													onchange={(e) => setMethod(row, (e.target as HTMLSelectElement).value)}
 												>
-													{#each overview.options?.methods ?? [] as m (m)}
+													{#each METHODS as m (m)}
 														<option value={m}>{METHOD_LABELS[m] ?? m}</option>
 													{/each}
 												</select>
@@ -776,7 +747,7 @@
 												</div>
 											{/if}
 
-											{#if row.base === 'land_area'}
+											{#if row.base !== 'flat'}
 												<div>
 													<label class={labelClass} for="exempt-{row.uid}">Exempt when value is below</label>
 													<input
@@ -847,14 +818,6 @@
 											{/if}
 
 											<div>
-												<label class={labelClass} for="period-{row.uid}">Billed</label>
-												<select id="period-{row.uid}" class={inputClass} bind:value={row.period}>
-													{#each overview.options?.periods ?? [] as p (p)}
-														<option value={p}>{PERIOD_LABELS[p] ?? p}</option>
-													{/each}
-												</select>
-											</div>
-											<div>
 												<label class={labelClass} for="due-{row.uid}">Due after (days)</label>
 												<input
 													id="due-{row.uid}"
@@ -863,15 +826,6 @@
 													max="365"
 													class={inputClass}
 													bind:value={row.dueDays}
-												/>
-											</div>
-											<div>
-												<label class={labelClass} for="applies-{row.uid}">Applies to profiles</label>
-												<input
-													id="applies-{row.uid}"
-													class={inputClass}
-													bind:value={row.appliesTo}
-													placeholder="member"
 												/>
 											</div>
 											<div>
@@ -896,6 +850,9 @@
 							<button type="button" onclick={() => addTax('land_area')} class="text-xs text-gray-600 hover:text-gray-900">
 								+ Land tax
 							</button>
+							<button type="button" onclick={() => addTax('declared')} class="text-xs text-gray-600 hover:text-gray-900">
+								+ Declared tax
+							</button>
 						</div>
 
 						<label class={cn(labelClass, 'mt-4')} for="tax-description">Note for this version</label>
@@ -913,183 +870,132 @@
 								onclick={onAdopt}
 							>
 								{#if busy === 'adopt'}{@render spinner(true)}{/if}
-								{overview.direct ? 'Adopt' : 'Propose for a vote'}
+								{overview.governor.direct ? 'Adopt' : 'Propose for a vote'}
 							</button>
-							<button class={secondaryClass} disabled={busy !== '' || !dirty} onclick={onSave}>
-								{#if busy === 'save'}{@render spinner(false)}{/if}
-								Save draft
-							</button>
-							{#if overview.draft}
-								<button class={secondaryClass} disabled={busy !== ''} onclick={onDiscard}>
-									{#if busy === 'discard'}{@render spinner(false)}{/if}
-									Discard draft
-								</button>
-							{:else if dirty}
+							{#if dirty}
 								<button class={secondaryClass} disabled={busy !== ''} onclick={resetEditor}>
 									Reset
 								</button>
 							{/if}
 						</div>
 						<p class="mt-2 text-xs text-gray-400">
-							Governed by {overview.governed_by || 'the realm'}{overview.governed_policy
-								? ` (${overview.governed_policy})`
-								: ''}. {overview.direct
+							Governed by {overview.governor.name} ({overview.governor.policy}).
+							{overview.governor.direct
 								? 'Adopting applies at once.'
-								: 'Adopting opens a vote; the draft is frozen until it closes.'}
+								: 'Adopting opens a vote.'}
+							Amounts are in {currency || 'tokens'}.
 						</p>
+						{#if !overview.governor.direct}
+							<p class="mt-2 text-xs text-gray-400">
+								This realm votes on its tax policy: a change takes two votes, one to draft the policy and
+								one to adopt it.
+							</p>
+						{/if}
+						{@render draftList()}
 					{/if}
 				</div>
 			</div>
-		{:else if activeTab === 'preview'}
-			<div class={cn(panelClass, 'max-w-2xl')}>
-				<h2 class="text-sm font-semibold text-gray-700 mb-1">What would one taxpayer owe?</h2>
-				<p class="text-xs text-gray-500 mb-3">
-					Uses the taxes as currently edited, saved or not, and the same calculation the codex
-					runs.
-				</p>
-				{#if rows.length === 0}
-					<p class="text-sm text-gray-400 py-4">Add a tax on the Policy tab first.</p>
-				{:else}
-					<div class={cn('grid gap-3', narrow ? 'grid-cols-1' : 'grid-cols-2')}>
-						<div>
-							<label class={labelClass} for="preview-tax">Tax</label>
-							<select
-								id="preview-tax"
-								class={inputClass}
-								value={previewRow?.uid}
-								onchange={(e) => {
-									previewUid = Number((e.target as HTMLSelectElement).value);
-									preview = null;
-								}}
-							>
-								{#each rows as r (r.uid)}
-									<option value={r.uid}>{r.label || r.code}</option>
-								{/each}
-							</select>
-						</div>
-						{#if previewRow && previewRow.base !== 'flat'}
+		{:else}
+			<div class={cn('grid gap-4', narrow ? 'grid-cols-1' : 'md:grid-cols-2')}>
+				<!-- Declare -->
+				<div class={panelClass}>
+					<h2 class="text-sm font-semibold text-gray-700 mb-3">Declare a tax</h2>
+					{#if declaredTaxes.length === 0}
+						<p class="text-sm text-gray-400 py-2">
+							The tax policy in force has no tax you declare yourself. The realm bills the others.
+						</p>
+					{:else}
+						<div class="space-y-3">
 							<div>
-								<label class={labelClass} for="preview-qty">Parcel area</label>
+								<label class={labelClass} for="declare-tax">Tax</label>
+								<select
+									id="declare-tax"
+									class={inputClass}
+									value={declareTax || declaredTaxes[0]?.code}
+									onchange={(e) => (declareTax = (e.target as HTMLSelectElement).value)}
+								>
+									{#each declaredTaxes as t (t.code)}
+										<option value={t.code}>{t.label || t.code}</option>
+									{/each}
+								</select>
+							</div>
+							<div>
+								<label class={labelClass} for="declare-period">Period</label>
+								<input id="declare-period" class={inputClass} bind:value={declarePeriod} />
+							</div>
+							<div>
+								<label class={labelClass} for="declare-amount">Amount to declare</label>
 								<input
-									id="preview-qty"
+									id="declare-amount"
 									type="number"
 									min="0"
 									step="any"
 									class={inputClass}
-									bind:value={previewQuantity}
+									bind:value={declareAmount}
 								/>
 							</div>
-						{/if}
-					</div>
-					<button class={cn(primaryClass, 'mt-3')} disabled={busy !== ''} onclick={runPreview}>
-						{#if busy === 'preview'}{@render spinner(true)}{/if}
-						Calculate
-					</button>
-
-					{#if preview}
-						<div class="mt-4 pt-3 border-t border-gray-100">
-							{#if previewRow?.base !== 'flat'}
-								<div class="text-xs text-gray-500 mb-2">
-									Taxable value: {preview.value.toLocaleString()}
-								</div>
-							{/if}
-							{#if preview.exempt}
-								<p class="text-sm text-emerald-700">Exempt: the value is below the threshold.</p>
-							{:else}
-								<ul class="divide-y divide-gray-100">
-									{#each preview.lines as line (`${line.from}-${line.to}`)}
-										<li class="flex justify-between py-1.5 text-sm">
-											<span class="text-gray-600">
-												{#if line.rate_bp}
-													{pct(line.rate_bp)} of {line.from.toLocaleString()} – {line.to.toLocaleString()}
-												{:else}
-													Fixed amount
-												{/if}
-											</span>
-											<span class="text-gray-900">{fmt(line.amount)}</span>
-										</li>
-									{/each}
-								</ul>
-							{/if}
-							<div class="flex justify-between pt-2 mt-1 border-t border-gray-200 text-sm font-semibold">
-								<span>Owed per period</span>
-								<span>{fmt(preview.amount)}</span>
+							<div>
+								<label class={labelClass} for="declare-org">For an organization you administer (optional)</label>
+								<input id="declare-org" class={inputClass} bind:value={declareOrganization} />
 							</div>
+							<button
+								class={cn(primaryClass, 'w-full')}
+								disabled={busy !== '' || declareAmount == null || !declarePeriod.trim()}
+								onclick={onDeclare}
+							>
+								{#if busy === 'declare'}{@render spinner(true)}{/if}
+								Declare
+							</button>
+							<p class="text-xs text-gray-400">
+								Each tax is declared once per period. The invoice appears on your dashboard.
+							</p>
 						</div>
 					{/if}
-				{/if}
-			</div>
-		{:else if activeTab === 'history'}
-			<div class={panelClass}>
-				<h2 class="text-sm font-semibold text-gray-700 mb-3">Policy versions</h2>
-				{#if historyRows.length === 0}
-					<p class="text-sm text-gray-400 py-4">
-						{busy === 'history' ? 'Loading…' : 'No versions yet.'}
-					</p>
-				{:else}
-					<ul class="divide-y divide-gray-100">
-						{#each historyRows as h (h.id)}
-							<li class="py-2 flex items-start justify-between gap-3">
-								<div class="min-w-0">
-									<div class="text-sm font-medium text-gray-900">{h.id}</div>
-									<div class="text-xs text-gray-500 truncate">
-										{h.taxes} tax(es){h.description ? ` · ${h.description}` : ''}
-									</div>
-								</div>
-								<div class="shrink-0 text-right">
-									<span
-										class={cn(
-											'px-2 py-0.5 text-xs rounded-full',
-											h.status === 'adopted'
-												? 'bg-green-50 text-green-700'
-												: h.status === 'proposed'
-													? 'bg-amber-50 text-amber-700'
-													: h.status === 'draft'
-														? 'bg-blue-50 text-blue-700'
-														: 'bg-gray-100 text-gray-500',
-										)}
-									>
-										{h.status}
-									</span>
-									{#if h.adopted_at}
-										<div class="text-xs text-gray-400 mt-0.5">{h.adopted_at.slice(0, 10)}</div>
-									{/if}
-								</div>
-							</li>
-						{/each}
-					</ul>
-					{#if historyNext != null}
-						<button class={cn(secondaryClass, 'mt-3')} disabled={busy !== ''} onclick={() => loadHistory()}>
-							Load more
-						</button>
+				</div>
+
+				<!-- Declarations -->
+				<div class={panelClass}>
+					<h2 class="text-sm font-semibold text-gray-700 mb-1">Your declarations</h2>
+					<p class="mb-3 text-xs text-gray-400">Declarations of an organization you administer are not listed here.</p>
+					{#if overview.declarations.length === 0}
+						<p class="text-sm text-gray-400 py-2">Nothing has been assessed or declared for you yet.</p>
+					{:else}
+						<ul class="divide-y divide-gray-100">
+							{#each overview.declarations as d (d.id)}
+								<li class="flex items-center justify-between gap-2 py-2 text-sm">
+									<span class="text-gray-900">{d.base} · {d.period}</span>
+									<span class="text-xs text-gray-500">{d.status}</span>
+								</li>
+							{/each}
+						</ul>
 					{/if}
-				{/if}
+				</div>
 			</div>
 		{/if}
 	{/if}
 
-	{#if voteConfirm}
+	{#if $voteConfirm}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
 			<div class="w-full max-w-md bg-white rounded-xl shadow-xl p-5">
 				<h3 class="text-base font-semibold text-gray-900 mb-1">A vote is required</h3>
-				<p class="text-sm text-gray-600 mb-3">{voteConfirm.summary}</p>
+				<p class="text-sm text-gray-600 mb-3">{$voteConfirm.summary}</p>
 				<div class="p-3 bg-gray-50 rounded-lg text-xs text-gray-600 mb-4">
 					<p class="mb-1">
 						<span class="font-medium text-gray-700">Governed by:</span>
-						{voteConfirm.governedBy} ({voteConfirm.governedPolicy})
+						{$voteConfirm.governedBy} ({$voteConfirm.governedPolicy})
 					</p>
-					<p>{voteConfirm.policyReason}</p>
+					<p>{$voteConfirm.policyReason}</p>
 				</div>
 				<div class="flex gap-2 justify-end">
 					<button
-						onclick={() => (voteConfirm = null)}
-						disabled={voteConfirmBusy}
+						onclick={() => voteConfirm.set(null)}
+						disabled={$voteConfirmBusy}
 						class={secondaryClass}
 					>
 						Cancel
 					</button>
-					<button onclick={() => voteConfirm?.run()} disabled={voteConfirmBusy} class={primaryClass}>
-						{#if voteConfirmBusy}{@render spinner(true)}{/if}
+					<button onclick={() => $voteConfirm?.run()} disabled={$voteConfirmBusy} class={primaryClass}>
+						{#if $voteConfirmBusy}{@render spinner(true)}{/if}
 						Create proposal
 					</button>
 				</div>
