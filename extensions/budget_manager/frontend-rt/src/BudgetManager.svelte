@@ -130,10 +130,7 @@
 			rule: source?.rule
 				? {
 						id: source.rule.id,
-						rules: Object.entries(source.rule.rules).map(([fund, share]) => ({
-							fund,
-							share: share as number,
-						})),
+						rules: source.rule.rules,
 					}
 				: null,
 			drafts: view.rule_drafts.filter((r: any) => r.source_fund === sourceCode),
@@ -143,7 +140,7 @@
 					name: f.name,
 					department: f.department,
 					balance: f.balances[view.currency] ?? 0,
-					share: source?.rule?.rules[f.id] ?? 0,
+					share: source?.rule?.rules.find((r: any) => r.fund === f.id)?.share ?? 0,
 				}))
 				.sort((a: any, b: any) => a.code.localeCompare(b.code)),
 			schedule_active: !!config.auto_allocate,
@@ -324,9 +321,9 @@
 		}
 	}
 
-	function describeRules(rules: Record<string, number>): string {
-		return Object.entries(rules)
-			.map(([fund, share]) => `${fund}: ${formatPercent(share)}%`)
+	function describeRules(rules: { fund: string; share: number }[]): string {
+		return rules
+			.map(({ fund, share }) => `${fund}: ${formatPercent(share)}%`)
 			.join(', ');
 	}
 
@@ -348,7 +345,7 @@
 			addToast('Percentages exceed 100%', 'error');
 			return;
 		}
-		const rules = Object.fromEntries(lines.map((r) => [r.fund, toRatio(r.percent)]));
+		const rules = lines.map((r) => ({ fund: r.fund, share: toRatio(r.percent) }));
 		ruleBusy = true;
 		try {
 			await governed(overview.ruleGovernor, `Adopt treasury allocation rule (${describeRules(rules)})`, async () => {

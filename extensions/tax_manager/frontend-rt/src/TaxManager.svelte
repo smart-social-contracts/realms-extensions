@@ -6,7 +6,7 @@
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
 	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
-	import { PERCENT, formatPercent, formatUnits, fromPercent, toBaseUnits } from '../../../_shared/frontend/units';
+	import { PERCENT, formatPercent, formatUnits, toBaseUnits, toRatio } from '../../../_shared/frontend/units';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -85,6 +85,11 @@
 	/** An amount the admin typed, in tokens, as base units; NaN when it is not an amount of this token. */
 	function toUnits(n: number | null | undefined): number {
 		return toBaseUnits(String(n ?? 0), decimals) ?? NaN;
+	}
+
+	/** A rate the admin typed, in percent, as a ratio; NaN when it is not a percentage with at most six decimals. */
+	function toRate(n: number | null | undefined): number {
+		return toRatio(n ?? 0) ?? NaN;
 	}
 
 	/** Base units as the number an input shows, in tokens. */
@@ -183,11 +188,11 @@
 		if (r.exemptBelow) t.exempt_below = toUnits(r.exemptBelow);
 		if (r.base === 'land_area') t.unit_value = toUnits(r.unitValue ?? 1);
 		if (t.method === 'fixed') t.amount = toUnits(r.amount);
-		else if (t.method === 'proportional') t.rate = fromPercent(r.rate);
+		else if (t.method === 'proportional') t.rate = toRate(r.rate);
 		else
 			t.brackets = r.brackets.map((b, i) => ({
 				up_to: i === r.brackets.length - 1 ? null : toUnits(b.upTo),
-				rate: fromPercent(b.rate),
+				rate: toRate(b.rate),
 			}));
 		return t;
 	}
@@ -195,7 +200,13 @@
 	const documentTaxes = $derived(rows.map(taxFrom));
 	const badAmount = $derived(
 		documentTaxes.some((t: any) =>
-			[t.amount, t.exempt_below, t.unit_value, ...(t.brackets ?? []).map((b: any) => b.up_to)].some(Number.isNaN),
+			[
+				t.amount,
+				t.exempt_below,
+				t.unit_value,
+				t.rate,
+				...(t.brackets ?? []).flatMap((b: any) => [b.up_to, b.rate]),
+			].some(Number.isNaN),
 		),
 	);
 	const dirty = $derived(JSON.stringify(documentTaxes) !== baseline);
@@ -307,7 +318,7 @@
 	/** Draft the edited taxes, then adopt the draft; each step may open a vote instead. */
 	async function onAdopt() {
 		if (badAmount) {
-			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
+			addToast(`Amounts need at most ${decimals} decimal places, rates at most six`, 'error');
 			return;
 		}
 		busy = 'adopt';
@@ -390,7 +401,7 @@
 	async function onDeclare() {
 		const amount = toBaseUnits(String(declareAmount ?? 0), decimals);
 		if (amount == null) {
-			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
+			addToast(`Amounts need at most ${decimals} decimal places, rates at most six`, 'error');
 			return;
 		}
 		busy = 'declare';

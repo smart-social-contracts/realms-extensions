@@ -44,8 +44,3 @@ export function formatPercent(ratio: number | null | undefined): string {
 export function toRatio(percent: string | number | null | undefined): number | null {
 	return toBaseUnits(String(percent ?? ''), PERCENT_DECIMALS);
 }
-
-/** A percentage held as a number, such as the value of a number input, as a ratio, rounded to the nearest hundred-millionth. */
-export function fromPercent(percent: number | null | undefined): number {
-	return Math.round((percent ?? 0) * PERCENT);
-}
