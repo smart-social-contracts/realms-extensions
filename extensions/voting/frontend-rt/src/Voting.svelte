@@ -147,6 +147,7 @@
 		'draft',
 		'voting',
 		'accepted',
+		'execution_scheduled',
 		'rejected',
 		'executed',
 		'failed',
@@ -174,6 +175,7 @@
 	let formUpgradeTarget = $state<UpgradeTarget>('extension');
 	let formPackageId = $state('');
 	let formVersion = $state('');
+	let formEffectiveAt = $state('');
 	let treasuryFunds: Record<string, Record<string, number>> = $state({});
 	let vaultTokens: { symbol: string; decimals: number }[] = $state([]);
 	let fundIds = $derived(Object.keys(treasuryFunds).sort());
@@ -299,6 +301,7 @@
 			status: String(p.status ?? ''),
 			created_at: Number(p.opens_at) || null,
 			voting_deadline: Number(p.deadline) || null,
+			effective_at: Number(p.effective_at) || null,
 			votes: {
 				yes: Number(tally.yes) || 0,
 				no: Number(tally.no) || 0,
@@ -404,6 +407,13 @@
 		formUpgradeTarget = 'extension';
 		formPackageId = '';
 		formVersion = '';
+		formEffectiveAt = '';
+	}
+
+	// TODO(realms-gos#503): take and show times in the realm's official time zone. Until then they are UTC.
+	/** The "takes effect at" field, "YYYY-MM-DDTHH:mm" in UTC, as epoch seconds: null when empty, NaN when not a time. */
+	function parseEffectiveAt(value: string): number | null {
+		return value ? Date.parse(`${value}:00Z`) / 1000 : null;
 	}
 
 	function buildSubmitArgs(): Record<string, any> | null {
@@ -419,6 +429,15 @@
 		if (orgScope) args.department = orgScope;
 
 		if (formProposalType === 'poll') return args;
+
+		const effectiveAt = parseEffectiveAt(formEffectiveAt);
+		if (effectiveAt !== null) {
+			if (!Number.isFinite(effectiveAt) || effectiveAt * 1000 <= Date.now()) {
+				error = 'The time it takes effect must be in the future';
+				return null;
+			}
+			args.effective_at = effectiveAt;
+		}
 
 		if (formProposalType === 'transaction') {
 			const fund = formFund.trim();
@@ -802,13 +821,21 @@
 		if (sl === 'voting') return 'bg-emerald-100 text-emerald-700';
 		if (sl === 'draft') return 'bg-amber-100 text-amber-700';
 		if (sl === 'accepted' || sl === 'executed') return 'bg-green-100 text-green-700';
+		if (sl === 'execution_scheduled') return 'bg-sky-100 text-sky-700';
 		if (sl === 'rejected' || sl === 'failed') return 'bg-red-100 text-red-700';
 		return 'bg-gray-100 text-gray-700';
 	}
 
 	function statusLabel(s: string): string {
 		if (!s) return 'Unknown';
-		return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+		const words = s.replace(/_/g, ' ');
+		return words.charAt(0).toUpperCase() + words.slice(1);
+	}
+
+	/** Epoch seconds as "2026-11-07 10:30 UTC". */
+	function formatUtc(value: any): string {
+		const date = new Date(Number(value) * 1000);
+		return isNaN(date.getTime()) ? 'N/A' : `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 	}
 
 	function formatDate(value: any): string {
@@ -1078,6 +1105,14 @@
 					<span>Created: {formatDateTime(selectedProposal.created_at)}</span>
 					{#if selectedProposal.voting_deadline}
 						<span>Deadline: {formatDateTime(selectedProposal.voting_deadline)}</span>
+					{/if}
+					{#if selectedProposal.effective_at}
+						<span>
+							Takes effect: {formatUtc(selectedProposal.effective_at)}
+							{#if selectedProposal.status === 'execution_scheduled'}
+								<span class="text-sky-700">({formatTimeRemaining(selectedProposal.effective_at, nowMs) || 'any moment now'})</span>
+							{/if}
+						</span>
 					{/if}
 					<span class="font-mono text-xs break-all">Link: {buildProposalUrl(selectedProposal)}</span>
 					<button
@@ -1443,6 +1478,24 @@
 					</div>
 				{/if}
 
+				{#if formProposalType !== 'poll'}
+					<div>
+						<label for="rt-effective-at" class="block text-sm font-medium text-gray-700 mb-1">Takes effect at (UTC)</label>
+						<input
+							id="rt-effective-at"
+							type="datetime-local"
+							bind:value={formEffectiveAt}
+							disabled={submitting}
+							class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+						/>
+						<p class="text-xs text-gray-400 mt-1">
+							Optional. Without it, the proposal runs as soon as it is accepted. With it, it runs at this time and never
+							earlier; if voting ends after this time, it expires and nothing runs. The time cannot change once the proposal
+							is accepted, so leave a margin.
+						</p>
+					</div>
+				{/if}
+
 				<div class="flex justify-end gap-3 pt-2">
 					<button
 						type="button"
@@ -1656,6 +1709,9 @@
 								<code>{truncatePrincipal(proposal.proposer)}</code>
 								<span>{formatDate(proposal.created_at)}</span>
 							</div>
+							{#if proposal.effective_at}
+								<p class="text-xs text-gray-500 mb-2">Takes effect {formatUtc(proposal.effective_at)}</p>
+							{/if}
 							{#if proposal.status === 'voting'}
 								{@const tally = voteTally(proposal)}
 								{@const votingOpen = isVotingOpen(proposal, nowMs)}
