@@ -81,7 +81,7 @@ test('an admin adopts an allocation rule', async ({ page }, testInfo) => {
   }
 
   const root = realmCall('budget_view').funds.find((f: { id: string }) => f.id === 'ROOT');
-  expect(root.rule.rules).toEqual({ [FUND]: 30 });
+  expect(root.rule.rules).toEqual({ [FUND]: 30_000_000 }); // hundred-millionths: 30 %
 });
 
 test('under a voting root a change takes two votes: draft, then adopt', async ({ page }, testInfo) => {
@@ -104,7 +104,7 @@ test('under a voting root a change takes two votes: draft, then adopt', async ({
     await expect(ext.getByText(/Proposal .* created/)).toBeVisible({ timeout: 120_000 });
     passTheOpenProposal();
     // Not in force yet: the 30 % stands.
-    expect(rootRule()).toEqual({ [FUND]: 30 });
+    expect(rootRule()).toEqual({ [FUND]: 30_000_000 });
 
     // The draft is listed, and adopting it is the second vote.
     await page.reload();
@@ -116,7 +116,7 @@ test('under a voting root a change takes two votes: draft, then adopt', async ({
     await ext.getByRole('button', { name: 'Create proposal' }).click();
     await expect(ext.getByText(/Proposal .* created/)).toBeVisible({ timeout: 120_000 });
     passTheOpenProposal();
-    expect(rootRule()).toEqual({ [FUND]: 40 });
+    expect(rootRule()).toEqual({ [FUND]: 40_000_000 });
   } finally {
     setRootPolicy(1, 1);
     await close();

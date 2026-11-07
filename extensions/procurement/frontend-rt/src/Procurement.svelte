@@ -8,6 +8,7 @@
 		readSessionFlag,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { PERCENT, formatPercent } from '../../../_shared/frontend/units';
 
 	type View = 'list' | 'create' | 'detail';
 
@@ -312,7 +313,7 @@
 				requester: formDepartment,
 				opens_at: localInputToEpoch(formOpens),
 				closes_at: localInputToEpoch(formCloses),
-				rubric: { price: 50, quality: 50 },
+				rubric: { price: 50 * PERCENT, quality: 50 * PERCENT },
 			});
 			actionMsg = outcome(res, `Created ${res.tender}`);
 			formTitle = '';
@@ -808,7 +809,7 @@
 									<div class="mt-2 grid gap-2 md:grid-cols-2">
 										{#each rubricCriteria(selected.rubric) as crit}
 											<label class="block text-xs">
-												{crit.label} (0–{MAX_MARK}, weight {crit.weight}%)
+												{crit.label} (0–{MAX_MARK}, weight {formatPercent(crit.weight)}%)
 												<input
 													type="number"
 													min="0"

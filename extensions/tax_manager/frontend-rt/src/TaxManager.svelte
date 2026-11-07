@@ -6,7 +6,7 @@
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
 	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
-	import { formatUnits, toBaseUnits } from '../../../_shared/frontend/units';
+	import { PERCENT, formatPercent, formatUnits, fromPercent, toBaseUnits } from '../../../_shared/frontend/units';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -92,8 +92,8 @@
 		return n == null ? null : Number(formatUnits(n, decimals));
 	}
 
-	function pct(bp: number | null | undefined): string {
-		return `${((bp ?? 0) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+	function pct(ratio: number | null | undefined): string {
+		return `${formatPercent(ratio)}%`;
 	}
 
 	function describeTax(t: any): string {
@@ -101,10 +101,10 @@
 			t.base === 'land_area' ? 'per parcel' : t.base === 'declared' ? 'per declaration' : 'per member';
 		let how = '';
 		if (t.method === 'fixed') how = `${fmt(t.amount)} ${per}`;
-		else if (t.method === 'proportional') how = `${pct(t.rate_bp)} of the value`;
+		else if (t.method === 'proportional') how = `${pct(t.rate)} of the value`;
 		else {
 			const parts = (t.brackets ?? []).map((b: any) =>
-				b.up_to == null ? `${pct(b.rate_bp)} above` : `${pct(b.rate_bp)} up to ${human(b.up_to)}`,
+				b.up_to == null ? `${pct(b.rate)} above` : `${pct(b.rate)} up to ${human(b.up_to)}`,
 			);
 			how = parts.join(', ');
 		}
@@ -142,7 +142,7 @@
 	let baseline = $state('[]');
 
 	function bracketFrom(b: any): BracketRow {
-		return { uid: nextUid++, upTo: toTokens(b.up_to), rate: (b.rate_bp ?? 0) / 100 };
+		return { uid: nextUid++, upTo: toTokens(b.up_to), rate: Number(formatPercent(b.rate)) };
 	}
 
 	function rowFrom(t: any): TaxRow {
@@ -155,7 +155,7 @@
 			unitValue: toTokens(t.unit_value ?? toUnits(1)),
 			method: t.method ?? 'fixed',
 			amount: toTokens(t.amount),
-			rate: t.rate_bp != null ? t.rate_bp / 100 : null,
+			rate: t.rate != null ? Number(formatPercent(t.rate)) : null,
 			brackets: (t.brackets ?? []).map(bracketFrom),
 			exemptBelow: toTokens(t.exempt_below || null),
 			exemptProfiles: (t.exempt_profiles ?? []).join(', '),
@@ -168,10 +168,6 @@
 			.split(',')
 			.map((x) => x.trim())
 			.filter(Boolean);
-	}
-
-	function bp(rate: number | null): number {
-		return Math.round((rate ?? 0) * 100);
 	}
 
 	function taxFrom(r: TaxRow): Record<string, unknown> {
@@ -187,11 +183,11 @@
 		if (r.exemptBelow) t.exempt_below = toUnits(r.exemptBelow);
 		if (r.base === 'land_area') t.unit_value = toUnits(r.unitValue ?? 1);
 		if (t.method === 'fixed') t.amount = toUnits(r.amount);
-		else if (t.method === 'proportional') t.rate_bp = bp(r.rate);
+		else if (t.method === 'proportional') t.rate = fromPercent(r.rate);
 		else
 			t.brackets = r.brackets.map((b, i) => ({
 				up_to: i === r.brackets.length - 1 ? null : toUnits(b.upTo),
-				rate_bp: bp(b.rate),
+				rate: fromPercent(b.rate),
 			}));
 		return t;
 	}
@@ -222,7 +218,7 @@
 						label: base === 'land_area' ? 'Land tax' : 'Tax on declared amounts',
 						base,
 						method: 'proportional',
-						rate_bp: 100,
+						rate: PERCENT,
 						unit_value: toUnits(1),
 					},
 		);
@@ -740,7 +736,7 @@
 														type="number"
 														min="0"
 														max="100"
-														step="0.01"
+														step="any"
 														class={inputClass}
 														bind:value={row.rate}
 													/>
@@ -789,7 +785,7 @@
 																	type="number"
 																	min="0"
 																	max="100"
-																	step="0.01"
+																	step="any"
 																	class={cn(inputClass, 'w-24')}
 																	bind:value={b.rate}
 																	aria-label="Rate %"
