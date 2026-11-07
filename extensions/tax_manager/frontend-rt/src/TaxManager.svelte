@@ -401,7 +401,7 @@
 	async function onDeclare() {
 		const amount = toBaseUnits(String(declareAmount ?? 0), decimals);
 		if (amount == null) {
-			addToast(`Amounts need at most ${decimals} decimal places, rates at most six`, 'error');
+			addToast(`Amounts need at most ${decimals} decimal places`, 'error');
 			return;
 		}
 		busy = 'declare';
