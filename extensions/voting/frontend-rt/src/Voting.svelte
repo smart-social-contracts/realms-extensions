@@ -1051,9 +1051,12 @@
 	}
 
 	/** Why a vote that has votes missing is still open. */
-	function waitingText(missing: number, hasDeadline: boolean): string {
-		const key = `waiting_${missing === 1 ? 'one' : 'many'}${hasDeadline ? '' : '_open'}`;
-		return t(key, { count: missing });
+	function waitingText(proposal: any): string {
+		const open = proposal.voting_deadline ? '' : '_open';
+		// A department's vote ends once it has its approvals and every veto holder has voted, or when all have voted.
+		if (proposal.required_approvals) return t(`waiting_department${open}`);
+		const missing = missingVoters(proposal.eligible, voteTally(proposal).total);
+		return t(`waiting_${missing === 1 ? 'one' : 'many'}${open}`, { count: missing });
 	}
 
 	function approvalRequirementLabel(proposal: any): string {
@@ -1298,7 +1301,8 @@
 				</div>
 			{/if}
 
-			{#if selectedProposal.status === 'execution_scheduled'}
+			<!-- Once a stop proposal is filed, another would only repeat it. -->
+			{#if selectedProposal.status === 'execution_scheduled' && !stopFiled}
 				<div class="rounded-lg border border-gray-200 bg-white p-5" data-testid="stop-card">
 					<h3 class="text-base font-semibold text-gray-900 mb-2">{t('stop_title')}</h3>
 					<p class="text-sm text-gray-600 mb-3">{t('stop_explain')}</p>
@@ -1412,7 +1416,7 @@
 					{/if}
 					{#if isVotingOpen(selectedProposal, nowMs) && missingVoters(selectedProposal.eligible, tally.total) > 0}
 						<p class="text-xs text-gray-600 mb-2" data-testid="waiting-line">
-							{waitingText(missingVoters(selectedProposal.eligible, tally.total), !!selectedProposal.voting_deadline)}
+							{waitingText(selectedProposal)}
 						</p>
 					{/if}
 

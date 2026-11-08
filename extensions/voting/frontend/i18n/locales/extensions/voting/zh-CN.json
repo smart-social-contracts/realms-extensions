@@ -64,5 +64,7 @@
   "waiting_one": "还差 1 位投票人，或等待截止时间",
   "waiting_many": "还差 {count} 位投票人，或等待截止时间",
   "waiting_one_open": "还差 1 位投票人，或等待结果确定",
-  "waiting_many_open": "还差 {count} 位投票人，或等待结果确定"
+  "waiting_many_open": "还差 {count} 位投票人，或等待结果确定",
+  "waiting_department": "还在等待更多批准、每位否决权持有人的投票，或截止时间",
+  "waiting_department_open": "还在等待更多批准和每位否决权持有人的投票：在通过或所有人都投票之前保持开放"
 }

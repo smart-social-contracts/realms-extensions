@@ -64,5 +64,7 @@
   "waiting_one": "En attente d'1 votant de plus ou de l'échéance",
   "waiting_many": "En attente de {count} votants de plus ou de l'échéance",
   "waiting_one_open": "En attente d'1 votant de plus, ou que le résultat soit certain",
-  "waiting_many_open": "En attente de {count} votants de plus, ou que le résultat soit certain"
+  "waiting_many_open": "En attente de {count} votants de plus, ou que le résultat soit certain",
+  "waiting_department": "En attente de plus d'approbations, du vote de chaque titulaire d'un veto ou de l'échéance",
+  "waiting_department_open": "En attente de plus d'approbations et du vote de chaque titulaire d'un veto : le vote reste ouvert jusqu'à son adoption ou jusqu'à ce que tous aient voté"
 }

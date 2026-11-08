@@ -64,5 +64,7 @@
   "waiting_one": "In attesa di 1 altro votante o della scadenza",
   "waiting_many": "In attesa di altri {count} votanti o della scadenza",
   "waiting_one_open": "In attesa di 1 altro votante, o che l'esito sia certo",
-  "waiting_many_open": "In attesa di altri {count} votanti, o che l'esito sia certo"
+  "waiting_many_open": "In attesa di altri {count} votanti, o che l'esito sia certo",
+  "waiting_department": "In attesa di altre approvazioni, del voto di ogni titolare di veto o della scadenza",
+  "waiting_department_open": "In attesa di altre approvazioni e del voto di ogni titolare di veto: resta aperto finché non passa o tutti hanno votato"
 }

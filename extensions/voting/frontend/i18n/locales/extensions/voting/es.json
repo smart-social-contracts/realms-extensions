@@ -64,5 +64,7 @@
   "waiting_one": "Falta 1 votante más o el plazo",
   "waiting_many": "Faltan {count} votantes más o el plazo",
   "waiting_one_open": "Falta 1 votante más, o hasta que el resultado sea seguro",
-  "waiting_many_open": "Faltan {count} votantes más, o hasta que el resultado sea seguro"
+  "waiting_many_open": "Faltan {count} votantes más, o hasta que el resultado sea seguro",
+  "waiting_department": "Esperando más aprobaciones, el voto de cada titular de veto o el plazo",
+  "waiting_department_open": "Esperando más aprobaciones y el voto de cada titular de veto: sigue abierta hasta que se apruebe o todos hayan votado"
 }

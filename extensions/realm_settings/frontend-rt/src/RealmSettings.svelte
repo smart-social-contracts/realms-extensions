@@ -193,7 +193,10 @@
 		const prev = savedSnapshot || {};
 		const changes: Change[] = [];
 		for (const { op, keys } of SETTING_GROUPS) {
-			const dirty = keys.filter((key) => !snapshotEquals(prev[key], next[key]));
+			// An empty time zone field means no change.
+			const dirty = keys.filter(
+				(key) => !snapshotEquals(prev[key], next[key]) && !(key === 'timezone' && next[key] === ''),
+			);
 			if (!dirty.length) continue;
 			const sent = op === 'realm_configure_tokens' ? keys : dirty;
 			changes.push({ op, args: Object.fromEntries(sent.map((key) => [key, next[key]])) });

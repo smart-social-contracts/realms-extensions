@@ -64,5 +64,7 @@
   "waiting_one": "Wartet auf 1 weitere Stimme oder das Ende der Frist",
   "waiting_many": "Wartet auf {count} weitere Stimmen oder das Ende der Frist",
   "waiting_one_open": "Wartet auf 1 weitere Stimme oder darauf, dass das Ergebnis feststeht",
-  "waiting_many_open": "Wartet auf {count} weitere Stimmen oder darauf, dass das Ergebnis feststeht"
+  "waiting_many_open": "Wartet auf {count} weitere Stimmen oder darauf, dass das Ergebnis feststeht",
+  "waiting_department": "Wartet auf weitere Zustimmungen, die Stimme jedes Vetoberechtigten oder das Ende der Frist",
+  "waiting_department_open": "Wartet auf weitere Zustimmungen und die Stimme jedes Vetoberechtigten: Die Abstimmung bleibt offen, bis sie angenommen ist oder alle abgestimmt haben"
 }
