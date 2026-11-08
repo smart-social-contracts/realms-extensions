@@ -65,12 +65,14 @@
   "waiting_many": "还差 {count} 位投票人，或等待截止时间",
   "waiting_one_open": "还差 1 位投票人，或等待结果确定",
   "waiting_many_open": "还差 {count} 位投票人，或等待结果确定",
-  "waiting_department": "还在等待{what}，或截止时间",
-  "waiting_department_open": "还在等待{what}：在通过或所有人都投票之前保持开放",
-  "waiting_approvals_one": "再有 1 项批准",
-  "waiting_approvals_many": "再有 {count} 项批准",
+  "waiting_department": "还需 {what}，或等到截止时间",
+  "waiting_department_open": "还需 {what}：在通过或所有人都投票之前保持开放",
+  "waiting_approvals_one": "1 项批准",
+  "waiting_approvals_many": "{count} 项批准",
   "waiting_vetoes_one": "1 位否决权持有人的投票",
   "waiting_vetoes_many": "{count} 位否决权持有人的投票",
   "waiting_quorum": "足够的票数以达到法定人数",
-  "waiting_and": "{first}和{second}"
+  "waiting_and": "{first}和 {second}",
+  "waiting_sep": "、",
+  "waiting_vetoed": "1 位否决权持有人更改其反对票"
 }

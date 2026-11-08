@@ -72,5 +72,7 @@
   "waiting_vetoes_one": "die Stimme von 1 Vetoberechtigten",
   "waiting_vetoes_many": "die Stimmen von {count} Vetoberechtigten",
   "waiting_quorum": "genug Stimmen für das Quorum",
-  "waiting_and": "{first} und {second}"
+  "waiting_and": "{first} und {second}",
+  "waiting_sep": ", ",
+  "waiting_vetoed": "die Änderung der Nein-Stimme eines Vetoberechtigten"
 }

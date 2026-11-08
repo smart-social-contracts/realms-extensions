@@ -45,6 +45,12 @@ export function vetoHoldersMissing(veto: string[] | undefined, votes: Vote[] | u
 	return (veto ?? []).filter((holder) => !voted.has(holder)).length;
 }
 
+/** Whether a veto holder has voted no among ``votes``: a department's vote does not pass while one stands. */
+export function isVetoed(veto: string[] | undefined, votes: Vote[] | undefined): boolean {
+	const holders = new Set(veto ?? []);
+	return (votes ?? []).some((vote) => holders.has(vote.voter) && vote.choice === 'no');
+}
+
 /** Whether the votes cast reach ``quorum``, a share of the eligible voters in hundred-millionths. */
 export function quorumReached(cast: number, eligible: number | null | undefined, quorum: number): boolean {
 	return cast * ONE >= quorum * Math.max(eligible ?? 0, 1);
@@ -62,17 +68,26 @@ export type OpenVote = {
 	required: number | null;
 	/** The department vote's veto holders who have not voted. */
 	vetoHoldersMissing: number;
+	/** Whether a veto holder has voted no. */
+	vetoed: boolean;
 	/** The share of the eligible voters that must vote (hundred-millionths). */
 	quorum: number;
 };
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
+/** The parts of a list as words: "a", "a and b", "a, b and c". */
+function joinList(t: Translate, parts: string[]): string {
+	if (parts.length === 1) return parts[0];
+	return t('waiting_and', { first: parts.slice(0, -1).join(t('waiting_sep')), second: parts[parts.length - 1] });
+}
+
 /**
  * Why an open vote is still open, in words: '' when it waits for nothing the screen knows of.
  * A realm-wide vote ends at its deadline or once everyone has voted. A department's passes once it has its approvals,
- * every veto holder who can still vote has voted, and its quorum is met (the realm's department_outcome), so the text
- * names only what is still missing.
+ * no veto holder stands against it, every veto holder who can still vote has voted and its quorum is met (the realm's
+ * department_outcome), so the text names only what is still short. While a veto holder's no stands nothing else
+ * matters: the vote waits for them to change it, or for the deadline.
  */
 export function waitingText(t: Translate, vote: OpenVote): string {
 	const open = vote.deadline ? '' : '_open';
@@ -81,14 +96,15 @@ export function waitingText(t: Translate, vote: OpenVote): string {
 		if (!missing) return '';
 		return t(`waiting_${missing === 1 ? 'one' : 'many'}${open}`, { count: missing });
 	}
+	if (!vote.eligible) return ''; // the vote was not read: its electorate is not known
+	if (vote.vetoed) return t(`waiting_department${open}`, { what: t('waiting_vetoed') });
 	const parts: string[] = [];
 	const approvals = Math.max(vote.required - vote.yes, 0);
 	if (approvals) parts.push(t(`waiting_approvals_${approvals === 1 ? 'one' : 'many'}`, { count: approvals }));
 	if (vote.vetoHoldersMissing) {
 		parts.push(t(`waiting_vetoes_${vote.vetoHoldersMissing === 1 ? 'one' : 'many'}`, { count: vote.vetoHoldersMissing }));
 	}
-	if (!parts.length && !quorumReached(vote.cast, vote.eligible, vote.quorum)) parts.push(t('waiting_quorum'));
+	if (!quorumReached(vote.cast, vote.eligible, vote.quorum)) parts.push(t('waiting_quorum'));
 	if (!parts.length) return '';
-	const what = parts.length === 2 ? t('waiting_and', { first: parts[0], second: parts[1] }) : parts[0];
-	return t(`waiting_department${open}`, { what });
+	return t(`waiting_department${open}`, { what: joinList(t, parts) });
 }

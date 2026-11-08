@@ -72,5 +72,7 @@
   "waiting_vetoes_one": "1 veto holder's vote",
   "waiting_vetoes_many": "{count} veto holders' votes",
   "waiting_quorum": "enough votes to reach the quorum",
-  "waiting_and": "{first} and {second}"
+  "waiting_and": "{first} and {second}",
+  "waiting_sep": ", ",
+  "waiting_vetoed": "a veto holder to change their no"
 }

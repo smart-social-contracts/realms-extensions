@@ -72,5 +72,7 @@
   "waiting_vetoes_one": "el voto de 1 titular de veto",
   "waiting_vetoes_many": "los votos de {count} titulares de veto",
   "waiting_quorum": "votos suficientes para alcanzar el quórum",
-  "waiting_and": "{first} y {second}"
+  "waiting_and": "{first} y {second}",
+  "waiting_sep": ", ",
+  "waiting_vetoed": "que un titular de veto cambie su no"
 }

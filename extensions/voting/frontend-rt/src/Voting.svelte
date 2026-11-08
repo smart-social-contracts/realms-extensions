@@ -21,7 +21,7 @@
 	} from '../../../_shared/frontend/realm-time';
 	import { loadExtensionI18n, t } from './lib/i18n';
 	import { displayId, type Link, type Replaceable } from './links';
-	import { VOTES_PAGE, myVote, vetoHoldersMissing, waitingText } from './votes';
+	import { VOTES_PAGE, isVetoed, myVote, vetoHoldersMissing, waitingText } from './votes';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -362,6 +362,7 @@
 			quorum: Number(p.quorum) || 0,
 			required_approvals: Number.isFinite(required) && required > 0 ? required : null,
 			veto_holders_missing: vetoHoldersMissing(p.tally?.veto, detail?.votes),
+			vetoed: isVetoed(p.tally?.veto, detail?.votes),
 			org_scope: department && department !== rootDepartment ? department : '',
 			action: p.action ?? null,
 			links: Array.isArray(p.links) ? p.links : [],
@@ -1061,6 +1062,7 @@
 			yes: tally.yes,
 			required: proposal.required_approvals,
 			vetoHoldersMissing: proposal.veto_holders_missing,
+			vetoed: proposal.vetoed,
 			quorum: proposal.quorum,
 		});
 	}

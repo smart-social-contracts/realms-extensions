@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { interpolate } from '../../../_shared/frontend/extension-i18n.ts';
 import {
 	choiceOf,
+	isVetoed,
 	missingVoters,
 	myVote,
 	quorumReached,
@@ -104,6 +105,27 @@ describe('vetoHoldersMissing', () => {
 	});
 });
 
+describe('isVetoed', () => {
+	const votes = [
+		{ voter: 'aaaaa-aa', choice: 'no' },
+		{ voter: 'bbbbb-bb', choice: 'yes' },
+		{ voter: 'ccccc-cc', choice: 'no' },
+	];
+
+	it('is true while a veto holder has voted no', () => {
+		assert.equal(isVetoed(['aaaaa-aa', 'bbbbb-bb'], votes), true);
+		assert.equal(isVetoed(['ccccc-cc'], votes), true);
+	});
+
+	it('is not true for a no from someone without a veto, or a veto holder who voted yes or has not voted', () => {
+		assert.equal(isVetoed(['bbbbb-bb'], votes), false);
+		assert.equal(isVetoed(['ddddd-dd'], votes), false);
+		assert.equal(isVetoed([], votes), false);
+		assert.equal(isVetoed(undefined, votes), false);
+		assert.equal(isVetoed(['aaaaa-aa'], undefined), false);
+	});
+});
+
 describe('quorumReached', () => {
 	it('compares the votes cast with a share of the eligible voters', () => {
 		const half = 50_000_000;
@@ -135,9 +157,19 @@ const department: OpenVote = {
 	yes: 1,
 	required: 2,
 	vetoHoldersMissing: 2,
+	vetoed: false,
 	quorum: 40_000_000,
 };
-const realmWide: OpenVote = { deadline: true, eligible: 5, cast: 3, yes: 2, required: null, vetoHoldersMissing: 0, quorum: 0 };
+const realmWide: OpenVote = {
+	deadline: true,
+	eligible: 5,
+	cast: 3,
+	yes: 2,
+	required: null,
+	vetoHoldersMissing: 0,
+	vetoed: false,
+	quorum: 0,
+};
 
 describe('waitingText', () => {
 	const en = translator('en');
@@ -167,6 +199,48 @@ describe('waitingText', () => {
 		const done = { ...department, yes: 2, vetoHoldersMissing: 0 };
 		assert.equal(waitingText(en, { ...done, cast: 1 }), 'Waiting for enough votes to reach the quorum, or the deadline');
 		assert.equal(waitingText(en, { ...done, cast: 2 }), '');
+	});
+
+	it('lists the quorum whenever it is short, joined to the rest as a list', () => {
+		assert.equal(
+			waitingText(en, { ...department, vetoHoldersMissing: 0, cast: 1 }),
+			'Waiting for 1 more approval and enough votes to reach the quorum, or the deadline',
+		);
+		assert.equal(
+			waitingText(en, { ...department, yes: 0, vetoHoldersMissing: 1, cast: 1 }),
+			"Waiting for 2 more approvals, 1 veto holder's vote and enough votes to reach the quorum, or the deadline",
+		);
+	});
+
+	describe('while a veto holder has voted no', () => {
+		it('names only that, with approvals short', () => {
+			assert.equal(
+				waitingText(en, { ...department, vetoed: true }),
+				'Waiting for a veto holder to change their no, or the deadline',
+			);
+			assert.equal(
+				waitingText(en, { ...department, vetoed: true, yes: 0, vetoHoldersMissing: 0, cast: 1 }),
+				'Waiting for a veto holder to change their no, or the deadline',
+			);
+		});
+
+		it('still says it when everything else is met', () => {
+			const met = { ...department, yes: 2, vetoHoldersMissing: 0, cast: 3, vetoed: true };
+			assert.equal(waitingText(en, met), 'Waiting for a veto holder to change their no, or the deadline');
+		});
+
+		it('says how a vote with no deadline stays open', () => {
+			assert.equal(
+				waitingText(en, { ...department, vetoed: true, deadline: false }),
+				'Waiting for a veto holder to change their no: it stays open until it passes or everyone has voted',
+			);
+		});
+	});
+
+	it('says nothing of a department vote whose electorate is not known', () => {
+		assert.equal(waitingText(en, { ...department, eligible: null }), '');
+		assert.equal(waitingText(en, { ...department, eligible: 0 }), '');
+		assert.equal(waitingText(en, { ...department, eligible: null, vetoed: true }), '');
 	});
 
 	it('says how a vote with no deadline stays open', () => {
@@ -207,6 +281,10 @@ describe('the voting strings in every language', () => {
 			{ ...department, vetoHoldersMissing: 0 },
 			{ ...department, yes: 2 },
 			{ ...department, yes: 2, vetoHoldersMissing: 0, cast: 1 },
+			{ ...department, vetoHoldersMissing: 0, cast: 1 },
+			{ ...department, yes: 0, vetoHoldersMissing: 1, cast: 1 },
+			{ ...department, vetoed: true },
+			{ ...department, vetoed: true, deadline: false },
 			{ ...department, deadline: false },
 			realmWide,
 			{ ...realmWide, cast: 4 },

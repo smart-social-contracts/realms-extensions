@@ -65,12 +65,14 @@
   "waiting_many": "In attesa di altri {count} votanti o della scadenza",
   "waiting_one_open": "In attesa di 1 altro votante, o che l'esito sia certo",
   "waiting_many_open": "In attesa di altri {count} votanti, o che l'esito sia certo",
-  "waiting_department": "Si attende {what}, oppure la scadenza",
-  "waiting_department_open": "Si attende {what}: resta aperto finché non passa o tutti hanno votato",
+  "waiting_department": "Mancano ancora: {what}, oppure la scadenza",
+  "waiting_department_open": "Mancano ancora: {what}. Resta aperto finché non passa o tutti hanno votato",
   "waiting_approvals_one": "1 approvazione in più",
   "waiting_approvals_many": "{count} approvazioni in più",
   "waiting_vetoes_one": "il voto di 1 titolare di veto",
   "waiting_vetoes_many": "i voti di {count} titolari di veto",
   "waiting_quorum": "abbastanza voti per raggiungere il quorum",
-  "waiting_and": "{first} e {second}"
+  "waiting_and": "{first} e {second}",
+  "waiting_sep": ", ",
+  "waiting_vetoed": "una modifica del no di un titolare di veto"
 }
