@@ -95,5 +95,6 @@
   "ended_quorum": "le quorum n'a pas été atteint",
   "ended_exceeds": "les oui dépassent le seuil",
   "ended_not_exceeds": "les oui ne dépassent pas le seuil",
-  "ended_casting": "oui et non sont à égalité au seuil, et la voix prépondérante tranche"
+  "ended_casting": "oui et non sont à égalité au seuil, et la voix prépondérante tranche",
+  "approval_label": "Approbation : {rule}"
 }

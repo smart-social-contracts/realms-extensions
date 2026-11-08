@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { interpolate } from '../../../_shared/frontend/extension-i18n.ts';
 import { ONE, PERCENT } from '../../../_shared/frontend/units.ts';
 import {
+	approvalBar,
+	approvalLabel,
 	approvalsNeeded,
 	castingNote,
 	choiceOf,
@@ -503,11 +505,69 @@ describe('the vote ends as the realm settles it', () => {
 		}
 	});
 
+	it('draws the bar so that its fill passes the threshold mark exactly when the realm accepts it', () => {
+		// Without a quorum, a veto or a casting vote nothing else decides: it is the threshold of the basis the bar measures.
+		for (const c of REALM_CASES.filter((c) => !c.rule.quorum && !c.rule.castingVote)) {
+			const bar = approvalBar(asRealm(c.rule), c.votes, c.eligible);
+			assert.equal(bar.fill > bar.mark, c.ends === 'accepted', c.name);
+		}
+		for (const c of DEPARTMENT_CASES.filter((c) => !c.rule.quorum && !c.rule.veto)) {
+			const bar = approvalBar(c.rule as VotingRule, c.votes, c.eligible);
+			assert.equal(bar.fill >= bar.mark && c.votes.yes > 0, c.ends === 'accepted', c.name);
+		}
+	});
+
 	it('knows nothing of a vote whose rule or electorate it does not have', () => {
 		const known = stateOf(DEPARTMENT_CASES[0], true);
 		assert.equal(finalOutcome({ ...known, rule: null }), null);
 		assert.equal(finalOutcome({ ...known, eligible: null }), null);
 		assert.equal(finalOutcome({ ...known, eligible: 0 }), null);
+	});
+});
+
+describe('approvalBar', () => {
+	it('measures the yes votes among the yes and no votes cast under a threshold of the votes cast', () => {
+		assert.deepEqual(approvalBar(realmRule, tally(3, 1, 2), 7), { basis: 4, fill: 0.75, mark: 0.5 });
+		assert.deepEqual(approvalBar(realmRule, tally(0, 0, 3), 7), { basis: 0, fill: 0, mark: 0.5 }); // only abstentions
+	});
+
+	it('measures the yes votes among all the eligible members under a threshold of the eligible', () => {
+		const eligible: VotingRule = { ...realmRule, thresholdOf: 'eligible' };
+		assert.deepEqual(approvalBar(eligible, tally(3, 1), 8), { basis: 8, fill: 0.375, mark: 0.5 });
+		assert.deepEqual(approvalBar(eligible, tally(3, 1), null), { basis: 0, fill: 0, mark: 0.5 }); // the vote was not read
+	});
+
+	it("measures a department's approvals against the policy's seats, whoever fills them", () => {
+		assert.deepEqual(approvalBar(departmentRule, tally(2, 1, 1), 5), { basis: 3, fill: 2 / 3, mark: 0.66666666 });
+		assert.equal(approvalBar(departmentRule, tally(4), 5).fill, 1); // more yes than seats fills the bar, no further
+	});
+
+	it('puts the mark where the stored threshold is', () => {
+		assert.equal(approvalBar({ ...realmRule, threshold: 75 * PERCENT }, tally(1), 7).mark, 0.75);
+		assert.equal(approvalBar({ ...realmRule, threshold: ONE }, tally(1), 7).mark, 1);
+	});
+});
+
+describe('approvalLabel', () => {
+	const en = translator('en');
+
+	it('says what the bar measures in the words of the Requirement line', () => {
+		assert.equal(approvalLabel(en, realmRule), 'Approval: more than 50% yes of the yes and no votes cast');
+		assert.equal(
+			approvalLabel(en, { ...realmRule, thresholdOf: 'eligible' }),
+			'Approval: more than 50% yes of all eligible members, whether they vote or not',
+		);
+		assert.equal(
+			approvalLabel(en, departmentRule),
+			"Approval: at least 66.666666% of the policy's 3 seats must vote yes (2 of 3)",
+		);
+	});
+
+	it('is the first words of the Requirement line', () => {
+		for (const rule of [realmRule, { ...realmRule, thresholdOf: 'eligible' } as VotingRule, departmentRule]) {
+			const label = approvalLabel(en, rule).replace('Approval: ', '');
+			assert.ok(requirementText(en, rule, 'dana').startsWith(`Requirement: ${label}`), label);
+		}
 	});
 });
 
@@ -708,6 +768,11 @@ describe('the voting strings in every language', () => {
 				requirementText(t, null, 'dana'),
 			];
 			const notes = [castingNote(t, tie, 'dana'), castingNote(t, { ...tie, castingChoice: '' }, 'dana')];
+			const labels = [
+				approvalLabel(t, realmRule),
+				approvalLabel(t, { ...realmRule, thresholdOf: 'eligible' }),
+				approvalLabel(t, departmentRule),
+			];
 			const ends = [
 				endedText(t, ended({ votes: tally(1, 1, 1) }), '8 Nov'),
 				endedText(t, ended({ rule: asDepartment(1, 3), votes: tally(0, 2) }), '8 Nov'),
@@ -719,7 +784,7 @@ describe('the voting strings in every language', () => {
 				endedText(t, tie, '8 Nov'),
 				endedText(t, ended({ rule: null }), '8 Nov'),
 			];
-			for (const group of [rules, notes, ends]) {
+			for (const group of [rules, notes, labels, ends]) {
 				for (const text of group) assert.ok(text && !/[{}]/.test(text), `${locale}: ${text}`);
 				assert.equal(new Set(group).size, group.length, `${locale}: each case reads differently`);
 			}

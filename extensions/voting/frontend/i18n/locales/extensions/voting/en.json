@@ -95,5 +95,6 @@
   "ended_quorum": "the quorum was not reached",
   "ended_exceeds": "the yes votes exceed the threshold",
   "ended_not_exceeds": "the yes votes do not exceed the threshold",
-  "ended_casting": "yes and no are tied at the threshold, and the casting vote decides it"
+  "ended_casting": "yes and no are tied at the threshold, and the casting vote decides it",
+  "approval_label": "Approval: {rule}"
 }

@@ -95,5 +95,6 @@
   "ended_quorum": "未达到法定人数",
   "ended_exceeds": "赞成票超过门槛",
   "ended_not_exceeds": "赞成票未超过门槛",
-  "ended_casting": "赞成与反对在门槛处持平，由决定票决定"
+  "ended_casting": "赞成与反对在门槛处持平，由决定票决定",
+  "approval_label": "赞成：{rule}"
 }

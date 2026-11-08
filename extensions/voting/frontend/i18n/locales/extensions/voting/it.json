@@ -95,5 +95,6 @@
   "ended_quorum": "il quorum non è stato raggiunto",
   "ended_exceeds": "i sì superano la soglia",
   "ended_not_exceeds": "i sì non superano la soglia",
-  "ended_casting": "sì e no sono in parità alla soglia e decide il voto decisivo"
+  "ended_casting": "sì e no sono in parità alla soglia e decide il voto decisivo",
+  "approval_label": "Approvazione: {rule}"
 }

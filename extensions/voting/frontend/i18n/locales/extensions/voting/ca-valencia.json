@@ -95,5 +95,6 @@
   "ended_quorum": "no s'ha aconseguit el quòrum",
   "ended_exceeds": "els sís superen el llindar",
   "ended_not_exceeds": "els sís no superen el llindar",
-  "ended_casting": "sí i no empaten al llindar i ho decideix el vot de qualitat"
+  "ended_casting": "sí i no empaten al llindar i ho decideix el vot de qualitat",
+  "approval_label": "Aprovació: {rule}"
 }

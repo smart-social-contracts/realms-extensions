@@ -95,5 +95,6 @@
   "ended_quorum": "no se alcanzó el quórum",
   "ended_exceeds": "los síes superan el umbral",
   "ended_not_exceeds": "los síes no superan el umbral",
-  "ended_casting": "sí y no empatan en el umbral y decide el voto de calidad"
+  "ended_casting": "sí y no empatan en el umbral y decide el voto de calidad",
+  "approval_label": "Aprobación: {rule}"
 }

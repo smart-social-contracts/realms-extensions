@@ -22,6 +22,8 @@
 	import { displayId, type Link, type Replaceable } from './links';
 	import {
 		VOTES_PAGE,
+		approvalBar,
+		approvalLabel,
 		castingNote,
 		endedText,
 		isVetoed,
@@ -1391,27 +1393,47 @@
 					</div>
 
 					{#if tally.total > 0}
+						{@const bar = selectedProposal.rule ? approvalBar(selectedProposal.rule, tally, selectedProposal.eligible) : null}
 						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal))}
 						{@const casting = castingNote(t, voteState(selectedProposal), castingMember(selectedProposal))}
 						<div class="mb-4">
-							<div class="flex justify-between text-xs text-gray-500 mb-1">
-								<span>Approval (yes / decisive votes)</span>
-								<span>{votePercent(tally.yes, Math.max(tally.yes + tally.no, 1))}</span>
-							</div>
-							<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex">
-								<div
-									class="bg-green-500 h-2.5 transition-all duration-300"
-									style="width: {tally.total > 0 ? (tally.yes / tally.total) * 100 : 0}%"
-								></div>
-								<div
-									class="bg-red-500 h-2.5 transition-all duration-300"
-									style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"
-								></div>
-								<div
-									class="bg-gray-400 h-2.5 transition-all duration-300"
-									style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
-								></div>
-							</div>
+							<!-- With a stored rule the bar measures what the rule measures, with the threshold marked on it; without one it keeps yes among yes and no. -->
+							{#if bar}
+								<div class="flex justify-between text-xs text-gray-500 mb-1">
+									<span data-testid="approval-label">{approvalLabel(t, selectedProposal.rule)}</span>
+									<span data-testid="approval-figure">{votePercent(Math.min(tally.yes, bar.basis), bar.basis)}</span>
+								</div>
+								<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex" style="position: relative">
+									<div
+										class="bg-green-500 h-2.5 transition-all duration-300"
+										style="width: {bar.fill * 100}%"
+										data-testid="approval-fill"
+									></div>
+									<div
+										style="position: absolute; top: 0; bottom: 0; width: 2px; background: #111827; left: {bar.mark * 100}%"
+										data-testid="threshold-mark"
+									></div>
+								</div>
+							{:else}
+								<div class="flex justify-between text-xs text-gray-500 mb-1">
+									<span>Approval (yes / decisive votes)</span>
+									<span>{votePercent(tally.yes, Math.max(tally.yes + tally.no, 1))}</span>
+								</div>
+								<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex">
+									<div
+										class="bg-green-500 h-2.5 transition-all duration-300"
+										style="width: {tally.total > 0 ? (tally.yes / tally.total) * 100 : 0}%"
+									></div>
+									<div
+										class="bg-red-500 h-2.5 transition-all duration-300"
+										style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"
+									></div>
+									<div
+										class="bg-gray-400 h-2.5 transition-all duration-300"
+										style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
+									></div>
+								</div>
+							{/if}
 							{#if selectedProposal.enriched}
 								<div class="text-xs text-gray-400 mt-1" data-testid="requirement-line">{requirement}</div>
 								{#if casting}

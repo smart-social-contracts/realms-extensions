@@ -180,24 +180,51 @@ function joinList(t: Translate, parts: string[]): string {
 	return t('waiting_and', { first: parts.slice(0, -1).join(t('waiting_sep')), second: parts[parts.length - 1] });
 }
 
+/** What the yes votes must come to and what that is a share of: the first words of the rule, and of the approval bar's label. */
+function thresholdClause(t: Translate, rule: VotingRule): string {
+	const threshold = formatPercent(rule.threshold);
+	if (isDepartment(rule)) {
+		return t('rule_department', { threshold, seats: rule.seats, approvals: approvalsNeeded(rule.threshold, rule.seats) });
+	}
+	return t(rule.thresholdOf === 'eligible' ? 'rule_eligible' : 'rule_cast', { threshold });
+}
+
 /**
  * The rule in words: what the yes votes must come to, what that is a share of (and for a department, that abstentions and
  * members who do not vote count against it), the quorum, a veto and the casting vote. ``who`` names the casting member.
  */
 export function requirementText(t: Translate, rule: VotingRule | null, who: string): string {
 	if (!rule) return t('requirement_unknown');
-	const threshold = formatPercent(rule.threshold);
-	const parts: string[] = [];
+	const parts: string[] = [thresholdClause(t, rule)];
 	if (isDepartment(rule)) {
-		parts.push(t('rule_department', { threshold, seats: rule.seats, approvals: approvalsNeeded(rule.threshold, rule.seats) }));
 		parts.push(t('rule_abstain'));
 		if (rule.veto) parts.push(t('rule_veto'));
-	} else {
-		parts.push(t(rule.thresholdOf === 'eligible' ? 'rule_eligible' : 'rule_cast', { threshold }));
-		if (rule.thresholdOf === 'cast' && rule.castingVote) parts.push(t('rule_casting', { who }));
+	} else if (rule.thresholdOf === 'cast' && rule.castingVote) {
+		parts.push(t('rule_casting', { who }));
 	}
 	if (rule.quorum) parts.push(t('rule_quorum', { quorum: formatPercent(rule.quorum) }));
 	return t('requirement', { rule: joinList(t, parts) });
+}
+
+/** What the rule's threshold is a share of, counted: a department's seats, all the eligible voters, or the yes and no votes cast. */
+function basisOf(rule: VotingRule, votes: Votes, eligible: number | null): number {
+	if (isDepartment(rule)) return rule.seats;
+	if (rule.thresholdOf === 'eligible') return eligible ?? 0;
+	return votes.yes + votes.no;
+}
+
+/**
+ * The approval bar of a vote with a stored rule: the share of the rule's basis that the yes votes make up (``fill``, 0 to 1,
+ * of ``basis``) and where the threshold lies on it (``mark``, 0 to 1). A vote with no rule keeps the bar of yes among yes and no.
+ */
+export function approvalBar(rule: VotingRule, votes: Votes, eligible: number | null) {
+	const basis = basisOf(rule, votes, eligible);
+	return { basis, fill: basis ? Math.min(votes.yes / basis, 1) : 0, mark: Math.min(rule.threshold / ONE, 1) };
+}
+
+/** What the approval bar measures, in the words of the Requirement line. */
+export function approvalLabel(t: Translate, rule: VotingRule): string {
+	return t('approval_label', { rule: thresholdClause(t, rule) });
 }
 
 /**

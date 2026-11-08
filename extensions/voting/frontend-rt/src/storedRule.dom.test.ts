@@ -192,6 +192,85 @@ test('the casting vote that decided a tie is shown, with who holds it', async ()
 	);
 });
 
+/** The bar of the open proposal: its label and figure, how far it is filled and where its threshold mark stands (percent). */
+const bar = () => {
+	const width = (testid: string) => parseFloat((target.querySelector(`[data-testid="${testid}"]`) as HTMLElement | null)?.style.width || 'NaN');
+	const mark = target.querySelector<HTMLElement>('[data-testid="threshold-mark"]');
+	return { label: text('approval-label'), figure: text('approval-figure'), fill: width('approval-fill'), mark: parseFloat(mark?.style.left ?? 'NaN') };
+};
+
+test('the bar of a vote over the votes cast measures yes among yes and no', async () => {
+	const row: Row = {
+		proposal: proposal('Cast', {
+			department: 'Realm',
+			deadline: FUTURE,
+			threshold: 50 * PERCENT,
+			quorum: 0,
+			threshold_of: 'cast',
+			casting_vote: '',
+			tally: { yes: 3, no: 1, abstain: 2, eligible: 7 },
+		}),
+		counts: counts(3, 1, 2, 7),
+		votes: [],
+	};
+	await openOn([row], 'Cast');
+	expect(bar()).toEqual({
+		label: 'Approval: more than 50% yes of the yes and no votes cast',
+		figure: '75.0%',
+		fill: 75,
+		mark: 50,
+	});
+});
+
+test('the bar of a vote over all the eligible members measures yes among them', async () => {
+	const row: Row = {
+		proposal: proposal('Eligible', {
+			department: 'Realm',
+			deadline: FUTURE,
+			threshold: 50 * PERCENT,
+			quorum: 0,
+			threshold_of: 'eligible',
+			casting_vote: '',
+			tally: { yes: 3, no: 1, abstain: 0, eligible: 8 },
+		}),
+		counts: counts(3, 1, 0, 8),
+		votes: [],
+	};
+	await openOn([row], 'Eligible');
+	expect(bar()).toEqual({
+		label: 'Approval: more than 50% yes of all eligible members, whether they vote or not',
+		figure: '37.5%',
+		fill: 37.5,
+		mark: 50,
+	});
+});
+
+test("the bar of a department's vote measures approvals against the policy's seats", async () => {
+	// 1 approval of the policy's 3 seats, though 4 members may vote; the mark is at the stored 2/3
+	await openOn([departmentVote(1, 0, [{ voter: 'alice', choice: 'yes' }])], 'Department');
+	const { fill, mark, ...words } = bar();
+	expect(words).toEqual({
+		label: "Approval: at least 66.666666% of the policy's 3 seats must vote yes (2 of 3)",
+		figure: '33.3%',
+	});
+	expect(fill).toBeCloseTo(100 / 3, 5);
+	expect(mark).toBeCloseTo(66.666666, 5);
+});
+
+test('a proposal that records no rule keeps the bar of yes among yes and no', async () => {
+	const row: Row = {
+		proposal: proposal('Old', { department: 'Civil Registry', deadline: PAST, threshold: 50 * PERCENT, quorum: 0, tally: '{}' }),
+		counts: counts(2, 1),
+		votes: [],
+	};
+	await openOn([row], 'Old');
+	const spans = [...target.querySelectorAll('span')].map((span) => span.textContent?.trim());
+	expect(spans).toContain('Approval (yes / decisive votes)');
+	expect(spans).toContain('66.7%');
+	expect(text('approval-label')).toBeNull();
+	expect(target.querySelector('[data-testid="threshold-mark"]')).toBeNull();
+});
+
 test('a proposal that records no rule says so, with no numbers', async () => {
 	// stored before the rule was kept: no basis, no seats, and its tally a Json field read as text
 	const row: Row = {
