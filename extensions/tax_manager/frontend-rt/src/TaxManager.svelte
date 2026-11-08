@@ -7,6 +7,7 @@
 	} from '../../../_shared/frontend/mobile-chrome';
 	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
 	import { PERCENT, formatPercent, formatUnits, toBaseUnits, toRatio } from '../../../_shared/frontend/units';
+	import { toEntry, toTax, type Tax } from './entries';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -127,6 +128,8 @@
 	interface TaxRow {
 		uid: number;
 		code: string;
+		kind: string;
+		extra: Record<string, unknown>;
 		label: string;
 		enabled: boolean;
 		base: string;
@@ -154,6 +157,8 @@
 		return {
 			uid: nextUid++,
 			code: t.code ?? '',
+			kind: t.kind ?? 'tax',
+			extra: t.extra ?? {},
 			label: t.label ?? '',
 			enabled: t.enabled !== false,
 			base: t.base ?? 'flat',
@@ -175,9 +180,11 @@
 			.filter(Boolean);
 	}
 
-	function taxFrom(r: TaxRow): Record<string, unknown> {
-		const t: Record<string, unknown> = {
+	function taxFrom(r: TaxRow): Tax {
+		const t: Tax = {
 			code: r.code.trim(),
+			kind: r.kind,
+			extra: r.extra,
 			label: r.label.trim() || r.code.trim(),
 			enabled: r.enabled,
 			base: r.base,
@@ -282,7 +289,7 @@
 			decimals: view.decimals,
 			adopted: policy && {
 				id: policy.id,
-				taxes: policy.document.taxes,
+				taxes: policy.taxes.map(toTax),
 				adopted_at: policy.adopted_at,
 				proposal: policy.proposal,
 			},
@@ -323,11 +330,11 @@
 		}
 		busy = 'adopt';
 		try {
-			const taxes = documentTaxes;
+			const taxes = documentTaxes.map(toEntry);
 			await governed(overview.governor, `Adopt a tax policy of ${taxes.length} tax(es)`, async () => {
 				// Under a voting policy drafting is voted on too; the draft it leaves is adopted from the list of drafts.
-				const document = { ...(currency ? { symbol: currency } : {}), taxes };
-				const drafted = await ctx.run('tax_policy_draft', { document, description });
+				const document = currency ? { symbol: currency } : {};
+				const drafted = await ctx.run('tax_policy_draft', { document, taxes, description });
 				if (!applied(drafted, addToast, 'Could not draft the tax policy', '; adopt the draft from the list once it passes')) return;
 				await adoptPolicy(drafted.policy);
 			});
@@ -512,7 +519,7 @@
 					<span class="min-w-0 text-gray-600">
 						<span class="font-medium text-gray-900">{d.id}</span>
 						<span class="text-xs text-gray-400">
-							· {d.document.taxes.map((t: any) => t.label || t.code).join(', ')}{d.description ? ` · ${d.description}` : ''}
+							· {d.taxes.map((t: any) => t.facts?.label || t.code).join(', ')}{d.description ? ` · ${d.description}` : ''}
 						</span>
 					</span>
 					{#if canManage}
