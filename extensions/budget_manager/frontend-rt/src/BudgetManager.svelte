@@ -8,6 +8,7 @@
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
 	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
+	import { ONE, formatPercent, toRatio } from '../../../_shared/frontend/units';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -129,10 +130,7 @@
 			rule: source?.rule
 				? {
 						id: source.rule.id,
-						rules: Object.entries(source.rule.rules).map(([fund, percent]) => ({
-							fund,
-							percent_bp: (percent as number) * 100,
-						})),
+						rules: source.rule.rules,
 					}
 				: null,
 			drafts: view.rule_drafts.filter((r: any) => r.source_fund === sourceCode),
@@ -142,7 +140,7 @@
 					name: f.name,
 					department: f.department,
 					balance: f.balances[view.currency] ?? 0,
-					share: source?.rule?.rules[f.id] ?? 0,
+					share: source?.rule?.rules.find((r: any) => r.fund === f.id)?.share ?? 0,
 				}))
 				.sort((a: any, b: any) => a.code.localeCompare(b.code)),
 			schedule_active: !!config.auto_allocate,
@@ -280,7 +278,8 @@
 	let ruleRows: RuleRow[] = $state([]);
 	let ruleBusy = $state(false);
 
-	const ruleTotal = $derived(ruleRows.reduce((s, r) => s + (parseFloat(r.percent) || 0), 0));
+	/** The shares typed so far, added up, in hundred-millionths. */
+	const ruleTotal = $derived(ruleRows.reduce((s, r) => s + (toRatio(r.percent) ?? 0), 0));
 
 	const targetFunds = $derived(
 		(overview?.funds ?? []).filter((f: any) => f.code !== overview?.source_fund),
@@ -290,7 +289,7 @@
 		const current = overview?.rule?.rules ?? [];
 		ruleRows = current.map((r: any) => ({
 			fund: r.fund,
-			percent: String((r.percent_bp ?? 0) / 100),
+			percent: formatPercent(r.share),
 		}));
 		if (ruleRows.length === 0) ruleRows = [{ fund: '', percent: '' }];
 	}
@@ -322,9 +321,9 @@
 		}
 	}
 
-	function describeRules(rules: Record<string, number>): string {
-		return Object.entries(rules)
-			.map(([fund, percent]) => `${fund}: ${percent}%`)
+	function describeRules(rules: { fund: string; share: number }[]): string {
+		return rules
+			.map(({ fund, share }) => `${fund}: ${formatPercent(share)}%`)
 			.join(', ');
 	}
 
@@ -333,20 +332,20 @@
 			addToast(`The source fund ${overview.source_fund} does not exist yet`, 'error');
 			return;
 		}
-		const lines = ruleRows.filter((r) => r.fund && parseFloat(r.percent) > 0);
+		const lines = ruleRows.filter((r) => r.fund && Number(r.percent) > 0);
 		if (lines.length === 0) {
 			addToast('Add at least one fund with a percentage', 'error');
 			return;
 		}
-		if (ruleTotal > 100) {
+		if (lines.some((r) => toRatio(r.percent) === null)) {
+			addToast('Use percentages with at most six decimals', 'error');
+			return;
+		}
+		if (ruleTotal > ONE) {
 			addToast('Percentages exceed 100%', 'error');
 			return;
 		}
-		if (lines.some((r) => !Number.isInteger(parseFloat(r.percent)))) {
-			addToast('Use whole percentages', 'error');
-			return;
-		}
-		const rules = Object.fromEntries(lines.map((r) => [r.fund, parseInt(r.percent)]));
+		const rules = lines.map((r) => ({ fund: r.fund, share: toRatio(r.percent) }));
 		ruleBusy = true;
 		try {
 			await governed(overview.ruleGovernor, `Adopt treasury allocation rule (${describeRules(rules)})`, async () => {
@@ -624,7 +623,7 @@
 								<span class="min-w-0 text-gray-600">
 									<span class="font-medium text-gray-900">{f.code}</span>
 									{#if f.department}<span class="text-xs text-gray-400"> · {f.department}</span>{/if}
-									{#if f.share}<span class="text-xs text-gray-400"> · {f.share}% of {overview.source_fund}</span>{/if}
+									{#if f.share}<span class="text-xs text-gray-400"> · {formatPercent(f.share)}% of {overview.source_fund}</span>{/if}
 								</span>
 								<span class="shrink-0 font-medium text-gray-900">{fmt(f.balance)}</span>
 							</li>
@@ -671,7 +670,7 @@
 									type="number"
 									min="0"
 									max="100"
-									step="0.01"
+									step="any"
 									bind:value={row.percent}
 									placeholder="%"
 									class="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg"
@@ -693,16 +692,16 @@
 						<span
 							class={cn(
 								'text-xs font-medium',
-								ruleTotal > 100 ? 'text-red-600' : 'text-gray-600',
+								ruleTotal > ONE ? 'text-red-600' : 'text-gray-600',
 							)}
 						>
-							total {ruleTotal.toFixed(2)}% — reserve {(100 - ruleTotal).toFixed(2)}%
+							total {formatPercent(ruleTotal)}% — reserve {formatPercent(Math.max(ONE - ruleTotal, 0))}%
 						</span>
 					</div>
 					<div class="flex gap-2 mt-4">
 						<button
 							onclick={saveRule}
-							disabled={ruleBusy || ruleTotal > 100 || !can('org.manage_budget')}
+							disabled={ruleBusy || ruleTotal > ONE || !can('org.manage_budget')}
 							class="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
 						>
 							{#if ruleBusy}

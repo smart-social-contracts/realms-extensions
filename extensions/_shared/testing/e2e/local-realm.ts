@@ -144,7 +144,7 @@ export function realmCall(name: string, args: Record<string, unknown> = {}): Rec
  * since changing the voting rules is itself governed.
  */
 export function makeOneYesDecideAtOnce(): void {
-  realmCall('governance_update', { voting_window: 0, threshold: 0 });
+  realmCall('governance_update', { voting_window: 0, voting_threshold: 0 });
 }
 
 /** The local identity, a member, votes yes on ``proposal``: its action runs at once. */

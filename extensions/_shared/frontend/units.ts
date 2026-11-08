@@ -23,3 +23,24 @@ export function toBaseUnits(input: string, decimals: number): number | null {
 	const n = Number(combined);
 	return Number.isFinite(n) && n >= 0 ? n : null;
 }
+
+/*
+ * Ratios (a quorum, a threshold, an allocation share, a tender weight, a tax rate) are integers in
+ * hundred-millionths: 100 % is 100 000 000. People read and type percentages, with up to six decimals.
+ */
+
+/** 1 %, in hundred-millionths. */
+export const PERCENT = 1_000_000;
+/** 100 %, in hundred-millionths. */
+export const ONE = 100 * PERCENT;
+const PERCENT_DECIMALS = 6;
+
+/** A ratio as the percentage a person reads, without the sign: 100 000 is "0.1", 33 333 333 is "33.333333". */
+export function formatPercent(ratio: number | null | undefined): string {
+	return formatUnits(ratio ?? 0, PERCENT_DECIMALS);
+}
+
+/** A percentage a person typed as a ratio; null when it is not a percentage with at most six decimals. */
+export function toRatio(percent: string | number | null | undefined): number | null {
+	return toBaseUnits(String(percent ?? ''), PERCENT_DECIMALS);
+}

@@ -5,6 +5,7 @@
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { ONE, formatPercent, toRatio } from '../../../_shared/frontend/units';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -279,7 +280,7 @@
 			policy: {
 				threshold_m: Number(policy.m) || 1,
 				threshold_n: Number(policy.n) || 1,
-				quorum_percent: Number(policy.quorum_percent) || 0,
+				quorum: Number(policy.quorum) || 0,
 				veto_principals: Array.isArray(policy.veto) ? policy.veto.map(String) : [],
 			},
 			positions,
@@ -360,7 +361,7 @@
 			}
 		};
 		if (m !== 1 || n !== 1) {
-			await follow(`Policy ${m}/${n}`, 'department_set_policy', { department: name, m, n, quorum_percent: 0, veto: [] });
+			await follow(`Policy ${m}/${n}`, 'department_set_policy', { department: name, m, n, quorum: 0, veto: [] });
 		}
 		if (fund) await follow(`Fund ${fund}`, 'fund_create', { fund, name: fund, department: name });
 		notify(notes.join(' '), refused ? 'info' : 'success');
@@ -468,7 +469,7 @@
 		return {
 			m: String(dept.policy?.threshold_m ?? 1),
 			n: String(dept.policy?.threshold_n ?? 1),
-			quorum: String(dept.policy?.quorum_percent ?? 0),
+			quorum: formatPercent(dept.policy?.quorum),
 			veto: (dept.policy?.veto_principals ?? []).join(', '),
 		};
 	}
@@ -500,13 +501,11 @@
 		const quorumRaw = draft.quorum.trim();
 		const m = parseInt(mRaw, 10);
 		const n = parseInt(nRaw, 10);
-		const quorum = parseInt(quorumRaw, 10);
+		const quorum = toRatio(quorumRaw);
 
 		if (!/^\d+$/.test(mRaw) || m < 1) errors.m = 'Must be an integer ≥ 1';
 		if (!/^\d+$/.test(nRaw) || n < 1) errors.n = 'Must be an integer ≥ 1';
-		if (!/^\d+$/.test(quorumRaw) || quorum < 0 || quorum > 100) {
-			errors.quorum = 'Must be an integer 0–100';
-		}
+		if (quorum === null || quorum > ONE) errors.quorum = 'Must be a percentage from 0 to 100, with at most six decimals';
 		if (!errors.m && !errors.n && m > n) errors.m = 'M must be ≤ N';
 
 		return { valid: Object.keys(errors).length === 0, errors };
@@ -526,7 +525,7 @@
 			department: name,
 			m: int(draft.m, 1),
 			n: int(draft.n, 1),
-			quorum_percent: int(draft.quorum, 0),
+			quorum: toRatio(draft.quorum) ?? 0,
 			veto: draft.veto.split(',').map((p) => p.trim()).filter(Boolean),
 		}, () => `Policy saved for ${name}`);
 		if (reply) await loadDepartments();
@@ -1003,8 +1002,8 @@
 					{#if narrow}
 						<div class="text-xs text-gray-500">
 							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
-							{#if (dept.policy?.quorum_percent ?? 0) > 0}
-								· Quorum {dept.policy?.quorum_percent}%
+							{#if (dept.policy?.quorum ?? 0) > 0}
+								· Quorum {formatPercent(dept.policy?.quorum)}%
 							{/if}
 						</div>
 					{:else}
@@ -1012,9 +1011,9 @@
 							<span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded-full font-medium">
 								Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
 							</span>
-							{#if (dept.policy?.quorum_percent ?? 0) > 0}
+							{#if (dept.policy?.quorum ?? 0) > 0}
 								<span class="px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded-full font-medium">
-									Quorum {dept.policy?.quorum_percent}%
+									Quorum {formatPercent(dept.policy?.quorum)}%
 								</span>
 							{/if}
 						</div>
@@ -1109,7 +1108,7 @@
 										</button>
 										<span class="text-xs text-gray-400">
 											Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
-											{(dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0
+											{(dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum ?? 0) > 0
 												? '— requires a vote'
 												: '— applies immediately'}
 										</span>
@@ -1229,10 +1228,10 @@
 				</div>
 				{:else if activeTab === 'members'}
 				<div class={cn('bg-gray-50 space-y-4', narrow ? 'px-3 py-3' : 'px-4 py-4 sm:px-6')}>
-					{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
+					{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum ?? 0) > 0}
 						<p class="text-xs text-gray-500">
 							Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1}
-							{(dept.policy?.quorum_percent ?? 0) > 0 ? ` · quorum ${dept.policy?.quorum_percent}%` : ''}
+							{(dept.policy?.quorum ?? 0) > 0 ? ` · quorum ${formatPercent(dept.policy?.quorum)}%` : ''}
 							— add/remove requires a vote
 						</p>
 					{/if}
@@ -1439,7 +1438,7 @@
 								{payrollBusy ? 'Running…' : 'Run payroll'}
 							</button>
 						</div>
-						{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum_percent ?? 0) > 0}
+						{#if (dept.policy?.threshold_m ?? 1) > 1 || (dept.policy?.threshold_n ?? 1) > 1 || (dept.policy?.quorum ?? 0) > 0}
 							<p class="text-xs text-gray-500">
 								Policy {dept.policy?.threshold_m ?? 1}/{dept.policy?.threshold_n ?? 1} — running payroll requires a vote.
 							</p>

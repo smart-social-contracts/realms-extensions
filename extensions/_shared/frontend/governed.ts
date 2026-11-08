@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { formatPercent } from './units';
 
 /**
  * Helpers for extensions whose actions are governed realm operations: under a department's
@@ -19,9 +20,9 @@ export async function governorOf(read: Read, department: string): Promise<Govern
 	const p = (await read('department_get', { department })).department.policy ?? {};
 	const m = p.m ?? 1;
 	const n = p.n ?? 1;
-	const quorum = p.quorum_percent ?? 0;
+	const quorum = p.quorum ?? 0;
 	const veto = p.veto ?? [];
-	const extras = [quorum ? `quorum ${quorum}%` : '', veto.length ? 'veto' : ''].filter(Boolean);
+	const extras = [quorum ? `quorum ${formatPercent(quorum)}%` : '', veto.length ? 'veto' : ''].filter(Boolean);
 	return {
 		name: department,
 		policy: extras.length ? `${m}/${n} (${extras.join(', ')})` : `${m}/${n}`,

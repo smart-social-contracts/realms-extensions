@@ -1,6 +1,6 @@
 {
   "name": "budget_manager",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "See how revenue moves through your treasury, set how each period's income is split across funds, compare planned spending to actuals, and choose whether allocation runs automatically.",
   "author": "Smart Social Contracts",
   "permissions": [],

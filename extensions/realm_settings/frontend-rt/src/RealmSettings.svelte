@@ -221,7 +221,7 @@
 		const m = Number(policy.m ?? 1);
 		const n = Number(policy.n ?? 1);
 		governancePolicyLabel = `${m}/${n}`;
-		governanceAppliesDirectly = m <= 1 && n <= 1 && !policy.quorum_percent && !(policy.veto?.length > 0);
+		governanceAppliesDirectly = m <= 1 && n <= 1 && !policy.quorum && !(policy.veto?.length > 0);
 	}
 
 	async function loadRealmSettings() {

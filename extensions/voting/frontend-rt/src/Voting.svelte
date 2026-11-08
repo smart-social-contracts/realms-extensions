@@ -7,6 +7,7 @@
 		persistSessionFlag,
 		readSessionFlag,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { formatPercent } from '../../../_shared/frontend/units';
 	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
@@ -308,8 +309,8 @@
 				abstain: Number(tally.abstain) || 0,
 			},
 			eligible: detail ? Number(detail.eligible) || 0 : null,
-			required_threshold: Number.isFinite(threshold) && detail ? threshold / 100 : null,
-			quorum_percent: Number(p.quorum_percent) || 0,
+			required_threshold: Number.isFinite(threshold) && detail ? threshold : null,
+			quorum: Number(p.quorum) || 0,
 			required_approvals: Number.isFinite(required) && required > 0 ? required : null,
 			org_scope: department && department !== rootDepartment ? department : '',
 			action: p.action ?? null,
@@ -932,8 +933,8 @@
 	function approvalRequirementLabel(proposal: any): string {
 		if (proposal?.required_approvals) return `${proposal.required_approvals} department approvals`;
 		if (proposal?.required_threshold != null) {
-			const quorum = proposal.quorum_percent ? `, ${proposal.quorum_percent}% turnout` : '';
-			return `more than ${(proposal.required_threshold * 100).toFixed(0)}% yes of decisive votes${quorum}`;
+			const quorum = proposal.quorum ? `, ${formatPercent(proposal.quorum)}% turnout` : '';
+			return `more than ${formatPercent(proposal.required_threshold)}% yes of decisive votes${quorum}`;
 		}
 		return 'Approval threshold not set';
 	}

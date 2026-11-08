@@ -60,7 +60,7 @@ test('an admin drafts a policy and adopts it', async ({ page }, testInfo) => {
   const policy = realmCall('tax_policy_view').policy;
   expect(policy.document.taxes.map((t: { code: string }) => t.code)).toEqual(['residence', 'revenue']);
   expect(policy.document.taxes[0]).toMatchObject({ code: 'residence', base: 'flat', amount: 2500 });
-  expect(policy.document.taxes[1]).toMatchObject({ base: 'declared', method: 'proportional', rate_bp: 200 });
+  expect(policy.document.taxes[1]).toMatchObject({ base: 'declared', method: 'proportional', rate: 2_000_000 });
 });
 
 test('a member reads the policy and cannot change it', async ({ page }, testInfo) => {
