@@ -10,7 +10,6 @@
 		persistSessionFlag,
 		readSessionFlag,
 	} from '../../../_shared/frontend/mobile-chrome';
-	import { formatPercent } from '../../../_shared/frontend/units';
 	import {
 		UTC,
 		formatUtc,
@@ -21,7 +20,18 @@
 	} from '../../../_shared/frontend/realm-time';
 	import { loadExtensionI18n, t } from './lib/i18n';
 	import { displayId, type Link, type Replaceable } from './links';
-	import { VOTES_PAGE, isVetoed, myVote, vetoHoldersMissing, waitingText } from './votes';
+	import {
+		VOTES_PAGE,
+		castingNote,
+		endedText,
+		isVetoed,
+		myVote,
+		requirementText,
+		vetoHoldersMissing,
+		votingRule,
+		waitingText,
+		type VoteState,
+	} from './votes';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -326,12 +336,11 @@
 	}
 
 	/** A slim Proposal row (from proposal_list or proposal_get) in the shape the UI renders. */
-	function normalizeProposal(row: any, detail: any = null, myChoice = ''): any {
+	function normalizeProposal(row: any, detail: any = null, myChoice = '', castingChoice = ''): any {
 		const p = detail?.proposal ?? row ?? {};
 		const tally = detail?.tally ?? p.tally ?? {};
 		const department = String(p.department ?? '');
-		const threshold = Number(p.threshold);
-		const required = Number(p.tally?.required);
+		const orgScope = department && department !== rootDepartment ? department : '';
 		return {
 			id: String(p.id ?? row?.id ?? ''),
 			title: String(p.title ?? ''),
@@ -347,12 +356,12 @@
 				abstain: Number(tally.abstain) || 0,
 			},
 			eligible: detail ? Number(detail.eligible) || 0 : null,
-			required_threshold: Number.isFinite(threshold) && detail ? threshold : null,
-			quorum: Number(p.quorum) || 0,
-			required_approvals: Number.isFinite(required) && required > 0 ? required : null,
+			// The rule stored when it was filed; null for a proposal that records none, or one not read in full.
+			rule: detail ? votingRule(p, !!orgScope) : null,
+			casting_choice: castingChoice,
 			veto_holders_missing: vetoHoldersMissing(p.tally?.veto, detail?.votes),
 			vetoed: isVetoed(p.tally?.veto, detail?.votes),
-			org_scope: department && department !== rootDepartment ? department : '',
+			org_scope: orgScope,
 			action: p.action ?? null,
 			links: Array.isArray(p.links) ? p.links : [],
 			replaced_by: String(p.replaced_by ?? ''),
@@ -581,7 +590,14 @@
 	async function fetchProposalDetail(proposalId: string, row: any = null): Promise<any | null> {
 		const detail = await read('proposal_get', { proposal: proposalId, count: VOTES_PAGE });
 		if (!detail) return row ? normalizeProposal(row) : null;
-		return normalizeProposal(row, detail, await myVote(read, proposalId, detail, myPrincipal()));
+		// A tie at the threshold goes to the casting member's yes: what they voted is read like the member's own vote.
+		const castingVote = String(detail.proposal?.casting_vote ?? '');
+		return normalizeProposal(
+			row,
+			detail,
+			await myVote(read, proposalId, detail, myPrincipal()),
+			await myVote(read, proposalId, detail, castingVote),
+		);
 	}
 
 	async function fetchProposalsPage(from: number | null) {
@@ -1018,18 +1034,7 @@
 			return `Closed — ${statusLabel(proposal.status)}`;
 		}
 		if (!isVotingDeadlinePassed(proposal, now)) return '';
-
-		const tally = voteTally(proposal);
-		const required = proposal?.required_approvals;
-		const endedAt = formatDateTime(proposal.voting_deadline);
-
-		if (required && tally.yes < required) {
-			return `Voting period ended ${endedAt} — needs ${required} approvals, ${tally.yes} received. Awaiting finalization.`;
-		}
-		if (required && tally.yes >= required) {
-			return `Voting period ended ${endedAt} — policy satisfied (${tally.yes}/${required} approvals). Awaiting finalization.`;
-		}
-		return `Voting period ended ${endedAt}. Awaiting finalization.`;
+		return endedText(t, voteState(proposal), formatDateTime(proposal.voting_deadline));
 	}
 
 	function formatVotingStatusLabel(proposal: any, now = Date.now()): string {
@@ -1041,28 +1046,31 @@
 		return formatTimeRemaining(proposal.voting_deadline, now);
 	}
 
+	/** A proposal's vote as the rule stored with it reads it. */
+	function voteState(proposal: any): VoteState {
+		const { yes, no, abstain } = voteTally(proposal);
+		return {
+			department: !!proposal.org_scope,
+			rule: proposal.rule,
+			eligible: proposal.eligible,
+			votes: { yes, no, abstain },
+			vetoed: proposal.vetoed,
+			castingChoice: proposal.casting_choice,
+		};
+	}
+
 	/** Why an open vote is still open, or '' when it waits for nothing known. */
 	function waitingFor(proposal: any): string {
-		const tally = voteTally(proposal);
 		return waitingText(t, {
+			...voteState(proposal),
 			deadline: !!proposal.voting_deadline,
-			eligible: proposal.eligible,
-			cast: tally.total,
-			yes: tally.yes,
-			required: proposal.required_approvals,
 			vetoHoldersMissing: proposal.veto_holders_missing,
-			vetoed: proposal.vetoed,
-			quorum: proposal.quorum,
 		});
 	}
 
-	function approvalRequirementLabel(proposal: any): string {
-		if (proposal?.required_approvals) return `${proposal.required_approvals} department approvals`;
-		if (proposal?.required_threshold != null) {
-			const quorum = proposal.quorum ? `, ${formatPercent(proposal.quorum)}% turnout` : '';
-			return `more than ${formatPercent(proposal.required_threshold)}% yes of decisive votes${quorum}`;
-		}
-		return 'Approval threshold not set';
+	/** Who holds a proposal's casting vote, as the screen names a member. */
+	function castingMember(proposal: any): string {
+		return truncatePrincipal(proposal.rule?.castingVote ?? '');
 	}
 
 	async function copyProposalLink(proposal: any) {
@@ -1383,6 +1391,8 @@
 					</div>
 
 					{#if tally.total > 0}
+						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal))}
+						{@const casting = castingNote(t, voteState(selectedProposal), castingMember(selectedProposal))}
 						<div class="mb-4">
 							<div class="flex justify-between text-xs text-gray-500 mb-1">
 								<span>Approval (yes / decisive votes)</span>
@@ -1402,8 +1412,11 @@
 									style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
 								></div>
 							</div>
-							{#if selectedProposal.required_threshold != null || selectedProposal.required_approvals}
-								<div class="text-xs text-gray-400 mt-1">Requirement: {approvalRequirementLabel(selectedProposal)}</div>
+							{#if selectedProposal.enriched}
+								<div class="text-xs text-gray-400 mt-1" data-testid="requirement-line">{requirement}</div>
+								{#if casting}
+									<div class="text-xs text-gray-400 mt-1" data-testid="casting-note">{casting}</div>
+								{/if}
 							{/if}
 						</div>
 					{/if}
@@ -1421,7 +1434,7 @@
 					{#if isVotingOpen(selectedProposal, nowMs)}
 						{@render voteButtons(selectedProposal, false)}
 					{:else if selectedProposal.status === 'voting'}
-						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2" data-testid="ended-line">
 							{getVotingClosedReason(selectedProposal, nowMs)}
 						</p>
 					{/if}

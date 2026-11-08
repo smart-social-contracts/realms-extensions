@@ -1,6 +1,6 @@
-/** What a member voted, read from the realm's vote records, and what an open vote is still waiting for. */
+/** What a member voted, read from the realm's vote records, the rule a vote is decided by, and what an open vote is still waiting for. */
 
-import { ONE } from '../../../_shared/frontend/units.ts';
+import { ONE, formatPercent } from '../../../_shared/frontend/units.ts';
 
 /** The votes of a proposal come this many at a time (the most the realm gives). */
 export const VOTES_PAGE = 500;
@@ -56,23 +56,121 @@ export function quorumReached(cast: number, eligible: number | null | undefined,
 	return cast * ONE >= quorum * Math.max(eligible ?? 0, 1);
 }
 
-/** An open vote, as far as what it waits for is concerned. */
-export type OpenVote = {
-	/** Whether the vote has a deadline (a realm with a voting window of 0 has none). */
-	deadline: boolean;
+/**
+ * The rule that decides a proposal, as the realm stores it when the proposal is filed (ggg I-GOV-3). Everything below
+ * that decides a vote repeats the realm's own arithmetic (api/proposals.py: department_outcome, exceeds,
+ * decided_by_casting_vote, quorum_met), integer for integer, so that the screen never says what the realm will not do.
+ */
+export type VotingRule = {
+	/** The share of its basis the yes votes must exceed (realm-wide) or reach (a department's), in hundred-millionths. */
+	threshold: number;
+	/** The share of the eligible voters who must vote, in hundred-millionths. */
+	quorum: number;
+	/** What a realm-wide threshold is a share of: the yes and no votes cast, or all the eligible voters. */
+	thresholdOf: 'cast' | 'eligible';
+	/** The casting member of a realm-wide vote, whose yes decides a tie at the threshold; '' for nobody. */
+	castingVote: string;
+	/** A department vote's n, the seats of its policy, which its threshold is a share of; null for a realm-wide vote. */
+	seats: number | null;
+	/** Whether a department's policy has veto holders: a veto holder's no rejects the vote. */
+	veto: boolean;
+};
+
+/** The rule of a department's vote, which knows its seats. */
+type DepartmentRule = VotingRule & { seats: number };
+
+export type Votes = { yes: number; no: number; abstain: number };
+
+const isDepartment = (rule: VotingRule): rule is DepartmentRule => rule.seats !== null;
+
+const whole = (value: unknown): number | null =>
+	typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+
+/**
+ * The rule stored with ``proposal`` (a proposal row of the realm), or null when it records none: a proposal stored before
+ * the rule was kept, or by a realm that does not keep it, has no basis, and a department's vote opened before its seats were
+ * counted has no n. The screen says so rather than guess numbers.
+ */
+export function votingRule(proposal: any, department: boolean): VotingRule | null {
+	const threshold = whole(proposal?.threshold);
+	const quorum = whole(proposal?.quorum);
+	const basis = proposal?.threshold_of;
+	if (threshold === null || quorum === null || (basis !== 'cast' && basis !== 'eligible')) return null;
+	const seats = department ? whole(proposal?.tally?.seats) : null;
+	if (department && !seats) return null;
+	return {
+		threshold,
+		quorum,
+		thresholdOf: basis,
+		castingVote: String(proposal.casting_vote ?? ''),
+		seats,
+		veto: Array.isArray(proposal.tally?.veto) && proposal.tally.veto.length > 0,
+	};
+}
+
+/** The yes votes a department's vote needs: its threshold of the policy's seats, rounded up, and at least one. */
+export function approvalsNeeded(threshold: number, seats: number): number {
+	return Math.max(Math.ceil((threshold * seats) / ONE), 1);
+}
+
+/** Whether the yes votes of a realm-wide vote exceed its threshold of the votes cast, or of all the eligible. */
+function exceedsThreshold(rule: VotingRule, votes: Votes, eligible: number): boolean {
+	const basis = rule.thresholdOf === 'eligible' ? eligible : votes.yes + votes.no;
+	return votes.yes * ONE > rule.threshold * basis;
+}
+
+/** Whether the yes votes stand exactly at the threshold of the yes and no votes cast, where a casting vote may decide. */
+function tiedAtThreshold(rule: VotingRule, votes: Votes): boolean {
+	return rule.thresholdOf === 'cast' && votes.yes * ONE === rule.threshold * (votes.yes + votes.no);
+}
+
+/** Whether a tie at the threshold is decided by the casting member's yes (``castingChoice``: what they voted, '' for nothing). */
+function decidedByCastingVote(rule: VotingRule, votes: Votes, castingChoice: string): boolean {
+	return rule.castingVote !== '' && castingChoice === 'yes' && tiedAtThreshold(rule, votes);
+}
+
+const castBy = (votes: Votes): number => votes.yes + votes.no + votes.abstain;
+
+/** What a department's vote is short of, by the realm's department_outcome: the approvals it lacks, a veto, its quorum. */
+function departmentShortfall(rule: DepartmentRule, votes: Votes, eligible: number, vetoed: boolean) {
+	return {
+		approvals: Math.max(approvalsNeeded(rule.threshold, rule.seats) - votes.yes, 0),
+		vetoed,
+		quorum: !quorumReached(castBy(votes), eligible, rule.quorum),
+	};
+}
+
+/** A vote as far as its rule is concerned: open or ended, what has been cast and what the rule makes of it. */
+export type VoteState = {
+	/** Whether a department decides the vote (by its seats), not the whole realm. */
+	department: boolean;
+	/** The rule stored with the proposal; null when it records none. */
+	rule: VotingRule | null;
+	/** The eligible voters counted when the vote opened; null when the vote was not read. */
 	eligible: number | null;
-	/** Votes cast, and the yes among them. */
-	cast: number;
-	yes: number;
-	/** The approvals a department's vote needs; null for a realm-wide vote. */
-	required: number | null;
-	/** The department vote's veto holders who have not voted. */
-	vetoHoldersMissing: number;
+	votes: Votes;
 	/** Whether a veto holder has voted no. */
 	vetoed: boolean;
-	/** The share of the eligible voters that must vote (hundred-millionths). */
-	quorum: number;
+	/** What the casting member voted ('' if they have not, or the vote has no casting member). */
+	castingChoice: string;
 };
+
+/**
+ * How a vote whose deadline has passed ends: the realm's ``outcome`` with ``final`` set. Null when the screen cannot tell:
+ * the rule is not recorded or the electorate is not known.
+ */
+export function finalOutcome(vote: VoteState): 'accepted' | 'rejected' | null {
+	const { rule, eligible, votes } = vote;
+	if (!rule || !eligible) return null;
+	if (isDepartment(rule)) {
+		const short = departmentShortfall(rule, votes, eligible, vote.vetoed);
+		return short.approvals || short.vetoed || short.quorum ? 'rejected' : 'accepted';
+	}
+	const passes =
+		quorumReached(castBy(votes), eligible, rule.quorum) &&
+		(exceedsThreshold(rule, votes, eligible) || decidedByCastingVote(rule, votes, vote.castingChoice));
+	return passes ? 'accepted' : 'rejected';
+}
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -83,6 +181,67 @@ function joinList(t: Translate, parts: string[]): string {
 }
 
 /**
+ * The rule in words: what the yes votes must come to, what that is a share of (and for a department, that abstentions and
+ * members who do not vote count against it), the quorum, a veto and the casting vote. ``who`` names the casting member.
+ */
+export function requirementText(t: Translate, rule: VotingRule | null, who: string): string {
+	if (!rule) return t('requirement_unknown');
+	const threshold = formatPercent(rule.threshold);
+	const parts: string[] = [];
+	if (isDepartment(rule)) {
+		parts.push(t('rule_department', { threshold, seats: rule.seats, approvals: approvalsNeeded(rule.threshold, rule.seats) }));
+		parts.push(t('rule_abstain'));
+		if (rule.veto) parts.push(t('rule_veto'));
+	} else {
+		parts.push(t(rule.thresholdOf === 'eligible' ? 'rule_eligible' : 'rule_cast', { threshold }));
+		if (rule.thresholdOf === 'cast' && rule.castingVote) parts.push(t('rule_casting', { who }));
+	}
+	if (rule.quorum) parts.push(t('rule_quorum', { quorum: formatPercent(rule.quorum) }));
+	return t('requirement', { rule: joinList(t, parts) });
+}
+
+/**
+ * Why a realm-wide tie at the threshold goes the way it does, when the yes and no votes are tied there: the casting member's
+ * yes decides it, or it waits for that yes. '' when there is no tie, or the vote has no casting member (a tie then rejects).
+ */
+export function castingNote(t: Translate, vote: VoteState, who: string): string {
+	const { rule, votes } = vote;
+	if (!rule || isDepartment(rule) || !rule.castingVote || votes.yes + votes.no === 0 || !tiedAtThreshold(rule, votes)) return '';
+	return t(decidedByCastingVote(rule, votes, vote.castingChoice) ? 'casting_decides' : 'casting_needs', { who });
+}
+
+/** Why a vote whose deadline has passed ends as it does, as the realm will settle it: '' when the screen cannot tell. */
+function endedBecause(t: Translate, vote: VoteState): string {
+	const { rule, eligible, votes } = vote;
+	const outcome = finalOutcome(vote);
+	if (!rule || !eligible || !outcome) return '';
+	if (isDepartment(rule)) {
+		const needed = approvalsNeeded(rule.threshold, rule.seats);
+		const short = departmentShortfall(rule, votes, eligible, vote.vetoed);
+		if (outcome === 'accepted') return t('ended_satisfied', { yes: votes.yes, needed });
+		if (short.vetoed) return t('ended_vetoed');
+		if (short.approvals) return t(`ended_needs_${needed === 1 ? 'one' : 'many'}`, { needed, yes: votes.yes });
+		return t('ended_quorum');
+	}
+	if (outcome === 'accepted') return t(exceedsThreshold(rule, votes, eligible) ? 'ended_exceeds' : 'ended_casting');
+	return t(quorumReached(castBy(votes), eligible, rule.quorum) ? 'ended_not_exceeds' : 'ended_quorum');
+}
+
+/** The line for a vote whose deadline has passed and which waits to be finalized, ``when`` it ended. */
+export function endedText(t: Translate, vote: VoteState, when: string): string {
+	const why = endedBecause(t, vote);
+	return why ? t('ended_because', { when, why }) : t('ended', { when });
+}
+
+/** An open vote, as far as what it waits for is concerned. */
+export type OpenVote = VoteState & {
+	/** Whether the vote has a deadline (a realm with a voting window of 0 has none). */
+	deadline: boolean;
+	/** The department vote's veto holders who have not voted. */
+	vetoHoldersMissing: number;
+};
+
+/**
  * Why an open vote is still open, in words: '' when it waits for nothing the screen knows of.
  * A realm-wide vote ends at its deadline or once everyone has voted. A department's passes once it has its approvals,
  * no veto holder stands against it, every veto holder who can still vote has voted and its quorum is met (the realm's
@@ -91,20 +250,21 @@ function joinList(t: Translate, parts: string[]): string {
  */
 export function waitingText(t: Translate, vote: OpenVote): string {
 	const open = vote.deadline ? '' : '_open';
-	if (vote.required === null) {
-		const missing = missingVoters(vote.eligible, vote.cast);
+	if (!vote.department) {
+		const missing = missingVoters(vote.eligible, castBy(vote.votes));
 		if (!missing) return '';
 		return t(`waiting_${missing === 1 ? 'one' : 'many'}${open}`, { count: missing });
 	}
-	if (!vote.eligible) return ''; // the vote was not read: its electorate is not known
-	if (vote.vetoed) return t(`waiting_department${open}`, { what: t('waiting_vetoed') });
+	// the vote was not read (its electorate is not known), or it records no rule (the seats its threshold is a share of)
+	if (!vote.eligible || !vote.rule || !isDepartment(vote.rule)) return '';
+	const short = departmentShortfall(vote.rule, vote.votes, vote.eligible, vote.vetoed);
+	if (short.vetoed) return t(`waiting_department${open}`, { what: t('waiting_vetoed') });
 	const parts: string[] = [];
-	const approvals = Math.max(vote.required - vote.yes, 0);
-	if (approvals) parts.push(t(`waiting_approvals_${approvals === 1 ? 'one' : 'many'}`, { count: approvals }));
+	if (short.approvals) parts.push(t(`waiting_approvals_${short.approvals === 1 ? 'one' : 'many'}`, { count: short.approvals }));
 	if (vote.vetoHoldersMissing) {
 		parts.push(t(`waiting_vetoes_${vote.vetoHoldersMissing === 1 ? 'one' : 'many'}`, { count: vote.vetoHoldersMissing }));
 	}
-	if (!quorumReached(vote.cast, vote.eligible, vote.quorum)) parts.push(t('waiting_quorum'));
+	if (short.quorum) parts.push(t('waiting_quorum'));
 	if (!parts.length) return '';
 	return t(`waiting_department${open}`, { what: joinList(t, parts) });
 }
