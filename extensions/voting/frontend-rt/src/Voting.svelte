@@ -25,20 +25,14 @@
 
 	let { ctx }: { ctx: any } = $props();
 
-	let i18nTick = $state(0);
-
 	$effect(() => {
 		const localeStore = ctx?.locale;
 		if (!localeStore?.subscribe) {
-			void loadExtensionI18n('en').then(() => {
-				i18nTick++;
-			});
+			void loadExtensionI18n('en');
 			return;
 		}
 		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
-			void loadExtensionI18n(loc || 'en').then(() => {
-				i18nTick++;
-			});
+			void loadExtensionI18n(loc || 'en');
 		});
 		return unsub;
 	});
@@ -51,7 +45,6 @@
 	type UpgradeTarget = 'codex' | 'extension';
 
 	function buildProposalTypeOptions(): { value: ProposalType | ''; label: string }[] {
-		void i18nTick;
 		return [
 			{ value: '', label: t('filter_all_types') },
 			{ value: 'transaction', label: t('type_transaction') },
@@ -62,7 +55,6 @@
 	}
 
 	function buildFormTypeOptions(): { value: FormProposalType; label: string; subtitle: string }[] {
-		void i18nTick;
 		return [
 			{
 				value: 'transaction',
@@ -303,10 +295,7 @@
 	let selectedProposalAction = $derived(
 		selectedProposal ? parseProposalAction(selectedProposal) : {},
 	);
-	let formSubtitle = $derived.by(() => {
-		void i18nTick;
-		return t(`form_subtitle_${formProposalType}`);
-	});
+	let formSubtitle = $derived(t(`form_subtitle_${formProposalType}`));
 
 	const UPGRADE_OPS: Record<string, UpgradeTarget> = {
 		codex_install: 'codex',
@@ -1205,7 +1194,6 @@
 {/snippet}
 
 <div class="voting-page w-full px-3 pt-4 sm:px-6 sm:pt-8 max-w-none">
-	{#key i18nTick}
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-3xl font-bold text-gray-900 mb-1">{t('page_title')}</h1>
@@ -2000,5 +1988,4 @@
 			{/if}
 		</div>
 	{/if}
-	{/key}
 </div>
