@@ -767,7 +767,9 @@
 									<div class="flex items-start justify-between gap-2">
 										<div class="min-w-0">
 											<div class="font-medium text-gray-900">{b.fund}</div>
-											<div class="text-xs text-gray-500 capitalize">{b.category.replace(/_/g, ' ')}</div>
+											<div class="text-xs text-gray-500 capitalize">
+												{b.category.replace(/_/g, ' ')} · {b.kind}{b.status === 'extended' ? ' · extended' : ''}
+											</div>
 										</div>
 										<div
 											class={cn(
@@ -790,6 +792,7 @@
 								<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
 									<th class="py-2 pr-3">Fund</th>
 									<th class="py-2 pr-3">Category</th>
+									<th class="py-2 pr-3">Kind</th>
 									<th class="py-2 pr-3 text-right">Planned</th>
 									<th class="py-2 pr-3 text-right">Actual</th>
 									<th class="py-2 text-right">Variance</th>
@@ -800,6 +803,7 @@
 									<tr>
 										<td class="py-2 pr-3 font-medium text-gray-900">{b.fund}</td>
 										<td class="py-2 pr-3 text-gray-600 capitalize">{b.category.replace(/_/g, ' ')}</td>
+										<td class="py-2 pr-3 text-gray-600 capitalize">{b.kind}{b.status === 'extended' ? ' (extended)' : ''}</td>
 										<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.planned)}</td>
 										<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.actual)}</td>
 										<td

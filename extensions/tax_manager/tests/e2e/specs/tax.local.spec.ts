@@ -58,9 +58,9 @@ test('an admin drafts a policy and adopts it', async ({ page }, testInfo) => {
   }
 
   const policy = realmCall('tax_policy_view').policy;
-  expect(policy.document.taxes.map((t: { code: string }) => t.code)).toEqual(['residence', 'revenue']);
-  expect(policy.document.taxes[0]).toMatchObject({ code: 'residence', base: 'flat', amount: 2500 });
-  expect(policy.document.taxes[1]).toMatchObject({ base: 'declared', method: 'proportional', rate: 2_000_000 });
+  expect(policy.taxes.map((t: { code: string }) => t.code)).toEqual(['residence', 'revenue']);
+  expect(policy.taxes[0]).toMatchObject({ code: 'residence', subject: 'User', amount: 2500 });
+  expect(policy.taxes[1]).toMatchObject({ subject: 'Declaration', rate: 2_000_000 });
 });
 
 test('a member reads the policy and cannot change it', async ({ page }, testInfo) => {
@@ -121,7 +121,7 @@ test('under a voting root a change takes two votes: draft, then adopt', async ({
     await expect(ext.getByText(/Proposal .* created/)).toBeVisible({ timeout: 120_000 });
     passTheOpenProposal();
     // Nothing is in force yet: the 25.00 stands.
-    expect(realmCall('tax_policy_view').policy.document.taxes[0].amount).toBe(2500);
+    expect(realmCall('tax_policy_view').policy.taxes[0].amount).toBe(2500);
 
     // The draft is listed, and adopting it is the second vote.
     await page.reload();
@@ -137,7 +137,7 @@ test('under a voting root a change takes two votes: draft, then adopt', async ({
     await page.reload();
     await expect(ext.getByText('30.00 E2E per member').first()).toBeVisible({ timeout: 120_000 });
     await page.screenshot({ path: testInfo.outputPath('08-in-force.png') });
-    expect(realmCall('tax_policy_view').policy.document.taxes[0].amount).toBe(3000);
+    expect(realmCall('tax_policy_view').policy.taxes[0].amount).toBe(3000);
   } finally {
     setRootPolicy(1, 1);
     await close();

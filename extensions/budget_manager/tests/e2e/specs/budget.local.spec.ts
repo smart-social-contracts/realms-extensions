@@ -24,12 +24,12 @@ test.beforeAll(() => {
   realmCall('fund_create', { fund: 'ROOT', name: 'Root' });
   realmCall('fund_create', { fund: FUND, name: 'Welfare' });
   realmCall('period_open', { period: PERIOD, starts_at: now - 86_400, ends_at: now + 365 * 86_400 });
-  const { budget } = realmCall('budget_draft', { fund: FUND, period: PERIOD, category: CATEGORY, planned: 500_000 });
-  realmCall('budget_propose', { budget });
+  realmCall('budget_draft', { fund: FUND, period: PERIOD, category: CATEGORY, kind: 'expense', planned: 500_000 });
+  realmCall('budget_propose', { period: PERIOD });
   // The view lists the budgets of one period, the one covering now: the next year's are read when it is chosen.
   realmCall('period_open', { period: NEXT_PERIOD, starts_at: now + 365 * 86_400, ends_at: now + 730 * 86_400 });
-  const next = realmCall('budget_draft', { fund: FUND, period: NEXT_PERIOD, category: NEXT_CATEGORY, planned: 120_000 });
-  realmCall('budget_propose', { budget: next.budget });
+  realmCall('budget_draft', { fund: FUND, period: NEXT_PERIOD, category: NEXT_CATEGORY, kind: 'expense', planned: 120_000 });
+  realmCall('budget_propose', { period: NEXT_PERIOD });
   setRootPolicy(1, 1);
   makeOneYesDecideAtOnce();
 });
