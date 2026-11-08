@@ -8,6 +8,7 @@ import {
 	approvalLabel,
 	approvalsNeeded,
 	castingNote,
+	castingVoteMatters,
 	choiceOf,
 	endedText,
 	finalOutcome,
@@ -20,6 +21,7 @@ import {
 	votingRule,
 	waitingText,
 	type OpenVote,
+	type Outcome,
 	type Translate,
 	type VoteState,
 	type VotingRule,
@@ -382,14 +384,20 @@ describe('approvalsNeeded', () => {
 
 // The cases of the realm's finalization tests (realms-gos tests/ggg/test_voting_rule.py and test_proposals.py), as the
 // votes they end with. ``eligible`` is the electorate counted when the vote opened, ``casting`` what the casting member voted.
+// ``source`` says how a case relates to the Python: "copied" has the same votes and the same end; "adapted" has the votes
+// of a Python case that asserts the status while the vote is open or after one more vote, here taken to the deadline;
+// "new" is not in the Python. ``ends`` is how the realm settles it; ``page`` is what the screen says when that differs:
+// a tie that the casting member's yes decides depends on their standing, which the screen cannot read.
 type Case = {
 	name: string;
+	source: 'copied' | 'adapted' | 'new';
 	rule: Partial<VotingRule>;
 	votes: ReturnType<typeof tally>;
 	eligible: number;
 	vetoed?: boolean;
 	casting?: string;
 	ends: 'accepted' | 'rejected';
+	page?: Outcome;
 };
 const asRealm = (rule: Partial<VotingRule>): VotingRule => ({ ...realmRule, ...rule });
 // A department's rule stores m of n rounded down: m * ONE // n.
@@ -402,69 +410,73 @@ const asDepartment = (m: number, n: number, rule: Partial<VotingRule> = {}): Vot
 	veto: false,
 	...rule,
 });
+const castingDecides = 'depends_on_casting_member';
 
 const REALM_CASES: Case[] = [
 	// test_the_yes_votes_exceed_the_threshold_of_the_votes_cast_or_of_all_the_eligible (Agora has seven members)
-	{ name: 'Cast: 3 yes of 3 cast', rule: {}, votes: tally(3), eligible: 7, ends: 'accepted' },
-	{ name: 'Eligible: 3 yes of 7 is not more than half', rule: { thresholdOf: 'eligible' }, votes: tally(3), eligible: 7, ends: 'rejected' },
-	{ name: 'Eligible: 4 yes of 7', rule: { thresholdOf: 'eligible' }, votes: tally(4), eligible: 7, ends: 'accepted' },
+	{ name: 'Cast: 3 yes of 3 cast', source: 'copied', rule: {}, votes: tally(3), eligible: 7, ends: 'accepted' },
+	{ name: 'Eligible: 3 yes of 7 is not more than half', source: 'copied', rule: { thresholdOf: 'eligible' }, votes: tally(3), eligible: 7, ends: 'rejected' },
+	{ name: 'Eligible: 4 yes of 7', source: 'copied', rule: { thresholdOf: 'eligible' }, votes: tally(4), eligible: 7, ends: 'accepted' },
 	// test_a_raised_threshold_decides_the_vote
-	{ name: '75 %: exactly three quarters is not more', rule: { threshold: 75 * PERCENT }, votes: tally(3, 1), eligible: 7, ends: 'rejected' },
-	{ name: '75 %: 4 of 5', rule: { threshold: 75 * PERCENT }, votes: tally(4, 1), eligible: 7, ends: 'accepted' },
-	// test_a_tie_at_the_threshold_is_accepted_only_with_the_casting_members_yes
-	{ name: 'tie at 50 % with the casting yes', rule: { castingVote: 'dana' }, votes: tally(1, 1), eligible: 7, casting: 'yes', ends: 'accepted' },
-	{ name: 'tie at 50 %, casting member voted no', rule: { castingVote: 'dana' }, votes: tally(1, 1), eligible: 7, casting: 'no', ends: 'rejected' },
-	{ name: 'tie at 50 %, casting member abstained', rule: { castingVote: 'dana' }, votes: tally(1, 1, 1), eligible: 7, casting: 'abstain', ends: 'rejected' },
-	{ name: 'tie at 50 %, casting member did not vote', rule: { castingVote: 'dana' }, votes: tally(1, 1), eligible: 7, casting: '', ends: 'rejected' },
-	{ name: 'tie at a raised 60 % with the casting yes', rule: { castingVote: 'dana', threshold: 60 * PERCENT }, votes: tally(3, 2), eligible: 7, casting: 'yes', ends: 'accepted' },
-	{ name: 'below a raised 60 %: casting decides ties, not shortfalls', rule: { castingVote: 'dana', threshold: 60 * PERCENT }, votes: tally(2, 2), eligible: 7, casting: 'yes', ends: 'rejected' },
-	{ name: 'outvoted despite the casting yes', rule: { castingVote: 'dana' }, votes: tally(1, 2), eligible: 7, casting: 'yes', ends: 'rejected' },
+	{ name: '75 %: exactly three quarters is not more', source: 'copied', rule: { threshold: 75 * PERCENT }, votes: tally(3, 1), eligible: 7, ends: 'rejected' },
+	{ name: '75 %: 4 of 5', source: 'copied', rule: { threshold: 75 * PERCENT }, votes: tally(4, 1), eligible: 7, ends: 'accepted' },
+	// test_a_tie_at_the_threshold_is_accepted_only_with_the_casting_members_yes (the casting member is Dana)
+	{ name: 'tie at 50 % with the casting yes', source: 'copied', rule: { castingVote: 'dana' }, votes: tally(1, 1), eligible: 7, casting: 'yes', ends: 'accepted', page: castingDecides },
+	{ name: 'casting member voted no: bob yes, alice and dana no', source: 'copied', rule: { castingVote: 'dana' }, votes: tally(1, 2), eligible: 7, casting: 'no', ends: 'rejected' },
+	{ name: 'casting member abstained: bob yes, alice no', source: 'copied', rule: { castingVote: 'dana' }, votes: tally(1, 1, 1), eligible: 7, casting: 'abstain', ends: 'rejected' },
+	{ name: 'casting member did not vote', source: 'copied', rule: { castingVote: 'dana' }, votes: tally(1, 1), eligible: 7, casting: '', ends: 'rejected' },
+	{ name: 'tie at a raised 60 % with the casting yes', source: 'copied', rule: { castingVote: 'dana', threshold: 60 * PERCENT }, votes: tally(3, 2), eligible: 7, casting: 'yes', ends: 'accepted', page: castingDecides },
+	{ name: 'below a raised 60 %: casting decides ties, not shortfalls', source: 'copied', rule: { castingVote: 'dana', threshold: 60 * PERCENT }, votes: tally(2, 2), eligible: 7, casting: 'yes', ends: 'rejected' },
+	{ name: 'outvoted despite the casting yes', source: 'copied', rule: { castingVote: 'dana' }, votes: tally(1, 2), eligible: 7, casting: 'yes', ends: 'rejected' },
 	// test_without_a_casting_vote_a_tie_rejects
-	{ name: 'tie at 50 % with no casting member', rule: {}, votes: tally(1, 1), eligible: 7, ends: 'rejected' },
+	{ name: 'tie at 50 % with no casting member', source: 'copied', rule: {}, votes: tally(1, 1), eligible: 7, ends: 'rejected' },
+	// test_a_casting_member_who_has_left_means_ties_reject_until_another_is_named: Dana voted yes and was then suspended. The
+	// realm rejects the tie; the votes are the same as a tie her yes decides, so the screen cannot tell the two apart.
+	{ name: 'tie at 50 %, the casting member voted yes and has left', source: 'copied', rule: { castingVote: 'dana' }, votes: tally(1, 1), eligible: 7, casting: 'yes', ends: 'rejected', page: castingDecides },
 	// test_the_casting_vote_decides_only_ties_over_the_votes_cast (8 eligible, 4 yes: exactly half)
-	{ name: 'Eligible: 4 yes of 8 is a tie of the eligible, which no casting vote decides', rule: { thresholdOf: 'eligible', castingVote: 'dana' }, votes: tally(4), eligible: 8, casting: 'yes', ends: 'rejected' },
+	{ name: 'Eligible: 4 yes of 8 is a tie of the eligible, which no casting vote decides', source: 'copied', rule: { thresholdOf: 'eligible', castingVote: 'dana' }, votes: tally(4), eligible: 8, casting: 'yes', ends: 'rejected' },
 	// decided_by_casting_vote holds only for a threshold of the votes cast: a tie of those is no tie of the eligible
-	{ name: 'Eligible: 1 yes and 1 no of 2 eligible, which the casting yes does not decide', rule: { thresholdOf: 'eligible', castingVote: 'dana' }, votes: tally(1, 1), eligible: 2, casting: 'yes', ends: 'rejected' },
-	// test_I_GOV_3_quorum_and_threshold (quorum 50 %: 2 of 7 voted)
-	{ name: 'quorum 50 % not reached by 2 yes of 7', rule: { quorum: 50 * PERCENT }, votes: tally(2), eligible: 7, ends: 'rejected' },
-	{ name: 'quorum 50 % reached by 4 of 7', rule: { quorum: 50 * PERCENT }, votes: tally(3, 1), eligible: 7, ends: 'accepted' },
+	{ name: 'Eligible: 1 yes and 1 no of 2 eligible, which the casting yes does not decide', source: 'new', rule: { thresholdOf: 'eligible', castingVote: 'dana' }, votes: tally(1, 1), eligible: 2, casting: 'yes', ends: 'rejected' },
+	// test_I_GOV_3_quorum_and_threshold (quorum 50 %: alice and bob voted yes, of 7)
+	{ name: 'quorum 50 % not reached by 2 yes of 7', source: 'copied', rule: { quorum: 50 * PERCENT }, votes: tally(2), eligible: 7, ends: 'rejected' },
+	{ name: 'quorum 50 % reached by 4 of 7', source: 'new', rule: { quorum: 50 * PERCENT }, votes: tally(3, 1), eligible: 7, ends: 'accepted' },
 ];
 
 const DEPARTMENT_CASES: Case[] = [
-	// test_a_departments_vote_ends_at_its_stored_threshold (4 seats, 4 voters)
-	{ name: 'm = 2 of four seats: 2 yes', rule: asDepartment(2, 4), votes: tally(2), eligible: 4, ends: 'accepted' },
-	{ name: '75 % of four seats is three: 2 yes', rule: asDepartment(2, 4, { threshold: 75 * PERCENT }), votes: tally(2), eligible: 4, ends: 'rejected' },
-	{ name: '75 % of four seats: 3 yes', rule: asDepartment(2, 4, { threshold: 75 * PERCENT }), votes: tally(3), eligible: 4, ends: 'accepted' },
+	// test_a_departments_vote_ends_at_its_stored_threshold (4 seats, 4 voters): the Python asserts the status after each vote
+	{ name: 'm = 2 of four seats: 2 yes', source: 'adapted', rule: asDepartment(2, 4), votes: tally(2), eligible: 4, ends: 'accepted' },
+	{ name: '75 % of four seats is three: 2 yes', source: 'adapted', rule: asDepartment(2, 4, { threshold: 75 * PERCENT }), votes: tally(2), eligible: 4, ends: 'rejected' },
+	{ name: '75 % of four seats: 3 yes', source: 'adapted', rule: asDepartment(2, 4, { threshold: 75 * PERCENT }), votes: tally(3), eligible: 4, ends: 'accepted' },
 	// test_a_departments_threshold_is_a_share_of_the_policys_n_whoever_fills_the_seats (m = 2, n = 3, four voters)
-	{ name: '2 of 3 seats: 1 yes', rule: asDepartment(2, 3), votes: tally(1), eligible: 4, ends: 'rejected' },
-	{ name: '2 of 3 seats: m, exactly', rule: asDepartment(2, 3), votes: tally(2), eligible: 4, ends: 'accepted' },
-	{ name: '100 % of 3 seats: 2 yes', rule: asDepartment(2, 3, { threshold: ONE }), votes: tally(2), eligible: 4, ends: 'rejected' },
-	{ name: '100 % of 3 seats is 3 yes, not 4', rule: asDepartment(2, 3, { threshold: ONE }), votes: tally(3), eligible: 4, ends: 'accepted' },
+	{ name: '2 of 3 seats: 1 yes', source: 'adapted', rule: asDepartment(2, 3), votes: tally(1), eligible: 4, ends: 'rejected' },
+	{ name: '2 of 3 seats: m, exactly', source: 'adapted', rule: asDepartment(2, 3), votes: tally(2), eligible: 4, ends: 'accepted' },
+	{ name: '100 % of 3 seats: 2 yes', source: 'adapted', rule: asDepartment(2, 3, { threshold: ONE }), votes: tally(2), eligible: 4, ends: 'rejected' },
+	{ name: '100 % of 3 seats is 3 yes, not 4', source: 'adapted', rule: asDepartment(2, 3, { threshold: ONE }), votes: tally(3), eligible: 4, ends: 'accepted' },
 	// test_a_vacancy_never_makes_a_departments_vote_easier (n = 4, two seats filled)
-	{ name: 'vacancy: one yes is not m', rule: asDepartment(2, 4), votes: tally(1), eligible: 2, ends: 'rejected' },
-	{ name: 'vacancy: two yes', rule: asDepartment(2, 4), votes: tally(2), eligible: 2, ends: 'accepted' },
-	{ name: 'vacancy: one yes, one no', rule: asDepartment(2, 4), votes: tally(1, 1), eligible: 2, ends: 'rejected' },
+	{ name: 'vacancy: one yes is not m', source: 'adapted', rule: asDepartment(2, 4), votes: tally(1), eligible: 2, ends: 'rejected' },
+	{ name: 'vacancy: two yes', source: 'adapted', rule: asDepartment(2, 4), votes: tally(2), eligible: 2, ends: 'accepted' },
+	{ name: 'vacancy: one yes, one no', source: 'copied', rule: asDepartment(2, 4), votes: tally(1, 1), eligible: 2, ends: 'rejected' },
 	// test_a_threshold_the_filled_seats_cannot_reach_rejects_the_vote
-	{ name: 'three approvals from two seats', rule: asDepartment(3, 4), votes: tally(2), eligible: 2, ends: 'rejected' },
+	{ name: 'three approvals from two seats', source: 'copied', rule: asDepartment(3, 4), votes: tally(2), eligible: 2, ends: 'rejected' },
 	// test_a_direct_policy_needs_one_yes_however_many_hold_seats
-	{ name: 'direct policy: one yes', rule: asDepartment(1, 1), votes: tally(1), eligible: 2, ends: 'accepted' },
-	{ name: 'direct policy: no yes at all', rule: asDepartment(1, 1), votes: tally(0, 0, 2), eligible: 2, ends: 'rejected' },
+	{ name: 'direct policy: one yes', source: 'copied', rule: asDepartment(1, 1), votes: tally(1), eligible: 2, ends: 'accepted' },
+	{ name: 'direct policy: no yes at all', source: 'new', rule: asDepartment(1, 1), votes: tally(0, 0, 2), eligible: 2, ends: 'rejected' },
 	// test_I_GOV_7_a_vetoing_no_keeps_the_vote_open_until_it_ends_and_rejects_it_then (2 of 3, dana holds a veto)
-	{ name: 'veto: dana no, bob and alice yes', rule: asDepartment(2, 3, { veto: true }), votes: tally(2, 1), eligible: 4, vetoed: true, ends: 'rejected' },
-	{ name: 'veto: dana changed her mind', rule: asDepartment(2, 3, { veto: true }), votes: tally(3), eligible: 4, ends: 'accepted' },
+	{ name: 'veto: dana no, bob and alice yes', source: 'copied', rule: asDepartment(2, 3, { veto: true }), votes: tally(2, 1), eligible: 4, vetoed: true, ends: 'rejected' },
+	{ name: 'veto: dana changed her mind', source: 'adapted', rule: asDepartment(2, 3, { veto: true }), votes: tally(3), eligible: 4, ends: 'accepted' },
 	// test_I_GOV_7_a_veto_holder_who_has_not_voted_keeps_a_department_vote_open
-	{ name: 'veto: dana abstained', rule: asDepartment(2, 3, { veto: true }), votes: tally(2, 0, 1), eligible: 4, ends: 'accepted' },
+	{ name: 'veto: dana abstained', source: 'adapted', rule: asDepartment(2, 3, { veto: true }), votes: tally(2, 0, 1), eligible: 4, ends: 'accepted' },
 	// test_I_GOV_7_a_veto_holder_who_never_votes_does_not_block_acceptance_at_the_deadline
-	{ name: 'veto: dana never voted', rule: asDepartment(2, 3, { veto: true }), votes: tally(2), eligible: 4, ends: 'accepted' },
-	// test_veto (m = 1 of 3, dana holds a veto and says no)
-	{ name: 'veto: one approval and a no from the veto holder', rule: asDepartment(1, 3, { veto: true }), votes: tally(1, 1), eligible: 4, vetoed: true, ends: 'rejected' },
+	{ name: 'veto: dana never voted', source: 'copied', rule: asDepartment(2, 3, { veto: true }), votes: tally(2), eligible: 4, ends: 'accepted' },
+	// test_veto (m = 1 of 3; dana, who holds the veto, and bob are the only two who may vote)
+	{ name: 'veto: one approval and a no from the veto holder', source: 'copied', rule: asDepartment(1, 3, { veto: true }), votes: tally(1, 1), eligible: 2, vetoed: true, ends: 'rejected' },
 	// test_I_GOV_3_a_departments_quorum_is_enforced (m = 1 of 3, quorum 75 % of four)
-	{ name: 'quorum 75 %: one yes of four', rule: asDepartment(1, 3, { quorum: 75 * PERCENT }), votes: tally(1), eligible: 4, ends: 'rejected' },
-	{ name: 'quorum 75 %: two of four', rule: asDepartment(1, 3, { quorum: 75 * PERCENT }), votes: tally(1, 0, 1), eligible: 4, ends: 'rejected' },
-	{ name: 'quorum 75 %: abstentions count towards it', rule: asDepartment(1, 3, { quorum: 75 * PERCENT }), votes: tally(1, 0, 2), eligible: 4, ends: 'accepted' },
+	{ name: 'quorum 75 %: one yes of four', source: 'copied', rule: asDepartment(1, 3, { quorum: 75 * PERCENT }), votes: tally(1), eligible: 4, ends: 'rejected' },
+	{ name: 'quorum 75 %: two of four', source: 'adapted', rule: asDepartment(1, 3, { quorum: 75 * PERCENT }), votes: tally(1, 0, 1), eligible: 4, ends: 'rejected' },
+	{ name: 'quorum 75 %: abstentions count towards it', source: 'adapted', rule: asDepartment(1, 3, { quorum: 75 * PERCENT }), votes: tally(1, 0, 2), eligible: 4, ends: 'accepted' },
 	// test_I_GOV_7_a_no_can_be_replaced_after_approvals_become_impossible (3 of 3)
-	{ name: '3 of 3: two no', rule: asDepartment(3, 3), votes: tally(0, 2), eligible: 4, ends: 'rejected' },
-	{ name: '3 of 3: three yes', rule: asDepartment(3, 3), votes: tally(3, 1), eligible: 4, ends: 'accepted' },
+	{ name: '3 of 3: two no', source: 'copied', rule: asDepartment(3, 3), votes: tally(0, 2), eligible: 4, ends: 'rejected' },
+	{ name: '3 of 3: three yes and a no', source: 'adapted', rule: asDepartment(3, 3), votes: tally(3, 1), eligible: 4, ends: 'accepted' },
 ];
 
 describe('the vote ends as the realm settles it', () => {
@@ -484,8 +496,8 @@ describe('the vote ends as the realm settles it', () => {
 	] as const) {
 		describe(kind, () => {
 			for (const c of cases) {
-				it(`${c.name}: ${c.ends}`, () => {
-					assert.equal(finalOutcome(stateOf(c, department)), c.ends);
+				it(`${c.source}: ${c.name}: ${c.page ?? c.ends}`, () => {
+					assert.equal(finalOutcome(stateOf(c, department)), c.page ?? c.ends);
 				});
 			}
 		});
@@ -515,6 +527,15 @@ describe('the vote ends as the realm settles it', () => {
 			const bar = approvalBar(c.rule as VotingRule, c.votes, c.eligible);
 			assert.equal(bar.fill >= bar.mark && c.votes.yes > 0, c.ends === 'accepted', c.name);
 		}
+	});
+
+	it("reads the casting member's vote only for a tie at the threshold of a vote that has one", () => {
+		assert.equal(castingVoteMatters(null, tally(1, 1)), false);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(2, 1)), false);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(0)), false);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(1, 1)), true);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: '' }), tally(1, 1)), false);
+		assert.equal(castingVoteMatters(asDepartment(1, 2, { castingVote: 'dana' }), tally(1, 1)), false);
 	});
 
 	it('knows nothing of a vote whose rule or electorate it does not have', () => {
@@ -557,10 +578,7 @@ describe('approvalLabel', () => {
 			approvalLabel(en, { ...realmRule, thresholdOf: 'eligible' }),
 			'Approval: more than 50% yes of all eligible members, whether they vote or not',
 		);
-		assert.equal(
-			approvalLabel(en, departmentRule),
-			"Approval: at least 66.666666% of the policy's 3 seats must vote yes (2 of 3)",
-		);
+		assert.equal(approvalLabel(en, departmentRule), "Approval: 2 of the policy's 3 seats must vote yes");
 	});
 
 	it('is the first words of the Requirement line', () => {
@@ -603,12 +621,20 @@ describe('requirementText', () => {
 	it("says that a department's abstentions and non-voters count, and names its seats, veto and quorum", () => {
 		assert.equal(
 			requirementText(en, departmentRule, who),
-			"Requirement: at least 66.666666% of the policy's 3 seats must vote yes (2 of 3), abstentions and members who do not vote count against it, no veto holder may vote no and at least 40% of the eligible members must vote",
+			"Requirement: 2 of the policy's 3 seats must vote yes, abstentions and members who do not vote count against it, no veto holder may vote no and at least 40% of the eligible members must vote",
 		);
 		assert.equal(
 			requirementText(en, asDepartment(1, 1), who),
-			"Requirement: at least 100% of the policy's 1 seats must vote yes (1 of 1) and abstentions and members who do not vote count against it",
+			"Requirement: the policy's 1 seat must vote yes and abstentions and members who do not vote count against it",
 		);
+	});
+
+	it("gives a department's rule as the approvals the realm rounds up to, never a percentage", () => {
+		const startsWith = (rule: VotingRule, start: string) => assert.ok(requirementText(en, rule, who).startsWith(start), start);
+		startsWith(asDepartment(2, 5, { threshold: 75 * PERCENT }), "Requirement: 4 of the policy's 5 seats must vote yes"); // 3.75
+		startsWith(asDepartment(2, 4, { threshold: 75 * PERCENT }), "Requirement: 3 of the policy's 4 seats must vote yes");
+		startsWith(asDepartment(1, 3), "Requirement: 1 of the policy's 3 seats must vote yes");
+		assert.ok(!/%/.test(requirementText(en, { ...departmentRule, quorum: 0 }, who)));
 	});
 
 	it('says the rule is not recorded when the proposal has none', () => {
@@ -631,7 +657,7 @@ describe('castingNote', () => {
 	it('says the casting vote decides a tie it voted yes in', () => {
 		assert.equal(
 			castingNote(en, tie, who),
-			'Yes and no are tied at the threshold: the yes of the casting vote (dana) decides it.',
+			'Yes and no are tied at the threshold: the yes of the casting vote (dana) decides it, if they are still a member.',
 		);
 	});
 
@@ -695,7 +721,7 @@ describe('endedText', () => {
 		);
 		assert.equal(
 			endedText(en, realm({ rule: { ...realmRule, castingVote: 'dana' }, votes: tally(1, 1), castingChoice: 'yes' }), when),
-			say('yes and no are tied at the threshold, and the casting vote decides it'),
+			say('yes and no are tied at the threshold, and the casting vote decides it, if its holder is still a member'),
 		);
 	});
 
@@ -745,6 +771,14 @@ describe('the voting strings in every language', () => {
 			for (const text of read) assert.ok(text && !/[{}]/.test(text), `${locale}: ${text}`);
 			assert.equal(new Set(read).size, read.length, `${locale}: each case reads differently`);
 		}
+	});
+
+	it('read out the figure next to the bar exactly, in every language', () => {
+		for (const locale of ['en', ...locales]) {
+			const text = translator(locale)('approval_figure', { yes: 3, basis: 8 });
+			assert.ok(/3/.test(text) && /8/.test(text) && !/[{}%.]/.test(text), `${locale}: ${text}`);
+		}
+		assert.equal(translator('en')('approval_figure', { yes: 3, basis: 8 }), '3 of 8');
 	});
 
 	it('read out the rule, the casting vote and the end of a vote, with nothing left to fill in', () => {

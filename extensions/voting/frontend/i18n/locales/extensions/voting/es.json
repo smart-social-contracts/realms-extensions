@@ -79,12 +79,12 @@
   "requirement_unknown": "Requisito: no consta para esta propuesta",
   "rule_cast": "más del {threshold}% de síes sobre los votos emitidos (síes y noes)",
   "rule_eligible": "más del {threshold}% de síes sobre todos los miembros con derecho a voto, voten o no",
-  "rule_department": "al menos el {threshold}% de los {seats} puestos de la política debe votar sí ({approvals} de {seats})",
+  "rule_department": "{approvals} de los {seats} puestos de la política deben votar sí",
   "rule_abstain": "las abstenciones y quienes no votan cuentan en contra",
   "rule_veto": "ningún titular de veto puede votar no",
   "rule_quorum": "al menos el {quorum}% de los miembros con derecho a voto debe votar",
   "rule_casting": "un empate en el umbral lo decide el sí del voto de calidad ({who})",
-  "casting_decides": "Sí y no empatan en el umbral: el sí del voto de calidad ({who}) lo decide.",
+  "casting_decides": "Sí y no empatan en el umbral: el sí del voto de calidad ({who}) lo decide, si sigue siendo miembro.",
   "casting_needs": "Sí y no empatan en el umbral: solo se aprueba con un sí del voto de calidad ({who}).",
   "ended": "El plazo de votación terminó el {when}. Pendiente de finalización.",
   "ended_because": "El plazo de votación terminó el {when} — {why}. Pendiente de finalización.",
@@ -95,6 +95,8 @@
   "ended_quorum": "no se alcanzó el quórum",
   "ended_exceeds": "los síes superan el umbral",
   "ended_not_exceeds": "los síes no superan el umbral",
-  "ended_casting": "sí y no empatan en el umbral y decide el voto de calidad",
-  "approval_label": "Aprobación: {rule}"
+  "ended_casting": "sí y no empatan en el umbral y decide el voto de calidad, si su titular sigue siendo miembro",
+  "approval_label": "Aprobación: {rule}",
+  "rule_department_one": "el único puesto de la política debe votar sí",
+  "approval_figure": "{yes} de {basis}"
 }

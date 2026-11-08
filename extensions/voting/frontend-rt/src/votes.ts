@@ -156,20 +156,25 @@ export type VoteState = {
 };
 
 /**
+ * How a vote ends. A tie decided by the casting member's yes depends on their standing: the realm ignores that yes once
+ * they have left (a suspended or banned member), and the screen cannot read it.
+ */
+export type Outcome = 'accepted' | 'rejected' | 'depends_on_casting_member';
+
+/**
  * How a vote whose deadline has passed ends: the realm's ``outcome`` with ``final`` set. Null when the screen cannot tell:
  * the rule is not recorded or the electorate is not known.
  */
-export function finalOutcome(vote: VoteState): 'accepted' | 'rejected' | null {
+export function finalOutcome(vote: VoteState): Outcome | null {
 	const { rule, eligible, votes } = vote;
 	if (!rule || !eligible) return null;
 	if (isDepartment(rule)) {
 		const short = departmentShortfall(rule, votes, eligible, vote.vetoed);
 		return short.approvals || short.vetoed || short.quorum ? 'rejected' : 'accepted';
 	}
-	const passes =
-		quorumReached(castBy(votes), eligible, rule.quorum) &&
-		(exceedsThreshold(rule, votes, eligible) || decidedByCastingVote(rule, votes, vote.castingChoice));
-	return passes ? 'accepted' : 'rejected';
+	if (!quorumReached(castBy(votes), eligible, rule.quorum)) return 'rejected';
+	if (exceedsThreshold(rule, votes, eligible)) return 'accepted';
+	return decidedByCastingVote(rule, votes, vote.castingChoice) ? 'depends_on_casting_member' : 'rejected';
 }
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
@@ -182,11 +187,13 @@ function joinList(t: Translate, parts: string[]): string {
 
 /** What the yes votes must come to and what that is a share of: the first words of the rule, and of the approval bar's label. */
 function thresholdClause(t: Translate, rule: VotingRule): string {
-	const threshold = formatPercent(rule.threshold);
+	// A department's yes votes reach its threshold of the seats, so the rule is the approvals that takes, rounded up as the
+	// realm does; a realm-wide one is exact to the stored ratio, and no more than that is "more than".
 	if (isDepartment(rule)) {
-		return t('rule_department', { threshold, seats: rule.seats, approvals: approvalsNeeded(rule.threshold, rule.seats) });
+		if (rule.seats === 1) return t('rule_department_one');
+		return t('rule_department', { seats: rule.seats, approvals: approvalsNeeded(rule.threshold, rule.seats) });
 	}
-	return t(rule.thresholdOf === 'eligible' ? 'rule_eligible' : 'rule_cast', { threshold });
+	return t(rule.thresholdOf === 'eligible' ? 'rule_eligible' : 'rule_cast', { threshold: formatPercent(rule.threshold) });
 }
 
 /**
@@ -227,13 +234,18 @@ export function approvalLabel(t: Translate, rule: VotingRule): string {
 	return t('approval_label', { rule: thresholdClause(t, rule) });
 }
 
+/** Whether the casting member's vote matters: the yes and no votes cast stand exactly at the threshold of a vote that has one. */
+export function castingVoteMatters(rule: VotingRule | null, votes: Votes): boolean {
+	return !!rule && !isDepartment(rule) && rule.castingVote !== '' && votes.yes + votes.no > 0 && tiedAtThreshold(rule, votes);
+}
+
 /**
  * Why a realm-wide tie at the threshold goes the way it does, when the yes and no votes are tied there: the casting member's
  * yes decides it, or it waits for that yes. '' when there is no tie, or the vote has no casting member (a tie then rejects).
  */
 export function castingNote(t: Translate, vote: VoteState, who: string): string {
 	const { rule, votes } = vote;
-	if (!rule || isDepartment(rule) || !rule.castingVote || votes.yes + votes.no === 0 || !tiedAtThreshold(rule, votes)) return '';
+	if (!rule || !castingVoteMatters(rule, votes)) return '';
 	return t(decidedByCastingVote(rule, votes, vote.castingChoice) ? 'casting_decides' : 'casting_needs', { who });
 }
 
@@ -250,7 +262,8 @@ function endedBecause(t: Translate, vote: VoteState): string {
 		if (short.approvals) return t(`ended_needs_${needed === 1 ? 'one' : 'many'}`, { needed, yes: votes.yes });
 		return t('ended_quorum');
 	}
-	if (outcome === 'accepted') return t(exceedsThreshold(rule, votes, eligible) ? 'ended_exceeds' : 'ended_casting');
+	if (outcome === 'accepted') return t('ended_exceeds');
+	if (outcome === 'depends_on_casting_member') return t('ended_casting');
 	return t(quorumReached(castBy(votes), eligible, rule.quorum) ? 'ended_not_exceeds' : 'ended_quorum');
 }
 

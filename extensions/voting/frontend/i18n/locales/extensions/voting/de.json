@@ -79,12 +79,12 @@
   "requirement_unknown": "Anforderung: für diesen Antrag nicht gespeichert",
   "rule_cast": "mehr als {threshold}% Ja-Stimmen unter den abgegebenen Ja- und Nein-Stimmen",
   "rule_eligible": "mehr als {threshold}% Ja-Stimmen aller Stimmberechtigten, ob sie abstimmen oder nicht",
-  "rule_department": "mindestens {threshold}% der {seats} Sitze der Richtlinie müssen mit Ja stimmen ({approvals} von {seats})",
+  "rule_department": "{approvals} der {seats} Sitze der Richtlinie müssen mit Ja stimmen",
   "rule_abstain": "Enthaltungen und Nichtabstimmende zählen dagegen",
   "rule_veto": "kein Vetoberechtigter darf mit Nein stimmen",
   "rule_quorum": "mindestens {quorum}% der Stimmberechtigten müssen abstimmen",
   "rule_casting": "bei Stimmengleichheit an der Schwelle entscheidet das Ja der Stichstimme ({who})",
-  "casting_decides": "Ja und Nein stehen an der Schwelle gleich: Das Ja der Stichstimme ({who}) entscheidet.",
+  "casting_decides": "Ja und Nein stehen an der Schwelle gleich: Das Ja der Stichstimme ({who}) entscheidet, solange ihr Inhaber noch Mitglied ist.",
   "casting_needs": "Ja und Nein stehen an der Schwelle gleich: Der Antrag wird nur mit einem Ja der Stichstimme ({who}) angenommen.",
   "ended": "Die Abstimmungsfrist endete am {when}. Wartet auf den Abschluss.",
   "ended_because": "Die Abstimmungsfrist endete am {when} — {why}. Wartet auf den Abschluss.",
@@ -95,6 +95,8 @@
   "ended_quorum": "das Quorum wurde nicht erreicht",
   "ended_exceeds": "die Ja-Stimmen übersteigen die Schwelle",
   "ended_not_exceeds": "die Ja-Stimmen übersteigen die Schwelle nicht",
-  "ended_casting": "Ja und Nein stehen an der Schwelle gleich, und die Stichstimme entscheidet",
-  "approval_label": "Zustimmung: {rule}"
+  "ended_casting": "Ja und Nein stehen an der Schwelle gleich, und die Stichstimme entscheidet, solange ihr Inhaber noch Mitglied ist",
+  "approval_label": "Zustimmung: {rule}",
+  "rule_department_one": "der einzige Sitz der Richtlinie muss mit Ja stimmen",
+  "approval_figure": "{yes} von {basis}"
 }

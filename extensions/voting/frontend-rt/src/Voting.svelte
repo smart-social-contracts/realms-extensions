@@ -25,6 +25,7 @@
 		approvalBar,
 		approvalLabel,
 		castingNote,
+		castingVoteMatters,
 		endedText,
 		isVetoed,
 		myVote,
@@ -338,7 +339,7 @@
 	}
 
 	/** A slim Proposal row (from proposal_list or proposal_get) in the shape the UI renders. */
-	function normalizeProposal(row: any, detail: any = null, myChoice = '', castingChoice = ''): any {
+	function normalizeProposal(row: any, detail: any = null, myChoice = ''): any {
 		const p = detail?.proposal ?? row ?? {};
 		const tally = detail?.tally ?? p.tally ?? {};
 		const department = String(p.department ?? '');
@@ -360,7 +361,7 @@
 			eligible: detail ? Number(detail.eligible) || 0 : null,
 			// The rule stored when it was filed; null for a proposal that records none, or one not read in full.
 			rule: detail ? votingRule(p, !!orgScope) : null,
-			casting_choice: castingChoice,
+			casting_choice: '',
 			veto_holders_missing: vetoHoldersMissing(p.tally?.veto, detail?.votes),
 			vetoed: isVetoed(p.tally?.veto, detail?.votes),
 			org_scope: orgScope,
@@ -592,14 +593,12 @@
 	async function fetchProposalDetail(proposalId: string, row: any = null): Promise<any | null> {
 		const detail = await read('proposal_get', { proposal: proposalId, count: VOTES_PAGE });
 		if (!detail) return row ? normalizeProposal(row) : null;
-		// A tie at the threshold goes to the casting member's yes: what they voted is read like the member's own vote.
-		const castingVote = String(detail.proposal?.casting_vote ?? '');
-		return normalizeProposal(
-			row,
-			detail,
-			await myVote(read, proposalId, detail, myPrincipal()),
-			await myVote(read, proposalId, detail, castingVote),
-		);
+		const proposal = normalizeProposal(row, detail, await myVote(read, proposalId, detail, myPrincipal()));
+		// A tie at the threshold goes to the casting member's yes: only then is what they voted read, like the member's own.
+		if (castingVoteMatters(proposal.rule, proposal.votes)) {
+			proposal.casting_choice = await myVote(read, proposalId, detail, proposal.rule.castingVote);
+		}
+		return proposal;
 	}
 
 	async function fetchProposalsPage(from: number | null) {
@@ -1392,47 +1391,49 @@
 						</div>
 					</div>
 
-					{#if tally.total > 0}
-						{@const bar = selectedProposal.rule ? approvalBar(selectedProposal.rule, tally, selectedProposal.eligible) : null}
+					{#if tally.total > 0 || selectedProposal.enriched}
 						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal))}
 						{@const casting = castingNote(t, voteState(selectedProposal), castingMember(selectedProposal))}
 						<div class="mb-4">
-							<!-- With a stored rule the bar measures what the rule measures, with the threshold marked on it; without one it keeps yes among yes and no. -->
-							{#if bar}
-								<div class="flex justify-between text-xs text-gray-500 mb-1">
-									<span data-testid="approval-label">{approvalLabel(t, selectedProposal.rule)}</span>
-									<span data-testid="approval-figure">{votePercent(Math.min(tally.yes, bar.basis), bar.basis)}</span>
-								</div>
-								<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex" style="position: relative">
-									<div
-										class="bg-green-500 h-2.5 transition-all duration-300"
-										style="width: {bar.fill * 100}%"
-										data-testid="approval-fill"
-									></div>
-									<div
-										style="position: absolute; top: 0; bottom: 0; width: 2px; background: #111827; left: {bar.mark * 100}%"
-										data-testid="threshold-mark"
-									></div>
-								</div>
-							{:else}
-								<div class="flex justify-between text-xs text-gray-500 mb-1">
-									<span>Approval (yes / decisive votes)</span>
-									<span>{votePercent(tally.yes, Math.max(tally.yes + tally.no, 1))}</span>
-								</div>
-								<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex">
-									<div
-										class="bg-green-500 h-2.5 transition-all duration-300"
-										style="width: {tally.total > 0 ? (tally.yes / tally.total) * 100 : 0}%"
-									></div>
-									<div
-										class="bg-red-500 h-2.5 transition-all duration-300"
-										style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"
-									></div>
-									<div
-										class="bg-gray-400 h-2.5 transition-all duration-300"
-										style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
-									></div>
-								</div>
+							{#if tally.total > 0}
+								{@const bar = selectedProposal.rule ? approvalBar(selectedProposal.rule, tally, selectedProposal.eligible) : null}
+								<!-- With a stored rule the bar measures what the rule measures, with the threshold marked on it; without one it keeps yes among yes and no. -->
+								{#if bar}
+									<div class="flex justify-between text-xs text-gray-500 mb-1">
+										<span data-testid="approval-label">{approvalLabel(t, selectedProposal.rule)}</span>
+										<span data-testid="approval-figure">{t('approval_figure', { yes: tally.yes, basis: bar.basis })}</span>
+									</div>
+									<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex" style="position: relative">
+										<div
+											class="bg-green-500 h-2.5 transition-all duration-300"
+											style="width: {bar.fill * 100}%"
+											data-testid="approval-fill"
+										></div>
+										<div
+											style="position: absolute; top: 0; bottom: 0; width: 2px; background: var(--color-gray-900, #111827); left: calc({bar.mark * 100}% - {bar.mark * 2}px)"
+											data-testid="threshold-mark"
+										></div>
+									</div>
+								{:else}
+									<div class="flex justify-between text-xs text-gray-500 mb-1">
+										<span>Approval (yes / decisive votes)</span>
+										<span>{votePercent(tally.yes, Math.max(tally.yes + tally.no, 1))}</span>
+									</div>
+									<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex">
+										<div
+											class="bg-green-500 h-2.5 transition-all duration-300"
+											style="width: {tally.total > 0 ? (tally.yes / tally.total) * 100 : 0}%"
+										></div>
+										<div
+											class="bg-red-500 h-2.5 transition-all duration-300"
+											style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"
+										></div>
+										<div
+											class="bg-gray-400 h-2.5 transition-all duration-300"
+											style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
+										></div>
+									</div>
+								{/if}
 							{/if}
 							{#if selectedProposal.enriched}
 								<div class="text-xs text-gray-400 mt-1" data-testid="requirement-line">{requirement}</div>

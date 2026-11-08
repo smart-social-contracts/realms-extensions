@@ -7,6 +7,7 @@ import en from '../../frontend/i18n/locales/extensions/voting/en.json';
 import Voting from './Voting.svelte';
 
 const PERCENT = 1_000_000;
+const ONE = 100 * PERCENT;
 const DANA = 'dana-ddddd-ddddd-ddddd-ddddd-ddddd-ddddd-ddd';
 const DANA_SHORT = `${DANA.slice(0, 8)}...${DANA.slice(-6)}`;
 const PAST = 1_700_000_000; // a deadline that has passed
@@ -14,7 +15,7 @@ const FUTURE = 4_102_444_800;
 
 type Vote = { voter: string; choice: string };
 /** A proposal as the realm stores it, the counts ``proposal_get`` reports for it and the votes it lists. */
-type Row = { proposal: Record<string, unknown>; counts: Record<string, number>; votes: Vote[] };
+type Row = { proposal: Record<string, unknown>; counts: Record<string, number>; votes: Vote[]; later?: Vote[] };
 const counts = (yes: number, no = 0, abstain = 0, eligible = 4) => ({ yes, no, abstain, eligible });
 
 const root = { id: 'Realm', is_root: true };
@@ -31,11 +32,11 @@ const proposal = (title: string, fields: Record<string, unknown>) => ({
 });
 
 /** A department's vote, 2 of the policy's 3 seats with a 40 % quorum and a veto holder (bob), ending at ``deadline``. */
-const departmentVote = (yes: number, no: number, votes: Vote[], deadline = PAST): Row => ({
+const departmentVote = (yes: number, no: number, votes: Vote[], deadline = PAST, threshold = 66_666_666): Row => ({
 	proposal: proposal('Department', {
 		department: 'Civil Registry',
 		deadline,
-		threshold: 66_666_666,
+		threshold,
 		quorum: 40 * PERCENT,
 		threshold_of: 'eligible',
 		casting_vote: '',
@@ -47,6 +48,8 @@ const departmentVote = (yes: number, no: number, votes: Vote[], deadline = PAST)
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount>;
+/** The proposals whose later pages of votes the page read. */
+let pagesRead: string[];
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 const viewButtons = (within: Element) => [...within.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'View');
@@ -54,6 +57,7 @@ const text = (testid: string) => target.querySelector(`[data-testid="${testid}"]
 
 /** Mounts the page on a realm that holds ``rows`` and opens the proposal titled ``title``. */
 async function openOn(rows: Row[], title: string) {
+	pagesRead = [];
 	window.matchMedia = (() => ({ matches: false })) as unknown as typeof window.matchMedia; // jsdom has none
 	vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => en }));
 	const rowOf = (id: string) => rows.find((row) => row.proposal.id === id)!;
@@ -63,10 +67,11 @@ async function openOn(rows: Row[], title: string) {
 			proposals: rows.map(({ proposal: { id, title, status, deadline, proposer } }) => ({ id, title, status, deadline, proposer })),
 			next: null,
 		}),
-		proposal_get: ({ proposal: id }) => {
-			const { proposal, counts, votes } = rowOf(id);
+		proposal_get: ({ proposal: id, from }) => {
+			const { proposal, counts, votes, later } = rowOf(id);
 			const { eligible, ...tally } = counts;
-			return { ok: true, proposal, tally, eligible, votes, next: null };
+			if (from) pagesRead.push(id);
+			return { ok: true, proposal, tally, eligible, votes: from ? later : votes, next: from || !later ? null : 2 };
 		},
 		department_list: () => ({ ok: true, departments: [root, registry] }),
 	};
@@ -96,7 +101,7 @@ afterEach(() => {
 test('a department vote past its deadline names its rule, abstentions and non-voters included', async () => {
 	await openOn([departmentVote(1, 0, [{ voter: 'alice', choice: 'yes' }])], 'Department');
 	expect(text('requirement-line')).toBe(
-		"Requirement: at least 66.666666% of the policy's 3 seats must vote yes (2 of 3), abstentions and members who do not vote count against it, no veto holder may vote no and at least 40% of the eligible members must vote",
+		"Requirement: 2 of the policy's 3 seats must vote yes, abstentions and members who do not vote count against it, no veto holder may vote no and at least 40% of the eligible members must vote",
 	);
 });
 
@@ -188,16 +193,22 @@ test('the casting vote that decided a tie is shown, with who holds it', async ()
 		`Requirement: more than 50% yes of the yes and no votes cast and a tie at the threshold goes to the yes of the casting vote (${DANA_SHORT})`,
 	);
 	expect(text('casting-note')).toBe(
-		`Yes and no are tied at the threshold: the yes of the casting vote (${DANA_SHORT}) decides it.`,
+		`Yes and no are tied at the threshold: the yes of the casting vote (${DANA_SHORT}) decides it, if they are still a member.`,
 	);
 });
 
-/** The bar of the open proposal: its label and figure, how far it is filled and where its threshold mark stands (percent). */
+/** The bar of the open proposal: its label and figure, how far it is filled (percent) and the style of its threshold mark. */
 const bar = () => {
-	const width = (testid: string) => parseFloat((target.querySelector(`[data-testid="${testid}"]`) as HTMLElement | null)?.style.width || 'NaN');
-	const mark = target.querySelector<HTMLElement>('[data-testid="threshold-mark"]');
-	return { label: text('approval-label'), figure: text('approval-figure'), fill: width('approval-fill'), mark: parseFloat(mark?.style.left ?? 'NaN') };
+	const fill = target.querySelector<HTMLElement>('[data-testid="approval-fill"]');
+	return {
+		label: text('approval-label'),
+		figure: text('approval-figure'),
+		fill: parseFloat(fill?.style.width ?? 'NaN'),
+		mark: target.querySelector('[data-testid="threshold-mark"]')?.getAttribute('style') ?? null,
+	};
 };
+/** The percentage a mark with ``calc(P% - Npx)`` stands at. */
+const markAt = (mark: string | null) => parseFloat(/left:\s*calc\(([\d.]+)%/.exec(mark ?? '')?.[1] ?? 'NaN');
 
 test('the bar of a vote over the votes cast measures yes among yes and no', async () => {
 	const row: Row = {
@@ -214,12 +225,10 @@ test('the bar of a vote over the votes cast measures yes among yes and no', asyn
 		votes: [],
 	};
 	await openOn([row], 'Cast');
-	expect(bar()).toEqual({
-		label: 'Approval: more than 50% yes of the yes and no votes cast',
-		figure: '75.0%',
-		fill: 75,
-		mark: 50,
-	});
+	const { mark, ...shown } = bar();
+	expect(shown).toEqual({ label: 'Approval: more than 50% yes of the yes and no votes cast', figure: '3 of 4', fill: 75 });
+	expect(markAt(mark)).toBe(50);
+	expect(mark).toContain('left: calc(50% - 1px)');
 });
 
 test('the bar of a vote over all the eligible members measures yes among them', async () => {
@@ -237,24 +246,77 @@ test('the bar of a vote over all the eligible members measures yes among them', 
 		votes: [],
 	};
 	await openOn([row], 'Eligible');
-	expect(bar()).toEqual({
+	const { mark, ...shown } = bar();
+	expect(shown).toEqual({
 		label: 'Approval: more than 50% yes of all eligible members, whether they vote or not',
-		figure: '37.5%',
+		figure: '3 of 8',
 		fill: 37.5,
-		mark: 50,
 	});
+	expect(markAt(mark)).toBe(50);
 });
 
 test("the bar of a department's vote measures approvals against the policy's seats", async () => {
 	// 1 approval of the policy's 3 seats, though 4 members may vote; the mark is at the stored 2/3
 	await openOn([departmentVote(1, 0, [{ voter: 'alice', choice: 'yes' }])], 'Department');
 	const { fill, mark, ...words } = bar();
-	expect(words).toEqual({
-		label: "Approval: at least 66.666666% of the policy's 3 seats must vote yes (2 of 3)",
-		figure: '33.3%',
-	});
+	expect(words).toEqual({ label: "Approval: 2 of the policy's 3 seats must vote yes", figure: '1 of 3' });
 	expect(fill).toBeCloseTo(100 / 3, 5);
-	expect(mark).toBeCloseTo(66.666666, 5);
+	expect(markAt(mark)).toBeCloseTo(66.666666, 3); // jsdom writes a calc() to four decimals
+});
+
+test('the threshold mark stays inside the bar at 100 % and takes the theme\'s dark grey', async () => {
+	await openOn([departmentVote(1, 0, [{ voter: 'alice', choice: 'yes' }], PAST, ONE)], 'Department');
+	const { mark } = bar();
+	expect(mark).toContain('left: calc(100% - 2px)'); // its own width, so that the bar does not clip it
+	expect(mark).toContain('background: var(--color-gray-900, #111827)');
+});
+
+test('the requirement shows before a single vote has been cast, and the bar does not', async () => {
+	const row: Row = {
+		proposal: proposal('Fresh', {
+			department: 'Realm',
+			deadline: FUTURE,
+			threshold: 50 * PERCENT,
+			quorum: 0,
+			threshold_of: 'cast',
+			casting_vote: '',
+			tally: { yes: 0, no: 0, abstain: 0, eligible: 7 },
+		}),
+		counts: counts(0, 0, 0, 7),
+		votes: [],
+	};
+	await openOn([row], 'Fresh');
+	expect(text('requirement-line')).toBe('Requirement: more than 50% yes of the yes and no votes cast');
+	expect(text('approval-label')).toBeNull();
+	expect(text('casting-note')).toBeNull();
+});
+
+/** A vote with a casting member (Dana) whose own vote is on the second page of the votes. */
+const castingRow = (title: string, yes: number, no: number): Row => ({
+	proposal: proposal(title, {
+		department: 'Realm',
+		deadline: FUTURE,
+		threshold: 50 * PERCENT,
+		quorum: 0,
+		threshold_of: 'cast',
+		casting_vote: DANA,
+		tally: { yes, no, abstain: 0, eligible: 7 },
+	}),
+	counts: counts(yes, no, 0, 7),
+	votes: [{ voter: 'carla', choice: 'no' }], // the member's own vote is on the first page: nothing else is looked for
+	later: [{ voter: DANA, choice: 'yes' }],
+});
+
+test("the casting member's vote is looked for in the later pages when the votes are tied at the threshold", async () => {
+	await openOn([castingRow('Tied', 1, 1)], 'Tied');
+	expect(pagesRead).toEqual(['Tied']);
+	expect(text('casting-note')).toContain('the yes of the casting vote');
+});
+
+test("the casting member's vote is not looked for when the votes are not tied", async () => {
+	await openOn([castingRow('Ahead', 3, 1)], 'Ahead');
+	expect(pagesRead).toEqual([]);
+	expect(text('casting-note')).toBeNull();
 });
 
 test('a proposal that records no rule keeps the bar of yes among yes and no', async () => {
