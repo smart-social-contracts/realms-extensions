@@ -65,6 +65,12 @@
   "waiting_many": "Waiting for {count} more voters or the deadline",
   "waiting_one_open": "Waiting for 1 more voter, or until the outcome is certain",
   "waiting_many_open": "Waiting for {count} more voters, or until the outcome is certain",
-  "waiting_department": "Waiting for more approvals, every veto holder's vote, or the deadline",
-  "waiting_department_open": "Waiting for more approvals and every veto holder's vote: it stays open until it passes or everyone has voted"
+  "waiting_department": "Waiting for {what}, or the deadline",
+  "waiting_department_open": "Waiting for {what}: it stays open until it passes or everyone has voted",
+  "waiting_approvals_one": "1 more approval",
+  "waiting_approvals_many": "{count} more approvals",
+  "waiting_vetoes_one": "1 veto holder's vote",
+  "waiting_vetoes_many": "{count} veto holders' votes",
+  "waiting_quorum": "enough votes to reach the quorum",
+  "waiting_and": "{first} and {second}"
 }

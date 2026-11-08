@@ -65,6 +65,12 @@
   "waiting_many": "Falten {count} votants més o el termini",
   "waiting_one_open": "Falta 1 votant més, o fins que el resultat siga segur",
   "waiting_many_open": "Falten {count} votants més, o fins que el resultat siga segur",
-  "waiting_department": "Esperant més aprovacions, el vot de cada titular de veto o el termini",
-  "waiting_department_open": "Esperant més aprovacions i el vot de cada titular de veto: continua oberta fins que s'aprove o tots hagen votat"
+  "waiting_department": "Esperant {what}, o el termini",
+  "waiting_department_open": "Esperant {what}: continua oberta fins que s'aprove o tots hagen votat",
+  "waiting_approvals_one": "1 aprovació més",
+  "waiting_approvals_many": "{count} aprovacions més",
+  "waiting_vetoes_one": "el vot d'1 titular de veto",
+  "waiting_vetoes_many": "els vots de {count} titulars de veto",
+  "waiting_quorum": "vots suficients per a aconseguir el quòrum",
+  "waiting_and": "{first} i {second}"
 }

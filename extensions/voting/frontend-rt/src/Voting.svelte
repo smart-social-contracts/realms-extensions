@@ -21,7 +21,7 @@
 	} from '../../../_shared/frontend/realm-time';
 	import { loadExtensionI18n, t } from './lib/i18n';
 	import { displayId, type Link, type Replaceable } from './links';
-	import { VOTES_PAGE, missingVoters, myVote } from './votes';
+	import { VOTES_PAGE, myVote, vetoHoldersMissing, waitingText } from './votes';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -361,6 +361,7 @@
 			required_threshold: Number.isFinite(threshold) && detail ? threshold : null,
 			quorum: Number(p.quorum) || 0,
 			required_approvals: Number.isFinite(required) && required > 0 ? required : null,
+			veto_holders_missing: vetoHoldersMissing(p.tally?.veto, detail?.votes),
 			org_scope: department && department !== rootDepartment ? department : '',
 			action: p.action ?? null,
 			links: Array.isArray(p.links) ? p.links : [],
@@ -1050,13 +1051,18 @@
 		return formatTimeRemaining(proposal.voting_deadline, now);
 	}
 
-	/** Why a vote that has votes missing is still open. */
-	function waitingText(proposal: any): string {
-		const open = proposal.voting_deadline ? '' : '_open';
-		// A department's vote ends once it has its approvals and every veto holder has voted, or when all have voted.
-		if (proposal.required_approvals) return t(`waiting_department${open}`);
-		const missing = missingVoters(proposal.eligible, voteTally(proposal).total);
-		return t(`waiting_${missing === 1 ? 'one' : 'many'}${open}`, { count: missing });
+	/** Why an open vote is still open, or '' when it waits for nothing known. */
+	function waitingFor(proposal: any): string {
+		const tally = voteTally(proposal);
+		return waitingText(t, {
+			deadline: !!proposal.voting_deadline,
+			eligible: proposal.eligible,
+			cast: tally.total,
+			yes: tally.yes,
+			required: proposal.required_approvals,
+			vetoHoldersMissing: proposal.veto_holders_missing,
+			quorum: proposal.quorum,
+		});
 	}
 
 	function approvalRequirementLabel(proposal: any): string {
@@ -1414,10 +1420,11 @@
 					{#if selectedProposal.eligible}
 						<p class="text-xs text-gray-400 mb-2">Eligible voters: {selectedProposal.eligible}</p>
 					{/if}
-					{#if isVotingOpen(selectedProposal, nowMs) && missingVoters(selectedProposal.eligible, tally.total) > 0}
-						<p class="text-xs text-gray-600 mb-2" data-testid="waiting-line">
-							{waitingText(selectedProposal)}
-						</p>
+					{#if isVotingOpen(selectedProposal, nowMs)}
+						{@const waiting = waitingFor(selectedProposal)}
+						{#if waiting}
+							<p class="text-xs text-gray-600 mb-2" data-testid="waiting-line">{waiting}</p>
+						{/if}
 					{/if}
 
 					{@render myVoteLine(selectedProposal, isVotingOpen(selectedProposal, nowMs))}

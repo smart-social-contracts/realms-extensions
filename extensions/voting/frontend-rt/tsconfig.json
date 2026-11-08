@@ -12,7 +12,9 @@
     "resolveJsonModule": true,
     "types": [
       "svelte"
-    ]
+    ],
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": [
     "src/**/*",
