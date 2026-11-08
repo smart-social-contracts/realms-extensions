@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { description as extensionDescription } from '../../manifest.json';
 	import {
 		isNarrowViewport,
@@ -546,6 +547,11 @@
 		}
 	}
 
+	/** The language of the document: the one the screen is in (a BCP 47 tag), English when the host does not say. */
+	function documentLanguage(): string {
+		return (ctx.locale?.subscribe ? get(ctx.locale) : null) || 'en';
+	}
+
 	/** Encrypt ``data`` for the department's staff and you, then store it as ``docId`` (new when null). */
 	async function storeDocument(
 		dept: DeptInfo,
@@ -565,6 +571,7 @@
 			department: dept.name,
 			...(docId ? { document: docId } : {}),
 			title,
+			languages: [documentLanguage()],
 			ref: INLINE_REF + plan.ciphertext,
 			hash: await sha256Hex(plan.ciphertext),
 			keys: plan.wrappedDeks,
