@@ -23,5 +23,13 @@
   "primary_color": "Colore principale",
   "preview": "Anteprima",
   "save_settings": "Salva impostazioni",
-  "saving_settings": "Salvataggio…"
+  "saving_settings": "Salvataggio…",
+  "section_timezone": "Fuso orario",
+  "section_timezone_desc": "L'ora ufficiale del regno. Gli orari, ad esempio quando una proposta ha effetto, si inseriscono e si mostrano in questo fuso; il regno li conserva in UTC, quindi cambiare fuso non sposta nulla di già salvato.",
+  "timezone": "Fuso orario",
+  "timezone_placeholder": "Scrivi per cercare, ad esempio Europe/Madrid",
+  "timezone_now": "Ora ufficiale adesso: {time}",
+  "timezone_preview": "In {zone} adesso è {time}.",
+  "timezone_applies_now": "Una modifica si applica non appena salvi.",
+  "timezone_needs_vote": "Una modifica dipende da {department} (politica {policy}): salvando si presenta una proposta e il fuso cambia quando viene accettata."
 }

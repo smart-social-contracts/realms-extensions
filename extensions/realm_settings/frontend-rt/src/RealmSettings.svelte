@@ -5,6 +5,9 @@
 	import QuartersPanel from './QuartersPanel.svelte';
 	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
 	import DepartmentTablePanel from './DepartmentTablePanel.svelte';
+	import TimeZonePanel from './TimeZonePanel.svelte';
+	import { loadExtensionI18n } from './lib/i18n';
+	import { UTC, matchZone, timeZoneChoices } from '../../../_shared/frontend/realm-time';
 	import { loadRealmRow, opCaller, proposalOf, refusalText, refusedPermission } from './ops';
 	import { isValidHexColor, snapshotEquals } from '../../../_shared/frontend/branding';
 	import {
@@ -20,7 +23,21 @@
 	let { ctx }: { ctx: any } = $props();
 
 	const call = opCaller(ctx);
+	const zoneChoices = timeZoneChoices();
 	const cn = ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' '));
+
+	let i18nTick = $state(0);
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en').then(() => i18nTick++);
+			return;
+		}
+		return localeStore.subscribe((loc: string | null | undefined) => {
+			void loadExtensionI18n(loc || 'en').then(() => i18nTick++);
+		});
+	});
 
 	let settingsLoading = $state(true);
 	let settingsSaving = $state(false);
@@ -32,6 +49,7 @@
 	let realmSettingsLogoUrl = $state('');
 	let realmSettingsBackgroundUrl = $state('');
 	let realmSettingsPrimaryColor = $state('#3b82f6');
+	let realmSettingsTimezone = $state(UTC);
 	let realmSettingsOpenRegistration = $state(false);
 	let realmSettingsAiAssistantEnabled = $state(true);
 	let realmSettingsFileRegistryId = $state('');
@@ -127,7 +145,10 @@
 	type Change = { op: string; args: Record<string, unknown> };
 
 	const SETTING_GROUPS: { op: string; keys: readonly string[] }[] = [
-		{ op: 'realm_configure', keys: ['name', 'manifesto', 'welcome_message', 'open_registration', 'ai_assistant_enabled'] },
+		{
+			op: 'realm_configure',
+			keys: ['name', 'manifesto', 'welcome_message', 'timezone', 'open_registration', 'ai_assistant_enabled'],
+		},
 		{ op: 'realm_configure_branding', keys: ['logo_url', 'background_image_url', 'primary_color'] },
 		{
 			op: 'realm_configure_tokens',
@@ -142,6 +163,8 @@
 			name: realmSettingsName,
 			manifesto: realmSettingsManifesto,
 			welcome_message: realmSettingsWelcome,
+			// The listed zone a person typed, whatever its case; anything else goes as typed, for the realm to refuse.
+			timezone: matchZone(zoneChoices, realmSettingsTimezone) ?? realmSettingsTimezone.trim(),
 			logo_url: realmSettingsLogoUrl,
 			background_image_url: realmSettingsBackgroundUrl,
 			primary_color: realmSettingsPrimaryColor,
@@ -170,7 +193,10 @@
 		const prev = savedSnapshot || {};
 		const changes: Change[] = [];
 		for (const { op, keys } of SETTING_GROUPS) {
-			const dirty = keys.filter((key) => !snapshotEquals(prev[key], next[key]));
+			// An empty time zone field means no change.
+			const dirty = keys.filter(
+				(key) => !snapshotEquals(prev[key], next[key]) && !(key === 'timezone' && next[key] === ''),
+			);
 			if (!dirty.length) continue;
 			const sent = op === 'realm_configure_tokens' ? keys : dirty;
 			changes.push({ op, args: Object.fromEntries(sent.map((key) => [key, next[key]])) });
@@ -228,13 +254,14 @@
 		settingsLoading = true;
 		settingsError = '';
 		try {
-			const [{ realm }, catalog] = await Promise.all([
+			const [{ realm, full }, catalog] = await Promise.all([
 				loadRealmRow(call),
 				call(false, 'token_catalog'),
 			]);
 			realmSettingsName = realm.name || '';
 			realmSettingsManifesto = realm.manifesto || '';
 			realmSettingsWelcome = realm.welcome_message || '';
+			realmSettingsTimezone = realm.timezone || UTC;
 			realmSettingsLogoUrl = realm.logo_url || '';
 			realmSettingsBackgroundUrl = realm.background_image_url || '';
 			realmSettingsPrimaryColor =
@@ -700,6 +727,17 @@
 				</div>
 			</div>
 		</section>
+
+		{#key i18nTick}
+			<TimeZonePanel
+				bind:value={realmSettingsTimezone}
+				saved={String(savedSnapshot?.timezone ?? UTC)}
+				choices={zoneChoices}
+				direct={governanceAppliesDirectly}
+				policy={governancePolicyLabel}
+				governedBy={governanceGovernedBy}
+			/>
+		{/key}
 
 		<section class="bg-white py-4 mb-6 sm:shadow-sm sm:rounded-lg sm:p-6">
 			<h2 class="text-lg font-semibold text-gray-900 mb-1">Languages</h2>

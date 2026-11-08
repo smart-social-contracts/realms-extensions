@@ -23,5 +23,13 @@
   "primary_color": "主色",
   "preview": "预览",
   "save_settings": "保存设置",
-  "saving_settings": "保存中…"
+  "saving_settings": "保存中…",
+  "section_timezone": "时区",
+  "section_timezone_desc": "领域的官方时间。时刻（例如提案何时生效）按此时区输入和显示；领域以 UTC 保存，因此更改时区不会改动已保存的任何内容。",
+  "timezone": "时区",
+  "timezone_placeholder": "输入以搜索，例如 Europe/Madrid",
+  "timezone_now": "当前官方时间：{time}",
+  "timezone_preview": "在 {zone}，现在是 {time}。",
+  "timezone_applies_now": "保存后更改立即生效。",
+  "timezone_needs_vote": "更改由 {department} 管理（政策 {policy}）：保存会提交一项提案，提案通过后时区才会改变。"
 }

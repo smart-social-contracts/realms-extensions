@@ -23,5 +23,13 @@
   "primary_color": "Primärfarbe",
   "preview": "Vorschau",
   "save_settings": "Einstellungen speichern",
-  "saving_settings": "Speichern…"
+  "saving_settings": "Speichern…",
+  "section_timezone": "Zeitzone",
+  "section_timezone_desc": "Die offizielle Zeit des Realms. Uhrzeiten, etwa wann ein Vorschlag wirksam wird, werden in dieser Zone eingegeben und angezeigt; das Realm speichert sie in UTC, eine Änderung der Zone verschiebt also nichts bereits Gespeichertes.",
+  "timezone": "Zeitzone",
+  "timezone_placeholder": "Zum Suchen tippen, zum Beispiel Europe/Madrid",
+  "timezone_now": "Offizielle Zeit jetzt: {time}",
+  "timezone_preview": "In {zone} ist es jetzt {time}.",
+  "timezone_applies_now": "Eine Änderung gilt, sobald du speicherst.",
+  "timezone_needs_vote": "Eine Änderung unterliegt {department} (Richtlinie {policy}): Beim Speichern wird ein Vorschlag eingereicht, und die Zone ändert sich, sobald er angenommen ist."
 }

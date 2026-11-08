@@ -23,5 +23,13 @@
   "primary_color": "Primary color",
   "preview": "Preview",
   "save_settings": "Save Settings",
-  "saving_settings": "Saving…"
+  "saving_settings": "Saving…",
+  "section_timezone": "Time zone",
+  "section_timezone_desc": "The realm's official time. Times of day, such as when a proposal takes effect, are entered and shown in this zone; the realm keeps them in UTC, so changing the zone moves nothing already stored.",
+  "timezone": "Time zone",
+  "timezone_placeholder": "Type to search, for example Europe/Madrid",
+  "timezone_now": "Official time now: {time}",
+  "timezone_preview": "In {zone} it is now {time}.",
+  "timezone_applies_now": "A change applies as soon as you save.",
+  "timezone_needs_vote": "A change is governed by {department} (policy {policy}): saving files a proposal, and the zone changes once it is accepted."
 }

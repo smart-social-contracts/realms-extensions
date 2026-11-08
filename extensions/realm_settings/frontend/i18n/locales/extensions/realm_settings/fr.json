@@ -23,5 +23,13 @@
   "primary_color": "Couleur principale",
   "preview": "Aperçu",
   "save_settings": "Enregistrer les paramètres",
-  "saving_settings": "Enregistrement…"
+  "saving_settings": "Enregistrement…",
+  "section_timezone": "Fuseau horaire",
+  "section_timezone_desc": "L'heure officielle du royaume. Les heures, par exemple celle de la prise d'effet d'une proposition, sont saisies et affichées dans ce fuseau ; le royaume les conserve en UTC, donc changer de fuseau ne déplace rien de ce qui est déjà enregistré.",
+  "timezone": "Fuseau horaire",
+  "timezone_placeholder": "Tapez pour chercher, par exemple Europe/Madrid",
+  "timezone_now": "Heure officielle actuelle : {time}",
+  "timezone_preview": "À {zone}, il est maintenant {time}.",
+  "timezone_applies_now": "Un changement s'applique dès l'enregistrement.",
+  "timezone_needs_vote": "Un changement relève de {department} (politique {policy}) : l'enregistrement dépose une proposition, et le fuseau change une fois celle-ci acceptée."
 }
