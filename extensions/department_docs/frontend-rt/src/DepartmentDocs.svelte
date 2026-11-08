@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { description as extensionDescription } from '../../manifest.json';
 	import {
 		isNarrowViewport,
@@ -23,6 +24,8 @@
 		id: string;
 		title: string;
 		department: string;
+		/** BCP 47 tags the document was stored with; empty for one stored before the realm kept them. */
+		languages: string[];
 		created_by: string;
 		/** Seconds since the epoch; 0 when unknown. */
 		at: number;
@@ -468,6 +471,7 @@
 			id: String(row.id),
 			title: String(row.title || 'Untitled'),
 			department: String(row.department || department),
+			languages: Array.isArray(row.languages) ? row.languages.map(String) : [],
 			created_by: String(row.author ?? ''),
 			at: Number(row.at) || 0,
 			can_manage: canManage,
@@ -546,10 +550,16 @@
 		}
 	}
 
-	/** Encrypt ``data`` for the department's staff and you, then store it as ``docId`` (new when null). */
+	/** The language of a new document: the one the screen is in (a BCP 47 tag), English when the host does not say. */
+	function documentLanguage(): string {
+		return (ctx.locale?.subscribe ? get(ctx.locale) : null) || 'en';
+	}
+
+	/** Encrypt ``data`` for the department's staff and you, then store it as ``existing`` (new when null), which keeps
+	 * the languages it was stored with. */
 	async function storeDocument(
 		dept: DeptInfo,
-		docId: string | null,
+		existing: DocMeta | null,
 		title: string,
 		data: { title: string; body: string },
 	): Promise<string> {
@@ -563,8 +573,9 @@
 		}
 		const reply = await run('document_store', {
 			department: dept.name,
-			...(docId ? { document: docId } : {}),
+			...(existing ? { document: existing.id } : {}),
 			title,
+			languages: existing ? existing.languages : [documentLanguage()],
 			ref: INLINE_REF + plan.ciphertext,
 			hash: await sha256Hex(plan.ciphertext),
 			keys: plan.wrappedDeks,
@@ -645,7 +656,7 @@
 				return;
 			}
 
-			await storeDocument(dept, doc.id, String(plaintext.title || doc.title), {
+			await storeDocument(dept, doc, String(plaintext.title || doc.title), {
 				title: String(plaintext.title ?? doc.title),
 				body: String(plaintext.body ?? ''),
 			});
@@ -913,7 +924,7 @@
 				const dept = departments.find((d) => d.name === doc.department);
 				if (!dept) throw new Error('Document not found');
 
-				await storeDocument(dept, doc.id, savedTitle, payload);
+				await storeDocument(dept, doc, savedTitle, payload);
 
 				composerMode = null;
 				editingDocId = null;
