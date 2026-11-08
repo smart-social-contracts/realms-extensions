@@ -23,5 +23,13 @@
   "primary_color": "Color principal",
   "preview": "Vista previa",
   "save_settings": "Guardar configuración",
-  "saving_settings": "Guardando…"
+  "saving_settings": "Guardando…",
+  "section_timezone": "Zona horaria",
+  "section_timezone_desc": "La hora oficial del reino. Las horas del día, como cuándo entra en vigor una propuesta, se introducen y se muestran en esta zona; el reino las guarda en UTC, así que cambiar la zona no mueve nada de lo ya guardado.",
+  "timezone": "Zona horaria",
+  "timezone_placeholder": "Escribe para buscar, por ejemplo Europe/Madrid",
+  "timezone_now": "Hora oficial ahora: {time}",
+  "timezone_preview": "En {zone} ahora es {time}.",
+  "timezone_applies_now": "Un cambio se aplica en cuanto guardas.",
+  "timezone_needs_vote": "Un cambio lo gobierna {department} (política {policy}): al guardar se presenta una propuesta, y la zona cambia cuando se acepta."
 }

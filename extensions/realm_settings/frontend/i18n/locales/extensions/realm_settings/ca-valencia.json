@@ -23,5 +23,13 @@
   "primary_color": "Color principal",
   "preview": "Vista prèvia",
   "save_settings": "Guardar ajustos",
-  "saving_settings": "Guardant…"
+  "saving_settings": "Guardant…",
+  "section_timezone": "Zona horària",
+  "section_timezone_desc": "L'hora oficial del regne. Les hores del dia, com ara quan entra en vigor una proposta, s'introduïxen i es mostren en esta zona; el regne les guarda en UTC, així que canviar la zona no mou res del que ja està guardat.",
+  "timezone": "Zona horària",
+  "timezone_placeholder": "Escriu per a buscar, per exemple Europe/Madrid",
+  "timezone_now": "Hora oficial ara: {time}",
+  "timezone_preview": "A {zone} ara és {time}.",
+  "timezone_applies_now": "Un canvi s'aplica tan prompte com guardes.",
+  "timezone_needs_vote": "Un canvi el governa {department} (política {policy}): en guardar es presenta una proposta, i la zona canvia quan s'accepta."
 }
