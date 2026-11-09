@@ -1,0 +1,22 @@
+{
+  "journal_of": "{realm}官方公报",
+  "journal": "官方公报",
+  "issue_number": "第 {number} 期",
+  "previous_day": "前一天",
+  "next_day": "后一天",
+  "pick_day": "日期",
+  "today": "今天",
+  "print": "打印或另存为 PDF",
+  "back_to_issue": "返回本期",
+  "loading": "正在加载本期…",
+  "no_entries": "当天没有记录任何消息或变更。",
+  "entries_count": "条目：{count}",
+  "times_in": "时间均为 {zone} 时间。",
+  "quarter_note": "本辖区不发布自己的公报。本领域的官方公报是其首都的公报，在此显示。",
+  "login_for_capital": "请登录，以便在本辖区阅读首都的公报。",
+  "error": "无法读取公报：{reason}",
+  "own_layer": "本领域自己的立法",
+  "entry_codex_installed": "本领域现已适用新的立法：{layers}。",
+  "entry_codex_installed_plain": "本领域现已适用新的立法。",
+  "entry_unknown": "已记录一项变更（{kind}）。"
+}

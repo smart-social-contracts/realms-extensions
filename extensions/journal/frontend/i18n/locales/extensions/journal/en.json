@@ -1,0 +1,22 @@
+{
+  "journal_of": "Official journal of {realm}",
+  "journal": "Official journal",
+  "issue_number": "No. {number}",
+  "previous_day": "Previous day",
+  "next_day": "Next day",
+  "pick_day": "Day",
+  "today": "Today",
+  "print": "Print or save as PDF",
+  "back_to_issue": "Back to the issue",
+  "loading": "Loading the issue…",
+  "no_entries": "No news or changes were recorded on this day.",
+  "entries_count": "Entries: {count}",
+  "times_in": "Times are in {zone}.",
+  "quarter_note": "This quarter publishes no journal of its own. The realm's official journal is its capital's, shown here.",
+  "login_for_capital": "Log in to read the capital's journal from this quarter.",
+  "error": "The journal could not be read: {reason}",
+  "own_layer": "the realm's own legislation",
+  "entry_codex_installed": "The realm now runs new legislation: {layers}.",
+  "entry_codex_installed_plain": "The realm now runs new legislation.",
+  "entry_unknown": "A change was recorded ({kind})."
+}
