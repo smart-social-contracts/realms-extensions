@@ -1,0 +1,21 @@
+{
+  "journal_of": "Gazzetta ufficiale di {realm}",
+  "journal": "Gazzetta ufficiale",
+  "issue_number": "N. {number}",
+  "previous_day": "Giorno precedente",
+  "next_day": "Giorno successivo",
+  "pick_day": "Giorno",
+  "today": "Oggi",
+  "print": "Stampa o salva come PDF",
+  "back_to_issue": "Torna al numero",
+  "loading": "Caricamento del numero…",
+  "no_entries": "In questo giorno non è stata registrata alcuna novità né modifica.",
+  "entries_count": "Voci: {count}",
+  "times_in": "Gli orari sono in {zone}.",
+  "quarter_note": "Questo quartiere non pubblica una gazzetta propria. La gazzetta ufficiale del regno è quella della sua capitale, mostrata qui.",
+  "login_for_capital": "Accedi per leggere da questo quartiere la gazzetta della capitale.",
+  "error": "Non è stato possibile leggere la gazzetta: {reason}",
+  "entry_codex_installed": "Il regno applica ora una nuova legislazione: {layers}.",
+  "entry_codex_installed_plain": "Il regno applica ora una nuova legislazione.",
+  "entry_unknown": "È stata registrata una modifica ({kind})."
+}

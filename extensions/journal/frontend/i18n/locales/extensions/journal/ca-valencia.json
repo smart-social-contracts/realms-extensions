@@ -1,0 +1,21 @@
+{
+  "journal_of": "Diari oficial de {realm}",
+  "journal": "Diari oficial",
+  "issue_number": "Núm. {number}",
+  "previous_day": "Dia anterior",
+  "next_day": "Dia següent",
+  "pick_day": "Dia",
+  "today": "Hui",
+  "print": "Imprimir o guardar com a PDF",
+  "back_to_issue": "Tornar al número",
+  "loading": "Carregant el número…",
+  "no_entries": "Este dia no es va registrar cap novetat ni canvi.",
+  "entries_count": "Entrades: {count}",
+  "times_in": "Les hores estan en {zone}.",
+  "quarter_note": "Este quart no publica un diari propi. El diari oficial del regne és el de la seua capital, que es mostra ací.",
+  "login_for_capital": "Inicia la sessió per a llegir des d'este quart el diari de la capital.",
+  "error": "No s'ha pogut llegir el diari: {reason}",
+  "entry_codex_installed": "El regne aplica ara una nova legislació: {layers}.",
+  "entry_codex_installed_plain": "El regne aplica ara una nova legislació.",
+  "entry_unknown": "S'ha registrat un canvi ({kind})."
+}

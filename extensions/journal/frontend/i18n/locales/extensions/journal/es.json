@@ -1,0 +1,21 @@
+{
+  "journal_of": "Diario oficial de {realm}",
+  "journal": "Diario oficial",
+  "issue_number": "N.º {number}",
+  "previous_day": "Día anterior",
+  "next_day": "Día siguiente",
+  "pick_day": "Día",
+  "today": "Hoy",
+  "print": "Imprimir o guardar como PDF",
+  "back_to_issue": "Volver al número",
+  "loading": "Cargando el número…",
+  "no_entries": "Este día no se registró ninguna novedad ni cambio.",
+  "entries_count": "Entradas: {count}",
+  "times_in": "Las horas están en {zone}.",
+  "quarter_note": "Este cuartel no publica un diario propio. El diario oficial del reino es el de su capital, que se muestra aquí.",
+  "login_for_capital": "Inicia sesión para leer desde este cuartel el diario de la capital.",
+  "error": "No se pudo leer el diario: {reason}",
+  "entry_codex_installed": "El reino aplica ahora una nueva legislación: {layers}.",
+  "entry_codex_installed_plain": "El reino aplica ahora una nueva legislación.",
+  "entry_unknown": "Se registró un cambio ({kind})."
+}

@@ -1,0 +1,36 @@
+{
+  "name": "journal",
+  "version": "1.0.0",
+  "description": "Read the realm's official journal: one issue a day with the latest news and changes of its legislation, that you can print or save as a PDF.",
+  "author": "Smart Social Contracts",
+  "categories": [
+    "governance"
+  ],
+  "sidebar_label": {
+    "en": "Official Journal",
+    "es": "Diario Oficial",
+    "de": "Amtsblatt",
+    "fr": "Journal officiel",
+    "it": "Gazzetta ufficiale",
+    "zh-CN": "官方公报",
+    "ca-valencia": "Diari Oficial"
+  },
+  "permissions": [],
+  "profiles": [],
+  "operations": [
+    "journal_issue",
+    "journal_capital_issue"
+  ],
+  "config": {
+    "personal_data": {
+      "entry_fields": [
+        "codex",
+        "layers",
+        "proposal",
+        "activates_at"
+      ]
+    }
+  },
+  "show_in_sidebar": true,
+  "icon": "ballpen"
+}

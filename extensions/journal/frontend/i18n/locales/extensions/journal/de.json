@@ -1,0 +1,21 @@
+{
+  "journal_of": "Amtsblatt von {realm}",
+  "journal": "Amtsblatt",
+  "issue_number": "Nr. {number}",
+  "previous_day": "Voriger Tag",
+  "next_day": "Nächster Tag",
+  "pick_day": "Tag",
+  "today": "Heute",
+  "print": "Drucken oder als PDF speichern",
+  "back_to_issue": "Zurück zur Ausgabe",
+  "loading": "Ausgabe wird geladen…",
+  "no_entries": "An diesem Tag wurden keine Neuigkeiten oder Änderungen verzeichnet.",
+  "entries_count": "Einträge: {count}",
+  "times_in": "Die Zeiten gelten in {zone}.",
+  "quarter_note": "Dieses Viertel gibt kein eigenes Amtsblatt heraus. Das Amtsblatt des Reichs ist das seiner Hauptstadt und wird hier angezeigt.",
+  "login_for_capital": "Melden Sie sich an, um das Amtsblatt der Hauptstadt von diesem Viertel aus zu lesen.",
+  "error": "Das Amtsblatt konnte nicht gelesen werden: {reason}",
+  "entry_codex_installed": "Das Reich wendet nun neue Gesetzgebung an: {layers}.",
+  "entry_codex_installed_plain": "Das Reich wendet nun neue Gesetzgebung an.",
+  "entry_unknown": "Eine Änderung wurde verzeichnet ({kind})."
+}
