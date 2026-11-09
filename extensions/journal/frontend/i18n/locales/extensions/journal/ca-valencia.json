@@ -15,7 +15,6 @@
   "quarter_note": "Este quart no publica un diari propi. El diari oficial del regne és el de la seua capital, que es mostra ací.",
   "login_for_capital": "Inicia la sessió per a llegir des d'este quart el diari de la capital.",
   "error": "No s'ha pogut llegir el diari: {reason}",
-  "own_layer": "la legislació pròpia del regne",
   "entry_codex_installed": "El regne aplica ara una nova legislació: {layers}.",
   "entry_codex_installed_plain": "El regne aplica ara una nova legislació.",
   "entry_unknown": "S'ha registrat un canvi ({kind})."

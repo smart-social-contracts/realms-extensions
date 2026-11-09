@@ -15,7 +15,6 @@
   "quarter_note": "Dieses Viertel gibt kein eigenes Amtsblatt heraus. Das Amtsblatt des Reichs ist das seiner Hauptstadt und wird hier angezeigt.",
   "login_for_capital": "Melden Sie sich an, um das Amtsblatt der Hauptstadt von diesem Viertel aus zu lesen.",
   "error": "Das Amtsblatt konnte nicht gelesen werden: {reason}",
-  "own_layer": "die eigene Gesetzgebung des Reichs",
   "entry_codex_installed": "Das Reich wendet nun neue Gesetzgebung an: {layers}.",
   "entry_codex_installed_plain": "Das Reich wendet nun neue Gesetzgebung an.",
   "entry_unknown": "Eine Änderung wurde verzeichnet ({kind})."

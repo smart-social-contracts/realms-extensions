@@ -15,7 +15,6 @@
   "quarter_note": "Ce quartier ne publie pas de journal propre. Le journal officiel du royaume est celui de sa capitale, affiché ici.",
   "login_for_capital": "Connectez-vous pour lire le journal de la capitale depuis ce quartier.",
   "error": "Le journal n'a pas pu être lu : {reason}",
-  "own_layer": "la législation propre du royaume",
   "entry_codex_installed": "Le royaume applique désormais une nouvelle législation : {layers}.",
   "entry_codex_installed_plain": "Le royaume applique désormais une nouvelle législation.",
   "entry_unknown": "Un changement a été enregistré ({kind})."

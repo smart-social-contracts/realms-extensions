@@ -15,7 +15,6 @@
   "quarter_note": "Questo quartiere non pubblica una gazzetta propria. La gazzetta ufficiale del regno è quella della sua capitale, mostrata qui.",
   "login_for_capital": "Accedi per leggere da questo quartiere la gazzetta della capitale.",
   "error": "Non è stato possibile leggere la gazzetta: {reason}",
-  "own_layer": "la legislazione propria del regno",
   "entry_codex_installed": "Il regno applica ora una nuova legislazione: {layers}.",
   "entry_codex_installed_plain": "Il regno applica ora una nuova legislazione.",
   "entry_unknown": "È stata registrata una modifica ({kind})."

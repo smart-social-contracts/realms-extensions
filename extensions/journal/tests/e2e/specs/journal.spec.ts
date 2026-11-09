@@ -1,9 +1,8 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { INSTALL, issueOf, LOGO, startRealm, type Scenario } from '../realm';
+import { CAPITAL, INSTALL, issueOf, LOGO, startRealm, type Scenario } from '../realm';
 
 const OUT = join(__dirname, '..', 'test-results');
 let scenario: Scenario;
@@ -22,7 +21,7 @@ function chinese(): Scenario {
   return {
     locale: 'zh-CN',
     realm: { name: '瓦伦西亚', logoUrl: LOGO },
-    replies: { journal_issue: { byDay: { '': issueOf('2026-11-09', 3, [INSTALL]) } } },
+    replies: { journal_issue: { byDay: { '': issueOf('2026-11-09', 3, [INSTALL], '瓦伦西亚') } } },
   };
 }
 
@@ -69,7 +68,7 @@ test('the same issue in English, empty days included', async ({ page }) => {
 
 test('the print route shows the sheet alone and its button prints the sheet, not the realm\'s page', async ({ page }) => {
   scenario = chinese();
-  scenario.replies.journal_issue.byDay['2026-11-09'] = issueOf('2026-11-09', 3, [INSTALL]);
+  scenario.replies.journal_issue.byDay['2026-11-09'] = issueOf('2026-11-09', 3, [INSTALL], '瓦伦西亚');
   await page.goto(`${url}/extensions/journal/2026-11-09/print`);
   await expect(sheet(page).getByRole('heading', { name: '瓦伦西亚官方公报' })).toBeVisible();
   await expect(page.getByRole('button', { name: '前一天' })).toHaveCount(0);
@@ -84,11 +83,8 @@ test('the sheet prints to a PDF with the Chinese text in it', async ({ page }) =
   scenario = chinese();
   await page.goto(`${url}/extensions/journal/2026-11-09/print`);
   await expect(sheet(page).locator('h1')).toBeVisible();
-  const pdf = await printedPdf(page);
-  const dir = mkdtempSync(join(tmpdir(), 'journal-pdf-'));
-  const file = join(dir, 'issue.pdf');
-  writeFileSync(file, pdf);
-  writeFileSync(join(OUT, 'journal-zh-CN.pdf'), pdf);
+  const file = join(OUT, 'journal-zh-CN.pdf');
+  writeFileSync(file, await printedPdf(page));
   const text = execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' });
   expect(text).toContain('瓦伦西亚官方公报');
   expect(text).toContain('第 3 期 · 2026年11月9日星期一');
@@ -101,12 +97,15 @@ test('a quarter shows the capital\'s issue and says whose journal it is', async 
     locale: 'en',
     realm: { name: 'Agora North', logoUrl: LOGO },
     replies: {
-      journal_issue: { ok: true, issued: false, capital: 'rrkah-fqaaa-aaaaa-aaaaq-cai' },
-      journal_capital_issue: { ok: true, ...issueOf('2026-11-09', 3, [INSTALL]), issued: false },
+      journal_issue: { ok: true, issued: false, capital: CAPITAL },
+      journal_capital_issue: { ...issueOf('2026-11-09', 3, [INSTALL], 'Agora'), issued: false },
     },
   };
   await page.goto(`${url}/extensions/journal`);
   await expect(page.getByText('This quarter publishes no journal of its own.')).toBeVisible();
+  // The sheet is the capital's: headed with the capital's name and without the quarter's logo.
+  await expect(sheet(page).getByRole('heading', { name: 'Official journal of Agora' })).toBeVisible();
+  await expect(sheet(page).locator('header img')).toHaveCount(0);
   await expect(sheet(page).getByText('The realm now runs new legislation: eu/es 2.4.0, eu/es/vc 1.1.0.')).toBeVisible();
   expect((await page.evaluate(() => (window as any).asked)).map(([name]: [string]) => name)).toEqual([
     'journal_issue',
@@ -120,13 +119,24 @@ test('a visitor on a quarter is asked to log in, and an error is shown as one', 
     locale: 'en',
     realm: { name: 'Agora North', logoUrl: '' },
     replies: {
-      journal_issue: { ok: true, issued: false, capital: 'rrkah-fqaaa-aaaaa-aaaaq-cai' },
+      journal_issue: { ok: true, issued: false, capital: CAPITAL },
       journal_capital_issue: { ok: false, denied: true, error: 'anonymous callers may not call this' },
     },
   };
   await page.goto(`${url}/extensions/journal`);
   await expect(page.getByRole('alert')).toContainText('Log in to read the capital\'s journal from this quarter.');
-  scenario.replies = { journal_issue: { ok: false, error: 'there is no issue for 2026-11-10: today is 2026-11-09' } };
+  scenario.replies = {
+    journal_issue: {
+      byDay: {
+        '2026-11-10': { ok: false, error: 'there is no issue for 2026-11-10: today is 2026-11-09' },
+        '': issueOf('2026-11-09', 3, [], 'Agora'),
+      },
+    },
+  };
   await page.goto(`${url}/extensions/journal/2026-11-10`);
   await expect(page.getByRole('alert')).toContainText('there is no issue for 2026-11-10');
+  // Today is offered beside the error, so a refused day is no dead end.
+  await page.getByRole('button', { name: 'Today' }).click();
+  await expect(sheet(page).getByText('No. 3 · Monday, November 9, 2026')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

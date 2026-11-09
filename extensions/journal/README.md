@@ -13,7 +13,8 @@ extension, one per realm, installed by default. The design is in
   page, the PDF and anything else are renderings of that JSON and are never checksummed.
 - **A quarter issues nothing.** Its `journal_issue` says so (`issued: false`, and the `capital` whose journal it is), and
   the page asks the capital's issue through `journal_capital_issue`, an update the quarter makes to its capital because a
-  read cannot call another canister. It needs a logged-in reader; a visitor is asked to log in.
+  read cannot call another canister. It needs a logged-in reader; a visitor is asked to log in. The sheet is headed with the
+  capital's name (the issue carries the issuing realm's name) and has no logo, since the quarter's is not the capital's.
 - **The journal only reports.** Publishing changes nothing about when legislation applies: it applies when the
   realm's operations run it, at the install switch.
 

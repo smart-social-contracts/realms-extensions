@@ -15,7 +15,6 @@
   "quarter_note": "This quarter publishes no journal of its own. The realm's official journal is its capital's, shown here.",
   "login_for_capital": "Log in to read the capital's journal from this quarter.",
   "error": "The journal could not be read: {reason}",
-  "own_layer": "the realm's own legislation",
   "entry_codex_installed": "The realm now runs new legislation: {layers}.",
   "entry_codex_installed_plain": "The realm now runs new legislation.",
   "entry_unknown": "A change was recorded ({kind})."

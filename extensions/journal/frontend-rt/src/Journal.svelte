@@ -14,10 +14,11 @@
 	// The capital whose issue is shown, when this realm is a quarter (its journal is the capital's).
 	let capital = $state('');
 	let locale = $state('en');
-	let realm = $state({ name: '', logoUrl: '' });
+	let logoUrl = $state('');
 	let frame: HTMLIFrameElement | undefined = $state();
 
-	let page = $derived(issue ? sheetHtml(issue, realm, t, locale) : '');
+	// A quarter's logo is not the capital's, whose journal it shows: the sheet has none then.
+	let page = $derived(issue ? sheetHtml(issue, capital ? '' : logoUrl, t, locale) : '');
 
 	$effect(() => {
 		const stop = ctx.locale?.subscribe?.((next: string | null | undefined) => {
@@ -29,7 +30,7 @@
 
 	$effect(() => {
 		const stop = ctx.realmInfo?.subscribe?.((info: any) => {
-			realm = { name: info?.name ?? '', logoUrl: info?.logoUrl ?? '' };
+			logoUrl = info?.logoUrl ?? '';
 		});
 		return stop;
 	});
@@ -96,6 +97,11 @@
 
 	{#if problem}
 		<p class="note error" role="alert">{t('error', { reason: problem })}</p>
+		{#if route.day}
+			<div class="bar">
+				<button type="button" onclick={() => go({ day: null, print: false })}>{t('today')}</button>
+			</div>
+		{/if}
 	{/if}
 
 	{#if issue}

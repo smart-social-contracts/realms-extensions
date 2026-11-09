@@ -12,8 +12,8 @@ function texts(locale: string) {
 }
 
 const t = texts('en');
-const AGORA = { name: 'Agora', logoUrl: '/custom/logo.png' };
-const empty: Issue = { day: '2026-11-09', number: 3, first_day: '2026-11-07', today: '2026-11-09', timezone: 'UTC', entries: [] };
+const LOGO = '/custom/logo.png';
+const empty: Issue = { realm: 'Agora', day: '2026-11-09', number: 3, first_day: '2026-11-07', today: '2026-11-09', timezone: 'UTC', entries: [] };
 const install = {
 	id: 'E-1',
 	at: Date.UTC(2026, 10, 9, 10, 30) / 1000,
@@ -22,7 +22,7 @@ const install = {
 };
 
 test('an issue with no entries is still an issue: its number, its day and a line that says so', () => {
-	const html = sheetHtml(empty, AGORA, t, 'en');
+	const html = sheetHtml(empty, LOGO, t, 'en');
 	assert.match(html, /Official journal of Agora/);
 	assert.match(html, /No\. 3 · Monday, November 9, 2026/);
 	assert.match(html, /No news or changes were recorded on this day\./);
@@ -32,7 +32,7 @@ test('an issue with no entries is still an issue: its number, its day and a line
 test('an entry shows its time in the realm\'s zone, across a summer-time change', () => {
 	assert.equal(timeOfDay(install.at, 'Europe/Madrid'), '11:30');
 	assert.equal(timeOfDay(Date.UTC(2026, 6, 1, 10, 30) / 1000, 'Europe/Madrid'), '12:30');
-	const html = sheetHtml({ ...empty, timezone: 'Europe/Madrid', entries: [install] }, AGORA, t, 'en');
+	const html = sheetHtml({ ...empty, timezone: 'Europe/Madrid', entries: [install] }, LOGO, t, 'en');
 	assert.match(html, /<time datetime="2026-11-09T10:30:00\.000Z">11:30<\/time>/);
 	assert.match(html, /Times are in Europe\/Madrid\./);
 });
@@ -44,20 +44,20 @@ test('an install says what the realm now runs, and a kind this version does not 
 });
 
 test('the realm\'s logo is on the sheet when it has one and not when it has none', () => {
-	assert.match(sheetHtml(empty, AGORA, t, 'en'), /<img src="\/custom\/logo\.png" alt="">/);
-	assert.doesNotMatch(sheetHtml(empty, { name: 'Agora', logoUrl: '' }, t, 'en'), /<img/);
+	assert.match(sheetHtml(empty, LOGO, t, 'en'), /<img src="\/custom\/logo\.png" alt="">/);
+	assert.doesNotMatch(sheetHtml(empty, '', t, 'en'), /<img/);
 });
 
 test('text from the realm cannot add markup to the sheet', () => {
-	const hostile = { name: '<script>alert(1)</script>', logoUrl: '"><script>alert(2)</script>' };
-	const html = sheetHtml({ ...empty, entries: [{ ...install, kind: '<b>x</b>', details: {} }] }, hostile, t, 'en');
+	const issue = { ...empty, realm: '<script>alert(1)</script>', entries: [{ ...install, kind: '<b>x</b>', details: {} }] };
+	const html = sheetHtml(issue, '"><script>alert(2)</script>', t, 'en');
 	assert.doesNotMatch(html, /<script>|<b>x/);
 	assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
 
 test('Chinese reaches the sheet whole, in the page and in the date', () => {
 	const zh = texts('zh-CN');
-	const html = sheetHtml({ ...empty, entries: [install] }, { name: '瓦伦西亚', logoUrl: '' }, zh, 'zh-CN');
+	const html = sheetHtml({ ...empty, realm: '瓦伦西亚', entries: [install] }, '', zh, 'zh-CN');
 	assert.match(html, /<meta charset="utf-8">/);
 	assert.match(html, /瓦伦西亚官方公报/);
 	assert.match(html, /第 3 期 · 2026年11月9日星期一/);

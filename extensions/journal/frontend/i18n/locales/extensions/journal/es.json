@@ -15,7 +15,6 @@
   "quarter_note": "Este cuartel no publica un diario propio. El diario oficial del reino es el de su capital, que se muestra aquí.",
   "login_for_capital": "Inicia sesión para leer desde este cuartel el diario de la capital.",
   "error": "No se pudo leer el diario: {reason}",
-  "own_layer": "la legislación propia del reino",
   "entry_codex_installed": "El reino aplica ahora una nueva legislación: {layers}.",
   "entry_codex_installed_plain": "El reino aplica ahora una nueva legislación.",
   "entry_unknown": "Se registró un cambio ({kind})."

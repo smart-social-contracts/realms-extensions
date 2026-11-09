@@ -15,15 +15,15 @@ export const LOGO =
       '<text x="32" y="42" font-size="30" text-anchor="middle" fill="#fff">A</text></svg>',
   );
 
-const CAPITAL = 'rrkah-fqaaa-aaaaa-aaaaq-cai';
+export const CAPITAL = 'rrkah-fqaaa-aaaaa-aaaaq-cai';
 
 /** What `journal_issue` answers on a capital, as realms-gos serves it. */
-export function issueOf(day: string, number: number, entries: any[] = []) {
+export function issueOf(day: string, number: number, entries: any[] = [], realm = 'Agora') {
   return {
     ok: true,
     issued: true,
     capital: CAPITAL,
-    issue: { day, number, first_day: '2026-11-07', today: '2026-11-09', timezone: 'Europe/Madrid', entries },
+    issue: { realm, day, number, first_day: '2026-11-07', today: '2026-11-09', timezone: 'Europe/Madrid', entries },
   };
 }
 

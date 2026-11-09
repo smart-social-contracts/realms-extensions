@@ -14,18 +14,14 @@ export interface Entry {
 }
 
 export interface Issue {
+	/** The name of the realm that issues it: on a quarter, the capital's. */
+	realm: string;
 	day: string;
 	number: number;
 	first_day: string;
 	today: string;
 	timezone: string;
 	entries: Entry[];
-}
-
-export interface Realm {
-	name: string;
-	/** The realm's logo, as the realm serves it; empty when it has none. */
-	logoUrl: string;
 }
 
 export type Text = (key: string, vars?: Record<string, string | number>) => string;
@@ -87,10 +83,13 @@ time { flex: none; width: 3.2em; font-variant-numeric: tabular-nums; color: #444
 footer { margin-top: 18px; font-size: 9pt; color: #555; }
 `;
 
-/** The whole page of an issue, for an iframe's `srcdoc` and for the browser to print. */
-export function sheetHtml(issue: Issue, realm: Realm, t: Text, locale: string): string {
-	const title = realm.name ? t('journal_of', { realm: realm.name }) : t('journal');
-	const logo = realm.logoUrl ? `<img src="${escapeHtml(realm.logoUrl)}" alt="">` : '';
+/**
+ * The whole page of an issue, for an iframe's `srcdoc` and for the browser to print. `logoUrl` is the logo of the realm
+ * that issues it, as the realm serves it, or empty when there is none to show.
+ */
+export function sheetHtml(issue: Issue, logoUrl: string, t: Text, locale: string): string {
+	const title = issue.realm ? t('journal_of', { realm: issue.realm }) : t('journal');
+	const logo = logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="">` : '';
 	const entries = issue.entries.length
 		? `<ol>${issue.entries
 				.map(
