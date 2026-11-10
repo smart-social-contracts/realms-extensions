@@ -25,6 +25,24 @@ function chinese(): Scenario {
   };
 }
 
+function quarter(): Scenario {
+  return {
+    locale: 'en',
+    realm: { name: 'Agora North', logoUrl: LOGO },
+    replies: {
+      journal_issue: { ok: true, issued: false, capital: CAPITAL },
+      journal_capital_issue: { ...issueOf('2026-11-09', 3, [INSTALL], 'Agora'), issued: false },
+    },
+  };
+}
+
+function consoleErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('console', (message) => message.type() === 'error' && errors.push(message.text()));
+  page.on('pageerror', (error) => errors.push(`page error: ${error.message}`));
+  return errors;
+}
+
 function sheet(page: Page): FrameLocator {
   return page.frameLocator('iframe.sheet');
 }
@@ -93,14 +111,7 @@ test('the sheet prints to a PDF with the Chinese text in it', async ({ page }) =
 });
 
 test('a quarter shows the capital\'s issue and says whose journal it is', async ({ page }) => {
-  scenario = {
-    locale: 'en',
-    realm: { name: 'Agora North', logoUrl: LOGO },
-    replies: {
-      journal_issue: { ok: true, issued: false, capital: CAPITAL },
-      journal_capital_issue: { ...issueOf('2026-11-09', 3, [INSTALL], 'Agora'), issued: false },
-    },
-  };
+  scenario = quarter();
   await page.goto(`${url}/extensions/journal`);
   await expect(page.getByText('This quarter publishes no journal of its own.')).toBeVisible();
   // The sheet is the capital's: headed with the capital's name and without the quarter's logo.
@@ -139,4 +150,47 @@ test('a visitor on a quarter is asked to log in, and an error is shown as one', 
   await page.getByRole('button', { name: 'Today' }).click();
   await expect(sheet(page).getByText('No. 3 · Monday, November 9, 2026')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+// The trace is off here. With it on, Playwright's tracer injects its snapshot script into every frame and Chromium
+// logs "Blocked script execution in 'about:srcdoc'" for a sandboxed frame like the sheet's; that is the tracer, not the
+// page, and the realm's own e2e lets that exact message through. The next test is the proof the sheet has no script.
+test('the page, the print route and a quarter log no console errors', async ({ page }) => {
+  const errors = consoleErrors(page);
+  scenario = chinese();
+  for (const path of ['/extensions/journal', '/extensions/journal/2026-11-09', '/extensions/journal/2026-11-09/print']) {
+    await page.goto(`${url}${path}`);
+    await expect(sheet(page).locator('h1')).toBeVisible();
+  }
+  scenario = quarter();
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).locator('h1')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('the sheet has no script, whatever the realm\'s text says, and its frame may not run one', async ({ page }) => {
+  scenario = {
+    locale: 'en',
+    realm: { name: 'Agora', logoUrl: LOGO },
+    replies: {
+      journal_issue: {
+        byDay: {
+          '': issueOf('2026-11-09', 3, [{ ...INSTALL, kind: '<svg onload=alert(1)>' }], '<script>alert(1)</script><img src=x onerror=alert(2)>'),
+        },
+      },
+    },
+  };
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).locator('h1')).toHaveText('Official journal of <script>alert(1)</script><img src=x onerror=alert(2)>');
+  const frame = page.locator('iframe.sheet');
+  expect(await frame.getAttribute('sandbox')).not.toContain('allow-scripts');
+  const scripted = await frame.evaluate((element) =>
+    [...(element as HTMLIFrameElement).contentDocument!.querySelectorAll('*')]
+      .filter(
+        (node) =>
+          node.localName === 'script' || [...node.attributes].some((a) => /^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)),
+      )
+      .map((node) => node.localName),
+  );
+  expect(scripted).toEqual([]);
 });

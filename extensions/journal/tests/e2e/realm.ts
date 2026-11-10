@@ -49,13 +49,18 @@ export interface Scenario {
   replies: Record<string, any>;
 }
 
+/** The scenario as JSON for an inline script: a "</script>" in the data (a hostile realm name) must not end the script. */
+function embedded(scenario: Scenario): string {
+  return JSON.stringify(scenario).replace(/</g, '\\u003c');
+}
+
 /** A page that plays the realm around the bundle: `ctx` answers from the scenario and records what it was asked. */
 function page(scenario: Scenario): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>realm</title></head><body>
 <div id="root"></div>
 <script type="module">
   import mount from '/bundle/index.js';
-  const scenario = ${JSON.stringify(scenario)};
+  const scenario = ${embedded(scenario)};
   const store = (value) => ({ subscribe(run) { run(value); return () => {}; } });
   window.asked = [];
   window.printed = 0;
