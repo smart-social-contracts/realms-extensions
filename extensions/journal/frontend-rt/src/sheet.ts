@@ -47,8 +47,17 @@ function layersText(layers: any): string {
 		.join(', ');
 }
 
+/** The change a `not_recorded` entry stands for, named by its codices: the realm made it, but not its entry. */
+export function missedChange(entry: Entry, t: Text): string {
+	const { kind, codex, reverted } = entry.details;
+	if (kind === 'codex_reverted') return t('missed_codex_reverted', { codex: String(codex), reverted: String(reverted) });
+	if (kind === 'codex_installed') return t('missed_codex_installed', { codex: String(codex) });
+	return t('missed_unknown', { kind: String(kind) });
+}
+
 /** What an entry says, in the reader's language. A kind this version does not know is still shown. */
 export function entryText(entry: Entry, t: Text): string {
+	if (entry.kind === 'not_recorded') return t('entry_not_recorded', { change: missedChange(entry, t) });
 	if (entry.kind === 'codex_installed' || entry.kind === 'codex_reverted') {
 		const key = `entry_${entry.kind}`;
 		const layers = layersText(entry.details.layers);

@@ -19,5 +19,10 @@
   "entry_codex_installed_plain": "The realm now runs new legislation.",
   "entry_codex_reverted": "The realm went back to earlier legislation: {layers}.",
   "entry_codex_reverted_plain": "The realm went back to earlier legislation.",
+  "missed_codex_reverted": "the revert to the codex {codex}, which replaced {reverted}",
+  "missed_codex_installed": "the install of the codex {codex}",
+  "missed_unknown": "a change ({kind})",
+  "entry_not_recorded": "An entry could not be recorded: {change}.",
+  "notice_not_recorded": "This issue is missing an entry: {change}, at {time}.",
   "entry_unknown": "A change was recorded ({kind})."
 }

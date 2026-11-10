@@ -19,5 +19,10 @@
   "entry_codex_installed_plain": "El regne aplica ara una nova legislació.",
   "entry_codex_reverted": "El regne ha tornat a una legislació anterior: {layers}.",
   "entry_codex_reverted_plain": "El regne ha tornat a una legislació anterior.",
+  "missed_codex_reverted": "la tornada al còdex {codex}, que va substituir {reverted}",
+  "missed_codex_installed": "la instal·lació del còdex {codex}",
+  "missed_unknown": "un canvi ({kind})",
+  "entry_not_recorded": "No s'ha pogut registrar una entrada: {change}.",
+  "notice_not_recorded": "A este número li falta una entrada: {change}, a les {time}.",
   "entry_unknown": "S'ha registrat un canvi ({kind})."
 }

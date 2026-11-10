@@ -43,6 +43,16 @@ test('an install says what the realm now runs, and a kind this version does not 
 	assert.equal(entryText({ ...install, kind: 'something_new' }, t), 'A change was recorded (something_new).');
 });
 
+test('an entry that could not be recorded says which change it misses, whatever the change', () => {
+	const missed = (details: Record<string, any>) => entryText({ ...install, kind: 'not_recorded', details }, t);
+	assert.equal(
+		missed({ kind: 'codex_reverted', codex: 'test@1.0.0', reverted: 'test@1.1.0' }),
+		'An entry could not be recorded: the revert to the codex test@1.0.0, which replaced test@1.1.0.',
+	);
+	assert.equal(missed({ kind: 'codex_installed', codex: 'sha256:ab' }), 'An entry could not be recorded: the install of the codex sha256:ab.');
+	assert.equal(missed({ kind: 'something_new' }), 'An entry could not be recorded: a change (something_new).');
+});
+
 test('a revert says the realm went back to earlier legislation, with no layers for a legacy codex', () => {
 	const revert = { ...install, kind: 'codex_reverted', details: { ...install.details, codex: 'sha256:ab', reverted: 'sha256:cd' } };
 	assert.equal(entryText(revert, t), 'The realm went back to earlier legislation: eu/es 2.4.0, eu/es/vc.');

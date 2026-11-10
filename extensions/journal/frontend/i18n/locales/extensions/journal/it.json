@@ -19,5 +19,10 @@
   "entry_codex_installed_plain": "Il regno applica ora una nuova legislazione.",
   "entry_codex_reverted": "Il regno è tornato a una legislazione precedente: {layers}.",
   "entry_codex_reverted_plain": "Il regno è tornato a una legislazione precedente.",
+  "missed_codex_reverted": "il ritorno al codice {codex}, che ha sostituito {reverted}",
+  "missed_codex_installed": "l'installazione del codice {codex}",
+  "missed_unknown": "una modifica ({kind})",
+  "entry_not_recorded": "Non è stato possibile registrare una voce: {change}.",
+  "notice_not_recorded": "A questo numero manca una voce: {change}, alle {time}.",
   "entry_unknown": "È stata registrata una modifica ({kind})."
 }

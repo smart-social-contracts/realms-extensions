@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-10
+
+### Added
+- A change whose entry the realm could not record (`not_recorded`) is a line of its issue and a notice on the page:
+  which revert or install it misses, and when. The reason is for the realm's IT admin team, in the codex status.
+
 ## [1.1.0] - 2026-11-10
 
 ### Added
