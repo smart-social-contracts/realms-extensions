@@ -43,6 +43,13 @@ test('an install says what the realm now runs, and a kind this version does not 
 	assert.equal(entryText({ ...install, kind: 'something_new' }, t), 'A change was recorded (something_new).');
 });
 
+test('a revert says the realm went back to earlier legislation, with no layers for a legacy codex', () => {
+	const revert = { ...install, kind: 'codex_reverted', details: { ...install.details, codex: 'sha256:ab', reverted: 'sha256:cd' } };
+	assert.equal(entryText(revert, t), 'The realm went back to earlier legislation: eu/es 2.4.0, eu/es/vc.');
+	assert.equal(entryText({ ...revert, details: { layers: [] } }, t), 'The realm went back to earlier legislation.');
+	assert.equal(entryText(revert, texts('zh-CN')), '本领域已恢复先前的立法：eu/es 2.4.0, eu/es/vc。');
+});
+
 test('the realm\'s logo is on the sheet when it has one and not when it has none', () => {
 	assert.match(sheetHtml(empty, LOGO, t, 'en'), /<img src="\/custom\/logo\.png" alt="">/);
 	assert.doesNotMatch(sheetHtml(empty, '', t, 'en'), /<img/);

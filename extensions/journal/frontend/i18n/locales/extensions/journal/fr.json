@@ -17,5 +17,7 @@
   "error": "Le journal n'a pas pu être lu : {reason}",
   "entry_codex_installed": "Le royaume applique désormais une nouvelle législation : {layers}.",
   "entry_codex_installed_plain": "Le royaume applique désormais une nouvelle législation.",
+  "entry_codex_reverted": "Le royaume est revenu à une législation antérieure : {layers}.",
+  "entry_codex_reverted_plain": "Le royaume est revenu à une législation antérieure.",
   "entry_unknown": "Un changement a été enregistré ({kind})."
 }

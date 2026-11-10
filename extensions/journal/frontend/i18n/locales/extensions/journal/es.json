@@ -17,5 +17,7 @@
   "error": "No se pudo leer el diario: {reason}",
   "entry_codex_installed": "El reino aplica ahora una nueva legislación: {layers}.",
   "entry_codex_installed_plain": "El reino aplica ahora una nueva legislación.",
+  "entry_codex_reverted": "El reino volvió a una legislación anterior: {layers}.",
+  "entry_codex_reverted_plain": "El reino volvió a una legislación anterior.",
   "entry_unknown": "Se registró un cambio ({kind})."
 }

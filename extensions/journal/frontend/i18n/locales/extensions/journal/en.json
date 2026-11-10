@@ -17,5 +17,7 @@
   "error": "The journal could not be read: {reason}",
   "entry_codex_installed": "The realm now runs new legislation: {layers}.",
   "entry_codex_installed_plain": "The realm now runs new legislation.",
+  "entry_codex_reverted": "The realm went back to earlier legislation: {layers}.",
+  "entry_codex_reverted_plain": "The realm went back to earlier legislation.",
   "entry_unknown": "A change was recorded ({kind})."
 }

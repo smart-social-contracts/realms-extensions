@@ -17,5 +17,7 @@
   "error": "无法读取公报：{reason}",
   "entry_codex_installed": "本领域现已适用新的立法：{layers}。",
   "entry_codex_installed_plain": "本领域现已适用新的立法。",
+  "entry_codex_reverted": "本领域已恢复先前的立法：{layers}。",
+  "entry_codex_reverted_plain": "本领域已恢复先前的立法。",
   "entry_unknown": "已记录一项变更（{kind}）。"
 }
