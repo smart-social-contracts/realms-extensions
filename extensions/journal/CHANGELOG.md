@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-10
+
+### Fixed
+- The notice of a revert whose entry could not be recorded says which codex the realm left and which it went back to:
+  "the revert from the codex A back to the codex B", where "B, which replaced A" read either way.
+
 ## [1.2.0] - 2026-11-10
 
 ### Added
