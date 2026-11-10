@@ -1,6 +1,6 @@
 {
   "name": "journal",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read the realm's official journal: one issue a day with the latest news and changes of its legislation, that you can print or save as a PDF.",
   "author": "Smart Social Contracts",
   "categories": [
@@ -27,7 +27,8 @@
         "codex",
         "layers",
         "proposal",
-        "activates_at"
+        "activates_at",
+        "reverted"
       ]
     }
   },

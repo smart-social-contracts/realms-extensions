@@ -17,5 +17,7 @@
   "error": "Das Amtsblatt konnte nicht gelesen werden: {reason}",
   "entry_codex_installed": "Das Reich wendet nun neue Gesetzgebung an: {layers}.",
   "entry_codex_installed_plain": "Das Reich wendet nun neue Gesetzgebung an.",
+  "entry_codex_reverted": "Das Reich ist zu früherer Gesetzgebung zurückgekehrt: {layers}.",
+  "entry_codex_reverted_plain": "Das Reich ist zu früherer Gesetzgebung zurückgekehrt.",
   "entry_unknown": "Eine Änderung wurde verzeichnet ({kind})."
 }

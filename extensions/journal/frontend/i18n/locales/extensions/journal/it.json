@@ -17,5 +17,7 @@
   "error": "Non è stato possibile leggere la gazzetta: {reason}",
   "entry_codex_installed": "Il regno applica ora una nuova legislazione: {layers}.",
   "entry_codex_installed_plain": "Il regno applica ora una nuova legislazione.",
+  "entry_codex_reverted": "Il regno è tornato a una legislazione precedente: {layers}.",
+  "entry_codex_reverted_plain": "Il regno è tornato a una legislazione precedente.",
   "entry_unknown": "È stata registrata una modifica ({kind})."
 }

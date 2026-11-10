@@ -49,9 +49,10 @@ function layersText(layers: any): string {
 
 /** What an entry says, in the reader's language. A kind this version does not know is still shown. */
 export function entryText(entry: Entry, t: Text): string {
-	if (entry.kind === 'codex_installed') {
+	if (entry.kind === 'codex_installed' || entry.kind === 'codex_reverted') {
+		const key = `entry_${entry.kind}`;
 		const layers = layersText(entry.details.layers);
-		return layers ? t('entry_codex_installed', { layers }) : t('entry_codex_installed_plain');
+		return layers ? t(key, { layers }) : t(`${key}_plain`);
 	}
 	return t('entry_unknown', { kind: entry.kind });
 }

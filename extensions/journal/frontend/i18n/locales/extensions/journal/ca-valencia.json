@@ -17,5 +17,7 @@
   "error": "No s'ha pogut llegir el diari: {reason}",
   "entry_codex_installed": "El regne aplica ara una nova legislació: {layers}.",
   "entry_codex_installed_plain": "El regne aplica ara una nova legislació.",
+  "entry_codex_reverted": "El regne ha tornat a una legislació anterior: {layers}.",
+  "entry_codex_reverted_plain": "El regne ha tornat a una legislació anterior.",
   "entry_unknown": "S'ha registrat un canvi ({kind})."
 }
