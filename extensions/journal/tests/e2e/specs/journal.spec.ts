@@ -125,6 +125,24 @@ test('a quarter shows the capital\'s issue and says whose journal it is', async 
   await page.screenshot({ path: join(OUT, 'journal-quarter.png') });
 });
 
+test('a revert whose entry could not be recorded is a notice on the page and a line on the sheet', async ({ page }) => {
+  const missed = {
+    ...INSTALL,
+    id: 'E-2',
+    kind: 'not_recorded',
+    details: { kind: 'codex_reverted', codex: 'test@1.0.0', reverted: 'test@1.1.0' },
+  };
+  scenario = {
+    locale: 'en',
+    realm: { name: 'Agora', logoUrl: LOGO },
+    replies: { journal_issue: { byDay: { '': issueOf('2026-11-09', 3, [missed]) } } },
+  };
+  await page.goto(`${url}/extensions/journal`);
+  const change = 'the revert to the codex test@1.0.0, which replaced test@1.1.0';
+  await expect(page.getByRole('alert')).toHaveText(`This issue is missing an entry: ${change}, at 11:30.`); // Madrid's time
+  await expect(sheet(page).getByText(`An entry could not be recorded: ${change}.`)).toBeVisible();
+});
+
 test('a visitor on a quarter is asked to log in, and an error is shown as one', async ({ page }) => {
   scenario = {
     locale: 'en',

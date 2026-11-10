@@ -19,5 +19,10 @@
   "entry_codex_installed_plain": "Le royaume applique désormais une nouvelle législation.",
   "entry_codex_reverted": "Le royaume est revenu à une législation antérieure : {layers}.",
   "entry_codex_reverted_plain": "Le royaume est revenu à une législation antérieure.",
+  "missed_codex_reverted": "le retour au codex {codex}, qui a remplacé {reverted}",
+  "missed_codex_installed": "l'installation du codex {codex}",
+  "missed_unknown": "un changement ({kind})",
+  "entry_not_recorded": "Une entrée n'a pas pu être enregistrée : {change}.",
+  "notice_not_recorded": "Il manque une entrée à ce numéro : {change}, à {time}.",
   "entry_unknown": "Un changement a été enregistré ({kind})."
 }

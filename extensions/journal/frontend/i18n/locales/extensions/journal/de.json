@@ -19,5 +19,10 @@
   "entry_codex_installed_plain": "Das Reich wendet nun neue Gesetzgebung an.",
   "entry_codex_reverted": "Das Reich ist zu früherer Gesetzgebung zurückgekehrt: {layers}.",
   "entry_codex_reverted_plain": "Das Reich ist zu früherer Gesetzgebung zurückgekehrt.",
+  "missed_codex_reverted": "die Rückkehr zum Kodex {codex}, der {reverted} ersetzte",
+  "missed_codex_installed": "die Installation des Kodex {codex}",
+  "missed_unknown": "eine Änderung ({kind})",
+  "entry_not_recorded": "Ein Eintrag konnte nicht verzeichnet werden: {change}.",
+  "notice_not_recorded": "In dieser Ausgabe fehlt ein Eintrag: {change}, um {time}.",
   "entry_unknown": "Eine Änderung wurde verzeichnet ({kind})."
 }

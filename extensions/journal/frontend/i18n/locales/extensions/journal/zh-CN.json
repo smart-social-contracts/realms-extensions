@@ -19,5 +19,10 @@
   "entry_codex_installed_plain": "本领域现已适用新的立法。",
   "entry_codex_reverted": "本领域已恢复先前的立法：{layers}。",
   "entry_codex_reverted_plain": "本领域已恢复先前的立法。",
+  "missed_codex_reverted": "恢复为法典 {codex}（取代 {reverted}）",
+  "missed_codex_installed": "安装法典 {codex}",
+  "missed_unknown": "一项变更（{kind}）",
+  "entry_not_recorded": "一项条目未能记录：{change}。",
+  "notice_not_recorded": "本期缺少一项条目：{change}，时间 {time}。",
   "entry_unknown": "已记录一项变更（{kind}）。"
 }

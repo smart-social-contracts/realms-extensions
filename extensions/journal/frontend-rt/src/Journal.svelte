@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { loadExtensionI18n, t } from './lib/i18n';
 	import { basePath, parseRoute, pathFor, shiftDay, type Route } from './route';
-	import { sheetHtml, type Issue } from './sheet';
+	import { missedChange, sheetHtml, timeOfDay, type Issue } from './sheet';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -19,6 +19,13 @@
 
 	// A quarter's logo is not the capital's, whose journal it shows: the sheet has none then.
 	let page = $derived(issue ? sheetHtml(issue, capital ? '' : logoUrl, t, locale) : '');
+	// The changes the realm made on this day whose entries it could not record: a reader must not miss them.
+	let notices = $derived(
+		(issue?.entries ?? [])
+			.filter((entry) => entry.kind === 'not_recorded')
+			.map((entry) => t('notice_not_recorded', { change: missedChange(entry, t), time: timeOfDay(entry.at, issue!.timezone) }))
+			.join(' '),
+	);
 
 	$effect(() => {
 		const stop = ctx.locale?.subscribe?.((next: string | null | undefined) => {
@@ -107,6 +114,9 @@
 	{#if issue}
 		{#if capital}
 			<p class="note">{t('quarter_note')}</p>
+		{/if}
+		{#if notices}
+			<p class="note error" role="alert">{notices}</p>
 		{/if}
 
 		<nav class="bar" aria-label={t('journal')}>
