@@ -47,7 +47,7 @@ test('an entry that could not be recorded says which change it misses, whatever 
 	const missed = (details: Record<string, any>) => entryText({ ...install, kind: 'not_recorded', details }, t);
 	assert.equal(
 		missed({ kind: 'codex_reverted', codex: 'test@1.0.0', reverted: 'test@1.1.0' }),
-		'An entry could not be recorded: the revert to the codex test@1.0.0, which replaced test@1.1.0.',
+		'An entry could not be recorded: the revert from the codex test@1.1.0 back to the codex test@1.0.0.',
 	);
 	assert.equal(missed({ kind: 'codex_installed', codex: 'sha256:ab' }), 'An entry could not be recorded: the install of the codex sha256:ab.');
 	assert.equal(missed({ kind: 'something_new' }), 'An entry could not be recorded: a change (something_new).');

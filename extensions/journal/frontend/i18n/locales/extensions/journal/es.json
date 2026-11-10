@@ -19,7 +19,7 @@
   "entry_codex_installed_plain": "El reino aplica ahora una nueva legislación.",
   "entry_codex_reverted": "El reino volvió a una legislación anterior: {layers}.",
   "entry_codex_reverted_plain": "El reino volvió a una legislación anterior.",
-  "missed_codex_reverted": "la vuelta al códice {codex}, que sustituyó a {reverted}",
+  "missed_codex_reverted": "la vuelta del códice {reverted} al códice {codex}",
   "missed_codex_installed": "la instalación del códice {codex}",
   "missed_unknown": "un cambio ({kind})",
   "entry_not_recorded": "No se pudo registrar una entrada: {change}.",

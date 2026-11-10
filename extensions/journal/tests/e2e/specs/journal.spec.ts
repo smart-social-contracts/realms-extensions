@@ -138,7 +138,7 @@ test('a revert whose entry could not be recorded is a notice on the page and a l
     replies: { journal_issue: { byDay: { '': issueOf('2026-11-09', 3, [missed]) } } },
   };
   await page.goto(`${url}/extensions/journal`);
-  const change = 'the revert to the codex test@1.0.0, which replaced test@1.1.0';
+  const change = 'the revert from the codex test@1.1.0 back to the codex test@1.0.0';
   await expect(page.getByRole('alert')).toHaveText(`This issue is missing an entry: ${change}, at 11:30.`); // Madrid's time
   await expect(sheet(page).getByText(`An entry could not be recorded: ${change}.`)).toBeVisible();
 });
