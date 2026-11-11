@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { basePath, parseRoute, pathFor, shiftDay } from './route.ts';
+import { basePath, parseRoute, pathFor, realmPrefix, shiftDay } from './route.ts';
 
 test('the journal page without a day is today', () => {
 	assert.deepEqual(parseRoute('/extensions/journal'), { day: null, print: false });
@@ -17,6 +17,8 @@ test('a realm served under a prefix keeps it', () => {
 	assert.equal(basePath(path), '/r/agora/extensions/journal');
 	assert.deepEqual(parseRoute(path), { day: '2026-11-09', print: true });
 	assert.equal(pathFor(basePath(path), { day: '2026-11-10', print: false }), '/r/agora/extensions/journal/2026-11-10');
+	assert.equal(realmPrefix(path), '/r/agora');
+	assert.equal(realmPrefix('/extensions/journal/2026-11-09'), '');
 });
 
 test('a path that is no day is today', () => {

@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import { loadExtensionI18n, t } from './lib/i18n';
-	import { basePath, parseRoute, pathFor, shiftDay, type Route } from './route';
-	import { missedChange, sheetHtml, timeOfDay, type Issue } from './sheet';
+	import { timeOfDay } from './dates';
+	import { missedChange } from './entries';
+	import type { Issue } from './issue';
+	import { basePath, parseRoute, pathFor, realmPrefix, shiftDay, type Route } from './route';
+	import { sheetHtml } from './sheet';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -13,12 +16,23 @@
 	let problem = $state('');
 	// The capital whose issue is shown, when this realm is a quarter (its journal is the capital's).
 	let capital = $state('');
+	// The canister that issues the issue shown: the realm itself, or on a quarter its capital.
+	let issuer = $state('');
 	let locale = $state('en');
 	let logoUrl = $state('');
 	let frame: HTMLIFrameElement | undefined = $state();
 
 	// A quarter's logo is not the capital's, whose journal it shows: the sheet has none then.
-	let page = $derived(issue ? sheetHtml(issue, capital ? '' : logoUrl, t, locale) : '');
+	let page = $derived(
+		issue
+			? sheetHtml(
+					issue,
+					{ logoUrl: capital ? '' : logoUrl, canisterId: issuer, prefix: realmPrefix(window.location.pathname) },
+					t,
+					locale,
+				)
+			: '',
+	);
 	// The changes the realm made on this day whose entries it could not record: a reader must not miss them.
 	let notices = $derived(
 		(issue?.entries ?? [])
@@ -50,7 +64,12 @@
 	onMount(() => {
 		const follow = () => (route = parseRoute(window.location.pathname));
 		window.addEventListener('popstate', follow);
-		return () => window.removeEventListener('popstate', follow);
+		// The sheet is narrower or wider on another screen, and its text runs onto more or fewer lines.
+		window.addEventListener('resize', fit);
+		return () => {
+			window.removeEventListener('popstate', follow);
+			window.removeEventListener('resize', fit);
+		};
 	});
 
 	async function load(day: string | null) {
@@ -65,6 +84,7 @@
 			if (mine !== asked) return; // a later request has replaced this one
 			if (reply.ok) {
 				issue = reply.issue;
+				issuer = reply.capital;
 				capital = reply.issued ? '' : reply.capital;
 			} else {
 				fail(reply.denied ? t('login_for_capital') : reply.error);
@@ -86,9 +106,24 @@
 		void ctx.navigate(pathFor(basePath(window.location.pathname), next));
 	}
 
+	// The body's height, not the document's: the document is never shorter than the frame, so the frame could not shrink.
 	function fit() {
-		const body = frame?.contentDocument?.documentElement;
+		const body = frame?.contentDocument?.body;
 		if (frame && body) frame.style.height = `${body.scrollHeight}px`;
+	}
+
+	// The sheet runs no script, so its links are followed from here: through the realm's router, not by loading the realm
+	// again inside the frame.
+	function followLink(event: MouseEvent) {
+		const link = (event.target as Element).closest('a[href]');
+		if (!link) return;
+		event.preventDefault();
+		void ctx.navigate(link.getAttribute('href')!);
+	}
+
+	function sheetLoaded() {
+		fit();
+		frame?.contentDocument?.addEventListener('click', followLink);
 	}
 
 	function print() {
@@ -159,7 +194,7 @@
 			title={t('journal')}
 			sandbox="allow-same-origin allow-modals"
 			srcdoc={page}
-			onload={fit}
+			onload={sheetLoaded}
 		></iframe>
 	{/if}
 </div>
@@ -222,7 +257,8 @@
 		width: 100%;
 		min-height: 320px;
 		border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-		border-radius: 4px;
+		border-radius: 2px;
 		background: #fff;
+		box-shadow: 0 1px 6px rgb(0 0 0 / 0.12);
 	}
 </style>

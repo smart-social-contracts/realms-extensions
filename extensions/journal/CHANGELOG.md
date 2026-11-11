@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-11
+
+### Changed
+- An issue reads and prints like an official gazette (think BOE, DOGV, Journal officiel, Amtsblatt), in the seven
+  languages. The masthead has the realm's logo, "Official Journal of <realm>", the issue number, the weekday and date in
+  the reader's language, the realm's official time zone with its offset (UTC only when the realm has not set a zone, and
+  as each entry's hover) and the realm's identity, the canister, small. Entries are grouped in numbered sections
+  (I. Legislation, II. Notices; a section with no entries is left out) and each has a reference of the issue and its
+  place in it, "2026/3-2", that never changes: a title, then the facts as a short formal text, the codex id (short on the
+  screen with the whole id on hover, whole on paper) and, on the screen, links to the proposal and the codex page. A day
+  with no entries says "No entries were published on this day." The sheet is serif, justified, responsive down to a phone
+  and prints on A4 with margins and, in the foot of every page, the issue and "Page 1 of 2".
+- An entry says what happened: for an install, what the realm runs, from when it is in force, by which proposal and how
+  the vote went; for a revert, the codex it went back to and the one it left, and the same decision.
+- The sheet has a marked place, `data-slot="signature"`, for the issue's signature and its verification (hash,
+  signature, key, verification code, address and QR). It is empty until the signing work fills it.
+
+### Added
+- The personal-data rules allow `vote`: the votes for, against and abstaining on the proposal that decided an install or
+  a revert, and how many could vote. Counts only; it names no person.
+- The links of the sheet go through the realm's router, also when the realm is served under a path (`/r/<slug>`).
+
+### Fixed
+- The sheet follows the width of the window: it was measured once, when it loaded.
+
 ## [1.3.0] - 2026-11-11
 
 ### Added
