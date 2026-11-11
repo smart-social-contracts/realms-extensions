@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-11
+
+### Added
+- The releases of the realm's sync sources are entries, as its checks find them: "The realm learned of a release of
+  legislation from eu/es: version 2.4.0, in force from 1 January 2027." A realm that is a sync source itself has an
+  entry for each release it publishes. Both are in the seven languages, and the notice of one that could not be
+  recorded names the release it misses.
+- The personal-data rules allow `source`, `version` and `effective_from`, the three fields that name a release and
+  say when it is in force. None names a person.
+
 ## [1.2.1] - 2026-11-10
 
 ### Fixed
