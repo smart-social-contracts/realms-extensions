@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
 	formatInZone,
 	formatOffset,
+	formatRealmWide,
 	formatUtc,
 	formatWithUtc,
 	isKnownZone,
@@ -147,6 +148,40 @@ describe('formatting', () => {
 		assert.equal(formatOffset(60), 'UTC+01:00');
 		assert.equal(formatOffset(-210), 'UTC-03:30');
 		assert.equal(offsetMinutes(instant * 1000, 'Pacific/Chatham'), 13 * 60 + 45);
+	});
+});
+
+describe('formatRealmWide', () => {
+	// 1 December 2026, 00:00 in Madrid: 08:00 in Tokyo, 17:00 the day before in Mexico City (the example of §4.5).
+	const switchTime = seconds('2026-11-30T23:00:00Z');
+
+	it('puts the quarter\'s time beside the official time when the clocks differ', () => {
+		assert.deepEqual(formatRealmWide(switchTime, 'Europe/Madrid', 'Asia/Tokyo'), {
+			official: '2026-12-01 00:00 Europe/Madrid (UTC+01:00)',
+			local: '2026-12-01 08:00 Asia/Tokyo (UTC+09:00)',
+		});
+		assert.equal(formatRealmWide(switchTime, 'Europe/Madrid', 'America/Mexico_City').local, '2026-11-30 17:00 America/Mexico_City (UTC-06:00)');
+	});
+
+	it('shows no local time when the clocks agree, in one zone or in two', () => {
+		assert.equal(formatRealmWide(switchTime, 'Europe/Madrid', 'Europe/Madrid').local, null);
+		assert.equal(formatRealmWide(switchTime, 'Europe/Madrid', 'Europe/Paris').local, null);
+	});
+
+	it('compares the clocks at that instant, not the zone names: summer time brings two zones together for a season', () => {
+		// London keeps UTC+0 in winter and UTC+1 in summer; Lagos is UTC+1 all year.
+		assert.equal(formatRealmWide(seconds('2026-07-15T10:00:00Z'), 'Europe/London', 'Africa/Lagos').local, null);
+		assert.equal(
+			formatRealmWide(seconds('2026-01-15T10:00:00Z'), 'Europe/London', 'Africa/Lagos').local,
+			'2026-01-15 11:00 Africa/Lagos (UTC+01:00)',
+		);
+	});
+
+	it('reads a zone the browser does not know as UTC', () => {
+		assert.deepEqual(formatRealmWide(switchTime, 'Mars/Olympus', 'UTC'), {
+			official: '2026-11-30 23:00 UTC',
+			local: null,
+		});
 	});
 });
 

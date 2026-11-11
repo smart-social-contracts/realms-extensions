@@ -1,6 +1,6 @@
 {
   "name": "codex_viewer",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Browse the automation scripts installed in your realm, read their source, copy code or links, and ask the assistant to explain a script or a selected passage.",
   "author": "Realms Team",
   "categories": [
@@ -27,6 +27,14 @@
     "ca-valencia": "Còdex"
   },
   "operations": [
-    "codex_status"
+    "codex_status",
+    "codex_views",
+    "codex_install_resume",
+    "codex_check_config",
+    "codex_check_now",
+    "codex_revert_fast",
+    "proposal_create",
+    "me",
+    "realm_info"
   ]
 }
