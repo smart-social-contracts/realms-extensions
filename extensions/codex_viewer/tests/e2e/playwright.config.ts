@@ -7,6 +7,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './specs',
+  // Playwright empties its output folder at each run: the screenshots the specs write to test-results/ stay.
+  outputDir: './test-results/.playwright',
   testIgnore: '**/*.local.spec.ts', // those need a local realm: playwright.local.config.ts
   timeout: 30 * 1000,
   fullyParallel: false,

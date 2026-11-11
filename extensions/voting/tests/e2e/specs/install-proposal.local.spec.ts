@@ -20,6 +20,10 @@ const CHAPTER = 'eu/es/vc/46250-valencia/local_regime'; // in every codex the re
 const CHAPTER_URL = `${BASE}/legislation/${CHAPTER}.py`;
 const REPORT = '# Analysis report\n\n## Newly allowed\n- tax_policy_propose: urban IBI between 1.10 % and 1.24 % for capitals\n';
 
+// València's procedure (Art. 65.2) refuses an ordinance that takes effect sooner than 15 working days after the vote
+// closes: a change list of the town's own layer states when it takes effect, six weeks away here.
+const TAKES_EFFECT = () => Math.floor(Date.now() / 1000) + 42 * 24 * 3600;
+
 test.use({ viewport: { width: 1280, height: 1700 } });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
 
@@ -46,6 +50,7 @@ test('a change list shows its summary, its chapter next to the running one, and 
   const reply = realmCall('proposal_create', {
     title: 'IBI 2027: large families',
     description: 'A bonus on the urban IBI',
+    effective_at: TAKES_EFFECT(),
     action: { op: 'codex_install', args: { url: CHANGE_LIST_URL, checksum: `sha256:${hexOf(list)}` } },
   });
   const voting = await openExtension(page, 'voting', { path: `/extensions/voting/proposals/${String(reply.proposal).replace('P-', '')}` });
@@ -72,6 +77,7 @@ test('a host the realm\'s pages may not read is unreachable, and the change list
   const reply = realmCall('proposal_create', {
     title: 'A change list on another host',
     description: 'Its host is not one a page of the realm reads',
+    effective_at: TAKES_EFFECT(),
     action: { op: 'codex_install', args: { url, checksum: `sha256:${hexOf(list)}` } },
   });
   const voting = await openExtension(page, 'voting', { path: `/extensions/voting/proposals/${String(reply.proposal).replace('P-', '')}` });
