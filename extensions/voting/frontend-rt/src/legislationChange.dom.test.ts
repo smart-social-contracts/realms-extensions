@@ -60,6 +60,8 @@ interface World {
 	files: Record<string, string>;
 	running?: Record<string, { sha256: string }> | null;
 	locale?: string;
+	/** The realm does not answer ``codex_status``: what it runs is unknown. */
+	unreadable?: boolean;
 	/** What shows the change has been read: the report, a failure or a release (none: nothing is shown for the proposal). */
 	ready?: string | null;
 }
@@ -70,6 +72,7 @@ async function open({
 	files,
 	running = { 'eu/es/vc/46250-valencia/tax': { sha256: `sha256:${hexOf(OLD_TAX)}` } },
 	locale = 'en',
+	unreadable = false,
 	ready = '[data-testid="report"], [data-testid="change-failure"], [data-testid="release-install"]',
 }: World) {
 	fetched = [];
@@ -90,7 +93,7 @@ async function open({
 		},
 		department_list: () => ({ ok: true, departments: [{ id: 'Realm', is_root: true }] }),
 		realm_info: () => ({ ok: true, realm: { timezone: 'Europe/Madrid' } }),
-		codex_status: () => ({ ok: true, codex: running ? { id: RUNNING, chapters: running } : null }),
+		codex_status: () => (unreadable ? { ok: false } : { ok: true, codex: running ? { id: RUNNING, chapters: running } : null }),
 		legislation_chapter: ({ chapter }) => ({ ok: true, text: chapter === `sha256:${hexOf(OLD_TAX)}` ? OLD_TAX : '' }),
 	};
 	const ctx = {
@@ -144,6 +147,13 @@ test('says a chapter the running codex lacks is new, and one it has unchanged is
 	expect(text('change-chapters')).toMatch(/New/);
 });
 
+test('says nothing of how a chapter differs, and offers no diff, when what the realm runs is unknown', async () => {
+	const list = JSON.stringify(changeList());
+	await open({ proposal: proposal(codeAction(list)), files: { [CHANGE_LIST_URL]: list, [REPORT_URL]: REPORT }, unreadable: true });
+	expect(text('change-chapters')).toMatch(/^eu\/es\/vc\/46250-valencia\/tax \d+ bytes$/);
+	expect(text('change-stale')).toBeNull();
+});
+
 test('warns that a change list made for another codex would be refused as stale, while the proposal can still run', async () => {
 	const list = JSON.stringify(changeList({ replaces: 'sha256:0000' }));
 	await open({ proposal: proposal(codeAction(list)), files: { [CHANGE_LIST_URL]: list, [REPORT_URL]: REPORT } });
@@ -166,7 +176,7 @@ test('shows no change list that is not the one the proposal pins', async () => {
 test('says so when the change list cannot be reached', async () => {
 	const list = JSON.stringify(changeList());
 	await open({ proposal: proposal(codeAction(list)), files: {} });
-	expect(text('change-failure')).toBe('The change list cannot be shown: The address could not be read from this browser.');
+	expect(text('change-failure')).toBe("The change list cannot be shown: The address could not be read from this browser. The realm's pages read only from some hosts.");
 });
 
 test('does not show a report that is not the file the change list names', async () => {

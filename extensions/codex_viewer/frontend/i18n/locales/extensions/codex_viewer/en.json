@@ -26,6 +26,7 @@
   "step_fetch_chapters": "Fetching the chapters",
   "step_check_sources": "Checking the sources",
   "step_build": "Building the codex",
+  "step_confirm": "Asking the capital to confirm before the switch",
   "step_switch": "Switching",
   "step_wait": "Staged, waiting for its time",
   "started": "Started",

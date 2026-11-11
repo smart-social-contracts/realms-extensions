@@ -26,6 +26,7 @@
   "step_fetch_chapters": "Scaricamento dei capitoli",
   "step_check_sources": "Verifica delle fonti",
   "step_build": "Costruzione del codice",
+  "step_confirm": "Conferma della capitale prima del passaggio",
   "step_switch": "Passaggio al nuovo codice",
   "step_wait": "Preparata, in attesa del suo momento",
   "started": "Avviata",

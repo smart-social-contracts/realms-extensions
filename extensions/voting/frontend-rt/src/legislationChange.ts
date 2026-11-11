@@ -39,11 +39,40 @@ const isText = (value: unknown): value is string => typeof value === 'string';
 const isHttps = (value: unknown): value is string => isText(value) && value.startsWith('https://');
 
 /**
+ * Refuses a JSON object that repeats a key, as the realm does (core/change_list.py): `JSON.parse` keeps the last
+ * value and a tool that kept the first would show voters something other than what the realm reads. `text` is JSON.
+ */
+function rejectRepeatedKeys(text: string): void {
+	const open: (Set<string> | null)[] = []; // the keys an open object has so far; null for an open array
+	let expectKey = false;
+	for (const [token] of text.matchAll(/"(?:[^"\\]|\\.)*"|[{}[\]:,]/g)) {
+		if (token === '{' || token === '[') {
+			open.push(token === '{' ? new Set() : null);
+			expectKey = token === '{';
+		} else if (token === '}' || token === ']') {
+			open.pop();
+			expectKey = false;
+		} else if (token === ',') {
+			expectKey = open[open.length - 1] instanceof Set;
+		} else if (token === ':') {
+			expectKey = false;
+		} else if (expectKey) {
+			const keys = open[open.length - 1] as Set<string>;
+			const name = JSON.parse(token);
+			if (keys.has(name)) throw new Error(`repeats the key ${name}`);
+			keys.add(name);
+			expectKey = false;
+		}
+	}
+}
+
+/**
  * The change list in `text`. It shows what the realm will read, so it asks no more than the realm does of what it
  * shows, and the `report`, which the realm never reads, is kept only when it is well formed.
  */
 export function readChangeList(text: string): ChangeList {
 	const data = JSON.parse(text);
+	rejectRepeatedKeys(text);
 	if (!data || typeof data !== 'object' || data.kind !== 'realms-gos/legislation-change' || data.format !== 1) {
 		throw new Error('not a change list');
 	}
@@ -121,7 +150,8 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 /**
  * The text at `url` if it is at most `limit` bytes of UTF-8 whose SHA-256 is `sha256` (64 hex digits): a copy of what
- * the proposal pins, whoever serves it.
+ * the proposal pins, whoever serves it. The address is the proposer's, but the realm's pages (the host's content
+ * security policy) decide which hosts a voter's browser contacts: any other is `unreachable` here.
  */
 export async function fetchPinned(url: string, sha256: string, limit: number, fetcher: typeof fetch = fetch): Promise<Fetched> {
 	if (!isHttps(url)) return { ok: false, reason: 'not_https' };

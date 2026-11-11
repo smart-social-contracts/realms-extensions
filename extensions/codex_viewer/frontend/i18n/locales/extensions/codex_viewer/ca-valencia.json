@@ -26,6 +26,7 @@
   "step_fetch_chapters": "Descarregant els capítols",
   "step_check_sources": "Comprovant les fonts",
   "step_build": "Construint el còdex",
+  "step_confirm": "Esperant la confirmació de la capital abans d'activar",
   "step_switch": "Activant",
   "step_wait": "Preparada, a l'espera del seu moment",
   "started": "Iniciada",

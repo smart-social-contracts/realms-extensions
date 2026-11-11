@@ -26,6 +26,7 @@
   "step_fetch_chapters": "Téléchargement des chapitres",
   "step_check_sources": "Vérification des sources",
   "step_build": "Construction du codex",
+  "step_confirm": "Confirmation de la capitale avant le basculement",
   "step_switch": "Basculement",
   "step_wait": "Préparée, en attente de son heure",
   "started": "Commencée",

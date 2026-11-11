@@ -30,7 +30,7 @@
 						<td><code>{layer.source}</code></td>
 						<td>{layer.version || '—'}</td>
 						<td>{layer.domains.join(', ')}</td>
-						<td>{layer.vouchedBy.length ? layer.vouchedBy.join(', ') : t('own_layer')}</td>
+						<td>{layer.own ? t('own_layer') : layer.vouchedBy.length ? layer.vouchedBy.join(', ') : '—'}</td>
 					</tr>
 				{/each}
 			</tbody>

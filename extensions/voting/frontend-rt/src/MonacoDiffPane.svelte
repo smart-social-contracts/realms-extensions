@@ -35,15 +35,14 @@
 
 	function setModels(orig: string, mod: string) {
 		if (!diffEditor || !monacoApi) return;
-		const prevOriginal = diffEditor.getModel()?.original;
-		const prevModified = diffEditor.getModel()?.modified;
-		if (prevOriginal) prevOriginal.dispose();
-		if (prevModified) prevModified.dispose();
-
+		const previous = diffEditor.getModel();
 		diffEditor.setModel({
 			original: monacoApi.editor.createModel(orig, language),
 			modified: monacoApi.editor.createModel(mod, language),
 		});
+		// The editor lets go of a model when it is given others: disposing one it still holds is an error.
+		previous?.original?.dispose();
+		previous?.modified?.dispose();
 	}
 
 	onMount(() => {
@@ -105,6 +104,7 @@
 
 	onDestroy(() => {
 		const model = diffEditor?.getModel();
+		diffEditor?.setModel(null);
 		model?.original?.dispose();
 		model?.modified?.dispose();
 		diffEditor?.dispose();

@@ -56,9 +56,9 @@ describe('what the realm runs', () => {
 
 	it('groups the chapters by layer, in the order of the layers', () => {
 		assert.deepEqual(layerRows(codex), [
-			{ source: 'eu/es', version: '2.4.0', domains: ['procedure', 'tax'], vouchedBy: ['rrkah-fqaaa-aaaaa-aaaaq-cai'] },
-			{ source: 'eu/es/vc', version: '1.1.0', domains: ['tax'], vouchedBy: ['rrkah-fqaaa-aaaaa-aaaaq-cai'] },
-			{ source: 'eu/es/vc/46250-valencia', version: '', domains: ['tax'], vouchedBy: [] },
+			{ source: 'eu/es', own: false, version: '2.4.0', domains: ['procedure', 'tax'], vouchedBy: ['rrkah-fqaaa-aaaaa-aaaaq-cai'] },
+			{ source: 'eu/es/vc', own: false, version: '1.1.0', domains: ['tax'], vouchedBy: ['rrkah-fqaaa-aaaaa-aaaaq-cai'] },
+			{ source: 'eu/es/vc/46250-valencia', own: true, version: '', domains: ['tax'], vouchedBy: [] },
 		]);
 	});
 
@@ -119,15 +119,18 @@ describe('the flattened view', () => {
 		});
 	});
 
-	it('names every layer of an extension, which all run', () => {
+	it('names every layer of an extension, which all run, and gathers their citations', () => {
 		const extension = row({
 			mark: 'extension',
 			layers: [
 				{ source: 'eu', legislation: 'GDPR' },
 				{ source: 'eu/es', legislation: 'LOPDGDD' },
+				{ source: 'eu/es/vc/46250-valencia', legislation: null },
 			],
 		});
-		assert.deepEqual(rowOrigin(extension), { applies: 'eu + eu/es', overrides: [], legislation: 'LOPDGDD' });
+		assert.deepEqual(rowOrigin(extension), { applies: 'eu + eu/es + eu/es/vc/46250-valencia', overrides: [], legislation: 'GDPR; LOPDGDD' });
+		const uncited = row({ mark: 'extension', layers: [{ source: 'eu', legislation: null }, { source: 'eu/es', legislation: null }] });
+		assert.equal(rowOrigin(uncited).legislation, null);
 	});
 
 	it('writes a setting\'s value as one line', () => {
@@ -186,7 +189,7 @@ describe('the strings of the page', () => {
 		}
 		// Keys built from a state: t(`job_${status}`), t(`step_${step}`), t(`compliance_${state}`), t(`mark_${mark}`).
 		for (const status of ['running', 'paused', 'failed', 'done']) asked.add(`job_${status}`);
-		for (const step of ['fetch_change_list', 'check_change_list', 'fetch_chapters', 'check_sources', 'build', 'switch', 'wait']) asked.add(`step_${step}`);
+		for (const step of ['fetch_change_list', 'check_change_list', 'fetch_chapters', 'check_sources', 'build', 'confirm', 'switch', 'wait']) asked.add(`step_${step}`);
 		for (const state of ['compliant', 'non_compliant', 'unknown']) asked.add(`compliance_${state}`);
 		for (const mark of ['fixed', 'extension', 'overridable']) asked.add(`mark_${mark}`);
 		const missing = [...asked].filter((key) => !(key in english));

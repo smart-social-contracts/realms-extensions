@@ -39,13 +39,14 @@
 
 	let list = $state<ChangeList | null>(null);
 	let failure = $state('');
+	// The codex the realm runs ("" and no chapters when it runs none, or one of the earlier kind); null while unknown.
 	let running = $state<{ id: string; chapters: Record<string, { sha256: string }> } | null>(null);
 	let report = $state<Fetched | null>(null);
 	// The chapters whose changes are open, with the two texts once they are read.
 	let shown = $state<Record<string, { before: string; after: string } | { error: string } | 'loading'>>({});
 
 	let summary = $derived(list ? summaryFor(list.summary, locale) : null);
-	let stale = $derived(open && !!list && !!running && list.replaces !== running.id);
+	let stale = $derived(open && !!list && !!running && (list.replaces ?? '') !== running.id);
 
 	const hex = (checksum: string) => checksum.replace(/^sha256:/, '');
 	const reason = (fetched: Fetched) => (fetched.ok ? '' : t(`fetch_${fetched.reason}`));
@@ -64,7 +65,7 @@
 			return;
 		}
 		const status = await read('codex_status', { count: 1 });
-		running = status?.codex?.chapters ? { id: String(status.codex.id), chapters: status.codex.chapters } : null;
+		if (status) running = { id: String(status.codex?.id ?? ''), chapters: status.codex?.chapters ?? {} };
 		if (list.report) report = await fetchPinned(list.report.url, list.report.sha256, MAX_REPORT);
 	}
 
@@ -126,7 +127,7 @@
 
 		{#if stale}
 			<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2" data-testid="change-stale">
-				{t('change_stale', { replaces: list.replaces ?? '—', running: running?.id ?? '—' })}
+				{t('change_stale', { replaces: list.replaces ?? '—', running: running?.id || '—' })}
 			</p>
 		{/if}
 
@@ -135,13 +136,15 @@
 				<h4 class="text-sm font-semibold text-gray-900 mb-1">{t('change_chapters')}</h4>
 				<ul class="divide-y divide-gray-100 text-sm" data-testid="change-chapters">
 					{#each list.set as entry (entry.chapter)}
-						{@const difference = running ? differenceOf(entry, running.chapters) : 'new'}
+						{@const difference = running ? differenceOf(entry, running.chapters) : null}
 						<li class="py-2">
 							<div class="flex flex-wrap items-center gap-2">
 								<span class="font-mono text-gray-900">{entry.chapter}</span>
-								<span class="px-2 py-0.5 rounded-full text-xs font-semibold {difference === 'same' ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-800'}">{t(`chapter_${difference}`)}</span>
+								{#if difference}
+									<span class="px-2 py-0.5 rounded-full text-xs font-semibold {difference === 'same' ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-800'}">{t(`chapter_${difference}`)}</span>
+								{/if}
 								{#if entry.size}<span class="text-xs text-gray-500">{t('chapter_size', { bytes: entry.size })}</span>{/if}
-								{#if difference !== 'same'}
+								{#if difference && difference !== 'same'}
 									<button type="button" class="text-xs text-blue-600 hover:underline" onclick={() => toggle(entry)}>
 										{entry.chapter in shown ? t('hide_changes') : t('show_changes')}
 									</button>

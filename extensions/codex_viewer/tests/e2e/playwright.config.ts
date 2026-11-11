@@ -7,6 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './specs',
+  testIgnore: '**/*.local.spec.ts', // those need a local realm: playwright.local.config.ts
   timeout: 30 * 1000,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

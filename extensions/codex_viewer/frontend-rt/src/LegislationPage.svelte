@@ -257,6 +257,7 @@
 	.legislation :global(th) {
 		color: #6b7280;
 		font-weight: 500;
+		white-space: nowrap;
 	}
 
 	.legislation :global(.actions) {

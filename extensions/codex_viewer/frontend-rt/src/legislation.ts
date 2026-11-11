@@ -111,6 +111,8 @@ export function complianceOf(flag: Flag): { state: 'compliant' | 'non_compliant'
 /** A layer of the running codex: its version, the domains it has a chapter in, and who vouched for them. */
 export interface LayerRow {
 	source: string;
+	/** The realm's own layer, the last: nobody vouches for it. */
+	own: boolean;
 	version: string;
 	domains: string[];
 	vouchedBy: string[];
@@ -118,11 +120,12 @@ export interface LayerRow {
 
 /** The chapters of `codex` grouped by layer, in the order of its layers. A chapter id is `<source>/<domain>`. */
 export function layerRows(codex: LayeredCodex): LayerRow[] {
-	return codex.layers.map((source) => {
+	return codex.layers.map((source, at) => {
 		const own = Object.entries(codex.chapters).filter(([, chapter]) => chapter.source === source);
 		const versions = [...new Set(own.map(([, chapter]) => chapter.version))];
 		return {
 			source,
+			own: at === codex.layers.length - 1,
 			version: versions.join(', '),
 			domains: own.map(([id]) => id.slice(source.length + 1)).sort(),
 			vouchedBy: [...new Set(own.map(([, chapter]) => chapter.vouched_by).filter(Boolean))],
@@ -143,13 +146,17 @@ export function failureRows(failures: Failures): FailureRow[] {
 		.sort((a, b) => b.at - a.at || a.file.localeCompare(b.file) || a.method.localeCompare(b.method));
 }
 
-/** Where a view row comes from: the layer whose definition applies, and the layers above it that it overrides. */
+/**
+ * Where a view row comes from: the layer whose definition applies and the layers above it that it overrides, with the
+ * legislation cited. Every layer of an `extension` runs, so the row names them all and gathers all their citations.
+ */
 export function rowOrigin(row: ViewRow): { applies: string; overrides: string[]; legislation: string | null } {
 	const layers = row.layers;
-	const winner = layers[layers.length - 1];
 	if (row.mark === 'extension') {
-		return { applies: layers.map((layer) => layer.source).join(' + '), overrides: [], legislation: winner?.legislation ?? null };
+		const cited = [...new Set(layers.map((layer) => layer.legislation).filter((text): text is string => !!text))];
+		return { applies: layers.map((layer) => layer.source).join(' + '), overrides: [], legislation: cited.join('; ') || null };
 	}
+	const winner = layers[layers.length - 1];
 	return {
 		applies: winner?.source ?? '',
 		overrides: layers.slice(0, -1).map((layer) => layer.source),

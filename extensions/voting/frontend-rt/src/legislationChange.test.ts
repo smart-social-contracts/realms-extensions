@@ -93,6 +93,18 @@ describe('reading a change list', () => {
 		assert.equal(readChangeList(JSON.stringify({ ...CHANGE_LIST, report: undefined })).report, null);
 	});
 
+	it('refuses a key repeated in any object, as the realm does, and no other repeat', () => {
+		const text = JSON.stringify(CHANGE_LIST);
+		assert.throws(() => readChangeList(text.replace('"realm":', '"realm":"x","realm":')), /repeats the key realm/);
+		assert.throws(() => readChangeList(text.replace('"chapter":', '"chapter":"x","chapter":')), /repeats the key chapter/);
+		assert.throws(() => readChangeList(text.replace('"summary":{', '"summary":{"es":"otro",')), /repeats the key es/);
+		// The same key in two objects, in two elements of a list, or as a value, text that looks like JSON: fine.
+		const twice = { ...CHANGE_LIST, set: [CHANGE_LIST.set[0], { ...CHANGE_LIST.set[0], chapter: 'eu/es/vc/46250-valencia/tax2' }] };
+		assert.doesNotThrow(() => readChangeList(JSON.stringify(twice)));
+		const tricky = { ...CHANGE_LIST, summary: { en: '{"a": 1, "a": 2} and "realm": ,' } };
+		assert.equal(readChangeList(JSON.stringify(tricky)).summary.en, '{"a": 1, "a": 2} and "realm": ,');
+	});
+
 	it('reads a change list with no summary, no removals and no chapters', () => {
 		const list = readChangeList(JSON.stringify({ kind: CHANGE_LIST.kind, format: 1, realm: 'x', release: { source: 'a', version: '1' } }));
 		assert.deepEqual([list.set, list.remove, list.summary, list.replaces], [[], [], {}, null]);

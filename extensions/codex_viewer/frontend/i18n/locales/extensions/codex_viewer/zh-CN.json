@@ -26,6 +26,7 @@
   "step_fetch_chapters": "正在获取各章",
   "step_check_sources": "正在检查来源",
   "step_build": "正在构建法典",
+  "step_confirm": "切换前等待首都确认",
   "step_switch": "正在切换",
   "step_wait": "已就绪，等待生效时间",
   "started": "开始于",

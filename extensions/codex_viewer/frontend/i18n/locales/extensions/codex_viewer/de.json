@@ -26,6 +26,7 @@
   "step_fetch_chapters": "Kapitel werden geladen",
   "step_check_sources": "Quellen werden geprüft",
   "step_build": "Codex wird aufgebaut",
+  "step_confirm": "Bestätigung der Hauptstadt vor dem Umschalten",
   "step_switch": "Umschalten",
   "step_wait": "Vorbereitet, wartet auf seinen Zeitpunkt",
   "started": "Gestartet",

@@ -26,6 +26,7 @@
   "step_fetch_chapters": "Descargando los capítulos",
   "step_check_sources": "Comprobando las fuentes",
   "step_build": "Construyendo el códice",
+  "step_confirm": "Esperando la confirmación de la capital antes de activar",
   "step_switch": "Activando",
   "step_wait": "Preparada, a la espera de su momento",
   "started": "Iniciada",
