@@ -81,8 +81,7 @@
 	}
 
 	function openProposal(id: string) {
-		const number = id.replace(/^P-/i, '');
-		void ctx.navigate?.(`/extensions/voting/proposals/${encodeURIComponent(number)}`);
+		void ctx.navigate?.(`/extensions/voting/proposals/${encodeURIComponent(id)}`);
 	}
 
 	async function checkNow() {
@@ -106,9 +105,10 @@
 		await reload();
 	}
 
-	// What is read besides the status follows the codex in force: a revert changes the flattened views.
+	// What is read besides the status (who the caller is, the zones, the flattened views) is read again whenever the
+	// status is: every reload replaces it, and a revert or an install changes the flattened views.
 	$effect(() => {
-		void status.codex?.id;
+		void status;
 		void loadAround();
 	});
 </script>

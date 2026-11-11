@@ -104,7 +104,7 @@ test('a member without admin rights can propose the install and cannot change th
   expect(await notices(page)).toEqual([['success', 'Proposal P-21 filed']]);
 
   await page.getByRole('button', { name: 'Proposal P-21' }).click();
-  expect(await page.evaluate(() => (window as any).navigated)).toEqual(['/extensions/voting/proposals/21']);
+  expect(await page.evaluate(() => (window as any).navigated)).toEqual(['/extensions/voting/proposals/P-21']);
 });
 
 test('an admin sets the interval and checks now', async ({ page }) => {
