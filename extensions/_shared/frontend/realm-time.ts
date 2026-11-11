@@ -117,6 +117,23 @@ export function formatWithUtc(epoch: number, zone: string): string {
 	return zone === UTC ? formatUtc(epoch) : `${formatInZone(epoch, zone)} · ${formatUtc(epoch)}`;
 }
 
+/** A realm-wide time as people read it: the official time, and the quarter's own beside it when its clock differs then. */
+export interface RealmWideTime {
+	official: string;
+	local: string | null;
+}
+
+/**
+ * ``epoch`` seconds in the official zone (the capital's), with the quarter's local time beside it when the two clocks
+ * show different times at that instant (layered-codex.md §4.5). A zone the browser does not know reads as UTC.
+ */
+export function formatRealmWide(epoch: number, officialZone: string, localZone: string): RealmWideTime {
+	const official = isKnownZone(officialZone) ? officialZone : UTC;
+	const local = isKnownZone(localZone) ? localZone : UTC;
+	const differs = offsetMinutes(epoch * 1000, official) !== offsetMinutes(epoch * 1000, local);
+	return { official: formatInZone(epoch, official), local: differs ? formatInZone(epoch, local) : null };
+}
+
 /** The zones to choose from: UTC, then the browser's IANA zones (Chrome lists no UTC). */
 export function timeZoneChoices(): string[] {
 	const supported: string[] =

@@ -1,6 +1,6 @@
 {
   "name": "voting",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Submit proposals that change how your realm works, read what each one would do, and vote yes, no, or abstain while voting is open.",
   "author": "Smart Social Contracts",
   "permissions": [],
@@ -33,6 +33,8 @@
     "department_list",
     "treasury_view",
     "realm_info",
+    "codex_status",
+    "legislation_chapter",
     "federal_vote_propose",
     "federal_vote_finalize",
     "federal_vote_cancel"

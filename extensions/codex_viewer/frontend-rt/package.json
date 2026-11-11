@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --experimental-strip-types --test src/legislation.test.ts ../../_shared/frontend/realm-time.test.ts"
   },
   "devDependencies": {
     "@monaco-editor/loader": "^1.5.0",

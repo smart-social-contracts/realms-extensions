@@ -3,6 +3,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import FederalVotes from './FederalVotes.svelte';
+	import LegislationChange from './LegislationChange.svelte';
 	import LinkPicker from './LinkPicker.svelte';
 	import ProposalLinks from './ProposalLinks.svelte';
 	import {
@@ -45,12 +46,16 @@
 			return;
 		}
 		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
-			void loadExtensionI18n(loc || 'en');
+			locale = loc || 'en';
+			void loadExtensionI18n(locale);
 		});
 		return unsub;
 	});
 
 	const EXTENSION_ID = 'voting';
+
+	// The language the member reads the page in: a change list's summary is shown in it when it has one.
+	let locale = $state('en');
 
 	type View = 'list' | 'form' | 'detail' | 'federal';
 	type ProposalType = 'transaction' | 'upgrade' | 'poll' | 'operation';
@@ -331,6 +336,12 @@
 		const op = String(action.op || '');
 		if (op === 'transfer_create') {
 			return { op, fund: args.fund, token: args.symbol, amount: args.amount, to_principal: args.to };
+		}
+		if (op === 'codex_install' && args.checksum) {
+			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
+		}
+		if (op === 'codex_install' && args.source && !args.manifest) {
+			return { op, target: 'codex', release: { source: String(args.source), version: String(args.version ?? '') } };
 		}
 		if (UPGRADE_OPS[op]) {
 			return { op, target: UPGRADE_OPS[op], package_id: args.codex ?? args.extension, version: args.version };
@@ -1489,6 +1500,16 @@
 								<dd class="font-mono text-xs break-all text-gray-900">{selectedProposalAction.to_principal || '—'}</dd>
 							</div>
 						</dl>
+					{:else if selectedProposalType === 'upgrade' && (selectedProposalAction.change_list || selectedProposalAction.release)}
+						{#key selectedProposal.id}
+							<LegislationChange
+								changeList={selectedProposalAction.change_list ?? null}
+								release={selectedProposalAction.release ?? null}
+								open={['voting', 'accepted', 'execution_scheduled'].includes(selectedProposal.status)}
+								{locale}
+								{read}
+							/>
+						{/key}
 					{:else if selectedProposalType === 'upgrade'}
 						<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
 							<div>
