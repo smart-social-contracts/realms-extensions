@@ -6,7 +6,7 @@
 
 /** A string for CSS `content`. Text from the realm (its name) must not end the string or the style element. */
 function cssString(text: string): string {
-	return `"${text.replace(/[\\"]/g, '\\$&').replace(/[\r\n]/g, ' ').replace(/</g, '\\3c ')}"`;
+	return `"${text.replace(/[\\"]/g, '\\$&').replace(/[\r\n\f]/g, ' ').replace(/</g, '\\3c ')}"`;
 }
 
 /** The CSS `content` of a translated "Page {page} of {pages}": its words as strings, its two counters as counters. */
@@ -57,6 +57,7 @@ h3 { margin: 2px 0 6px; font-size: 12.5pt; line-height: 1.25; break-after: avoid
 
 .colophon { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 16px; margin-top: 22px; padding-top: 8px; border-top: 1px solid #111; font-size: 9pt; color: #4a4a4a; }
 .authentication { display: grid; grid-template-columns: 1fr 30mm; gap: 8px 14px; margin-top: 14px; padding: 10px 12px; border: 1px solid #111; font-size: 9pt; break-inside: avoid; }
+.authentication[hidden] { display: none; }
 .authentication h2 { grid-column: 1 / -1; font-size: 9.5pt; letter-spacing: .08em; text-transform: uppercase; }
 .authentication dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; align-content: start; }
 .authentication dt { font-weight: 700; }

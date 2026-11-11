@@ -14,7 +14,8 @@ extension, one per realm, installed by default. The design is in
 - **A quarter issues nothing.** Its `journal_issue` says so (`issued: false`, and the `capital` whose journal it is), and
   the page asks the capital's issue through `journal_capital_issue`, an update the quarter makes to its capital because a
   read cannot call another canister. It needs a logged-in reader; a visitor is asked to log in. The sheet is headed with the
-  capital's name (the issue carries the issuing realm's name) and has no logo, since the quarter's is not the capital's.
+  capital's name (the issue carries the issuing realm's name) and has no logo and no links, since the quarter's logo,
+  proposals and codices are not the capital's.
 - **What it reports.** The realm's own installs and reverts, the releases its checks find in the records of its sync
   sources, and, on a sync source, the releases it publishes. Each is an entry stamped when the realm learned of it, so a
   past issue never changes.
@@ -49,7 +50,8 @@ An issue reads as an official gazette:
 - **Paper:** A4 with margins; the foot of every page has the issue and its page number (in the browsers that print page
   margins), and the colophon ends the issue.
 - **Signature and verification:** a marked slot, `data-slot="signature"`, whose `data-field`s (`issue_hash`, `signature`,
-  `key_id`, `verification_code`, `verification_url`, `verification_qr`) the signing work fills.
+  `key_id`, `verification_code`, `verification_url`, `verification_qr`) the signing work fills and then shows (it is
+  `hidden` until then: an empty box on paper would read as "unsigned").
 
 The entry texts are in `src/entries.ts` (plain text, no markup), the page in `src/sheet.ts`. The seven languages are in
 `frontend/i18n/locales/extensions/journal/`.

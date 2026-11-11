@@ -102,6 +102,12 @@ test('an entry is a title, the facts as a short formal text, the codex and the p
 	assert.match(html, /<a href="\/extensions\/codex_viewer\?codex=sha256%3A4be1a2c3/);
 });
 
+test('a quarter\'s sheet, which is its capital\'s issue, has no links to the quarter\'s own proposals and codices', () => {
+	const html = sheet({ ...empty, entries: [install, found] }, { ...ISSUER, prefix: null });
+	assert.doesNotMatch(html, /<a |<p class="links">/);
+	assert.match(html, /Decided by proposal P-12\./); // what it says is still said
+});
+
 test('the links keep the path a realm is served under', () => {
 	const html = sheet({ ...empty, entries: [install, found] }, { ...ISSUER, prefix: '/r/agora' });
 	assert.match(html, /href="\/r\/agora\/extensions\/voting\/proposals\/P-12"/);
@@ -123,9 +129,9 @@ test('the headings are in order: the title, the sections, the entries', () => {
 	assert.deepEqual(levels, [1, 2, 3, 2, 3, 2]); // ... and the signature's title last
 });
 
-test('the place of the signature and its verification is on the sheet, marked, with a field for each of its parts', () => {
+test('the place of the signature and its verification is on the sheet, marked and hidden, with a field for each part', () => {
 	const html = sheet({ ...empty, entries: [install] });
-	assert.match(html, /<section class="authentication" data-slot="signature"/);
+	assert.match(html, /<section class="authentication" data-slot="signature" hidden /); // shown when the signing work fills it
 	assert.match(html, /<h2 id="authentication-title">Signature and verification<\/h2>/);
 	for (const field of ['issue_hash', 'signature', 'key_id', 'verification_code', 'verification_url', 'verification_qr']) {
 		assert.match(html, new RegExp(`data-field="${field}"`), field);
@@ -141,6 +147,11 @@ test('text from the realm cannot add markup or style to the sheet', () => {
 	assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 	assert.equal(html.match(/<\/style>/g)?.length, 1); // the sheet's own, none from the realm's name in the page footer
 	assert.ok(html.includes('content: "Official Journal of \\">\\3c script>alert(1)\\3c /script>\\3c /style>')); // `<` is escaped, in CSS
+});
+
+test('a line break in the realm\'s name cannot end the string of the page footer either', () => {
+	const html = sheet({ ...empty, realm: 'A\fB\r\nC' });
+	assert.match(html, /content: "Official Journal of A B {2}C · 2026\/3";/);
 });
 
 test('the realm\'s name cannot end the string of the page footer', () => {

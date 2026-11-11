@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An entry says what happened: for an install, what the realm runs, from when it is in force, by which proposal and how
   the vote went; for a revert, the codex it went back to and the one it left, and the same decision.
 - The sheet has a marked place, `data-slot="signature"`, for the issue's signature and its verification (hash,
-  signature, key, verification code, address and QR). It is empty until the signing work fills it.
+  signature, key, verification code, address and QR). It is hidden until the signing work fills it.
+- On a quarter, which shows its capital's issue, the sheet has no links: the proposals and codices an entry names are the
+  capital's, and the quarter's own pages are not.
 
 ### Added
 - The personal-data rules allow `vote`: the votes for, against and abstaining on the proposal that decided an install or

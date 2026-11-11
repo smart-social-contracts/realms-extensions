@@ -146,6 +146,9 @@ test('a quarter shows the capital\'s issue and says whose journal it is', async 
   await expect(sheet(page).getByRole('heading', { name: 'Official Journal of Agora' })).toBeVisible();
   await expect(sheet(page).locator('.masthead img')).toHaveCount(0);
   await expect(sheet(page).getByText(`Realm identity: ${CAPITAL}`)).toBeVisible(); // the capital's, whose journal it is
+  // Its proposals and codices are the capital's, so the quarter has nothing of its own to link them to.
+  await expect(sheet(page).getByText('Decided by proposal P-12.')).toBeVisible();
+  await expect(sheet(page).locator('a')).toHaveCount(0);
   await expect(sheet(page).getByText('The realm now runs new legislation: eu/es 2.4.0, eu/es/vc 1.1.0.')).toBeVisible();
   expect((await page.evaluate(() => (window as any).asked)).map(([name]: [string]) => name)).toEqual([
     'journal_issue',
@@ -243,7 +246,8 @@ for (const { locale, realm, title, sections, date, page: pageNumber } of GAZETTE
     await expect(paper.locator('abbr.short').first()).toHaveAttribute('title', CODEX_ID);
     await expect(paper.locator('abbr.short').first()).toHaveText('sha256:4be1a2c3…');
     await expect(paper.locator('.links a').first()).toBeVisible();
-    await expect(paper.locator('.authentication[data-slot="signature"]')).toBeVisible();
+    await expect(paper.locator('.authentication[data-slot="signature"]')).toBeHidden(); // until the signing work fills it
+    await expect(paper.locator('.authentication [data-field]')).toHaveCount(6);
     await page.screenshot({ path: join(OUT, `journal-gazette-${locale}.png`), fullPage: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -307,8 +311,11 @@ test('the links of an entry go to the realm\'s pages through its router, under t
   scenario = gazette('en', 'Agora');
   await page.goto(`${url}/r/agora/extensions/journal`);
   const paper = sheet(page);
-  await expect(paper.getByRole('link', { name: 'Proposal P-12' })).toHaveAttribute('href', '/r/agora/extensions/voting/proposals/P-12');
-  await paper.getByRole('link', { name: 'Proposal P-12' }).click();
+  const proposal = paper.getByRole('link', { name: 'Proposal P-12' });
+  await expect(proposal).toHaveAttribute('href', '/r/agora/extensions/voting/proposals/P-12');
+  await proposal.click({ modifiers: ['Control'] }); // a click that asks for a new tab is the browser's, not the router's
+  expect(new URL(page.url()).pathname).toBe('/r/agora/extensions/journal');
+  await proposal.click();
   expect(new URL(page.url()).pathname).toBe('/r/agora/extensions/voting/proposals/P-12'); // the realm's navigate, not the frame's
   await expect(page.locator('iframe.sheet')).toHaveAttribute('srcdoc', /Official Journal of Agora/); // the sheet is still the sheet
   await paper.getByRole('link', { name: 'The codex' }).first().click();

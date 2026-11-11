@@ -16,8 +16,10 @@ export interface Issuer {
 	logoUrl: string;
 	/** The realm's identity: the canister that issues the journal. */
 	canisterId: string;
-	/** Where the realm is served from: empty, or `/r/<slug>`. The sheet's links are paths on the realm's origin. */
-	prefix: string;
+	/** Where the realm is served from: empty, or `/r/<slug>`. The sheet's links are paths on the realm's origin. Null when
+	 * this realm is not the issuer (a quarter shows its capital's issue): the proposals and codices an entry names are the
+	 * capital's, so the quarter's own pages are not the ones to link to, and the sheet has no links. */
+	prefix: string | null;
 }
 
 interface View {
@@ -80,7 +82,8 @@ function codicesHtml({ codices }: Described): string {
 }
 
 /** Links to the pages of the realm that tell more: on the screen only, since paper has nowhere to follow them. */
-function linksHtml({ links }: Described, prefix: string): string {
+function linksHtml({ links }: Described, prefix: string | null): string {
+	if (prefix === null) return '';
 	const anchors = links.map(({ label, path }) => `<a href="${esc(prefix + path)}">${esc(label)}</a>`);
 	return anchors.length ? `<p class="links">${anchors.join('')}</p>` : '';
 }
@@ -117,14 +120,15 @@ const SIGNATURE_FIELDS = ['issue_hash', 'signature', 'key_id', 'verification_cod
 /**
  * The place of the issue's signature and its verification. The signing work fills each `data-field` of it: the hash of the
  * issue, the realm's signature of it, the id of the key that made it, a code to check it by and the address that checks it,
- * with its QR in `verification_qr`. Until then the fields are empty.
+ * with its QR in `verification_qr`, and takes off `hidden`. It is hidden until then: an empty box on paper reads as
+ * "unsigned".
  */
 function signatureSlotHtml({ t }: View): string {
 	const fields = SIGNATURE_FIELDS.map(
 		(field) => `<dt>${esc(t(`signature_${field}`))}</dt><dd class="mono" data-field="${field}">—</dd>`,
 	);
 	return (
-		`<section class="authentication" data-slot="signature" aria-labelledby="authentication-title">` +
+		`<section class="authentication" data-slot="signature" hidden aria-labelledby="authentication-title">` +
 		`<h2 id="authentication-title">${esc(t('signature_title'))}</h2><dl>${fields.join('')}</dl>` +
 		`<div class="qr" data-field="verification_qr" aria-hidden="true"></div></section>`
 	);

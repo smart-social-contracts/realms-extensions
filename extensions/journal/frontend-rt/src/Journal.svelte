@@ -22,12 +22,17 @@
 	let logoUrl = $state('');
 	let frame: HTMLIFrameElement | undefined = $state();
 
-	// A quarter's logo is not the capital's, whose journal it shows: the sheet has none then.
+	// A quarter's logo is not the capital's, whose journal it shows, and nor are its proposals and codices: the sheet has
+	// no logo and no links then.
 	let page = $derived(
 		issue
 			? sheetHtml(
 					issue,
-					{ logoUrl: capital ? '' : logoUrl, canisterId: issuer, prefix: realmPrefix(window.location.pathname) },
+					{
+						logoUrl: capital ? '' : logoUrl,
+						canisterId: issuer,
+						prefix: capital ? null : realmPrefix(window.location.pathname),
+					},
 					t,
 					locale,
 				)
@@ -115,6 +120,8 @@
 	// The sheet runs no script, so its links are followed from here: through the realm's router, not by loading the realm
 	// again inside the frame.
 	function followLink(event: MouseEvent) {
+		// A click that asks for something else (a new tab, a download) is left to the browser.
+		if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
 		const link = (event.target as Element).closest('a[href]');
 		if (!link) return;
 		event.preventDefault();
