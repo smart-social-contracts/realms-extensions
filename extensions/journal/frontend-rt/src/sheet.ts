@@ -47,17 +47,29 @@ function layersText(layers: any): string {
 		.join(', ');
 }
 
-/** The change a `not_recorded` entry stands for, named by its codices: the realm made it, but not its entry. */
+/** The change a `not_recorded` entry stands for, named by its codices or its release: the realm made it, but not its entry. */
 export function missedChange(entry: Entry, t: Text): string {
-	const { kind, codex, reverted } = entry.details;
+	const { kind, codex, reverted, source, version } = entry.details;
 	if (kind === 'codex_reverted') return t('missed_codex_reverted', { codex: String(codex), reverted: String(reverted) });
 	if (kind === 'codex_installed') return t('missed_codex_installed', { codex: String(codex) });
+	if (kind === 'release_found' || kind === 'release_published') return t(`missed_${kind}`, { source: String(source), version: String(version) });
 	return t('missed_unknown', { kind: String(kind) });
 }
 
-/** What an entry says, in the reader's language. A kind this version does not know is still shown. */
-export function entryText(entry: Entry, t: Text): string {
+/** A release the realm found or published: which one, and the day it is in force from. Without the fields the
+ * personal-data rules allow, only that there was one. */
+function releaseText(entry: Entry, t: Text, day: (seconds: number) => string): string {
+	const { source, version, effective_from } = entry.details;
+	const key = `entry_${entry.kind}`;
+	const known = typeof source === 'string' && typeof version === 'string' && typeof effective_from === 'number';
+	return known ? t(key, { source, version, date: day(effective_from) }) : t(`${key}_plain`);
+}
+
+/** What an entry says, in the reader's language; `day` writes out a day for the dates it names. A kind this version
+ * does not know is still shown. */
+export function entryText(entry: Entry, t: Text, day: (seconds: number) => string): string {
 	if (entry.kind === 'not_recorded') return t('entry_not_recorded', { change: missedChange(entry, t) });
+	if (entry.kind === 'release_found' || entry.kind === 'release_published') return releaseText(entry, t, day);
 	if (entry.kind === 'codex_installed' || entry.kind === 'codex_reverted') {
 		const key = `entry_${entry.kind}`;
 		const layers = layersText(entry.details.layers);
@@ -76,6 +88,11 @@ export function timeOfDay(at: number, zone: string): string {
 /** The issue's day written out in the reader's language ("lunes, 9 de noviembre de 2026"). */
 export function longDate(day: string, locale: string): string {
 	return new Intl.DateTimeFormat(locale, { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(`${day}T00:00:00Z`));
+}
+
+/** The day of UTC seconds `at` in the realm's zone, written out in the reader's language ("1 de enero de 2027"). */
+export function dayOf(at: number, zone: string, locale: string): string {
+	return new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: zone }).format(new Date(at * 1000));
 }
 
 const STYLE = `
@@ -100,12 +117,13 @@ footer { margin-top: 18px; font-size: 9pt; color: #555; }
 export function sheetHtml(issue: Issue, logoUrl: string, t: Text, locale: string): string {
 	const title = issue.realm ? t('journal_of', { realm: issue.realm }) : t('journal');
 	const logo = logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="">` : '';
+	const day = (seconds: number) => dayOf(seconds, issue.timezone, locale);
 	const entries = issue.entries.length
 		? `<ol>${issue.entries
 				.map(
 					(entry) =>
 						`<li><time datetime="${new Date(entry.at * 1000).toISOString()}">${timeOfDay(entry.at, issue.timezone)}</time>` +
-						`<span>${escapeHtml(entryText(entry, t))}</span></li>`,
+						`<span>${escapeHtml(entryText(entry, t, day))}</span></li>`,
 				)
 				.join('')}</ol>`
 		: `<p class="empty">${escapeHtml(t('no_entries'))}</p>`;
