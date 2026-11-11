@@ -41,6 +41,7 @@
   "compliance_non_compliant": "Not compliant",
   "compliance_unknown": "Unknown",
   "behind_since": "Behind since",
+  "stale_layers": "Layers behind: {layers}",
   "check_failed": "The last check could not read this record: {reason}",
   "last_checked": "Last checked",
   "release_line": "{source} {version} is published",

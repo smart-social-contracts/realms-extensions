@@ -41,6 +41,7 @@
   "compliance_non_compliant": "不合规",
   "compliance_unknown": "未知",
   "behind_since": "落后始于",
+  "stale_layers": "落后的层级：{layers}",
   "check_failed": "上次检查无法读取该记录：{reason}",
   "last_checked": "上次检查",
   "release_line": "{source} {version} 已发布",

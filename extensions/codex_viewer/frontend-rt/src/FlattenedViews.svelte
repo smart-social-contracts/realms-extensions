@@ -17,9 +17,9 @@
 	{:else}
 		<label>
 			{t('domain')}
-			<select bind:value={chosen}>
+			<select value={domain.domain} onchange={(event) => (chosen = event.currentTarget.value)}>
 				{#each domains as name (name)}
-					<option value={name} selected={name === domain.domain}>{name}</option>
+					<option value={name}>{name}</option>
 				{/each}
 			</select>
 		</label>
@@ -32,7 +32,7 @@
 				{#each domain.members as row (row.name)}
 					{@const origin = rowOrigin(row)}
 					<tr>
-						<td><code>{row.name}</code>{#if row.kind === 'setting'}<span class="value"> = {valueText(row.value)}</span>{/if}</td>
+						<td><code>{row.name}</code>{#if row.kind === 'setting'}{' '}<span class="value">= {valueText(row.value)}</span>{/if}</td>
 						<td>{row.mark ? `${row.kind} · ${t(`mark_${row.mark}`)}` : row.kind}</td>
 						<td>
 							<code>{origin.applies}</code>

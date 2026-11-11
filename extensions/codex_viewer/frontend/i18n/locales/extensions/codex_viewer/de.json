@@ -41,6 +41,7 @@
   "compliance_non_compliant": "Nicht konform",
   "compliance_unknown": "Unbekannt",
   "behind_since": "Im Rückstand seit",
+  "stale_layers": "Ebenen im Rückstand: {layers}",
   "check_failed": "Die letzte Prüfung konnte dieses Verzeichnis nicht lesen: {reason}",
   "last_checked": "Zuletzt geprüft",
   "release_line": "{source} {version} ist veröffentlicht",

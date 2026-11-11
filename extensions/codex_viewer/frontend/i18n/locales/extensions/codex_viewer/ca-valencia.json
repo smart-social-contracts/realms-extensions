@@ -41,6 +41,7 @@
   "compliance_non_compliant": "Incompleix",
   "compliance_unknown": "Desconegut",
   "behind_since": "Desfasat des de",
+  "stale_layers": "Capes desfasades: {layers}",
   "check_failed": "L'última comprovació no ha pogut llegir aquest registre: {reason}",
   "last_checked": "Última comprovació",
   "release_line": "{source} {version} està publicada",

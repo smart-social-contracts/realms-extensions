@@ -41,6 +41,7 @@
   "compliance_non_compliant": "Non in regola",
   "compliance_unknown": "Sconosciuto",
   "behind_since": "In ritardo dal",
+  "stale_layers": "Livelli in ritardo: {layers}",
   "check_failed": "L'ultima verifica non ha potuto leggere questo registro: {reason}",
   "last_checked": "Ultima verifica",
   "release_line": "{source} {version} è pubblicata",

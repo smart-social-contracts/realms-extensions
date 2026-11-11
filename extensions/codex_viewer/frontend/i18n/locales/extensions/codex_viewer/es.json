@@ -41,6 +41,7 @@
   "compliance_non_compliant": "Incumple",
   "compliance_unknown": "Desconocido",
   "behind_since": "Desfasado desde",
+  "stale_layers": "Capas desfasadas: {layers}",
   "check_failed": "La última comprobación no pudo leer este registro: {reason}",
   "last_checked": "Última comprobación",
   "release_line": "{source} {version} está publicada",

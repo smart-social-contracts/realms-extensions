@@ -1,0 +1,14 @@
+{
+  "name": "@realms/codex-viewer-e2e",
+  "version": "1.0.0",
+  "description": "Browser tests of the codex page: the legislation view, on the built bundle with a canned realm",
+  "private": true,
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.52.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -49,7 +49,8 @@
 			</p>
 			{#if flag.state === 'non_compliant'}
 				<p class="error">
-					{t('behind_since')} <TimeText epoch={flag.since} {zones} />: {flag.stale.join(', ')}
+					{t('behind_since')} <TimeText epoch={flag.since} {zones} /><br />
+					{t('stale_layers', { layers: flag.stale.join(', ') })}
 				</p>
 			{/if}
 			{#if source.error}
