@@ -15,6 +15,9 @@ extension, one per realm, installed by default. The design is in
   the page asks the capital's issue through `journal_capital_issue`, an update the quarter makes to its capital because a
   read cannot call another canister. It needs a logged-in reader; a visitor is asked to log in. The sheet is headed with the
   capital's name (the issue carries the issuing realm's name) and has no logo, since the quarter's is not the capital's.
+- **What it reports.** The realm's own installs and reverts, the releases its checks find in the records of its sync
+  sources, and, on a sync source, the releases it publishes. Each is an entry stamped when the realm learned of it, so a
+  past issue never changes.
 - **The journal only reports.** Publishing changes nothing about when legislation applies: it applies when the
   realm's operations run it, at the install switch.
 

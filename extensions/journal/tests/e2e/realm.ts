@@ -42,6 +42,23 @@ export const INSTALL = {
   },
 };
 
+// 00:00 on 1 January 2027 in Madrid, the realm's zone in these scenarios.
+const NEW_YEAR = Date.UTC(2026, 11, 31, 23, 0) / 1000;
+
+/** A release the realm's check found, and one the realm published, as realms-gos records them. */
+export const FOUND = {
+  id: 'E-2',
+  at: Date.UTC(2026, 10, 9, 8, 15) / 1000,
+  kind: 'release_found',
+  details: { source: 'eu/es', version: '2.5.0', effective_from: NEW_YEAR },
+};
+export const PUBLISHED = {
+  id: 'E-3',
+  at: Date.UTC(2026, 10, 9, 9, 45) / 1000,
+  kind: 'release_published',
+  details: { source: 'eu/es/vc', version: '1.2.0', effective_from: NEW_YEAR },
+};
+
 export interface Scenario {
   locale: string;
   realm: { name: string; logoUrl: string };

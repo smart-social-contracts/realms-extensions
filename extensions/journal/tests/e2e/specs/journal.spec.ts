@@ -2,7 +2,7 @@ import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CAPITAL, INSTALL, issueOf, LOGO, startRealm, type Scenario } from '../realm';
+import { CAPITAL, FOUND, INSTALL, issueOf, LOGO, PUBLISHED, startRealm, type Scenario } from '../realm';
 
 const OUT = join(__dirname, '..', 'test-results');
 let scenario: Scenario;
@@ -82,6 +82,29 @@ test('the same issue in English, empty days included', async ({ page }) => {
   await expect(sheet(page).getByText('No. 2 · Sunday, November 8, 2026')).toBeVisible();
   expect(await page.evaluate(() => (window as any).asked.at(-1))).toEqual(['journal_issue', { day: '2026-11-08' }]);
   await page.screenshot({ path: join(OUT, 'journal-en-empty.png') });
+});
+
+test('the releases a check found and the realm published are lines of the sheet, in Chinese too, and print to a PDF', async ({
+  page,
+}) => {
+  scenario = chinese();
+  scenario.replies.journal_issue.byDay[''] = issueOf('2026-11-09', 3, [FOUND, PUBLISHED, INSTALL], '瓦伦西亚');
+  await page.goto(`${url}/extensions/journal`);
+  const paper = sheet(page);
+  await expect(paper.getByText('本领域获悉 eu/es 的立法发布了新版本：版本 2.5.0，自 2027年1月1日 起生效。')).toBeVisible();
+  await expect(paper.getByText('本领域发布了其立法的一个版本：eu/es/vc 版本 1.2.0，自 2027年1月1日 起生效。')).toBeVisible();
+  await expect(paper.locator('time')).toHaveText(['09:15', '10:45', '11:30']);
+  await page.screenshot({ path: join(OUT, 'journal-zh-CN-releases.png') });
+  const file = join(OUT, 'journal-zh-CN-releases.pdf');
+  writeFileSync(file, await printedPdf(page));
+  const text = execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' });
+  expect(text).toContain('版本 2.5.0，自 2027年1月1日'); // the line wraps after it
+  expect(execFileSync('pdfinfo', [file], { encoding: 'utf8' })).toMatch(/Pages:\s+1\b/);
+
+  scenario.locale = 'en';
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).getByText('The realm learned of a release of legislation from eu/es: version 2.5.0, in force from January 1, 2027.')).toBeVisible();
+  await expect(sheet(page).getByText('The realm published a release of its legislation: eu/es/vc version 1.2.0, in force from January 1, 2027.')).toBeVisible();
 });
 
 test('the print route shows the sheet alone and its button prints the sheet, not the realm\'s page', async ({ page }) => {
