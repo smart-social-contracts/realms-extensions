@@ -85,7 +85,7 @@ print(json.dumps({"codex": cid, "failures": codex.failures}))
 CHECKS = '''
 import json
 from api import sync_checks
-from core import chain, compliance
+from core import chain, compliance, legislation
 from ggg import InstallJob, SyncSource
 now = chain.now()
 SyncSource(id=%(spain)r, name="Spain", status="active", checked_at=now - 2 * 3600,

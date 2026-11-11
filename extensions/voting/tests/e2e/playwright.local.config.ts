@@ -4,6 +4,8 @@ import { defineConfig, devices } from '@playwright/test';
 // portal host page it serves itself.
 export default defineConfig({
   testDir: './specs',
+  // Playwright empties its output folder at each run: the screenshots the specs write to test-results/ stay.
+  outputDir: './test-results/.playwright',
   testMatch: '**/*.local.spec.ts',
   fullyParallel: false,
   workers: 1,
