@@ -7,7 +7,7 @@ on:
       - 'extensions/voting/**'
       - '.github/workflows/voting-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/voting/**'
       - '.github/workflows/voting-test.yml'

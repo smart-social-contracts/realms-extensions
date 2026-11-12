@@ -7,7 +7,7 @@ on:
       - 'extensions/realm_settings/**'
       - '.github/workflows/realm_settings-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/realm_settings/**'
       - '.github/workflows/realm_settings-test.yml'

@@ -7,7 +7,7 @@ on:
       - 'extensions/llm_chat/**'
       - '.github/workflows/llm_chat-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/llm_chat/**'
       - '.github/workflows/llm_chat-test.yml'

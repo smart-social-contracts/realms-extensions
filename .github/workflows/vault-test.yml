@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/**'
       - '.github/workflows/vault-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/vault/**'
       - 'extensions/_shared/**'

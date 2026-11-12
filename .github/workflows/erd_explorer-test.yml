@@ -7,7 +7,7 @@ on:
       - 'extensions/erd_explorer/**'
       - '.github/workflows/erd_explorer-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/erd_explorer/**'
       - '.github/workflows/erd_explorer-test.yml'
