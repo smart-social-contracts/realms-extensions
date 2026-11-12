@@ -17,6 +17,9 @@ codex, which notifies the team; and an install job that an upgrade paused.
 For the voting page's tags (`seed_tagged_proposals`): six proposals filed with the tags of a town's areas, one without tags
 and one with the most a proposal can carry, 16; with `--bulk-proposals N`, N closed proposals more, two tags each, the
 last also tagged "rare-last" (`seed_bulk_proposals`).
+
+For the land registry's planning (`seed_planning`): two planning zones the realm defines (Seafront, Old town), an organisation that
+owns four parcels, three of them in a zone or two, and two licences that name one of the parcels (one active until 2030, one applied for).
 """
 
 import argparse
@@ -147,6 +150,41 @@ def seed_bulk_proposals(realm, total, batch=100):
     for first in range(1, total + 1, batch):
         code = BULK_PROPOSALS % {"areas": AREAS, "kinds": KINDS, "first": first, "last": min(first + batch - 1, total), "total": total}
         realm.shell(code)
+
+
+# Planning zones and parcels for the land registry (ggg domain `planning`: Land.zones, set with land_zone_set; License.land, I-LIC-4).
+PLANNING_ZONES = [("seafront", "Seafront", "planning"), ("old-town", "Old town", "heritage")]
+PARCELS = [  # (x, kind, the zones it lies in)
+    (0, "residential", ["seafront"]),
+    (3, "commercial", ["seafront", "old-town"]),
+    (6, "agricultural", []),
+    (9, "residential", ["old-town"]),
+]
+LICENCE_FACTS = """
+import json
+from core import chain
+from ggg import License
+lic = License[%(licence)r]
+lic.status, lic.issued_at, lic.expires_at = "active", chain.now(), %(until)d
+print(json.dumps(lic.status))
+"""
+
+
+def seed_planning(realm):
+    for zone, name, kind in PLANNING_ZONES:
+        realm.op("zone_define", zone=zone, name=name, kind=kind)
+    owner = "Seafront Estates"
+    realm.op("organization_register", organization=owner, description="Owns the parcels of the seafront", kind="company")
+    parcels = []
+    for x, kind, zones in PARCELS:
+        land = realm.op("land_register", x=x, y=0, width=3, height=2, kind=kind, owner=f"Organization:{owner}")["land"]
+        if zones:
+            realm.op("land_zone_set", land=land, zones=zones)
+        parcels.append(land)
+    # two licences name the second parcel (License.land): the building one is issued, until 1 January 2030; the other is applied for
+    building = realm.op("license_apply", kind="building", holder=f"Organization:{owner}", land=parcels[1])["license"]
+    realm.op("license_apply", kind="demolition", holder=f"Organization:{owner}", land=parcels[1])
+    realm.shell(LICENCE_FACTS % {"licence": building, "until": 1_893_456_000})
 
 
 # --- budget_manager 2.2.0: spending stages, scheduled payments, quarter sweeps (--budget-screens) -------------------
@@ -290,6 +328,7 @@ def main():
     # A realm in setup took a legacy codex; only one kind runs at a time.
     realm.shell("from ggg import Codex\nfor c in Codex.instances():\n    c.status = 'inactive'")
     realm.op("realm_configure", timezone="Europe/Madrid")
+    seed_planning(realm)
     older = install([(OWN, "tax")], "", 5 * DAY, "P-3")
     newer = install([], older["codex"], 2 * DAY, "P-12")
     realm.op("department_create", department="IT")

@@ -2,8 +2,33 @@
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
+	import { UTC, formatInZone, isKnownZone } from '../../../_shared/frontend/realm-time';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import {
+		MAX_ZONES,
+		NO_ZONE,
+		inZone,
+		isDefinedZone,
+		licencesByParcel,
+		planningZones,
+		sameZones,
+		toggleZone,
+		zoneName,
+		zonesOf,
+		type Licence,
+		type Zone,
+	} from './planning';
 
 	let { ctx }: { ctx: any } = $props();
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
 
 	type Reply = { ok: boolean; error?: string; [key: string]: any };
 	type Parcel = {
@@ -18,11 +43,27 @@
 		owner_kind: string;
 		owner_id: string;
 		token_id: string;
+		/** The planning zones the parcel lies in (`lies_in`), by id. */
+		zones: string[];
 	};
 	type MapZone = { id: string; name: string; kind: string };
 
 	let lands: Parcel[] = $state([]);
 	let zones: MapZone[] = $state([]);
+	// The zones the realm defines (planning areas, districts): they have no shape, so the map does not draw them.
+	let planning: Zone[] = $state([]);
+	// The licences are read when a parcel is opened, not with the registry: `license_list` has no filter by parcel, so it is every page.
+	let licences: Map<string, Licence[]> = $state(new Map());
+	let licencesProblem = $state('');
+	let licencesCapped = $state(false);
+	let licencesLoading = $state(false);
+	let licencesRead = false;
+	// The zones `land_map` lists are cut at MAX_PAGES pages: said, when that is where it stopped.
+	let zonesCapped = $state(false);
+	let permissions: string[] = $state([]);
+	let realmZone = $state(UTC);
+	let zoneFilter = $state('');
+	let zoneChoice: string[] = $state([]);
 	let userNames: Record<string, string> = $state({});
 	let loading = $state(true);
 	let refreshing = $state(false);
@@ -53,6 +94,8 @@
 	let map: any = null;
 	let maplibregl: any = null;
 	let h3: any = null;
+	// h3-js, asked for at the start: it tells a member's home cell from a zone the realm defines when `land_map` does not say.
+	let h3Ready: Promise<unknown> = Promise.resolve();
 	let landPopup: any = null;
 	let didFitBounds = false;
 	let unsubscribePrincipal: (() => void) | null = null;
@@ -64,10 +107,14 @@
 	const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 	const SOURCE_ZONES = 'zone-cells';
 	const SOURCE_POINTS = 'zone-points';
+	const H3_WAIT_MS = 3000;
 	const PAGE = 500;
 	const MAX_PAGES = 50;
 	const MAX_SPAN = 16;
 	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
+	// What `land_zone_set` needs (realms-gos api/assets.py): `me` lists the permissions the member holds, `all` standing for every one.
+	const ZONE_PERMISSION = 'realm.configure';
+	const LICENCE_STATUSES = ['applied', 'active', 'rejected', 'suspended', 'revoked', 'expired'];
 
 	const STATUS_LABELS: Record<string, string> = {
 		active: 'Active',
@@ -88,6 +135,9 @@
 
 	let selectedLand = $derived(lands.find((l) => l.id === selectedLandId) ?? null);
 	let knownUsers = $derived(Object.entries(userNames));
+	let visibleLands = $derived(inZone(lands, zoneFilter));
+	let canSetZones = $derived(permissions.includes('all') || permissions.includes(ZONE_PERMISSION));
+	let selectedLicences = $derived(selectedLand ? (licences.get(selectedLand.id) ?? []) : []);
 
 	function loadScript(src: string): Promise<void> {
 		return new Promise((resolve, reject) => {
@@ -265,8 +315,32 @@
 		updateLayerVisibility();
 	}
 
+	/** Every licence of the realm, once: the parcels' panels read their own from them. */
+	async function loadLicences() {
+		if (licencesRead) return;
+		licencesRead = true;
+		licencesLoading = true;
+		try {
+			const rows = await readPages('license_list', 'licenses');
+			licences = licencesByParcel(rows.rows);
+			licencesProblem = rows.error;
+			licencesCapped = rows.capped;
+		} finally {
+			licencesLoading = false;
+		}
+	}
+
+	/** Read the registry again, licences included. */
+	async function refresh() {
+		licencesRead = false;
+		await loadLands(true);
+		if (selectedLandId) void loadLicences();
+	}
+
 	function selectLand(land: Parcel | null) {
 		selectedLandId = land?.id || '';
+		if (land) void loadLicences();
+		zoneChoice = land ? [...land.zones] : [];
 		transfer = { owner_type: 'user', owner_id: '', order: '' };
 		disputeReason = '';
 	}
@@ -363,17 +437,17 @@
 		return { ok: false, error: `${name} did not answer` };
 	}
 
-	/** Every row of a paged read operation (``from``/``count``, continued by ``next``). */
-	async function readPages(name: string, key: string): Promise<{ rows: any[]; error: string }> {
+	/** Every row of a paged read operation (``from``/``count``, continued by ``next``), up to MAX_PAGES pages: ``capped`` when there are more. */
+	async function readPages(name: string, key: string): Promise<{ rows: any[]; error: string; capped: boolean }> {
 		const rows: any[] = [];
 		let from: number | null = 1;
 		for (let i = 0; from != null && i < MAX_PAGES; i++) {
 			const reply = await call(false, name, { from, count: PAGE });
-			if (!reply.ok) return { rows, error: reply.error || `${name} was refused` };
+			if (!reply.ok) return { rows, error: reply.error || `${name} was refused`, capped: false };
 			rows.push(...(Array.isArray(reply[key]) ? reply[key] : []));
 			from = typeof reply.next === 'number' ? reply.next : null;
 		}
-		return { rows, error: '' };
+		return { rows, error: '', capped: from != null };
 	}
 
 	function toParcel(raw: any): Parcel {
@@ -391,6 +465,7 @@
 			owner_kind: colon >= 0 ? owner.slice(0, colon) : '',
 			owner_id: colon >= 0 ? owner.slice(colon + 1) : owner,
 			token_id: raw?.token_id != null && raw.token_id !== '' ? String(raw.token_id) : '',
+			zones: zonesOf(raw?.lies_in),
 		};
 	}
 
@@ -398,11 +473,23 @@
 		return id.length > 16 ? `${id.slice(0, 5)}…${id.slice(-3)}` : id;
 	}
 
+	/** Who a reference (``User:<id>``, ``Organization:<id>``) names: a member by nickname, an organization by its id. */
+	function refLabel(ref: string) {
+		if (!ref) return 'No owner';
+		const colon = ref.indexOf(':');
+		const kind = colon >= 0 ? ref.slice(0, colon) : '';
+		const id = colon >= 0 ? ref.slice(colon + 1) : ref;
+		if (kind === 'User') return userNames[id] || shortId(id);
+		if (kind === 'Organization') return `Org ${id}`;
+		return ref;
+	}
+
 	function ownerLabel(land: Parcel) {
-		if (!land.owner) return 'No owner';
-		if (land.owner_kind === 'User') return userNames[land.owner_id] || shortId(land.owner_id);
-		if (land.owner_kind === 'Organization') return `Org ${land.owner_id}`;
-		return land.owner;
+		return refLabel(land.owner);
+	}
+
+	function licenceStatus(status: string) {
+		return LICENCE_STATUSES.includes(status) ? t(`licence_status_${status}`) : status;
 	}
 
 	function statusLabel(status: string) {
@@ -426,10 +513,12 @@
 		error = '';
 		accessDeniedOp = null;
 		try {
-			const [parcels, mapZones, users] = await Promise.all([
+			const [parcels, mapZones, users, me, info] = await Promise.all([
 				readPages('land_list', 'lands'),
 				readPages('land_map', 'zones'),
 				call(false, 'user_list', { from: 1, count: PAGE }),
+				call(false, 'me'),
+				call(false, 'realm_info'),
 			]);
 			if (parcels.error) {
 				const needs = parcels.error.match(ACCESS_REFUSAL);
@@ -437,10 +526,21 @@
 				else error = `Parcels are unavailable right now: ${parcels.error}`;
 			}
 			lands = parcels.rows.map(toParcel).filter((l) => l.id);
+			// A realm that does not say which zones it defined (no `defined`) is read by h3-js, which may be a moment away: not for long.
+			if (mapZones.rows.some((z) => typeof z?.defined !== 'boolean')) await Promise.race([h3Ready, new Promise((done) => setTimeout(done, H3_WAIT_MS))]);
+			const named = new Set(lands.flatMap((l) => l.zones));
+			const isValidCell = h3?.isValidCell ? (id: string) => !!h3.isValidCell(id) : undefined;
 			zones = mapZones.rows
-				.filter((z) => z?.id)
+				.filter((z) => z?.id && !isDefinedZone(z, named, isValidCell))
 				.map((z) => ({ id: String(z.id), name: String(z.name || ''), kind: String(z.kind || 'unassigned') }));
+			planning = planningZones(mapZones.rows, named, isValidCell);
+			zonesCapped = mapZones.capped;
+			if (zoneFilter && zoneFilter !== NO_ZONE && !planning.some((zone) => zone.id === zoneFilter)) zoneFilter = '';
 			if (mapZones.error) console.warn('land_map:', mapZones.error);
+			permissions = me.ok && Array.isArray(me.permissions) ? me.permissions : [];
+			// The realm's official time: its own zone, or on a quarter its capital's (`timezone` is the quarter's own).
+			const officialZone = info.ok ? info.realm?.official_timezone || info.realm?.timezone : '';
+			realmZone = typeof officialZone === 'string' && isKnownZone(officialZone) ? officialZone : UTC;
 			if (users.ok) {
 				const names: Record<string, string> = {};
 				for (const u of users.users ?? []) if (u?.id) names[u.id] = u.nickname || '';
@@ -607,6 +707,13 @@
 		await act('land_unfreeze', { land: selectedLand.id }, () => 'Dispute ended; the parcel is active again.');
 	}
 
+	async function saveZones() {
+		if (!selectedLand) return;
+		const land = selectedLand.id;
+		const reply = await act('land_zone_set', { land, zones: zoneChoice }, () => t('planning_saved', { land }));
+		if (reply) zoneChoice = [...(lands.find((l) => l.id === land)?.zones ?? [])];
+	}
+
 	async function mintNFT() {
 		if (!selectedLand) return;
 		await act('land_mint_nft', { land: selectedLand.id }, (r) => `NFT minted! Token ID: ${r.token_id}`);
@@ -622,6 +729,7 @@
 	onMount(async () => {
 		window.addEventListener('keydown', onWindowKeydown);
 		unsubscribePrincipal = ctx.principal?.subscribe?.((value: string) => (principal = value || '')) ?? null;
+		h3Ready = loadH3Lib().then((lib) => (h3 = lib), () => null);
 		await loadLands(false);
 		await tick();
 		if (mapContainer) {
@@ -659,7 +767,7 @@
 					<p class="muted">{extensionDescription}</p>
 					<p class="muted">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</p>
 				</div>
-				<button type="button" class="ghost-btn" onclick={() => loadLands(true)} disabled={refreshing}>Refresh</button>
+				<button type="button" class="ghost-btn" onclick={refresh} disabled={refreshing}>Refresh</button>
 			</div>
 
 			{#if error}<div class="alert error">{error}</div>{/if}
@@ -710,13 +818,33 @@
 				</form>
 			{/if}
 
+			{#if zonesCapped}
+				<p class="muted note zone-filter" data-testid="zones-capped">{t('planning_zones_capped', { count: PAGE * MAX_PAGES })}</p>
+			{/if}
+			{#if planning.length}
+				<div class="zone-filter">
+					<label>{t('planning_filter_label')}
+						<select bind:value={zoneFilter} data-testid="zone-filter">
+							<option value="">{t('planning_filter_all')}</option>
+							{#each planning as zone (zone.id)}<option value={zone.id}>{zone.name || zone.id}</option>{/each}
+							<option value={NO_ZONE}>{t('planning_filter_none')}</option>
+						</select>
+					</label>
+					{#if zoneFilter}
+						<span class="muted" data-testid="zone-filter-count">{t('planning_filter_count', { shown: visibleLands.length, total: lands.length })}</span>
+					{/if}
+				</div>
+			{/if}
+
 			<div class="parcel-list">
 				{#if loading}
 					<p class="muted center">Loading lands…</p>
 				{:else if lands.length === 0}
 					<p class="muted center">No parcels yet. Use “Register parcel” to add one.</p>
+				{:else if visibleLands.length === 0}
+					<p class="muted center">{t('planning_filter_count', { shown: 0, total: lands.length })}</p>
 				{:else}
-					{#each lands as land (land.id)}
+					{#each visibleLands as land (land.id)}
 						<button
 							type="button"
 							class="parcel-row"
@@ -727,6 +855,9 @@
 							<span class="parcel-main">
 								<strong>{land.id}</strong>
 								<span class="muted">{land.land_type} · ({land.x}, {land.y}) · {ownerLabel(land)}</span>
+								{#if land.zones.length}
+									<span class="muted" data-testid="parcel-zones">{land.zones.map((id) => zoneName(planning, id)).join(', ')}</span>
+								{/if}
 							</span>
 							<span class="parcel-status">
 								{#if land.status !== 'active'}{statusLabel(land.status)}{:else if land.token_id}NFT{:else}Owned{/if}
@@ -745,6 +876,63 @@
 						<span class="readonly-label">Owner</span>
 						<span>{ownerLabel(selectedLand)}</span>
 					</p>
+
+					<div class="mini-form" data-testid="planning-panel">
+						<h4>{t('planning_title')}</h4>
+						{#if selectedLand.zones.length}
+							<div class="zone-chips">
+								{#each selectedLand.zones as id (id)}
+									<span class="zone-chip" title={planning.find((zone) => zone.id === id)?.kind} data-testid="parcel-zone">{zoneName(planning, id)}</span>
+								{/each}
+							</div>
+						{:else}
+							<p class="muted note">{t('planning_none')}</p>
+						{/if}
+						{#if !planning.length}
+							<p class="muted note">{t('planning_no_zones_defined')}</p>
+						{:else if canSetZones}
+							<form class="zone-form" onsubmit={(e) => { e.preventDefault(); saveZones(); }}>
+								<p class="muted note">{t('planning_edit_hint', { max: MAX_ZONES })}</p>
+								{#each planning as zone (zone.id)}
+									<label class="zone-option">
+										<input
+											type="checkbox"
+											checked={zoneChoice.includes(zone.id)}
+											disabled={submitting || (!zoneChoice.includes(zone.id) && zoneChoice.length >= MAX_ZONES)}
+											onchange={() => (zoneChoice = toggleZone(zoneChoice, zone.id))}
+										/>
+										<span>{zone.name || zone.id}</span>
+										{#if zone.kind}<span class="muted">{zone.kind}</span>{/if}
+									</label>
+								{/each}
+								{#if zoneChoice.length >= MAX_ZONES}<p class="muted note">{t('planning_full', { max: MAX_ZONES })}</p>{/if}
+								<button type="submit" class="primary-btn" disabled={submitting || sameZones(zoneChoice, selectedLand.zones)}>{t('planning_save')}</button>
+							</form>
+						{:else}
+							<p class="muted note" data-testid="planning-reason">{t('planning_needs_permission', { permission: ZONE_PERMISSION })}</p>
+						{/if}
+					</div>
+
+					<div class="mini-form" data-testid="licences-panel">
+						<h4>{t('licences_title')}</h4>
+						{#if licencesLoading}
+							<p class="muted note" data-testid="licences-loading">{t('licences_loading')}</p>
+						{:else if licencesProblem}
+							<p class="muted note" data-testid="licences-problem">{t('licences_unavailable', { reason: licencesProblem })}</p>
+						{:else if selectedLicences.length}
+							<ul class="licence-list">
+								{#each selectedLicences as licence (licence.id)}
+									<li data-testid="licence">
+										<strong>{licence.kind}</strong> · {licenceStatus(licence.status)} · {refLabel(licence.holder)}
+										{#if licence.expires_at}<span class="muted"> · {t('licence_until', { date: formatInZone(licence.expires_at, realmZone) })}</span>{/if}
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="muted note">{t('licences_none')}</p>
+						{/if}
+						{#if licencesCapped && !licencesLoading}<p class="muted note">{t('licences_capped', { count: PAGE * MAX_PAGES })}</p>{/if}
+					</div>
 
 					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); transferParcel(); }}>
 						<h4>Ownership</h4>
@@ -1060,6 +1248,57 @@
 	.readonly-label {
 		color: #525252;
 		font-size: 0.75rem;
+	}
+
+	.zone-filter {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		padding: 0.5rem 1rem;
+		font-size: 0.8rem;
+		color: #525252;
+	}
+
+	.zone-filter select {
+		margin-left: 0.4rem;
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #d4d4d4;
+		border-radius: 0.45rem;
+		font-size: 0.8rem;
+	}
+
+	.zone-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.zone-chip {
+		padding: 0.15rem 0.55rem;
+		border-radius: 999px;
+		background: #eef2ff;
+		color: #3730a3;
+		font-size: 0.75rem;
+	}
+
+	.zone-form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.zone-option {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+	}
+
+	.licence-list {
+		margin: 0;
+		padding-left: 1.1rem;
+		font-size: 0.8rem;
 	}
 
 	.legend {
