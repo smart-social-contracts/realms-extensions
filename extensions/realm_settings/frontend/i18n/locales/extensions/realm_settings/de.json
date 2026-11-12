@@ -31,5 +31,14 @@
   "timezone_now": "Offizielle Zeit jetzt: {time}",
   "timezone_preview": "In {zone} ist es jetzt {time}.",
   "timezone_applies_now": "Eine Änderung gilt, sobald du speicherst.",
-  "timezone_needs_vote": "Eine Änderung unterliegt {department} (Richtlinie {policy}): Beim Speichern wird ein Vorschlag eingereicht, und die Zone ändert sich, sobald er angenommen ist."
+  "timezone_needs_vote": "Eine Änderung unterliegt {department} (Richtlinie {policy}): Beim Speichern wird ein Vorschlag eingereicht, und die Zone ändert sich, sobald er angenommen ist.",
+  "section_journal_signing": "Signaturen des Amtsblatts",
+  "section_journal_signing_desc": "Der Canister des Realms signiert eine Ausgabe seines Amtsblatts, wenn jemand darum bittet, einmalig, und bewahrt die Signatur auf. Jede Signatur kostet das Realm Cycles (rund 26 Milliarden im Produktionsnetz); das Realm kann auch jede Ausgabe signieren, sobald ihr Tag zu Ende ist.",
+  "journal_signing": "Wann Ausgaben signiert werden",
+  "journal_signing_on_request": "Auf Anfrage (Standard)",
+  "journal_signing_daily": "Täglich, sobald der Tag zu Ende ist",
+  "journal_signing_on_request_note": "Kostet nichts, bis jemand darum bittet, und höchstens eine Signatur pro Tag.",
+  "journal_signing_daily_note": "Eine Signatur pro Tag: rund 9,5 Billionen Cycles im Jahr. Beim Wechsel werden einmalig alle Tage signiert, die seit dem zuletzt signierten entstanden sind: etwa 12 Signaturen (0,3 Billionen Cycles) für ein Jahr ohne Signatur.",
+  "journal_signing_applies_now": "Eine Änderung gilt, sobald du speicherst.",
+  "journal_signing_needs_vote": "Eine Änderung unterliegt {department} (Richtlinie {policy}): Beim Speichern wird ein Vorschlag eingereicht, und sie gilt, sobald er angenommen ist."
 }

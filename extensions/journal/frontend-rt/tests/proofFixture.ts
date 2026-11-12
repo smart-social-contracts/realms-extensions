@@ -13,7 +13,8 @@ export const DIGEST = 'cd'.repeat(32);
 export const CODE = codeOf(DIGEST)!; // ZXG4-3TON-ZXG4-3TON
 export const SIGNATURE = 'ef'.repeat(64);
 
-/** The text the canister signs for `issue`, with `over` replacing parts of it. */
+/** The text the canister signs for `issue`, with `over` replacing parts of it. It says `made_at`, as a document made now does;
+ * `{ made_at: undefined, signed_at: t }` is the text of one the release before signed as it made it. */
 export function canonicalOf(issue: Issue, over: Record<string, unknown> = {}): string {
 	return JSON.stringify({
 		v: 1,
@@ -22,7 +23,7 @@ export function canonicalOf(issue: Issue, over: Record<string, unknown> = {}): s
 		subject: issue.day,
 		body: { number: issue.number, timezone: issue.timezone, entries: issue.entries },
 		prev: null,
-		signed_at: 1_790_000_000,
+		made_at: 1_790_000_000,
 		key: { algorithm: 'ed25519', name: 'key_1', path: 'realms:journal', public_key: PUBLIC_KEY },
 		...over,
 	});

@@ -59,7 +59,13 @@
   "signature_verification_url": "Verify at",
   "signature_batch_root": "Root of its batch",
   "signature_how": "Scan the code, or open the address and enter the verification code, to check the realm's signature of this issue.",
-  "signature_provisional": "Provisional issue: the realm signs it once its day has closed.",
-  "signature_unsigned": "Not signed yet: the realm signs each issue once its day has closed.",
-  "signature_mismatch": "The signature the realm gives for this issue does not match what this sheet shows. Do not rely on it."
+  "signature_provisional": "Provisional issue: it can be signed once its day has closed.",
+  "signature_unsigned": "Not signed yet: the realm signs an issue when someone asks for its signature.",
+  "signature_mismatch": "The signature the realm gives for this issue does not match what this sheet shows. Do not rely on it.",
+  "sign_request": "Request signature",
+  "sign_busy": "Signing…",
+  "sign_hint": "Anyone may ask. The realm signs the issue once and keeps the signature.",
+  "sign_pending": "The issue is being signed. Checking again…",
+  "sign_error": "The issue could not be signed: {reason}",
+  "sign_waiting": "The signature is taking longer than usual. Try again in a moment."
 }
