@@ -52,7 +52,7 @@ class Realm:
         assert "Traceback" not in reply, reply
         return reply
 
-    def op(self, name, **args):
+    def op(self, name, /, **args):
         reply = json.loads(self.icp("run", f"({json.dumps(name)}, {json.dumps(json.dumps(args))})"))
         assert reply.get("ok", True) is not False, (name, reply)
         return reply
