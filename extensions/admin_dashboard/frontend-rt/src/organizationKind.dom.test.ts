@@ -162,3 +162,24 @@ test('when the realm has more rows than a click searches, the page says how many
 	expect(chips()).toEqual(['Party']);
 	expect(text()).toContain('Org 24000');
 });
+
+test('a kind no organisation has says so', async () => {
+	await mountOn(ORGS.filter((o) => o.kind !== 'union'));
+	await choose('org-kind-select', 'union');
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('No organisations of this kind.');
+});
+
+test('a realm with no organisations lists none, without an error', async () => {
+	await mountOn([]);
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('No items found.');
+	expect(text()).not.toContain('This list isn');
+});
+
+test('a reader the realm refuses is told which permission is missing, and sees no kinds', async () => {
+	await mountOn(ORGS, { refuse: 'organization_list needs realm.data_view' });
+	expect(text()).toContain('Additional permissions needed');
+	expect(text()).toContain('realm.data_view');
+	expect(chips()).toEqual([]);
+});
