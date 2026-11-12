@@ -62,6 +62,8 @@ interface World {
 	locale?: string;
 	/** The realm does not answer ``codex_status``: what it runs is unknown. */
 	unreadable?: boolean;
+	/** What ``codex_status`` says of the sync sources: the releases each could install, a step back marked. */
+	sources?: unknown[];
 	/** What shows the change has been read: the report, a failure or a release (none: nothing is shown for the proposal). */
 	ready?: string | null;
 }
@@ -73,6 +75,7 @@ async function open({
 	running = { 'eu/es/vc/46250-valencia/tax': { sha256: `sha256:${hexOf(OLD_TAX)}` } },
 	locale = 'en',
 	unreadable = false,
+	sources = [],
 	ready = '[data-testid="report"], [data-testid="change-failure"], [data-testid="release-install"]',
 }: World) {
 	fetched = [];
@@ -93,7 +96,8 @@ async function open({
 		},
 		department_list: () => ({ ok: true, departments: [{ id: 'Realm', is_root: true }] }),
 		realm_info: () => ({ ok: true, realm: { timezone: 'Europe/Madrid' } }),
-		codex_status: () => (unreadable ? { ok: false } : { ok: true, codex: running ? { id: RUNNING, chapters: running } : null }),
+		codex_status: () =>
+			unreadable ? { ok: false } : { ok: true, codex: running ? { id: RUNNING, chapters: running } : null, sync_sources: sources },
 		legislation_chapter: ({ chapter }) => ({ ok: true, text: chapter === `sha256:${hexOf(OLD_TAX)}` ? OLD_TAX : '' }),
 	};
 	const ctx = {
@@ -205,6 +209,40 @@ test('says what the install of a release does: the realm builds its change list 
 		'Installs release 2.4.0 of eu/es whole. The realm builds the change list from the record of the sync source that vouches for it when the install runs.',
 	);
 	expect(fetched.filter((url) => !url.includes('/i18n/'))).toEqual([]);
+});
+
+const RELEASE = { op: 'codex_install', args: { source: 'eu/es', version: '2.4.0' } };
+const RUNS_2_6 = { 'eu/es/tax': { sha256: 'sha256:aa', source: 'eu/es', version: '2.6.0' } };
+const SPAIN = (installable: unknown[]) => [{ source: 'ryjl3', name: 'Spain', layer: 'eu/es', compliance: 'compliant', installable, notes: [] }];
+
+test('names the release of that layer the realm runs now next to the install of a release', async () => {
+	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN([]) });
+	expect(text('release-runs')).toBe('The realm runs eu/es 2.6.0 now.');
+	expect(text('release-step-back')).toBeNull(); // no source says it is a step back
+});
+
+test('says so when the sync source marks the release a step back: it must not read to a voter as a plain install', async () => {
+	const installable = [{ source: 'eu/es', version: '2.4.0', effective_from: 1, step_back: true }];
+	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN(installable) });
+	expect(text('release-step-back')).toBe(
+		'This takes the realm back: eu/es 2.4.0 is older than 2.6.0, the release the realm runs now. The source went back to it.',
+	);
+	expect(text('release-install')).toMatch(/^Installs release 2\.4\.0 of eu\/es whole\./); // what it does is still said
+});
+
+test('marks only the release the source went back to, not another release of the layer', async () => {
+	const installable = [{ source: 'eu/es', version: '2.4.0', effective_from: 1, step_back: true }];
+	const other = { op: 'codex_install', args: { source: 'eu/es', version: '2.5.0' } };
+	await open({ proposal: proposal(other), files: {}, running: RUNS_2_6, sources: SPAIN(installable) });
+	expect(text('release-step-back')).toBeNull();
+	expect(text('release-runs')).toBe('The realm runs eu/es 2.6.0 now.');
+});
+
+test('says what it can of an install of a release when the realm does not answer codex_status', async () => {
+	await open({ proposal: proposal(RELEASE), files: {}, unreadable: true });
+	expect(text('release-install')).toMatch(/^Installs release 2\.4\.0 of eu\/es whole\./);
+	expect(text('release-runs')).toBeNull();
+	expect(text('release-step-back')).toBeNull();
 });
 
 test('leaves an install of a codex package as it was', async () => {

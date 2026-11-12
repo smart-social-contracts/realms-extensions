@@ -118,6 +118,8 @@
   "second_vote": "Segona votació: la primera va acabar en empat ({yes} sís, {no} nos, {abstain} abstencions), així que la proposta es va sotmetre a una segona votació amb la mateixa regla. Els vots de la primera es van esborrar: tots voten de nou.",
   "second_vote_short": "Segona votació, després d'un empat en la primera",
   "release_install": "Instal·la sencera la versió {version} de {source}. El regne construeix la llista de canvis a partir del registre de la font de sincronització que l'avala quan s'executa la instal·lació.",
+  "release_runs": "El regne aplica ara {source} {version}.",
+  "release_step_back": "Això fa retrocedir el regne: {source} {version} és anterior a {runs}, la versió que el regne aplica ara. La font ha tornat a ella.",
   "change_unreadable": "No es pot mostrar la llista de canvis: {reason}",
   "change_loading": "Llegint la llista de canvis…",
   "change_invalid": "Aquesta no és una llista de canvis que el regne llija.",

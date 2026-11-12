@@ -6,7 +6,9 @@ import {
 	differenceOf,
 	fetchFirstPinned,
 	fetchPinned,
+	isStepBack,
 	readChangeList,
+	runningRelease,
 	summaryFor,
 	type ChapterEntry,
 } from './legislationChange.ts';
@@ -181,6 +183,35 @@ describe('fetching what a proposal pins', () => {
 		assert.deepEqual(await fetchFirstPinned(urls, hexOf(TAX), 1024, serving({ [url]: 'tampered', [mirror]: TAX })), { ok: true, text: TAX });
 		assert.deepEqual(await fetchFirstPinned(urls, hexOf(TAX), 1024, serving({ [url]: 'tampered' })), { ok: false, reason: 'unreachable' });
 		assert.deepEqual(await fetchFirstPinned([], hexOf(TAX), 1024, serving({})), { ok: false, reason: 'unreachable' });
+	});
+});
+
+describe('the release of a layer the realm runs, and a step back', () => {
+	const chapters = {
+		'eu/es/tax': { source: 'eu/es', version: '2.6.0' },
+		'eu/es/procedure': { source: 'eu/es', version: '2.6.0' },
+		'eu/es/vc/46250-valencia/tax': { source: 'eu/es/vc/46250-valencia', version: '' },
+	};
+
+	it('is the version the layer\'s chapters carry, and nothing for a layer the realm does not run', () => {
+		assert.equal(runningRelease(chapters, 'eu/es'), '2.6.0');
+		assert.equal(runningRelease(chapters, 'eu'), '');
+		assert.equal(runningRelease(chapters, 'eu/es/vc/46250-valencia'), ''); // the realm's own layer has no version
+		assert.equal(runningRelease(undefined, 'eu/es'), '');
+		assert.equal(runningRelease(null, 'eu/es'), '');
+	});
+
+	it('is a step back only where a sync source marks that very release so', () => {
+		const release = { source: 'eu/es', version: '2.4.0' };
+		const marked = [{ installable: [{ source: 'eu/es', version: '2.4.0', step_back: true }] }];
+		assert.equal(isStepBack(marked, release), true);
+		assert.equal(isStepBack([{ installable: [{ source: 'eu/es', version: '2.4.0' }] }], release), false); // plain
+		assert.equal(isStepBack([{ installable: [{ source: 'eu/es', version: '2.4.0', step_back: false }] }], release), false);
+		assert.equal(isStepBack(marked, { source: 'eu/es', version: '2.5.0' }), false); // another release of the layer
+		assert.equal(isStepBack(marked, { source: 'eu', version: '2.4.0' }), false); // another layer
+		assert.equal(isStepBack([{}, ...marked], release), true); // a source that lists nothing
+		assert.equal(isStepBack([], release), false);
+		assert.equal(isStepBack(undefined, release), false); // a realm that does not say
 	});
 });
 

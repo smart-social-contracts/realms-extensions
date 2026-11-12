@@ -8,7 +8,9 @@
 		differenceOf,
 		fetchFirstPinned,
 		fetchPinned,
+		isStepBack,
 		readChangeList,
+		runningRelease,
 		summaryFor,
 		type ChangeList,
 		type ChapterEntry,
@@ -45,11 +47,24 @@
 	// The chapters whose changes are open, with the two texts once they are read.
 	let shown = $state<Record<string, { before: string; after: string } | { error: string } | 'loading'>>({});
 
+	// For the install of a release: the release of that layer the realm runs now ('' when none, or unknown), and whether a
+	// sync source says installing it is a step back (the source went back to it, §11.6).
+	let runsNow = $state('');
+	let stepBack = $state(false);
+
 	let summary = $derived(list ? summaryFor(list.summary, locale) : null);
 	let stale = $derived(open && !!list && !!running && (list.replaces ?? '') !== running.id);
 
 	const hex = (checksum: string) => checksum.replace(/^sha256:/, '');
 	const reason = (fetched: Fetched) => (fetched.ok ? '' : t(`fetch_${fetched.reason}`));
+
+	async function loadRelease() {
+		if (!release) return;
+		const status = await read('codex_status', { count: 1 });
+		if (!status) return;
+		runsNow = runningRelease(status.codex?.chapters, release.source);
+		stepBack = isStepBack(status.sync_sources, release);
+	}
 
 	async function load() {
 		if (!changeList) return;
@@ -91,12 +106,21 @@
 
 	$effect(() => {
 		void load();
+		void loadRelease();
 	});
 </script>
 
 <div class="space-y-4" data-testid="legislation-change">
 	{#if release}
 		<p class="text-sm text-gray-700" data-testid="release-install">{t('release_install', { version: release.version, source: release.source })}</p>
+		{#if runsNow}
+			<p class="text-sm text-gray-700" data-testid="release-runs">{t('release_runs', { version: runsNow, source: release.source })}</p>
+		{/if}
+		{#if stepBack}
+			<p class="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2" data-testid="release-step-back">
+				{t('release_step_back', { version: release.version, source: release.source, runs: runsNow || '—' })}
+			</p>
+		{/if}
 	{:else if failure}
 		<p class="text-sm text-red-700" data-testid="change-failure">{t('change_unreadable', { reason: failure })}</p>
 	{:else if !list}
