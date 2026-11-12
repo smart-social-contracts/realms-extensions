@@ -250,7 +250,7 @@ test('a parcel lies in at most 8 zones: the ninth cannot be chosen', async () =>
 	await settle();
 	const boxes = [...target.querySelectorAll<HTMLInputElement>('.zone-option input')];
 	expect(boxes.filter((b) => b.checked)).toHaveLength(8);
-	expect(boxes.filter((b) => b.disabled).map((b) => b.closest('label')?.textContent?.trim())).toEqual(['Zone 9']);
+	expect(boxes.filter((b) => b.disabled).map((b) => b.closest('label')?.querySelector('span')?.textContent)).toEqual(['Zone 9']);
 	expect(text()).toContain('A parcel lies in at most 8 zones.');
 });
 
