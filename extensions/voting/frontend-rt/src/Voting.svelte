@@ -340,11 +340,13 @@
 		if (op === 'transfer_create') {
 			return { op, fund: args.fund, token: args.symbol, amount: args.amount, to_principal: args.to };
 		}
-		if (op === 'codex_install' && args.checksum) {
-			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
-		}
+		// The branch the realm takes first (core.change_list.names_release): an action that names a release runs as one, whatever
+		// change list it carries beside it (the realm refuses the shape now; a proposal stored before still runs as the release).
 		if (op === 'codex_install' && args.source && !args.manifest) {
 			return { op, target: 'codex', release: { source: String(args.source), version: String(args.version ?? '') } };
+		}
+		if (op === 'codex_install' && args.checksum) {
+			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
 		}
 		if (UPGRADE_OPS[op]) {
 			return { op, target: UPGRADE_OPS[op], package_id: args.codex ?? args.extension, version: args.version };

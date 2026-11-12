@@ -16,6 +16,7 @@
 		type ChapterEntry,
 		type Fetched,
 		type ReleaseChange,
+		type SyncSourceView,
 	} from './legislationChange';
 
 	/**
@@ -51,13 +52,12 @@
 	// The chapters whose changes are open, with the two texts once they are read.
 	let shown = $state<Record<string, { before: string; after: string } | { error: string } | 'loading'>>({});
 
-	// For the install of a release: the release of that layer the realm runs now ('' when none, or unknown), and whether a
-	// sync source says installing it is a step back (the source went back to it, §11.6).
+	// For the install of a release: the release of that layer the realm runs now ('' when none, or unknown), and the sync
+	// sources `codex_status` says (undefined until read), whose `installable` mark a step back.
 	let runsNow = $state('');
-	let sourcesStepBack = $state(false);
-	// The realm's own comparison of the proposal's release with the one it runs wins; what `codex_status` says is the
-	// answer of a realm that does not send it.
-	let stepBack = $derived(sourcesStepBack || releaseChange?.step_back === true);
+	let sources = $state<SyncSourceView[] | undefined>(undefined);
+	// A step back when the realm says so of this proposal's release (`releaseChange`) or a sync source marks it (isStepBack).
+	let stepBack = $derived(!!release && isStepBack(sources, release, releaseChange));
 	let unplaced = $derived(releaseChange?.order === 'tied' || releaseChange?.order === 'unknown');
 
 	let summary = $derived(list ? summaryFor(list.summary, locale) : null);
@@ -71,7 +71,7 @@
 		const status = await read('codex_status', { count: 1 });
 		if (!status) return;
 		runsNow = runningRelease(status.codex?.chapters, release.source);
-		sourcesStepBack = isStepBack(status.sync_sources, release);
+		sources = status.sync_sources;
 	}
 
 	async function load() {

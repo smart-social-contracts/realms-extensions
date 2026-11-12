@@ -276,10 +276,33 @@ test('says nothing more of a newer release, or of the one the realm runs now', a
 	}
 });
 
-test('takes what the realm says of the release over what the sync sources mark, and falls back to them when it says nothing', async () => {
+test('is a step back when either the realm or a sync source says so, the safer rule: the sources\' mark stands when the realm says nothing, or newer', async () => {
 	const marked = [{ source: 'eu/es', version: '2.4.0', effective_from: 1, step_back: true }];
+	// a realm before the comparison: the sources' mark is all there is
 	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN(marked), releaseChange: null });
-	expect(text('release-step-back')).not.toBeNull(); // a realm before the comparison: the sources' mark is all there is
+	expect(text('release-step-back')).not.toBeNull();
+	closePage();
+	// the realm says the release is newer, a source marks it a step back: the warning is shown (either is enough)
+	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN(marked), releaseChange: CHANGE('newer') });
+	expect(text('release-step-back')).not.toBeNull();
+	expect(text('release-unplaced')).toBeNull();
+});
+
+test('describes an action that names a release and a change list as the release, which is what the realm runs', async () => {
+	// Filed before the realm refused the shape: it runs as the release, so a voter reads the release, not the change list.
+	const list = JSON.stringify(changeList());
+	const both = { op: 'codex_install', args: { source: 'eu/es', version: '2.4.0', url: CHANGE_LIST_URL, checksum: `sha256:${hexOf(list)}` } };
+	await open({
+		proposal: proposal(both),
+		files: { [CHANGE_LIST_URL]: list, [REPORT_URL]: REPORT },
+		running: RUNS_2_6,
+		sources: SPAIN([]),
+		releaseChange: CHANGE('older'),
+	});
+	expect(text('release-install')).toMatch(/^Installs release 2\.4\.0 of eu\/es whole\./);
+	expect(text('release-step-back')).toBe('This takes the realm back: eu/es 2.4.0 is older than 2.6.0, the release the realm runs now.');
+	expect(text('change-summary')).toBeNull(); // no change list is shown: the realm never reads it
+	expect(fetched).not.toContain(CHANGE_LIST_URL);
 });
 
 test('marks only the release the source went back to, not another release of the layer', async () => {

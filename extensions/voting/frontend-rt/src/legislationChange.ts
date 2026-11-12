@@ -151,10 +151,11 @@ export function releaseChangeOf(raw: unknown): ReleaseChange | null {
 }
 
 /**
- * Whether installing `release` takes the realm back, however it was filed. The realm says so in `release_change` of the
- * proposal (`change`): it was published strictly earlier than the release the realm runs. A realm that does not send it
- * (before realms-gos compared a proposal's release) still marks the one its source went back to `step_back` in
- * `installable`, which `sources` carry. A step back must not read to a voter as a plain install.
+ * Whether installing `release` takes the realm back, however it was filed: the one rule, for the page. Either is enough
+ * (the safer rule: a warning that is not needed costs a voter a line, one that is missing costs the vote its meaning): the
+ * realm says so of the proposal's own release in `release_change` (`change`: published strictly earlier than the one the
+ * realm runs), or a sync source marks that release `step_back` in the `installable` that `sources` carry (the only mark a
+ * realm sends before it compares a proposal's release). A step back must not read to a voter as a plain install.
  */
 export function isStepBack(
 	sources: SyncSourceView[] | null | undefined,
