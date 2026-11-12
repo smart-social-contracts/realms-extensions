@@ -1,6 +1,6 @@
 {
   "name": "land_registry",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "ggg_api_version": 1,
   "operations": [
     "land_list",
@@ -10,7 +10,11 @@
     "land_transfer",
     "land_freeze",
     "land_unfreeze",
-    "land_mint_nft"
+    "land_mint_nft",
+    "land_zone_set",
+    "license_list",
+    "me",
+    "realm_info"
   ],
   "capabilities": [
     "land.list",
