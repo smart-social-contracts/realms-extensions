@@ -22,6 +22,7 @@ const settle = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
 const all = <E extends Element = HTMLElement>(selector: string) => [...target.querySelectorAll<E>(selector)];
 const byTestId = (id: string) => all(`[data-testid="${id}"]`);
 const texts = (id: string) => byTestId(id).map((e) => e.textContent?.trim());
+const text = () => target.textContent ?? '';
 const button = (name: string) => all<HTMLButtonElement>('button').find((b) => b.textContent?.trim() === name)!;
 
 async function type(input: HTMLInputElement, value: string, enter = false) {
