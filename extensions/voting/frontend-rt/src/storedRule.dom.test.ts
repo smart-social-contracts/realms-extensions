@@ -382,7 +382,7 @@ test('a department vote that counts the votes cast names its rule in words, not 
 	await openOn([councilVote('Council', 1, 1, ONE_YES_ONE_NO)], 'Council');
 	const requirement = text('requirement-line')!;
 	expect(requirement).toBe(
-		`Requirement: more than 50% yes of the yes and no votes cast, abstentions are not counted, at least 33.333333% of the policy's 5 seats must vote, a tie at the threshold goes to a second vote and a tie at the threshold in the second vote goes to the yes of the casting vote (${DANA_SHORT})`,
+		`Requirement: more than 50% yes of the yes and no votes cast, at least 2 of the policy's 5 seats must vote, abstentions count towards the quorum, not the majority, a tie at the threshold goes to a second vote and a tie at the threshold in the second vote goes to the yes of the casting vote (${DANA_SHORT})`,
 	);
 	expect(requirement).not.toMatch(/3 of the policy's 5 seats|count against/);
 });
@@ -408,8 +408,11 @@ test('a first vote shows no second vote, and says nothing of a casting vote that
 test("a second vote says it follows a tied first vote and what that came to", async () => {
 	await openOn([councilVote('Council', 1, 1, ONE_YES_ONE_NO, { first_vote: FIRST_VOTE })], 'Council');
 	expect(text('second-vote-line')).toBe(
-		'Second vote: the first vote ended in a tie (2 yes, 2 no, 1 abstain) and was put to a second vote under the same rule.',
+		"Second vote: the first vote ended in a tie (2 yes, 2 no, 1 abstain), so the proposal was put to a second vote under the same rule. The first vote's ballots were deleted: everyone votes again.",
 	);
+	// it is the second vote: the rule has no second vote to come, only the casting vote of its tie
+	expect(text('requirement-line')).not.toContain('goes to a second vote');
+	expect(text('requirement-line')).toMatch(/ and a tie at the threshold in the second vote goes to the yes of the casting vote/);
 	expect(text('approval-figure')).toBe('1 of 2'); // the count of this vote, not of the first
 });
 
@@ -437,7 +440,7 @@ test('a tie in the second vote waits for the casting yes while the casting membe
 test('a tie in the second vote of a department with no head says it is rejected', async () => {
 	const row = councilVote('Tied', 1, 1, ONE_YES_ONE_NO, { first_vote: FIRST_VOTE, casting_vote: '' });
 	await openOn([row], 'Tied');
-	expect(text('casting-note')).toBe('Yes and no are tied at the threshold again, and the vote has no casting vote: it is rejected.');
+	expect(text('casting-note')).toBe('Yes and no are tied at the threshold again, and the vote has no casting vote: a tie rejects it.');
 	expect(text('requirement-line')).toMatch(/a tie at the threshold in the second vote rejects it$/);
 });
 
@@ -449,6 +452,12 @@ test("the casting member's vote is not looked for in a first vote's tie, which g
 test('a first vote that tied at its deadline says a second vote follows', async () => {
 	await openOn([councilVote('Council', 1, 1, ONE_YES_ONE_NO, { deadline: PAST }, 1)], 'Council');
 	expect(text('ended-line')).toMatch(/^Voting period ended .+ — yes and no are tied at the threshold, so a second vote follows\. Awaiting finalization\.$/);
+});
+
+test('a first vote that tied and ended after the proposal takes effect says it expires instead of going to a second vote', async () => {
+	const row = councilVote('Council', 1, 1, ONE_YES_ONE_NO, { deadline: PAST, effective_at: PAST - 1000 }, 1);
+	await openOn([row], 'Council');
+	expect(text('ended-line')).toMatch(/ — yes and no are tied at the threshold, but the vote ended after the time the proposal takes effect, so it expires instead of going to a second vote\. Awaiting finalization\.$/);
 });
 
 test('a second vote that ended in a majority says the yes votes exceed the threshold', async () => {
@@ -468,7 +477,7 @@ test("a veto holder's no on a vote that counts the votes cast is named while it 
 			tally: { yes: 2, no: 1, abstain: 0, eligible: 5, seats: 5, veto: ['bob'] },
 		});
 	await openOn([withVeto(FUTURE)], 'Council');
-	expect(text('requirement-line')).toContain('abstentions are not counted, no veto holder may vote no, at least 33.333333%');
+	expect(text('requirement-line')).toContain("at least 2 of the policy's 5 seats must vote, abstentions count towards the quorum, not the majority, no veto holder may vote no, a tie");
 	expect(text('waiting-line')).toBe('Waiting for a veto holder to change their no, or the deadline');
 	unmount(page);
 	target.remove();
@@ -487,7 +496,7 @@ test('a veto holder who has not voted does not hold a vote that counts the votes
 test("a threshold of the policy's seats adds them to the majority of the votes cast", async () => {
 	const row = councilVote('Council', 2, 1, ONE_YES_ONE_NO, { threshold_of: 'eligible', threshold: 60 * PERCENT });
 	await openOn([row], 'Council');
-	expect(text('requirement-line')).toMatch(/^Requirement: 3 of the policy's 5 seats must vote yes, more than 50% yes of the yes and no votes cast, abstentions are not counted, /);
+	expect(text('requirement-line')).toMatch(/^Requirement: 3 of the policy's 5 seats must vote yes, more than 50% yes of the yes and no votes cast, at least 2 of the policy's 5 seats must vote, abstentions count towards the quorum, not the majority, /);
 	const { fill, ...words } = bar();
 	expect(words.label).toBe("Approval: 3 of the policy's 5 seats must vote yes");
 	expect(words.figure).toBe('2 of 5');

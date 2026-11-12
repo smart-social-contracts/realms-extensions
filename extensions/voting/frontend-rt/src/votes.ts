@@ -133,6 +133,11 @@ export function approvalsNeeded(threshold: number, seats: number): number {
 	return Math.max(Math.ceil((threshold * seats) / ONE), 1);
 }
 
+/** The votes cast that reach a department's quorum, a share of the policy's seats rounded up: the fewest the realm accepts. */
+export function votersNeeded(quorum: number, seats: number): number {
+	return Math.ceil((quorum * seats) / ONE);
+}
+
 /** Whether the yes votes of a realm-wide vote exceed its threshold of the votes cast, or of all the eligible. */
 function exceedsThreshold(rule: VotingRule, votes: Votes, eligible: number): boolean {
 	const basis = rule.thresholdOf === 'eligible' ? eligible : votes.yes + votes.no;
@@ -174,12 +179,22 @@ function tiedAtMajority(rule: DepartmentRule, votes: Votes): boolean {
 }
 
 /** How a department's vote that counts the votes cast ends, each by the first thing the realm finds (api/proposals.py: majority_outcome). */
-type MajorityEnd = 'vetoed' | 'quorum' | 'no_majority' | 'second_vote' | 'tied_again' | 'seats' | 'majority' | 'casting';
+type MajorityEnd =
+	| 'vetoed'
+	| 'quorum'
+	| 'no_majority'
+	| 'second_vote'
+	| 'expires'
+	| 'tied_again'
+	| 'seats'
+	| 'majority'
+	| 'casting';
 
 /**
  * How such a vote ends: a veto holder's no or a quorum of the policy's n not reached rejects it; the yes votes must exceed
  * the share of the votes cast, or tie at it, which a first vote puts to a second and a second vote leaves to the casting
- * member's yes; under ``eligible`` the yes votes must also reach the threshold of the seats.
+ * member's yes; under ``eligible`` the yes votes must also reach the threshold of the seats. A first vote that tied and ended
+ * after the time the proposal takes effect expires it instead of going to a second vote.
  */
 function majorityEnd(rule: DepartmentRule, vote: VoteState): MajorityEnd {
 	const { votes } = vote;
@@ -188,7 +203,7 @@ function majorityEnd(rule: DepartmentRule, vote: VoteState): MajorityEnd {
 	const ahead = votes.yes * ONE > majorityShare(rule) * (votes.yes + votes.no);
 	const tied = tiedAtMajority(rule, votes);
 	if (!ahead && !tied) return 'no_majority';
-	if (tied && !vote.firstVote) return 'second_vote';
+	if (tied && !vote.firstVote) return vote.expiresIfTied ? 'expires' : 'second_vote';
 	if (tied && !(rule.castingVote !== '' && vote.castingChoice === 'yes')) return 'tied_again';
 	if (rule.thresholdOf === 'eligible' && votes.yes * ONE < rule.threshold * rule.seats) return 'seats';
 	return ahead ? 'majority' : 'casting';
@@ -209,6 +224,8 @@ export type VoteState = {
 	castingChoice: string;
 	/** What the first vote came to, when this is the second vote that a tied first vote put the proposal to; null for a first vote. */
 	firstVote: Votes | null;
+	/** Whether the vote ended after the time the proposal takes effect, so that a tied first vote expires the proposal (api/proposals.py: second_vote). */
+	expiresIfTied: boolean;
 };
 
 /**
@@ -216,7 +233,7 @@ export type VoteState = {
  * they have left (a suspended or banned member), and the screen cannot read it. A tied first vote of a department that counts
  * the votes cast ends in a second vote, not in a decision.
  */
-export type Outcome = 'accepted' | 'rejected' | 'depends_on_casting_member' | 'second_vote';
+export type Outcome = 'accepted' | 'rejected' | 'depends_on_casting_member' | 'second_vote' | 'expired';
 
 /**
  * How a vote whose deadline has passed ends: the realm's ``outcome`` with ``final`` set. Null when the screen cannot tell:
@@ -229,7 +246,8 @@ export function finalOutcome(vote: VoteState): Outcome | null {
 		const end = majorityEnd(rule, vote);
 		if (end === 'majority') return 'accepted';
 		if (end === 'casting') return 'depends_on_casting_member';
-		return end === 'second_vote' ? 'second_vote' : 'rejected';
+		if (end === 'second_vote') return 'second_vote';
+		return end === 'expires' ? 'expired' : 'rejected';
 	}
 	if (isDepartment(rule)) {
 		const short = departmentShortfall(rule, votes, eligible, vote.vetoed);
@@ -262,15 +280,16 @@ function thresholdClause(t: Translate, rule: VotingRule): string {
 
 /**
  * The rule of a department's vote that counts the votes cast, as the parts of a list: under ``eligible`` the threshold of the
- * seats comes first, as the approval bar measures it, with the majority of the votes cast, a half, after it.
+ * seats comes first, as the approval bar measures it, with the majority of the votes cast, a half, after it. The quorum is a
+ * number of seats, and abstentions count towards it, never towards the majority. A second vote needs no word of the second vote.
  */
-function majorityParts(t: Translate, rule: DepartmentRule, who: string): string[] {
+function majorityParts(t: Translate, rule: DepartmentRule, who: string, secondVote: boolean): string[] {
 	const parts = [thresholdClause(t, rule)];
 	if (rule.thresholdOf === 'eligible') parts.push(t('rule_cast', { threshold: formatPercent(HALF) }));
-	parts.push(t('rule_abstain_not_counted'));
+	if (rule.quorum) parts.push(t('rule_quorum_seats', { count: votersNeeded(rule.quorum, rule.seats), seats: rule.seats }));
+	parts.push(t(rule.quorum ? 'rule_abstain_quorum' : 'rule_abstain_not_counted'));
 	if (rule.veto) parts.push(t('rule_veto'));
-	if (rule.quorum) parts.push(t('rule_quorum_seats', { quorum: formatPercent(rule.quorum), seats: rule.seats }));
-	parts.push(t('rule_second_vote'));
+	if (!secondVote) parts.push(t('rule_second_vote'));
 	parts.push(rule.castingVote ? t('rule_casting_second', { who }) : t('rule_second_tie_rejects'));
 	return parts;
 }
@@ -278,11 +297,12 @@ function majorityParts(t: Translate, rule: DepartmentRule, who: string): string[
 /**
  * The rule in words: what the yes votes must come to, what that is a share of (and for a department, that abstentions and
  * members who do not vote count against it, or are not counted when it counts the votes cast), the quorum, a veto, a second
- * vote and the casting vote. ``who`` names the casting member.
+ * vote and the casting vote. ``who`` names the casting member; ``secondVote``: the vote is the second a tied first vote put
+ * the proposal to.
  */
-export function requirementText(t: Translate, rule: VotingRule | null, who: string): string {
+export function requirementText(t: Translate, rule: VotingRule | null, who: string, secondVote = false): string {
 	if (!rule) return t('requirement_unknown');
-	if (isMajority(rule)) return t('requirement', { rule: joinList(t, majorityParts(t, rule, who)) });
+	if (isMajority(rule)) return t('requirement', { rule: joinList(t, majorityParts(t, rule, who, secondVote)) });
 	const parts: string[] = [thresholdClause(t, rule)];
 	if (isDepartment(rule)) {
 		parts.push(t('rule_abstain'));
@@ -355,6 +375,7 @@ function majorityEndedBecause(t: Translate, rule: DepartmentRule, vote: VoteStat
 	if (end === 'quorum') return t('ended_quorum');
 	if (end === 'no_majority') return t('ended_not_exceeds');
 	if (end === 'second_vote') return t('ended_second_vote');
+	if (end === 'expires') return t('ended_tie_expires');
 	if (end === 'tied_again') return t('ended_tied_again');
 	if (end === 'seats') {
 		const needed = approvalsNeeded(rule.threshold, rule.seats);

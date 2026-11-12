@@ -95,7 +95,7 @@ test('the first vote of a Council that counts the votes cast: its rule in words,
   await open(page);
 
   await expect(page.getByTestId('requirement-line')).toHaveText(
-    `Requirement: more than 50% yes of the yes and no votes cast, abstentions are not counted, at least 33.333333% of the policy's 5 seats must vote, a tie at the threshold goes to a second vote and a tie at the threshold in the second vote goes to the yes of the casting vote (${JORDI_SHORT})`,
+    `Requirement: more than 50% yes of the yes and no votes cast, at least 2 of the policy's 5 seats must vote, abstentions count towards the quorum, not the majority, a tie at the threshold goes to a second vote and a tie at the threshold in the second vote goes to the yes of the casting vote (${JORDI_SHORT})`,
   );
   await expect(page.getByTestId('requirement-line')).not.toContainText('3 of the policy');
   await expect(page.getByTestId('approval-label')).toHaveText('Approval: more than 50% yes of the yes and no votes cast');
@@ -111,8 +111,11 @@ test('the second vote says it follows a tied first vote, what that came to, and 
   await open(page, 'P-7');
 
   await expect(page.getByTestId('second-vote-line')).toHaveText(
-    'Second vote: the first vote ended in a tie (2 yes, 2 no, 1 abstain) and was put to a second vote under the same rule.',
+    "Second vote: the first vote ended in a tie (2 yes, 2 no, 1 abstain), so the proposal was put to a second vote under the same rule. The first vote's ballots were deleted: everyone votes again.",
   );
+  // it is the second vote: the rule has no second vote to come, only the casting vote of its tie
+  await expect(page.getByTestId('requirement-line')).not.toContainText('goes to a second vote');
+  await expect(page.getByTestId('requirement-line')).toContainText('a tie at the threshold in the second vote goes to the yes of the casting vote');
   await expect(page.getByTestId('approval-figure')).toHaveText('1 of 2'); // the count of this vote, not of the first
   await expect(page.getByTestId('casting-note')).toHaveText(
     `Yes and no are tied at the threshold again: the yes of the casting vote (${JORDI_SHORT}) decides it, if they still hold a seat.`,
@@ -129,10 +132,10 @@ test('a tie in the second vote waits for the casting yes until the casting membe
   await page.screenshot({ path: join(OUT, 'department-majority-second-vote-waiting-for-casting.png'), fullPage: true });
 });
 
-test('a tie in the second vote of a department with no head says it is rejected', async ({ page }) => {
+test('a tie in the second vote of a department with no head says a tie rejects it', async ({ page }) => {
   scenario = council({ id: 'P-7', first_vote: FIRST_VOTE, casting_vote: '' }, [ballot(LAIA, 'yes'), ballot(PAU, 'no')]);
   await open(page, 'P-7');
-  await expect(page.getByTestId('casting-note')).toHaveText('Yes and no are tied at the threshold again, and the vote has no casting vote: it is rejected.');
+  await expect(page.getByTestId('casting-note')).toHaveText('Yes and no are tied at the threshold again, and the vote has no casting vote: a tie rejects it.');
   await expect(page.getByTestId('requirement-line')).toContainText('a tie at the threshold in the second vote rejects it');
 });
 
@@ -141,6 +144,15 @@ test('a first vote that tied at its deadline says that a second vote follows', a
   await open(page);
   await expect(page.getByTestId('ended-line')).toContainText('yes and no are tied at the threshold, so a second vote follows. Awaiting finalization.');
   await page.screenshot({ path: join(OUT, 'department-majority-first-vote-ended-tied.png'), fullPage: true });
+});
+
+test('a first vote that tied and ended after the proposal takes effect says it expires instead of going to a second vote', async ({ page }) => {
+  scenario = council({ deadline: PAST, effective_at: PAST - 1000 }, [ballot(LAIA, 'yes'), ballot(NEUS, 'no'), ballot(PAU, 'abstain')]);
+  await open(page);
+  await expect(page.getByTestId('ended-line')).toContainText(
+    'yes and no are tied at the threshold, but the vote ended after the time the proposal takes effect, so it expires instead of going to a second vote. Awaiting finalization.',
+  );
+  await page.screenshot({ path: join(OUT, 'department-majority-first-vote-ended-tied-expires.png'), fullPage: true });
 });
 
 test('a second vote that tied at its deadline is decided by the casting yes, if its holder still holds a seat', async ({ page }) => {
@@ -165,7 +177,7 @@ test("a veto holder's no is named while the vote is open, and the rule says it r
     [ballot(JORDI, 'yes'), ballot(LAIA, 'yes'), ballot(NEUS, 'no')],
   );
   await open(page);
-  await expect(page.getByTestId('requirement-line')).toContainText('abstentions are not counted, no veto holder may vote no, at least 33.333333%');
+  await expect(page.getByTestId('requirement-line')).toContainText("at least 2 of the policy's 5 seats must vote, abstentions count towards the quorum, not the majority, no veto holder may vote no, a tie");
   await expect(page.getByTestId('waiting-line')).toHaveText('Waiting for a veto holder to change their no, or the deadline');
   await page.screenshot({ path: join(OUT, 'department-majority-veto.png'), fullPage: true });
 });
@@ -174,7 +186,7 @@ test("a threshold of the policy's seats adds them to the majority of the votes c
   scenario = council({ threshold_of: 'eligible', threshold: 60_000_000 }, [ballot(JORDI, 'yes'), ballot(LAIA, 'yes'), ballot(NEUS, 'no')]);
   await open(page);
   await expect(page.getByTestId('requirement-line')).toContainText(
-    "Requirement: 3 of the policy's 5 seats must vote yes, more than 50% yes of the yes and no votes cast, abstentions are not counted",
+    "Requirement: 3 of the policy's 5 seats must vote yes, more than 50% yes of the yes and no votes cast, at least 2 of the policy's 5 seats must vote, abstentions count towards the quorum, not the majority",
   );
   await expect(page.getByTestId('approval-label')).toHaveText("Approval: 3 of the policy's 5 seats must vote yes");
   await expect(page.getByTestId('approval-figure')).toHaveText('2 of 5');

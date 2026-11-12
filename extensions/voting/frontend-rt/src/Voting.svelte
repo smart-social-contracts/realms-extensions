@@ -1073,6 +1073,8 @@
 			vetoed: proposal.vetoed,
 			castingChoice: proposal.casting_choice,
 			firstVote: proposal.first_vote,
+			// A first vote that tied expires the proposal when it ended after the time the proposal takes effect.
+			expiresIfTied: !!proposal.effective_at && !!proposal.voting_deadline && proposal.voting_deadline > proposal.effective_at,
 		};
 	}
 
@@ -1413,7 +1415,7 @@
 					</div>
 
 					{#if tally.total > 0 || selectedProposal.enriched}
-						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal))}
+						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal), !!selectedProposal.first_vote)}
 						{@const casting = castingNote(t, voteState(selectedProposal), castingMember(selectedProposal))}
 						<div class="mb-4">
 							{#if tally.total > 0}
