@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { openExtension, realmCall } from '../../../../_shared/testing/e2e/local-realm';
@@ -16,9 +16,24 @@ test.use({ viewport: { width: 1280, height: 1200 } });
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
 
+/** The host's sidebar slides in as the page opens, moving the extension with it: wait until the heading stays put. */
+async function settled(ext: FrameLocator) {
+  const heading = ext.getByRole('heading', { name: 'Budget management' });
+  let before = '';
+  await expect
+    .poll(async () => {
+      const now = JSON.stringify(await heading.boundingBox());
+      const still = now === before;
+      before = now;
+      return still;
+    }, { intervals: [400], timeout: 30_000 })
+    .toBe(true);
+}
+
 async function open(page: Page) {
   const { ext, close } = await openExtension(page, 'budget_manager');
   await expect(ext.getByRole('button', { name: 'Budgets' })).toBeVisible({ timeout: 120_000 });
+  await settled(ext);
   return { ext, close };
 }
 
@@ -126,6 +141,7 @@ test('a plain member reads the stages and the sweep rules, not the payments or t
   const { ext, close } = await openExtension(page, 'budget_manager', { asMember: true });
   try {
     await expect(ext.getByTestId('stages')).toBeVisible({ timeout: 120_000 });
+    await settled(ext);
     await expect(ext.getByTestId('stages').getByTestId('unadopted')).toHaveCount(0);
     await expect(ext.getByRole('button', { name: 'Scheduled payments' })).toHaveCount(0);
     await ext.getByRole('button', { name: 'Quarter sweeps' }).click();

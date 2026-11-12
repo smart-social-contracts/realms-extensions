@@ -31,6 +31,10 @@ jobs:
       working-directory: extensions/budget_manager/frontend-rt
       run: npm install --no-audit --no-fund --silent
 
+    - name: Unit tests
+      working-directory: extensions/budget_manager/frontend-rt
+      run: npm test
+
     - name: Build
       working-directory: extensions/budget_manager/frontend-rt
       run: npm run build
