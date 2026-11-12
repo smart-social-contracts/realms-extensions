@@ -148,7 +148,7 @@
 				<span class="font-mono text-xs text-gray-500">{contract.id}</span>
 			</div>
 
-			<dl class="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+			<dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
 				<div>
 					<dt class="text-gray-500">{t('term_supplier')}</dt>
 					<dd data-testid="contract-supplier">{suppliers(contract).join(', ') || '—'}</dd>
@@ -229,7 +229,7 @@
 		{#if contract.framework && holder}
 			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700" data-testid="contract-framework">
 				<h3 class="font-medium">{t('framework_title')}</h3>
-				<dl class="mt-2 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+				<dl class="mt-2 grid gap-3 text-sm sm:grid-cols-2">
 					<div>
 						<dt class="text-gray-500">{t(holder.kind === 'external' ? 'framework_holder_body' : 'framework_holder_realm')}</dt>
 						<dd data-testid="framework-holder">
