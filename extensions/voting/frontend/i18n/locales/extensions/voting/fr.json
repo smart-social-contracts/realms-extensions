@@ -118,6 +118,8 @@
   "second_vote": "Second vote : le premier s'est terminé à égalité ({yes} oui, {no} non, {abstain} abstentions), la proposition a donc été soumise à un second vote selon la même règle. Les bulletins du premier ont été effacés : tout le monde vote de nouveau.",
   "second_vote_short": "Second vote, après une égalité au premier",
   "release_install": "Installe en entier la version {version} de {source}. Le royaume construit la liste des changements à partir du registre de la source de synchronisation qui la garantit, au moment de l'installation.",
+  "release_runs": "Le royaume applique maintenant {source} {version}.",
+  "release_step_back": "Cela fait reculer le royaume : {source} {version} est antérieure à {runs}, la version qu'il applique maintenant. La source y est revenue.",
   "change_unreadable": "La liste des changements ne peut pas être affichée : {reason}",
   "change_loading": "Lecture de la liste des changements…",
   "change_invalid": "Ce n'est pas une liste des changements que le royaume lit.",

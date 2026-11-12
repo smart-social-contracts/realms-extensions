@@ -118,6 +118,8 @@
   "second_vote": "Second vote: the first vote ended in a tie ({yes} yes, {no} no, {abstain} abstain), so the proposal was put to a second vote under the same rule. The first vote's ballots were deleted: everyone votes again.",
   "second_vote_short": "Second vote, after a tied first vote",
   "release_install": "Installs release {version} of {source} whole. The realm builds the change list from the record of the sync source that vouches for it when the install runs.",
+  "release_runs": "The realm runs {source} {version} now.",
+  "release_step_back": "This takes the realm back: {source} {version} is older than {runs}, the release the realm runs now. The source went back to it.",
   "change_unreadable": "The change list cannot be shown: {reason}",
   "change_loading": "Reading the change list…",
   "change_invalid": "This is not a change list the realm reads.",

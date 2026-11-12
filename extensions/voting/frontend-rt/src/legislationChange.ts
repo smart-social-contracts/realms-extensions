@@ -111,6 +111,33 @@ export function differenceOf(entry: ChapterEntry, running: Record<string, { sha2
 	return current.sha256 === entry.sha256 ? 'same' : 'changed';
 }
 
+/** What `codex_status` says of a sync source that matters to a release's install: the releases it could install. */
+export interface SyncSourceView {
+	installable?: { source: string; version: string; step_back?: boolean }[];
+}
+
+/**
+ * The release of layer `source` the realm runs now: the version its chapters carry, or '' when it runs none of that
+ * layer (or one of the earlier kind). A layer's chapters all carry one release (docs/codices/layered-codex.md §8).
+ */
+export function runningRelease(chapters: Record<string, { source?: string; version?: string }> | null | undefined, source: string): string {
+	for (const chapter of Object.values(chapters ?? {})) {
+		if (chapter.source === source && chapter.version) return chapter.version;
+	}
+	return '';
+}
+
+/**
+ * Whether installing `release` takes the realm back: a sync source marks it `step_back` in `installable`, because it is
+ * older than the release the realm runs and its source went back to it (§11.6). A step back filed any way, by the
+ * "Propose install" of the codex page or by hand, must not read to a voter as a plain install.
+ */
+export function isStepBack(sources: SyncSourceView[] | null | undefined, release: { source: string; version: string }): boolean {
+	return (sources ?? []).some((source) =>
+		(source.installable ?? []).some((item) => item.step_back === true && item.source === release.source && item.version === release.version),
+	);
+}
+
 export type Fetched =
 	| { ok: true; text: string }
 	| { ok: false; reason: 'not_https' | 'unreachable' | 'too_large' | 'wrong_bytes' | 'not_text' };

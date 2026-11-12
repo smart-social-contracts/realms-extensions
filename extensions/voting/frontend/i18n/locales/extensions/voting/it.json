@@ -118,6 +118,8 @@
   "second_vote": "Seconda votazione: la prima si è chiusa in parità ({yes} sì, {no} no, {abstain} astenuti), quindi la proposta è stata sottoposta a una seconda votazione con la stessa regola. Le schede della prima sono state cancellate: tutti votano di nuovo.",
   "second_vote_short": "Seconda votazione, dopo una parità nella prima",
   "release_install": "Installa per intero la versione {version} di {source}. Il regno costruisce l'elenco delle modifiche dal registro della fonte di sincronizzazione che la garantisce quando l'installazione viene eseguita.",
+  "release_runs": "Il regno applica ora {source} {version}.",
+  "release_step_back": "Questo fa tornare indietro il regno: {source} {version} è precedente a {runs}, la versione che il regno applica ora. La fonte è tornata a essa.",
   "change_unreadable": "L'elenco delle modifiche non può essere mostrato: {reason}",
   "change_loading": "Lettura dell'elenco delle modifiche…",
   "change_invalid": "Questo non è un elenco delle modifiche che il regno legge.",

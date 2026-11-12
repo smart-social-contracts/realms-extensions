@@ -15,8 +15,9 @@ export interface Release {
 
 /**
  * What a flag does not say about a layer the realm runs and a source's record does not list (§11.6): `unlisted`, a version
- * the source does not list while none it lists took effect after it; `went_back`, the source vouched for what the realm
- * runs and now lists an older release. `lists` is the newest release the record has of the layer.
+ * the source does not list whose place against what it lists cannot be told (releases are ordered by when they were
+ * published, never by effective date); `went_back`, the source vouched for what the realm runs and now lists only releases
+ * published earlier. `lists` is the newest release the record has of the layer.
  */
 export interface Note {
 	source: string;
@@ -45,8 +46,8 @@ export interface Chapter {
 	sha256: string;
 	vouched_by: string;
 	route: string;
-	/** When the release this layer came from took effect, when the realm kept it. */
-	effective_from?: number;
+	/** When the publisher published the release this layer came from, when the realm kept it. */
+	published?: number;
 }
 
 export interface LayeredCodex {

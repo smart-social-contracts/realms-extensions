@@ -118,6 +118,8 @@
   "second_vote": "第二轮投票：第一轮以平票结束（赞成 {yes}、反对 {no}、弃权 {abstain}），因此提案按同一规则交付第二轮投票。第一轮的选票已删除：所有人重新投票。",
   "second_vote_short": "第二轮投票（第一轮平票）",
   "release_install": "完整安装 {source} 的 {version} 版。安装执行时，领域会依据为其担保的同步来源的记录构建变更清单。",
+  "release_runs": "领域目前运行的是 {source} {version}。",
+  "release_step_back": "这会使领域回退：{source} {version} 早于领域目前运行的 {runs}。来源已回退到该版本。",
   "change_unreadable": "无法显示变更清单：{reason}",
   "change_loading": "正在读取变更清单…",
   "change_invalid": "这不是领域能读取的变更清单。",

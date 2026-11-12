@@ -118,6 +118,8 @@
   "second_vote": "Zweite Abstimmung: Die erste endete unentschieden ({yes} Ja, {no} Nein, {abstain} Enthaltungen), daher wurde der Antrag mit derselben Regel einer zweiten Abstimmung unterzogen. Die Stimmen der ersten wurden gelöscht: Alle stimmen erneut ab.",
   "second_vote_short": "Zweite Abstimmung nach einem Gleichstand in der ersten",
   "release_install": "Installiert Version {version} von {source} vollständig. Das Realm baut die Änderungsliste beim Ausführen der Installation aus dem Verzeichnis der Synchronisationsquelle, die dafür bürgt.",
+  "release_runs": "Das Realm führt jetzt {source} {version} aus.",
+  "release_step_back": "Das führt das Realm zurück: {source} {version} ist älter als {runs}, die Fassung, die das Realm jetzt ausführt. Die Quelle ist zu ihr zurückgekehrt.",
   "change_unreadable": "Die Änderungsliste kann nicht angezeigt werden: {reason}",
   "change_loading": "Änderungsliste wird gelesen …",
   "change_invalid": "Das ist keine Änderungsliste, die das Realm liest.",
