@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/frontend/**'
       - '.github/workflows/codex_viewer-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/codex_viewer/**'
       - 'extensions/_shared/frontend/**'
