@@ -5,11 +5,13 @@ on:
     branches: [ main, develop ]
     paths:
       - 'extensions/voting/**'
+      - 'extensions/_shared/frontend/**'
       - '.github/workflows/voting-test.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'extensions/voting/**'
+      - 'extensions/_shared/frontend/**'
       - '.github/workflows/voting-test.yml'
 
 jobs:
