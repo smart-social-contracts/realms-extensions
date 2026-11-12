@@ -60,6 +60,7 @@
 	let licencesRead = false;
 	// The zones `land_map` lists are cut at MAX_PAGES pages: said, when that is where it stopped.
 	let zonesCapped = $state(false);
+	let parcelsCapped = $state(false);
 	let permissions: string[] = $state([]);
 	let realmZone = $state(UTC);
 	let zoneFilter = $state('');
@@ -407,7 +408,8 @@
 	async function initMap() {
 		if (!mapContainer || map) return;
 		maplibregl = await loadMapLibre();
-		h3 = await loadH3Lib();
+		await h3Ready;
+		if (!h3) throw new Error('h3-js is not available');
 		let style: any = STYLE_URL;
 		try {
 			const res = await fetch(STYLE_URL);
@@ -526,6 +528,8 @@
 				else error = `Parcels are unavailable right now: ${parcels.error}`;
 			}
 			lands = parcels.rows.map(toParcel).filter((l) => l.id);
+			parcelsCapped = parcels.capped;
+			loading = false; // the parcels are on the screen while h3-js, below, is waited for
 			// A realm that does not say which zones it defined (no `defined`) is read by h3-js, which may be a moment away: not for long.
 			if (mapZones.rows.some((z) => typeof z?.defined !== 'boolean')) await Promise.race([h3Ready, new Promise((done) => setTimeout(done, H3_WAIT_MS))]);
 			const named = new Set(lands.flatMap((l) => l.zones));
@@ -818,6 +822,9 @@
 				</form>
 			{/if}
 
+			{#if parcelsCapped}
+				<p class="muted note zone-filter" data-testid="parcels-capped">{t('parcels_capped', { count: PAGE * MAX_PAGES })}</p>
+			{/if}
 			{#if zonesCapped}
 				<p class="muted note zone-filter" data-testid="zones-capped">{t('planning_zones_capped', { count: PAGE * MAX_PAGES })}</p>
 			{/if}

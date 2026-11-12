@@ -1180,6 +1180,7 @@
 	});
 
 	onDestroy(() => {
+		listGeneration++; // a tag search still running for the list of this page stops making calls
 		clearInterval(countdownTimer);
 		window.removeEventListener('popstate', handlePopState);
 		clearProposalFocus();

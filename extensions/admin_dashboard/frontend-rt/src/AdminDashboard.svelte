@@ -332,6 +332,7 @@
 							No items found.
 						{/if}
 					</p>
+					{#if currentPage > 0 || (selectedType === 'Organization' && kindFilter && nextCursor != null)}
 					<div class="mt-4 flex items-center justify-center gap-2">
 						{#if currentPage > 0}
 							<button
@@ -351,6 +352,7 @@
 							>{t('org_kind_search_further')}</button>
 						{/if}
 					</div>
+					{/if}
 				</div>
 			{:else}
 				<div class="divide-y divide-gray-200">
