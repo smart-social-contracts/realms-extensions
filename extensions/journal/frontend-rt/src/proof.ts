@@ -18,6 +18,19 @@ export function verificationUrl(canisterId: string, code: string): string {
 	return `${VERIFY_URL}?canister=${encodeURIComponent(canisterId)}&code=${encodeURIComponent(code)}`;
 }
 
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/** The verification code of a document: the first 80 bits of its digest (hex) in base32, as `XXXX-XXXX-XXXX-XXXX`, the way
+ * the canister makes it. The sheet shows this and not the code the realm sends beside the digest. Null for a digest that is
+ * not 64 hex digits. */
+export function codeOf(digest: string): string | null {
+	if (!/^[0-9a-f]{64}$/i.test(digest)) return null;
+	const bits = BigInt(`0x${digest.slice(0, 20)}`);
+	let code = '';
+	for (let shift = 75n; shift >= 0n; shift -= 5n) code += BASE32[Number((bits >> shift) & 31n)];
+	return code.match(/.{4}/g)!.join('-');
+}
+
 /** What a signed issue says in its text. */
 export interface Signed {
 	realm: string;
@@ -45,19 +58,51 @@ function sameJson(a: unknown, b: unknown): boolean {
 	return keys.length === Object.keys(b).length && keys.every((key) => sameJson((a as any)[key], (b as any)[key]));
 }
 
+const isHex = (text: unknown, length: number): boolean => typeof text === 'string' && text.length === length && /^[0-9a-f]+$/i.test(text);
+
+/** The fields of an entry the sheet renders, and so the ones that must be the signed ones. */
+const ENTRY_FIELDS = ['id', 'at', 'kind', 'details'] as const;
+
+function rendered(entries: Entry[]): unknown[] {
+	return entries.map((entry) => Object.fromEntries(ENTRY_FIELDS.map((field) => [field, (entry as any)[field]])));
+}
+
+/** Whether every value of the proof that the sheet prints has the form it has when it is right. */
+function shaped(proof: NonNullable<Issue['proof']>, signed: Signed): boolean {
+	const { key } = signed;
+	return (
+		isHex(proof.digest, 64) &&
+		isHex(proof.root, 64) &&
+		isHex(proof.signature, 128) &&
+		Array.isArray(proof.path) &&
+		proof.path.every((step) => Array.isArray(step) && (step[0] === 'l' || step[0] === 'r') && isHex(step[1], 64)) &&
+		key.algorithm === 'ed25519' &&
+		isHex(key.public_key, 64) &&
+		typeof key.name === 'string' &&
+		/^[a-z0-9_]+$/.test(key.name) &&
+		key.path === 'realms:journal' &&
+		proof.code === codeOf(proof.digest)
+	);
+}
+
 /**
  * The signed text of the issue's proof when it is this issue's: signed by the canister that issues the journal, for this
- * day, over the entries this sheet shows. Anything else (a proof of another day, of another canister, or over entries the
- * realm no longer serves as they were) is null, and the sheet says so instead of showing a signature that is not
- * this issue's. `canisterId` is empty when the sheet does not know the issuer.
+ * day and number, over the entries this sheet renders, with every value in its right form and the code the digest's.
+ * Anything else (a proof of another day, number or canister, over entries the realm no longer serves as they were, or an
+ * issuer the sheet does not know) is null, and the sheet says so instead of showing a signature that is not this issue's.
  */
 export function signedOf(issue: Issue, canisterId: string): Signed | null {
-	const signed = issue.proof ? signedText(issue.proof.canonical) : null;
+	const proof = issue.proof;
+	const signed = proof ? signedText(proof.canonical) : null;
 	const ours =
+		proof &&
 		signed &&
-		(!canisterId || signed.realm === canisterId) &&
+		canisterId !== '' &&
+		signed.realm === canisterId &&
 		signed.subject === issue.day &&
-		sameJson(signed.body.entries, issue.entries);
+		signed.body.number === issue.number &&
+		shaped(proof, signed) &&
+		sameJson(rendered(signed.body.entries), rendered(issue.entries));
 	return ours ? signed : null;
 }
 

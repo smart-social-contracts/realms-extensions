@@ -1,11 +1,12 @@
 /** A signed issue as the tests make one: the text the canister signs, built from the issue, and a proof around it. */
 
 import type { Issue } from './issue.ts';
+import { codeOf } from './proof.ts';
 
 export const CANISTER = 'rrkah-fqaaa-aaaaa-aaaaq-cai';
-export const CODE = 'ABCD-EFGH-JKLM-NPQR';
 export const PUBLIC_KEY = 'ab'.repeat(32);
 export const DIGEST = 'cd'.repeat(32);
+export const CODE = codeOf(DIGEST)!; // ZXG4-3TON-ZXG4-3TON
 export const SIGNATURE = 'ef'.repeat(64);
 
 /** The text the canister signs for `issue`, with `over` replacing parts of it. */

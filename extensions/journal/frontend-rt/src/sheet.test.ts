@@ -161,9 +161,20 @@ test('a signed issue shows its signature box: the hash, the signature, the key, 
 	assert.doesNotMatch(html, /class="signature-note/);
 });
 
-test('the address names the canister the proof is of, and starts with the verify page\'s', () => {
-	const html = sheet(signed(ONE), { ...ISSUER, canisterId: '' }); // an issuer the sheet does not know: the signed text names it
-	assert.ok(field(html, 'verification_url')!.includes(`${VERIFY_URL}?canister=${CANISTER}&amp;code=${CODE}`));
+test('the address names the canister of the proof and starts with the verify page\'s', () => {
+	assert.ok(field(sheet(signed(ONE)), 'verification_url')!.includes(`${VERIFY_URL}?canister=${CANISTER}&amp;code=${CODE}`));
+});
+
+test('an issuer the sheet does not know has no signature shown: the sheet cannot say whose it is', () => {
+	const html = sheet(signed(ONE), { ...ISSUER, canisterId: '' });
+	assert.match(html, /<p class="signature-note mismatch" role="alert">/);
+	assert.match(slot(html), /^<section[^>]* hidden/);
+	assert.ok(!html.includes(CODE));
+});
+
+test('the code on the sheet is the digest\'s, whatever code the realm sends', () => {
+	assert.equal(field(sheet(signed(ONE)), 'verification_code'), CODE);
+	assert.match(sheet(signed(ONE, { code: 'AAAA-AAAA-AAAA-AAAA' })), /signature-note mismatch/); // not the issue's: not shown
 });
 
 test('an issue signed with others shows the root of their batch, and one signed alone does not', () => {
@@ -208,13 +219,17 @@ test('a signature that is not this issue\'s is not shown: not of another day, an
 	}
 });
 
-test('what the realm says in a proof cannot add markup to the sheet', () => {
+test('what the realm says in a proof cannot add markup to the sheet, and a proof not in its form is not shown at all', () => {
 	const hostile = '"><script>alert(1)</script>';
-	const html = sheet(signed(ONE, { digest: hostile, signature: hostile, code: hostile, root: hostile, path: [['r', 'aa']] }));
-	assert.doesNotMatch(html, /<script>/);
-	assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+	for (const proof of [{ digest: hostile }, { signature: hostile }, { root: hostile }, { code: hostile }, { path: [['r', hostile]] }]) {
+		const html = sheet(signed(ONE, proof));
+		assert.doesNotMatch(html, /<script>|alert\(1\)/);
+		assert.match(html, /signature-note mismatch/);
+		assert.match(slot(html), /^<section[^>]* hidden/);
+	}
 	const key = sheet(signed(ONE, {}, { key: { algorithm: 'ed25519', name: hostile, path: hostile, public_key: hostile } }));
-	assert.doesNotMatch(key, /<script>/);
+	assert.doesNotMatch(key, /<script>|alert\(1\)/);
+	assert.match(key, /signature-note mismatch/);
 });
 
 test('a signed sheet reads and prints: the box is not cut across pages and its address prints as text', () => {

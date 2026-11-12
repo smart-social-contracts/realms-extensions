@@ -8,7 +8,7 @@
 import { dayOf, longDate, momentOf, timeOfDay, utcOffset } from './dates.ts';
 import { describe, SECTIONS, shortId, type Described } from './entries.ts';
 import { entryReference, issueReference, type Entry, type Issue, type Text } from './issue.ts';
-import { qrSvg, signedOf, verificationUrl } from './proof.ts';
+import { codeOf, qrSvg, signedOf, verificationUrl } from './proof.ts';
 import { pageRules, SHEET_STYLE } from './sheetStyle.ts';
 
 /** What the sheet shows of the realm that issues the journal besides the issue. */
@@ -133,14 +133,15 @@ function signatureSlotHtml({ issue, issuer, t }: View): string {
 	let parts: Part[] = [];
 	let qr = '';
 	if (signed && proof) {
-		const url = verificationUrl(signed.realm, proof.code);
+		const code = codeOf(proof.digest)!; // the digest's, as the canister makes it: `signedOf` has seen it is the one sent
+		const url = verificationUrl(signed.realm, code);
 		parts = [
 			{ field: 'issue_hash', html: esc(proof.digest) },
 			// A batch of one is signed as its digest; one signed with others, as the root of their tree.
 			...(proof.path.length ? [{ field: 'batch_root', html: esc(proof.root) }] : []),
 			{ field: 'signature', html: esc(proof.signature) },
 			{ field: 'key_id', html: `${esc(signed.key.public_key)} (${esc(signed.key.name)}, ${esc(signed.key.path)})` },
-			{ field: 'verification_code', html: esc(proof.code) },
+			{ field: 'verification_code', html: esc(code) },
 			{ field: 'verification_url', html: `<a href="${esc(url)}">${esc(url)}</a>` },
 		];
 		qr = qrSvg(url);

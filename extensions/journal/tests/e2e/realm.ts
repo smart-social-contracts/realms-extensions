@@ -27,7 +27,7 @@ export function issueOf(day: string, number: number, entries: any[] = [], realm 
   };
 }
 
-export const PROOF_CODE = 'K7QX-2MPD-W4NA-ZR5T';
+export const PROOF_CODE = 'UGQ2-DINB-UGQ2-DINB'; // the code of PROOF_DIGEST: its first 80 bits in base32
 export const PROOF_DIGEST = 'a1'.repeat(32);
 export const PROOF_SIGNATURE = 'b2'.repeat(64);
 export const PROOF_KEY = 'c3'.repeat(32);
