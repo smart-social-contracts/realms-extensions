@@ -97,6 +97,28 @@ test('the contract of a lot opens the contract page, which names the lot', async
   expect(await asked(page, 'contract_get')).toEqual([{ contract: 'C-10' }]);
 });
 
+test('the table of lots does not show counts or winners, nor the bids, before the bids are read', async ({ page }) => {
+  scenario = realm(MANAGER, tender(), { tender_get: { delay: 1500, reply: { ok: true, tender: tender() } } });
+  await openTender(page);
+  const row = page.getByTestId('lot-row').first();
+  await expect(row.getByRole('cell').nth(3)).toHaveText('…');
+  await expect(row.getByRole('cell').nth(4)).toHaveText('…');
+  await expect(page.getByRole('heading', { name: 'Bids (…)' })).toBeVisible();
+  await expect(page.getByTestId('lot-award')).toHaveCount(0); // nothing to choose among yet
+  await expect(page.getByRole('heading', { name: 'Bids (3)' })).toBeVisible();
+  await expect(row.getByRole('cell').nth(3)).toHaveText('2');
+  await expect(row.getByRole('cell').nth(4)).toHaveText('buildco');
+  await expect(page.getByTestId('lot-award')).toHaveCount(1);
+});
+
+test('a visitor whose permissions are not known is offered no award', async ({ page }) => {
+  scenario = realm(null, tender());
+  await openTender(page);
+  await expect(page.getByRole('heading', { name: 'Bids (3)' })).toBeVisible();
+  await expect(page.getByTestId('lot-row')).toHaveCount(2);
+  await expect(page.getByTestId('lot-award')).toHaveCount(0);
+});
+
 test('a reader without the permission to manage sees the lots and no way to award them', async ({ page }) => {
   scenario = realm(READER, tender());
   await openTender(page);

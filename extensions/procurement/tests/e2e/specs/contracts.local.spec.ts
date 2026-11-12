@@ -17,6 +17,9 @@ test.use({ viewport: { width: 1280, height: 1500 } });
 const SLOW = { timeout: 120_000 };
 
 async function shot(page: Page, name: string) {
+  // The realm's page may still be laying out (the first shot of a run came out blank).
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(800);
   await page.screenshot({ path: join(OUT, `local-${name}.png`), fullPage: true });
 }
 
@@ -150,6 +153,33 @@ test('a call-off names the body that holds the agreement, its reference and its 
   }
 });
 
+test('a member without the permissions reads the contracts and the lots, and is offered no action', async ({ page }) => {
+  const { ext, close } = await openExtension(page, 'procurement', { asMember: true });
+  try {
+    await openContract(ext, 'Bike lane works');
+    await expect(ext.getByTestId('amendment')).toHaveCount(2, SLOW);
+    await expect(ext.getByTestId('amend-floor')).toBeVisible();
+    await expect(ext.getByTestId('amend-denied')).toBeVisible();
+    await expect(ext.getByRole('button', { name: 'Propose the amendment' })).toHaveCount(0);
+    await shot(page, 'member-contract');
+
+    await ext.getByRole('button', { name: 'All contracts' }).click();
+    await ext.getByTestId('sections').getByRole('tab', { name: 'Requests' }).click();
+    await ext.getByRole('row').filter({ hasText: 'Bike lane works in the old town' }).getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
+    // The bids are read: the counts are real, and the lots that wait for an award are open (an admin is offered them here).
+    await expect(ext.getByRole('heading', { name: 'Bids (5)' })).toBeVisible(SLOW);
+    await expect(ext.getByTestId('lot-row').nth(1)).toContainText('Open');
+    await expect(ext.getByTestId('lot-row').nth(2)).toContainText('Open');
+    await expect(ext.getByTestId('lot-award')).toHaveCount(0);
+    await expect(ext.getByRole('button', { name: 'Award this lot' })).toHaveCount(0);
+    await expect(ext.getByRole('button', { name: 'Leave this lot unawarded' })).toHaveCount(0);
+    await shot(page, 'member-lots');
+  } finally {
+    await close();
+  }
+});
+
 test('a tender in lots: the table, the contract of an awarded lot, and each open lot awarded or left unawarded', async ({ page }) => {
   const { ext, close } = await openExtension(page, 'procurement');
   try {
@@ -216,27 +246,6 @@ test('a tender is created with lots, their budgets in the currency\'s base units
       { id: 'north', title: 'North schools', estimated_value: 5_000 * 10 ** 8, status: 'open', winner: null, contract: null },
       { id: 'south', title: 'South schools', estimated_value: null, status: 'open', winner: null, contract: null },
     ]);
-  } finally {
-    await close();
-  }
-});
-
-test('a member without the permissions reads the contracts and the lots, and is offered no action', async ({ page }) => {
-  const { ext, close } = await openExtension(page, 'procurement', { asMember: true });
-  try {
-    await openContract(ext, 'Bike lane works');
-    await expect(ext.getByTestId('amendment')).toHaveCount(2, SLOW);
-    await expect(ext.getByTestId('amend-floor')).toBeVisible();
-    await expect(ext.getByTestId('amend-denied')).toBeVisible();
-    await expect(ext.getByRole('button', { name: 'Propose the amendment' })).toHaveCount(0);
-    await shot(page, 'member-contract');
-
-    await ext.getByRole('button', { name: 'All contracts' }).click();
-    await ext.getByTestId('sections').getByRole('tab', { name: 'Requests' }).click();
-    await ext.getByRole('row').filter({ hasText: 'Bike lane works in the old town' }).getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
-    await expect(ext.getByRole('button', { name: 'Award this lot' })).toHaveCount(0);
-    await shot(page, 'member-lots');
   } finally {
     await close();
   }
