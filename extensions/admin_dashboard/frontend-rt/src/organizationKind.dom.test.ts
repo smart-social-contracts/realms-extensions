@@ -234,7 +234,7 @@ test('a chain of calls over empty pages stops when the kind is changed', async (
 	await choose('org-kind-select', 'company');
 	release();
 	await settle(200);
-	// the held call of the first request, and the one call that fills the page of the second: the first request hops no further (it would
-	// have gone on over the 20 hops, with the kind the page has by then)
-	expect(organizationCalls().map((args) => args.kind)).toEqual(['party', 'company']);
+	// the list of all organisations the page opens on, the held call of the first request, and the one call that fills the page of the second:
+	// the first request hops no further (an extra call, made with the kind the page has by then, is what the loop without the check makes)
+	expect(organizationCalls().map((args) => args.kind)).toEqual([undefined, 'party', 'company']);
 });
