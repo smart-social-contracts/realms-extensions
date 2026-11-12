@@ -1,10 +1,11 @@
 {
   "name": "budget-manager-e2e-tests",
   "version": "1.0.0",
-  "description": "UI tests of the budget_manager extension, on a local realm (realms local start)",
+  "description": "Browser tests of the budget_manager extension: the stages, scheduled payments and sweeps screens on the built bundle with a canned realm, and the allocation flow on a local realm",
   "private": true,
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:local": "playwright test -c playwright.local.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.52.0",
