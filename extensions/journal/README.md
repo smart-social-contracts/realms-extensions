@@ -11,7 +11,7 @@ extension, one per realm, installed by default. The design is in
   the journal's first day, its `entries`, its `status` (`provisional`, `signed`, `unsigned`) and, when signed, its `proof`. `day` is the realm's local day on the capital's clock (`YYYY-MM-DD`,
   default today). Every day from the first to today has an issue, with or without entries; a later day has none. The
   page, the PDF and anything else are renderings of that JSON, never checksummed themselves: the canister signs the JSON of a
-  closed day, and the sheet shows that signature.
+  closed day when someone asks it to, and the sheet shows that signature.
 - **A quarter issues nothing.** Its `journal_issue` says so (`issued: false`, and the `capital` whose journal it is), and
   the page asks the capital's issue through `journal_capital_issue`, an update the quarter makes to its capital because a
   read cannot call another canister. It needs a logged-in reader; a visitor is asked to log in. The sheet is headed with the
@@ -56,8 +56,15 @@ An issue reads as an official gazette:
   canister's, for this day, over the entries the sheet shows. The QR code is drawn on the sheet as an SVG from
   `qrcode-generator`, and the address and the code lead to the verify page (`VERIFY_URL` in `src/proof.ts`, a placeholder
   until it is published) as `?canister=<id>&code=<code>`. An issue without a signature of its own has the slot `hidden` and a
-  line that says what it is: provisional (today's), not signed yet, or "the signature does not match". The sheet only shows
-  the signature; the verify page, served from elsewhere, checks it.
+  line that says what it is: provisional (today's, which can be signed once its day has closed), not signed yet (which the
+  realm signs when someone asks), or "the signature does not match". The sheet only shows the signature; the verify page,
+  served from elsewhere, checks it.
+- **Request signature:** a closed issue with no signature has a button, outside the sheet (so it is not printed), for anyone,
+  signed in or not. It calls `journal_sign {day}`, which signs the issue once and returns its proof, `pending` while another
+  call is signing it (the page asks again every few seconds: `src/sign.ts`), or a refusal whose reason the page shows beside
+  the button. When it is signed the issue is read again and the sheet shows the box. The signature is the realm's own cost, at
+  most one a day; a realm can be set to sign every day instead (`journal_signing` in realm settings). A quarter has no button:
+  the issue is its capital's.
 
 The entry texts are in `src/entries.ts` (plain text, no markup), the page in `src/sheet.ts`. The seven languages are in
 `frontend/i18n/locales/extensions/journal/`.
