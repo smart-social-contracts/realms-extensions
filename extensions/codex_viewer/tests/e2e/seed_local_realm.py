@@ -9,6 +9,9 @@ operations as that same identity. Nothing but a local network is accepted.
     seed_local_realm.py --network local --identity <local identity> --home <dir of the local realm's icp.yaml> \\
         --backend <realm backend canister id> --fixture <realms-gos>/tests/fixtures/legislation/valencia
 
+With `--only procurement --principals <realms-gos>/config/deterministic-test-identity-principals.json` (and no
+`--fixture`) it seeds only what the procurement screens show (see `seed_procurement` below), on a realm that was launched.
+
 It leaves: two layered codices of València's example legislation (the later replaced the earlier, which has no tax
 chapter of the town's own), on Madrid time; an IT admin team (department `IT`, seat `it.seat`, which a test fills);
 a sync source, Spain, that has published a release the realm runs behind; the check schedule; a failing method of the
@@ -109,6 +112,201 @@ legislation._record("eu/es/procedure.py", "check_proposal_create", "KeyError: wo
 from ggg import Notification
 print(json.dumps(sorted({n.href for n in Notification.instances() if n.topic == "codex.failing"})))
 '''
+
+
+# ---- procurement (extensions/procurement): contracts, amendments, lots and framework call-offs ---------------------------
+#
+# Each step runs Python in the realm as the controller, like the legislation above, and calls operations as a member of the
+# town (`do`) or as the controller (`do` without `who`); `at` runs a block as of another time, so that what it writes
+# carries that time. The people are the realm's test identities: identity N is number N of the principals file.
+
+PROCUREMENT_PRELUDE = '''
+import json
+from core import chain
+from core.db import next_id
+from core.op import call
+FOUNDER = %(founder)r
+P = %(principals)r  # identity number -> principal
+_now = chain.now
+NOW = _now()
+DAY = 86400
+
+
+class at:
+    def __init__(self, t):
+        self.t = t
+    def __enter__(self):
+        chain.now = lambda: self.t
+    def __exit__(self, *a):
+        chain.now = _now
+
+
+def do(operation, /, who=None, **args):
+    out = call(operation, args, user=P[who] if who else FOUNDER)
+    assert out.get("ok", True) is not False, (operation, who, args, out)
+    return out
+
+
+def titled(cls, title):
+    # The row of cls with this title, or None: the step that made it is done. Ids are the realm's to give.
+    return next((row for row in cls.instances() if row.title == title), None)
+'''
+
+
+def seed_procurement_realm_settings(realm, prelude):
+    """The realm's currency and time zone. A bare local realm has no token, so no currency and no decimals (a contract then
+    reads in base units, with no symbol), and it keeps UTC: REALM with 8 decimals, as a realm that has its token, and Madrid."""
+    realm.shell(prelude + '''
+from ggg import Token
+if Token["REALM"] is None:
+    do("token_register", symbol="REALM", ledger="ryjl3-tyaaa-aaaaa-aaaba-cai", decimals=8, fee=10_000)
+do("realm_configure_tokens", accounting_currency="REALM", accounting_currency_decimals=8)
+do("realm_configure", timezone="Europe/Madrid")
+''')
+
+
+def seed_procurement_people_and_bodies(realm, prelude):
+    """Four people, the departments Infrastructure and Finance (each decides alone) and Planning (two seats, which will decide
+    by vote), the organizations BuildCo and RoadCorp with their administrators, and the Province as an outside body: the
+    parties the procurement screens name."""
+    realm.shell(prelude + '''
+from ggg import Department, External, Organization, Position, User
+NAMES = {2: "Jordi", 3: "Laia", 6: "Biel", 7: "Aina"}
+for n, name in NAMES.items():
+    if User[P[n]] is None:
+        do("user_add", user=P[n])
+        User[P[n]].nickname = name
+for department, description in (("Finance", "Budgets, funds and payments"), ("Infrastructure", "Roads, lanes and works")):
+    if Department[department] is None:
+        do("department_create", department=department, description=description)
+if Department["Planning"] is None:
+    do("department_create", department="Planning", description="Plans the works and holds their contracts")
+if Position["planning.officer"] is None:
+    do("position_create", department="Planning", position="planning.officer", title="Planning officer", headcount=2)
+    do("appoint", position="planning.officer", user=P[6])
+    do("appoint", position="planning.officer", user=P[7])
+    do("department_edit", department="Planning", head=P[6])
+for name, admin in (("BuildCo", 2), ("RoadCorp", 3)):
+    if Organization[name] is None:
+        do("organization_register", organization=name, description=name, kind="company")
+        do("organization_edit", organization=name, admins=[P[admin]])
+if External["province"] is None:
+    do("external_add", external="province", name="The Province", kind="authority", channel="manual")
+''')
+
+
+def seed_procurement_contracts(realm, prelude):
+    """The fund ROADS with an adopted capital line; a plain tender of Planning and, from it, the contract "Bike lane works": 50 000
+    spread over FY2026 and FY2027, 12 000 paid on it from the capital line, amended twice (the first decided by Planning at
+    once; then Planning goes to a vote of 1 of its 2 seats, and the second is carried by a proposal) and a third attempt
+    refused for going below what was paid; two call-offs under a framework agreement, one held by the Province and one by
+    another realm. The payment is written as a Transfer row: a local network has no ledger to pay through, so the fund's
+    balance and the line's actual do not move. Ids come from the realm's replies; a step is done when its title exists."""
+    print(realm.shell(prelude + '''
+from api.treasury import currency, decimals_of
+from ggg import Budget, Contract, ContractAmendment, FiscalPeriod, Fund, Tender, Transfer
+U = 10 ** decimals_of(currency())  # one unit of the realm's currency, in its base units
+YEAR = 365 * DAY
+start = 1767225600  # 1 Jan 2026
+if Fund["ROADS"] is None:
+    do("fund_create", fund="ROADS", name="Roads", department="Infrastructure")
+if FiscalPeriod["FY2026"] is None:
+    do("period_open", period="FY2026", starts_at=start, ends_at=start + YEAR)
+
+
+def capital_line():
+    return next((b for b in Budget.instances() if b.fund.id == "ROADS" and b.category == "capital" and b.status == "adopted"), None)
+
+
+if capital_line() is None:
+    do("budget_draft", fund="ROADS", period="FY2026", category="capital", kind="expense", planned=300_000 * U)
+    do("budget_propose", period="FY2026", fund="ROADS")
+capital = capital_line()
+river = titled(Tender, "Bike lane along the river")
+if river is None:
+    with at(NOW - 40 * DAY):
+        river = Tender[do("tender_create", title="Bike lane along the river", requester="Planning", kind="works",
+                          procedure="open", opens_at=NOW - 40 * DAY, closes_at=NOW - 30 * DAY,
+                          rubric={"price": 60_000_000, "quality": 40_000_000})["tender"]]
+lane = titled(Contract, "Bike lane works")
+if lane is None:
+    with at(NOW - 30 * DAY):
+        lane = Contract[do("contract_create", title="Bike lane works", parties=["Department:Planning", "Organization:BuildCo"],
+                           value=50_000 * U, symbol=currency(), tender=river.id, starts_at=NOW - 30 * DAY, ends_at=NOW + 90 * DAY,
+                           split=[{"period": "FY2026", "amount": 30_000 * U}, {"period": "FY2027", "amount": 20_000 * U}])["contract"]]
+    with at(NOW - 20 * DAY):  # money paid on it from the capital line, so that its value cannot fall below it
+        Transfer(id=next_id(Transfer, "TR"), sender="Fund:ROADS", to="Organization:BuildCo", symbol=currency(), amount=12_000 * U,
+                 status="completed", at=NOW - 20 * DAY, contract=lane.id, budget=capital.id)
+    with at(NOW - 12 * DAY):  # Planning still decides alone: applied at once
+        do("contract_amend", contract=lane.id, ends_at=NOW + 150 * DAY)
+    do("department_set_policy", department="Planning", m=1, n=2)
+    with at(NOW - 5 * DAY):  # now a vote of its seats: the amendment is a proposal, carried by one yes
+        filed = do("contract_amend", contract=lane.id,
+                   split=[{"period": "FY2026", "amount": 12_000 * U}, {"period": "FY2027", "amount": 38_000 * U}])
+        assert filed.get("requires_vote"), filed
+        decided = do("proposal_vote", 6, proposal=filed["proposal"], choice="yes")
+        assert decided["status"] == "executed", decided
+    refused = call("contract_amend", {"contract": lane.id, "value": 10_000 * U, "split": []}, user=FOUNDER)
+    assert refused.get("kind") == "conflict" and "paid" in refused["error"], refused
+if titled(Contract, "Electricity for the council buildings") is None:
+    with at(NOW - 15 * DAY):
+        do("contract_create", title="Electricity for the council buildings", parties=["Department:Finance", "Organization:BuildCo"],
+           value=9_000 * U, symbol=currency(), kind="supplies",
+           framework={"holder": {"External": "province"}, "reference": "AM-2025/04", "winners": ["BuildCo", "RoadCorp"]})
+if titled(Contract, "Street lighting") is None:
+    with at(NOW - 10 * DAY):
+        do("contract_create", title="Street lighting", parties=["Department:Infrastructure", "Organization:RoadCorp"],
+           value=4_000 * U, symbol=currency(), kind="supplies",
+           framework={"holder": {"Realm": "rrkah-fqaaa-aaaaa-aaaaq-cai"}, "reference": "T-12", "winners": []})
+print([(c.id, c.title, c.value // U, c.lot, c.framework and c.framework["reference"]) for c in Contract.instances()],
+      [(a.id, a.proposal) for a in ContractAmendment.instances()], capital.id)
+'''))
+
+
+def seed_procurement_lots(realm, prelude):
+    """A tender "Bike lane works in the old town" in three lots, bid on, scored and revealed: lot 1 awarded (its contract names
+    the lot), lots 2 and 3 still open with their scored bids, so that the award and the leave-unawarded screens have
+    something to do. Done once its title exists."""
+    print(realm.shell(prelude + '''
+from api.procurement import seal
+from api.treasury import currency, decimals_of
+from ggg import Contract, Tender
+U = 10 ** decimals_of(currency())
+if titled(Tender, "Bike lane works in the old town") is None:
+    rubric = {"price": 60_000_000, "quality": 40_000_000}
+    lots = [{"id": "1", "title": "Bike lanes", "estimated_value": 40_000 * U}, {"id": "2", "title": "Bike racks", "estimated_value": 10_000 * U},
+            {"id": "3", "title": "Signs", "estimated_value": 5_000 * U}]
+    with at(NOW - 10 * DAY):
+        t = do("tender_create", title="Bike lane works in the old town", requester="Infrastructure", kind="works", procedure="open",
+               estimated_value=55_000 * U, opens_at=NOW - 10 * DAY, closes_at=NOW - 3 * DAY, rubric=rubric, lots=lots)["tender"]
+        do("tender_open", tender=t)
+    offers = {"b1": (2, "BuildCo", "1", 48_000), "b2": (2, "BuildCo", "2", 9_000), "b3": (3, "RoadCorp", "1", 52_000),
+              "b4": (3, "RoadCorp", "2", 9_500), "b5": (3, "RoadCorp", "3", 4_000)}
+    ids = {}
+    with at(NOW - 6 * DAY):
+        for key, (who, vendor, lot, price) in offers.items():
+            ids[key] = do("bid_submit", who, tender=t, vendor=vendor, lot=lot, payload_ref=f"vetkey:{vendor}:{t}:{lot}",
+                          payload_hash=seal(price * U, key))["bid"]
+    with at(NOW - 2 * DAY):
+        do("bids_reveal", tender=t, openings={ids[k]: {"price": offers[k][3] * U, "nonce": k} for k in offers})
+        for key, marks in (("b1", (9, 8)), ("b3", (7, 7)), ("b2", (6, 7)), ("b4", (8, 5)), ("b5", (6, 6))):
+            do("bid_score", bid=ids[key], scores={"price": marks[0], "quality": marks[1]})
+    with at(NOW - 1 * DAY):
+        do("tender_award", tender=t, lot="1")
+t = titled(Tender, "Bike lane works in the old town")
+print(t.id, t.status, [(l["id"], l["status"], l["winner"], l["contract"]) for l in t.lots], [(c.id, c.value // U, c.lot) for c in Contract.instances() if c.lot])
+'''))
+
+
+def seed_procurement(realm, home, principals_file):
+    """What the screens of the procurement extension show: see the three steps above. Run it on a launched realm."""
+    founder = json.loads((Path(home) / "state.json").read_text())["principal"]
+    identities = json.loads(Path(principals_file).read_text())["identities"]
+    prelude = PROCUREMENT_PRELUDE % {"founder": founder, "principals": {i["index"] + 1: i["principal"] for i in identities}}
+    seed_procurement_realm_settings(realm, prelude)
+    seed_procurement_people_and_bodies(realm, prelude)
+    seed_procurement_lots(realm, prelude)
+    seed_procurement_contracts(realm, prelude)
 
 
 # Organisations of each kind, for the data explorer's kind column and filter (ggg I-ORG-9), and one from before kinds existed.
@@ -326,12 +524,18 @@ def main():
     parser.add_argument("--identity", required=True, help="the local network's identity, a controller of the realm")
     parser.add_argument("--home", required=True, help="the directory of the local realm's icp.yaml")
     parser.add_argument("--backend", required=True, help="the realm backend's canister id")
-    parser.add_argument("--fixture", required=True, type=Path, help="tests/fixtures/legislation/valencia of realms-gos")
+    parser.add_argument("--fixture", type=Path, help="tests/fixtures/legislation/valencia of realms-gos (not with --only)")
+    parser.add_argument("--only", choices=["procurement"], help="seed only what one extension's screens show")
+    parser.add_argument("--principals", type=Path, help="config/deterministic-test-identity-principals.json of realms-gos (--only)")
     parser.add_argument("--bulk-proposals", type=int, default=0, help="also file this many closed, tagged proposals (voting tags)")
     parser.add_argument("--budget-screens", action="store_true", help="also seed what budget_manager 2.2.0 shows (the budget, "
                         "its payments and the sweeps): for a realm of its own, since it makes the realm a capital")
     args = parser.parse_args()
     realm = Realm(args.network, args.identity, args.home, args.backend)
+    if args.only == "procurement":
+        return seed_procurement(realm, args.home, args.principals)
+    if not args.fixture:
+        parser.error("--fixture is required unless --only is given")
 
     # eu/es/register: its hook sends a notification to a Ref, which the realm cannot take yet as an effect's argument
     # (the operation raises and, instead of failing the chapter, traps the caller's message: `user_add` with it).
