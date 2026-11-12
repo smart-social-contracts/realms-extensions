@@ -320,6 +320,24 @@ test('says what it can of an install of a release when the realm does not answer
 	expect(text('release-step-back')).toBeNull();
 });
 
+test('does not describe a package whose manifest is null as a release: the realm names a release only without a manifest key', async () => {
+	// {source, version, manifest: null} is a package for the realm (the key is there), not a release: the page must not say
+	// "Installs release 2.4.0 of eu/es" of what the realm will not install as one.
+	const nullManifest = { op: 'codex_install', args: { source: 'eu/es', version: '2.4.0', manifest: null } };
+	await open({ proposal: proposal(nullManifest), files: {}, running: RUNS_2_6, sources: SPAIN([]), ready: null });
+	expect(text('release-install')).toBeNull();
+	expect(text('release-step-back')).toBeNull();
+	expect(text('legislation-change')).toBeNull(); // no change list, no release: the package block of the page
+	expect(target.textContent).toContain('2.4.0');
+	closePage();
+	// the same with a manifest that is an empty string, and with a real release for contrast
+	await open({ proposal: proposal({ ...nullManifest, args: { ...nullManifest.args, manifest: '' } }), files: {}, ready: null });
+	expect(text('release-install')).toBeNull();
+	closePage();
+	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN([]) });
+	expect(text('release-install')).not.toBeNull();
+});
+
 test('leaves an install of a codex package as it was', async () => {
 	await open({ proposal: proposal({ op: 'codex_install', args: { codex: 'agora', version: '1.2.0' } }), files: {}, ready: null });
 	expect(text('legislation-change')).toBeNull();

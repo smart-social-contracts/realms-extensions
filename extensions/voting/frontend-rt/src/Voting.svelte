@@ -340,12 +340,13 @@
 		if (op === 'transfer_create') {
 			return { op, fund: args.fund, token: args.symbol, amount: args.amount, to_principal: args.to };
 		}
-		// The branch the realm takes first (core.change_list.names_release): an action that names a release runs as one, whatever
+		// The branches the realm takes, in its order and by the presence of the keys, as core.change_list.names_release does: an
+		// action that names a release (`source` and no `manifest` key, whatever the manifest would be) runs as one, whatever
 		// change list it carries beside it (the realm refuses the shape now; a proposal stored before still runs as the release).
-		if (op === 'codex_install' && args.source && !args.manifest) {
+		if (op === 'codex_install' && 'source' in args && !('manifest' in args)) {
 			return { op, target: 'codex', release: { source: String(args.source), version: String(args.version ?? '') } };
 		}
-		if (op === 'codex_install' && args.checksum) {
+		if (op === 'codex_install' && 'checksum' in args) {
 			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
 		}
 		if (UPGRADE_OPS[op]) {
