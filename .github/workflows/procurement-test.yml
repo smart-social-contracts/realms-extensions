@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/frontend/**'
       - '.github/workflows/procurement-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/procurement/**'
       - 'extensions/_shared/frontend/**'
