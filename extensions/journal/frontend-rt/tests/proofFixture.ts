@@ -1,7 +1,11 @@
-/** A signed issue as the tests make one: the text the canister signs, built from the issue, and a proof around it. */
+/**
+ * A signed issue as the unit tests make one: the text the canister signs, built from the issue, and a proof around it. It
+ * is not in src/: it names a canister, and realms-gos refuses an id in the source of an extension (a test fixture is exempt
+ * in tests/ and in *.test.ts).
+ */
 
-import type { Issue } from './issue.ts';
-import { codeOf } from './proof.ts';
+import type { Issue } from '../src/issue.ts';
+import { codeOf } from '../src/proof.ts';
 
 export const CANISTER = 'rrkah-fqaaa-aaaaa-aaaaq-cai';
 export const PUBLIC_KEY = 'ab'.repeat(32);

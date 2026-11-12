@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { dayOf, longDate, momentOf, timeOfDay, utcOffset } from './dates.ts';
 import { entryReference, issueReference, type Issue } from './issue.ts';
 import { escapeHtml, sheetHtml, type Issuer } from './sheet.ts';
-import { CODE, DIGEST, PUBLIC_KEY, SIGNATURE, signed } from './proofFixture.ts';
+import { CODE, DIGEST, PUBLIC_KEY, SIGNATURE, signed } from '../tests/proofFixture.ts';
 import { VERIFY_URL, verificationUrl } from './proof.ts';
 import { LOCALES, texts } from './testTexts.ts';
 
