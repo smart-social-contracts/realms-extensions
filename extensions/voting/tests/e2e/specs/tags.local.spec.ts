@@ -9,6 +9,28 @@ import { openExtension, realmCall } from '../../../../_shared/testing/e2e/local-
 
 const OUT = join(__dirname, '..', 'test-results');
 
+/** The proposals that carry one of ``tags``: the realm filters a page of rows at a time, so every page is read. */
+function findTagged(tags: string[]): any[] {
+  const found: any[] = [];
+  let from: number | null = 1;
+  while (from != null) {
+    const reply: Record<string, any> = realmCall('proposal_list', { from, count: 500, tags });
+    found.push(...reply.proposals);
+    from = reply.next;
+  }
+  return found;
+}
+
+/** What the realm says when it refuses ``name`` (the command line fails, and its output holds the reply). */
+function refusal(name: string, args: Record<string, unknown>): string {
+  try {
+    realmCall(name, args);
+  } catch (e: any) {
+    return `${e.stdout ?? ''}${e.message ?? ''}`;
+  }
+  throw new Error(`${name} was not refused`);
+}
+
 test.use({ viewport: { width: 1280, height: 1500 } });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
 
@@ -50,9 +72,9 @@ test('a proposal filed with tags in the form carries them in the realm, as the r
     await voting.ext.locator('button[type="submit"]').click();
     await expect(voting.ext.getByText(/Proposal P-\d+ submitted/)).toBeVisible({ timeout: 120_000 });
 
-    const found = realmCall('proposal_list', { tags: ['Carrer del Mar'], count: 100 }).proposals;
-    expect(found.map((p: any) => p.title)).toEqual(['Resurface Carrer del Mar']);
-    expect(found[0].tags).toEqual(['mobility', 'district-3', 'Carrer del Mar']);
+    const found = findTagged(['Carrer del Mar']);
+    expect(found.at(-1).title).toBe('Resurface Carrer del Mar'); // the latest, when the spec has run before
+    expect(found.at(-1).tags).toEqual(['mobility', 'district-3', 'Carrer del Mar']);
   } finally {
     await voting.close();
   }
@@ -60,10 +82,11 @@ test('a proposal filed with tags in the form carries them in the realm, as the r
 
 test('the realm refuses what the form refuses: 17 tags, and a tag of 65 characters', async () => {
   const sixteen = Array.from({ length: 16 }, (_, i) => `t${i}`);
-  expect(() => realmCall('proposal_create', { title: 'x', description: 'y', tags: [...sixteen, 'one more'] })).toThrow(/at most 16 tags/);
-  expect(() => realmCall('proposal_create', { title: 'x', description: 'y', tags: ['x'.repeat(65)] })).toThrow(/1 to 64 code points/);
-  expect(() => realmCall('proposal_create', { title: 'x', description: 'y', tags: [' padded'] })).toThrow(/no whitespace at either end/);
-  expect(() => realmCall('proposal_create', { title: 'x', description: 'y', tags: ['a', 'a'] })).toThrow(/each named once/);
+  const filed = (tags: string[]) => refusal('proposal_create', { title: 'x', description: 'y', tags });
+  expect(filed([...sixteen, 'one more'])).toMatch(/at most 16 tags/);
+  expect(filed(['x'.repeat(65)])).toMatch(/1 to 64 code points/);
+  expect(filed([' padded'])).toMatch(/no whitespace at either end/);
+  expect(filed(['a', 'a'])).toMatch(/each named once/);
 });
 
 test('a search for a tag only the last of a year of proposals carries, timed', async ({ page }) => {
