@@ -13,15 +13,26 @@
 		pending,
 		fmt,
 		narrow,
+		focus,
 	}: {
 		period: string;
 		lines: BudgetLine[];
 		pending: BudgetLine[];
 		fmt: (raw: number) => string;
 		narrow: boolean;
+		/** A line to point at, e.g. the one a payment is charged to. */
+		focus: BudgetLine | null;
 	} = $props();
 
 	const funds = $derived(byFund(lines));
+	// A line of another version or period is not among those in force: the page says so rather than show nothing.
+	const focused = $derived(focus && focus.period === period ? focus : null);
+	const focusedInForce = $derived(!focused || funds.some((f) => f.lines.some((line) => line.id === focused.id)));
+	let root: HTMLElement | undefined = $state();
+
+	$effect(() => {
+		if (focused) root?.querySelector(`[data-line="${focused.id}"]`)?.scrollIntoView({ block: 'center' });
+	});
 	const budget = $derived(stagesOf(funds.flatMap((f) => f.lines)));
 
 	const LEGEND: StageName[] = ['actual', 'committed', 'reserved', 'available'];
@@ -66,9 +77,14 @@
 	</dl>
 {/snippet}
 
-<div data-testid="stages">
+<div data-testid="stages" bind:this={root}>
 	<h2 class="text-sm font-semibold text-gray-700 mb-1">{t('stages_title', { period })}</h2>
 	<p class="text-xs text-gray-500 mb-3">{t('stages_hint')}</p>
+	{#if focused && !focusedInForce}
+		<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="line-gone">
+			{t('stages_line_gone')}
+		</p>
+	{/if}
 	<ul class="flex flex-wrap gap-x-3 gap-y-1 mb-3 text-xs text-gray-600" aria-label={t('stages_legend')}>
 		{#each LEGEND as stage (stage)}
 			<li class="inline-flex items-center gap-2">
@@ -86,10 +102,14 @@
 				<section class="py-3" data-fund={f.fund}>
 					<h3 class="font-semibold text-gray-900">{f.fund}</h3>
 					{#each f.lines as line (line.id)}
-						<article class="py-2" data-line={line.id}>
+						<article
+							class="py-2 {focused?.id === line.id ? 'bg-amber-50' : ''}"
+							data-line={line.id}
+							aria-current={focused?.id === line.id ? 'true' : undefined}
+						>
 							<div class="flex items-start justify-between gap-2 mb-1">
 								<span class="min-w-0 font-medium text-gray-900">
-									<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400"> · {t('stages_extended')}</span>{/if}
+									<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400">{' · '}{t('stages_extended')}</span>{/if}
 								</span>
 								<span class="shrink-0 text-xs text-gray-500">{t('stage_planned')} {fmt(line.planned)}</span>
 							</div>
@@ -120,13 +140,13 @@
 		<table class="w-full text-sm" data-testid="stages-table">
 			<thead>
 				<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
-					<th class="py-2 pr-3">{t('col_category')}</th>
-					<th class="py-2 pr-3 w-48"><span class="sr-only">{t('stages_legend')}</span></th>
-					<th class="py-2 pr-3 text-right">{t('stage_planned')}</th>
-					<th class="py-2 pr-3 text-right">{t('stage_reserved')}</th>
-					<th class="py-2 pr-3 text-right">{t('stage_committed')}</th>
-					<th class="py-2 pr-3 text-right">{t('stage_actual')}</th>
-					<th class="py-2 text-right">{t('stage_available')}</th>
+					<th scope="col" class="py-2 pr-3">{t('col_category')}</th>
+					<th scope="col" class="py-2 pr-3 w-48"><span class="sr-only">{t('stages_legend')}</span></th>
+					<th scope="col" class="py-2 pr-3 text-right">{t('stage_planned')}</th>
+					<th scope="col" class="py-2 pr-3 text-right">{t('stage_reserved')}</th>
+					<th scope="col" class="py-2 pr-3 text-right">{t('stage_committed')}</th>
+					<th scope="col" class="py-2 pr-3 text-right">{t('stage_actual')}</th>
+					<th scope="col" class="py-2 text-right">{t('stage_available')}</th>
 				</tr>
 			</thead>
 			{#each funds as f (f.fund)}
@@ -135,9 +155,13 @@
 						<th scope="rowgroup" colspan="7" class="py-2 pr-3 text-left font-semibold text-gray-900">{f.fund}</th>
 					</tr>
 					{#each f.lines as line (line.id)}
-						<tr data-line={line.id}>
+						<tr
+							class={focused?.id === line.id ? 'bg-amber-50' : ''}
+							data-line={line.id}
+							aria-current={focused?.id === line.id ? 'true' : undefined}
+						>
 							<td class="py-2 pr-3 text-gray-600">
-								<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400"> · {t('stages_extended')}</span>{/if}
+								<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400">{' · '}{t('stages_extended')}</span>{/if}
 							</td>
 							<td class="py-2 pr-3"><StageBar stages={line} label={barLabel(line)} /></td>
 							{@render cells(line)}

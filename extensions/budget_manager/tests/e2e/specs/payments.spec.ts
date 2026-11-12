@@ -95,11 +95,34 @@ test('can be filtered to what falls due this month, or what is overdue', async (
   expect(await listed(page)).toHaveLength(5);
 });
 
-test('the line a payment is charged to opens among the spending stages', async ({ page }) => {
+test('the line a payment is charged to opens among the spending stages, and is pointed at', async ({ page }) => {
   scenario = owing();
   await openPayments(page);
   await page.getByTestId('payments').locator('[data-payment="T-10"]').getByRole('button', { name: 'ROADS · capital (FY2026)' }).click();
-  await expect(page.getByTestId('stages').locator('[data-line="B-1"]')).toBeVisible();
+  const line = page.getByTestId('stages').locator('[data-line="B-1"]');
+  await expect(line).toBeVisible();
+  await expect(line).toHaveAttribute('aria-current', 'true');
+  await expect(line).toHaveClass(/bg-amber-50/);
+  await expect(page.getByTestId('stages').locator('[data-line="B-2"]')).not.toHaveAttribute('aria-current', 'true');
+  await expect(page.getByTestId('line-gone')).toHaveCount(0);
+  await page.screenshot({ path: join(OUT, 'payments-line-shown.png'), fullPage: true });
+});
+
+test('a payment charged to a line that is no longer in force says so rather than show nothing', async ({ page }) => {
+  scenario = owing();
+  await openPayments(page);
+  // T-13 was charged to B-5, the version of the capital line that a later budget amended.
+  await page.getByTestId('payments').locator('[data-payment="T-13"]').getByRole('button', { name: 'ROADS · capital (FY2026)' }).click();
+  await expect(page.getByTestId('line-gone')).toHaveText('That line is no longer among the lines in force: a later budget amended it, or its period has closed.');
+  await expect(page.getByTestId('stages').locator('[data-line="B-5"]')).toHaveCount(0);
+});
+
+test('an amount in a token the realm does not list is said to be in the smallest unit', async ({ page }) => {
+  scenario = owing();
+  const [first] = scenario.replies.transfer_list.cases.scheduled.transfers;
+  Object.assign(first, { symbol: 'XYZ', amount: 12345 });
+  await openPayments(page);
+  await expect(page.getByTestId('payments').locator(`[data-payment="${first.id}"]`).getByRole('cell').nth(3)).toHaveText('12345 XYZ (smallest units)');
 });
 
 test('says so when nothing is owed, whatever the filter', async ({ page }) => {

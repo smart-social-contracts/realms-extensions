@@ -70,5 +70,7 @@
   "sweep_quarter_side": "on the quarter: {id}",
   "sweep_booked_as": "Booked as {transaction}",
   "entry_debit": "{category}: debit {amount}",
-  "entry_credit": "{category}: credit {amount}"
+  "entry_credit": "{category}: credit {amount}",
+  "money_base_units": "{amount} {symbol} (smallest units)",
+  "stages_line_gone": "That line is no longer among the lines in force: a later budget amended it, or its period has closed."
 }

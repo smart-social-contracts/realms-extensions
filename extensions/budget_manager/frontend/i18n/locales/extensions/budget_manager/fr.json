@@ -70,5 +70,7 @@
   "sweep_quarter_side": "dans le quartier : {id}",
   "sweep_booked_as": "Comptabilisée sous {transaction}",
   "entry_debit": "{category} : débit {amount}",
-  "entry_credit": "{category} : crédit {amount}"
+  "entry_credit": "{category} : crédit {amount}",
+  "money_base_units": "{amount} {symbol} (plus petites unités)",
+  "stages_line_gone": "Cette ligne ne fait plus partie des lignes en vigueur : un budget ultérieur l'a modifiée, ou sa période est close."
 }

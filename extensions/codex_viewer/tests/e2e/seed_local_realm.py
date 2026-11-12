@@ -114,7 +114,7 @@ print(json.dumps({"ok": True}))
 LINES_AND_DUE_DATES = '''
 import json
 from ggg import Budget, Transfer
-for line, stage in %(lines)r.items():  # what has been charged to a line, and a line a vote has yet to decide
+for line, stage in %(lines)r.items():  # the charged amount of ggg's example set directly (it replaces what the payments booked)
     Budget[line].status = stage.get("status", Budget[line].status)
     if "actual" in stage:
         Budget[line].actual = stage["actual"] * 100
@@ -151,8 +151,9 @@ SOUTH = "renrk-eyaaa-aaaaa-aaada-cai"
 def seed_budget_screens(realm):
     """What the screens of budget_manager 2.2.0 show (`budget_manager/tests/e2e/specs/screens.local.spec.ts`): REALM, a
     token of two decimals, and three funds; FY2026 with Roads' capital and upkeep, a toll revenue line and Welfare's care,
-    the stages (reserved, committed, charged) of ggg's example on the capital line, a drafted and a proposed line that are
-    not in force; payments owed (two fall due this month, one of them overdue, one next month) and one cancelled
+    stages on the capital line (reserved 40,000, committed 90,000 of which the 12,000 payment below draws on, and 120,500
+    charged: the figure of ggg's example, set directly, since this realm pays nothing through a ledger), a drafted and a
+    proposed line that are not in force; payments owed (two fall due this month, one of them overdue, one next month) and one cancelled
     unpaid; and a capital with two quarters, its sweep rules and the three sweeps they reported, booked."""
     now = int(realm.shell("from core import chain\nprint(chain.now())").strip())
     realm.op("token_register", symbol="REALM", ledger="aaaaa-aa", decimals=2, fee=10)

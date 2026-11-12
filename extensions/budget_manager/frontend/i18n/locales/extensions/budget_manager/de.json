@@ -70,5 +70,7 @@
   "sweep_quarter_side": "im Viertel: {id}",
   "sweep_booked_as": "Gebucht als {transaction}",
   "entry_debit": "{category}: Soll {amount}",
-  "entry_credit": "{category}: Haben {amount}"
+  "entry_credit": "{category}: Haben {amount}",
+  "money_base_units": "{amount} {symbol} (kleinste Einheiten)",
+  "stages_line_gone": "Dieser Posten gehört nicht mehr zu den geltenden: Ein späterer Haushalt hat ihn geändert, oder sein Zeitraum ist abgeschlossen."
 }

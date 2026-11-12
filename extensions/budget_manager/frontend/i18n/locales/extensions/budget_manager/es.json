@@ -70,5 +70,7 @@
   "sweep_quarter_side": "en el cuartel: {id}",
   "sweep_booked_as": "Asentado como {transaction}",
   "entry_debit": "{category}: débito {amount}",
-  "entry_credit": "{category}: crédito {amount}"
+  "entry_credit": "{category}: crédito {amount}",
+  "money_base_units": "{amount} {symbol} (unidades mínimas)",
+  "stages_line_gone": "Esa partida ya no está entre las que están en vigor: un presupuesto posterior la modificó, o su período se ha cerrado."
 }

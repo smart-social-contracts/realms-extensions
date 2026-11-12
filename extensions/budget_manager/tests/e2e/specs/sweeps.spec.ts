@@ -61,7 +61,7 @@ test('on the capital: the sweep rules, and the sweeps of the quarters with the b
   await expect(first.getByRole('cell').nth(2)).toHaveText('ROOT → ROADS');
   await expect(first.getByRole('cell').nth(3)).toContainText('890 REALM');
   await expect(first.getByRole('cell').nth(3)).toContainText('fee 0.1 REALM, paid by the quarter');
-  await expect(first.getByRole('cell').nth(4)).toHaveText('Bookedledger block 90113'); // the status, and the block of the move
+  await expect(first.getByRole('cell').nth(4)).toHaveText('Booked ledger block 90113'); // the status, and the block of the move
 
   // The capital's booking of it: one transaction and its lines.
   const booking = first.getByRole('cell').nth(5);

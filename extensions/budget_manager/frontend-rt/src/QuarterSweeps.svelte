@@ -92,10 +92,10 @@
 			<table class="w-full text-sm mb-4" data-testid="rules">
 				<thead>
 					<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
-						<th class="py-2 pr-3">{t('rule_fund')}</th>
-						<th class="py-2 pr-3">{t('rule_symbol')}</th>
-						<th class="py-2 pr-3">{t('rule_into')}</th>
-						<th class="py-2 text-right">{t('rule_keep')}</th>
+						<th scope="col" class="py-2 pr-3">{t('rule_fund')}</th>
+						<th scope="col" class="py-2 pr-3">{t('rule_symbol')}</th>
+						<th scope="col" class="py-2 pr-3">{t('rule_into')}</th>
+						<th scope="col" class="py-2 text-right">{t('rule_keep')}</th>
 					</tr>
 				</thead>
 				<tbody class="divide-y divide-gray-100">
@@ -130,7 +130,7 @@
 								<div class="font-medium text-gray-900">{role === 'capital' ? (names[sweep.quarter] ?? sweep.quarter) : sweep.id}</div>
 								<div class="text-xs text-gray-500">
 									<Day epoch={sweep.created_at} {zone} />
-									{#if role === 'capital'} · {t('sweep_quarter_side', { id: idOnQuarter(sweep) })}{/if}
+									{#if role === 'capital'}{' · '}{t('sweep_quarter_side', { id: idOnQuarter(sweep) })}{/if}
 								</div>
 							</div>
 							<div class="shrink-0 font-medium text-gray-900">{fmtIn(sweep.amount, sweep.symbol)}</div>
@@ -145,12 +145,12 @@
 			<table class="w-full text-sm" data-testid="history">
 				<thead>
 					<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
-						<th class="py-2 pr-3">{t('col_date')}</th>
-						<th class="py-2 pr-3">{role === 'capital' ? t('col_quarter') : t('col_sweep')}</th>
-						<th class="py-2 pr-3">{t('col_into')}</th>
-						<th class="py-2 pr-3 text-right">{t('col_amount')}</th>
-						<th class="py-2 pr-3">{t('col_state')}</th>
-						{#if bookings}<th class="py-2">{t('col_booking')}</th>{/if}
+						<th scope="col" class="py-2 pr-3">{t('col_date')}</th>
+						<th scope="col" class="py-2 pr-3">{role === 'capital' ? t('col_quarter') : t('col_sweep')}</th>
+						<th scope="col" class="py-2 pr-3">{t('col_into')}</th>
+						<th scope="col" class="py-2 pr-3 text-right">{t('col_amount')}</th>
+						<th scope="col" class="py-2 pr-3">{t('col_state')}</th>
+						{#if bookings}<th scope="col" class="py-2">{t('col_booking')}</th>{/if}
 					</tr>
 				</thead>
 				<tbody class="divide-y divide-gray-100">

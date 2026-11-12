@@ -70,5 +70,7 @@
   "sweep_quarter_side": "nel quartiere: {id}",
   "sweep_booked_as": "Registrato come {transaction}",
   "entry_debit": "{category}: dare {amount}",
-  "entry_credit": "{category}: avere {amount}"
+  "entry_credit": "{category}: avere {amount}",
+  "money_base_units": "{amount} {symbol} (unità minime)",
+  "stages_line_gone": "Questa voce non è più tra quelle in vigore: un bilancio successivo l'ha modificata, oppure il suo periodo è chiuso."
 }

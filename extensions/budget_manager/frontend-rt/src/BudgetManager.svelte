@@ -111,6 +111,7 @@
 	let sweepEntries: BookedEntry[] = $state.raw([]);
 	let sweepBookings = $state(false);
 	let tabError = $state('');
+	let shownLine: BudgetLine | null = $state.raw(null);
 	let sweepRules: SweepRule[] = $state.raw([]);
 	let role: 'capital' | 'quarter' | null = $state(null);
 	let quarterNames: Record<string, string> = $state.raw({});
@@ -128,7 +129,8 @@
 	/** ``raw`` of the token ``symbol``: the realm's currency, or one of the other tokens it holds. */
 	function fmtIn(raw: number, symbol: string): string {
 		const places = symbol === currency ? decimals : tokenDecimals[symbol];
-		return places === undefined ? `${raw} ${symbol}` : formatMoney(raw, places, symbol);
+		// A token the realm does not list has no known decimals: its amount is said to be in the smallest unit.
+		return places === undefined ? t('money_base_units', { amount: raw, symbol }) : formatMoney(raw, places, symbol);
 	}
 
 	function isoDate(ts: number): string {
@@ -136,11 +138,11 @@
 	}
 
 	/** A read the older screens do not need: when the realm refuses it they go on without it. */
-	async function readOptional(name: string) {
+	async function optional<T>(get: () => Promise<T>): Promise<T | null> {
 		try {
-			return await read(name);
+			return await get();
 		} catch (e) {
-			console.warn(`[budget_manager] ${name}:`, e);
+			console.warn('[budget_manager]', e);
 			return null;
 		}
 	}
@@ -150,8 +152,8 @@
 			budgetView(selectedPeriod),
 			read('me'),
 			pages('department_list', {}, 'departments'),
-			readOptional('realm_info'),
-			readOptional('quarter_directory'),
+			optional(() => read('realm_info')),
+			optional(() => read('quarter_directory')),
 		]);
 		if (!selectedPeriod) {
 			// The view reads the budgets of one period: the one covering now, or else the latest.
@@ -211,10 +213,13 @@
 		role = roleIn(directory) ?? (rules.length > 0 ? 'capital' : null);
 		quarterNames = Object.fromEntries((directory?.quarters ?? []).map((q: any) => [q.id, q.name]));
 		if (!hasLedger) return;
-		const [treasury, lines] = await Promise.all([read('treasury_view'), pages('budget_list', {}, 'budgets')]);
-		tokenDecimals = Object.fromEntries(treasury.tokens.map((k: any) => [k.id, k.decimals]));
-		budgetLines = lines;
-		lineById = Object.fromEntries(lines.map((line: BudgetLine) => [line.id, line]));
+		const [treasury, lines] = await Promise.all([
+			optional(() => read('treasury_view')),
+			optional(() => pages('budget_list', {}, 'budgets')),
+		]);
+		tokenDecimals = Object.fromEntries((treasury?.tokens ?? []).map((k: any) => [k.id, k.decimals]));
+		budgetLines = lines ?? [];
+		lineById = Object.fromEntries(budgetLines.map((line: BudgetLine) => [line.id, line]));
 	}
 
 	async function loadPayments() {
@@ -241,6 +246,7 @@
 	async function openTab(tab: Tab) {
 		activeTab = tab;
 		tabError = '';
+		shownLine = null;
 		try {
 			if (tab === 'scheduled' && payments === null) await loadPayments();
 			if (tab === 'sweeps' && sweeps === null && hasLedger) await loadSweeps();
@@ -249,10 +255,11 @@
 		}
 	}
 
-	/** Show the budget line a payment is charged to, among the stages of its period. */
+	/** Point at the budget line a payment is charged to, among the stages of its period. */
 	async function showLine(line: BudgetLine) {
 		activeTab = 'budgets';
 		if (line.period !== selectedPeriod) await selectPeriod(line.period);
+		shownLine = line;
 	}
 
 	function sum(values: Record<string, number>): number {
@@ -945,7 +952,7 @@
 				{/if}
 			</div>
 			<div class={cn(panelClass, 'mt-4')}>
-				<SpendingStages period={selectedPeriod} lines={stageLines} pending={pendingLines} {fmt} {narrow} />
+				<SpendingStages period={selectedPeriod} lines={stageLines} pending={pendingLines} {fmt} {narrow} focus={shownLine} />
 			</div>
 		{:else if activeTab === 'scheduled'}
 			<div class={panelClass}>

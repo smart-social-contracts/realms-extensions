@@ -70,5 +70,7 @@
   "sweep_quarter_side": "al quart: {id}",
   "sweep_booked_as": "Assentat com {transaction}",
   "entry_debit": "{category}: dèbit {amount}",
-  "entry_credit": "{category}: crèdit {amount}"
+  "entry_credit": "{category}: crèdit {amount}",
+  "money_base_units": "{amount} {symbol} (unitats mínimes)",
+  "stages_line_gone": "Eixa partida ja no està entre les que estan en vigor: un pressupost posterior la va modificar, o el seu període s'ha tancat."
 }

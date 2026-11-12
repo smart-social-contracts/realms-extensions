@@ -136,12 +136,12 @@
 		<table class="w-full text-sm">
 			<thead>
 				<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
-					<th class="py-2 pr-3">{t('col_due')}</th>
-					<th class="py-2 pr-3">{t('col_from')}</th>
-					<th class="py-2 pr-3">{t('col_to')}</th>
-					<th class="py-2 pr-3 text-right">{t('col_amount')}</th>
-					<th class="py-2 pr-3">{t('col_line')}</th>
-					<th class="py-2">{t('col_state')}</th>
+					<th scope="col" class="py-2 pr-3">{t('col_due')}</th>
+					<th scope="col" class="py-2 pr-3">{t('col_from')}</th>
+					<th scope="col" class="py-2 pr-3">{t('col_to')}</th>
+					<th scope="col" class="py-2 pr-3 text-right">{t('col_amount')}</th>
+					<th scope="col" class="py-2 pr-3">{t('col_line')}</th>
+					<th scope="col" class="py-2">{t('col_state')}</th>
 				</tr>
 			</thead>
 			<tbody class="divide-y divide-gray-100">

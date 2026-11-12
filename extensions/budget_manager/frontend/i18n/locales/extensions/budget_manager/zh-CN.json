@@ -70,5 +70,7 @@
   "sweep_quarter_side": "在辖区：{id}",
   "sweep_booked_as": "已入账为 {transaction}",
   "entry_debit": "{category}：借 {amount}",
-  "entry_credit": "{category}：贷 {amount}"
+  "entry_credit": "{category}：贷 {amount}",
+  "money_base_units": "{amount} {symbol}（最小单位）",
+  "stages_line_gone": "该预算项已不在生效项之列：后来的预算修订了它，或其所属期间已结束。"
 }
