@@ -2,11 +2,22 @@
 	import { untrack } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import { KINDS, kindOf, kindText } from './organizationKind';
 
 	let { ctx }: { ctx: any } = $props();
 
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
+
 	/** One page of rows, or the realm's reason for refusing it. */
-	type Page = { rows: any[]; next: number | null } | string;
+	type Page = { rows: any[]; next: number | null; scanned?: number } | string;
 
 	interface EntityType {
 		value: string;
@@ -24,9 +35,14 @@
 
 	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
 	const pageSize = 10;
+	// The rows the realm reads through per call (its most) when a filter makes most of them not match: a page of 10 would find
+	// a rare kind a hop at a time.
+	const filteredCount = 500;
 	const MAX_HOPS = 20;
 
 	let selectedType = $state('User');
+	// The kind the organisations are listed by; the realm does the filtering (`organization_list` takes a `kind`).
+	let kindFilter = $state('');
 	let accessDeniedOp: string | null = $state(null);
 	let unavailable = $state(false);
 
@@ -42,8 +58,15 @@
 	let expandedItem: number | null = $state(null);
 	let currentPage = $state(0);
 	let nextCursor: number | null = $state(null);
+	// What an empty page of a filtered list can claim: the rows the realm read through since the last page that had any, and whether an
+	// earlier page had some (then "none" is "no more", and the count does not take in rows that held matches).
+	let searched = $state(0);
+	let earlierRows = $state(false);
 	// cursors[i] is the `from` of page i (null: the operation's default start).
 	let cursors: (number | null)[] = [null];
+	// scans[i] is the rows the realm read through to fill page i (hops over empty pages included), found[i] the rows page i holds.
+	let scans: number[] = [];
+	let found: number[] = [];
 	let requestSeq = 0;
 
 	function getIcon(className: string): string {
@@ -65,12 +88,17 @@
 		}
 	}
 
-	/** A paginated list operation whose rows are under `key`. */
-	function listed(op: string, key: string) {
+	/**
+	 * A paginated list operation whose rows are under `key`; `filters` are the arguments that narrow it, and `perCall` the rows
+	 * it reads through, both read at each call. The realm filters a page of rows after reading it, so a page can hold fewer
+	 * rows than `perCall`, or none, while more follow (`next`): `scanned` is what the call read through.
+	 */
+	function listed(op: string, key: string, filters: () => Record<string, unknown> = () => ({}), perCall: () => number = () => pageSize) {
 		return async (from: number | null): Promise<Page> => {
-			const reply = await read(op, { ...(from != null ? { from } : {}), count: pageSize });
+			const count = perCall();
+			const reply = await read(op, { ...(from != null ? { from } : {}), count, ...filters() });
 			if (!reply.ok) return reply.error;
-			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: reply.next ?? null };
+			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: reply.next ?? null, scanned: count };
 		};
 	}
 
@@ -115,7 +143,10 @@
 		entity('LedgerEntry', listed('ledger_view', 'entries')),
 		entity('License', listed('license_list', 'licenses')),
 		entity('NFTToken', registeredTokens('nft_tokens')),
-		entity('Organization', listed('organization_list', 'organizations')),
+		entity(
+			'Organization',
+			listed('organization_list', 'organizations', () => (kindFilter ? { kind: kindFilter } : {}), () => (kindFilter ? filteredCount : pageSize)),
+		),
 		entity('Proposal', listed('proposal_list', 'proposals')),
 		entity('Realm', loadRealm),
 		entity('Task', listed('task_list', 'tasks')),
@@ -148,9 +179,12 @@
 		unavailable = false;
 
 		let page = await type.load(cursors[pageIndex] ?? null);
-		// Id-range pages can come back empty (deleted rows): follow `next` to the next rows.
-		for (let hops = 0; typeof page !== 'string' && page.rows.length === 0 && page.next != null && hops < MAX_HOPS; hops++) {
+		let readThrough = typeof page === 'string' ? 0 : (page.scanned ?? 0);
+		// Id-range pages can come back empty (deleted rows, or none of the rows had the kind asked for): follow `next` to the next rows.
+		// A newer request (another type, another kind) leaves this chain: it makes no further call.
+		for (let hops = 0; seq === requestSeq && typeof page !== 'string' && page.rows.length === 0 && page.next != null && hops < MAX_HOPS; hops++) {
 			page = await type.load(page.next);
+			if (typeof page !== 'string') readThrough += page.scanned ?? 0;
 		}
 		if (seq !== requestSeq) return;
 
@@ -164,6 +198,12 @@
 		} else {
 			items = page.rows;
 			nextCursor = page.next;
+			scans = [...scans.slice(0, pageIndex), readThrough];
+			found = [...found.slice(0, pageIndex), page.rows.length];
+			let lastWithRows = pageIndex - 1;
+			while (lastWithRows >= 0 && found[lastWithRows] === 0) lastWithRows--;
+			earlierRows = lastWithRows >= 0;
+			searched = scans.slice(lastWithRows + 1).reduce((total, rows) => total + rows, 0);
 			currentPage = pageIndex;
 			cursors = [...cursors.slice(0, pageIndex + 1), page.next];
 		}
@@ -189,8 +229,11 @@
 
 	$effect(() => {
 		selectedType;
+		kindFilter;
 		untrack(() => {
 			cursors = [null];
+			scans = [];
+			found = [];
 			currentPage = 0;
 			loadData(0);
 		});
@@ -233,7 +276,23 @@
 					<option value={type.value}>{type.label}</option>
 				{/each}
 			</select>
+			{#if selectedType === 'Organization'}
+				<label for="org-kind-select" class="font-medium text-gray-700">{t('org_kind_label')}:</label>
+				<select
+					id="org-kind-select"
+					bind:value={kindFilter}
+					class="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+				>
+					<option value="">{t('org_kind_all')}</option>
+					{#each KINDS as kind}
+						<option value={kind}>{kindText(kind, t)}</option>
+					{/each}
+				</select>
+			{/if}
 		</div>
+		{#if selectedType === 'Organization'}
+			<p class="mt-3 text-xs text-gray-500">{t('org_kind_hint')}</p>
+		{/if}
 		<p class="mt-3 text-xs text-gray-500">
 			Records are read-only here. Only record types the realm offers a list for are shown.
 		</p>
@@ -265,10 +324,33 @@
 							Nothing to show.
 						{:else if unavailable}
 							This list isn't available right now.
+						{:else if selectedType === 'Organization' && kindFilter && nextCursor != null}
+							{t(earlierRows ? 'org_kind_searched_next' : 'org_kind_searched', { count: searched })}
+						{:else if selectedType === 'Organization' && kindFilter}
+							{t(earlierRows ? 'org_kind_no_more' : 'org_kind_none')}
 						{:else}
 							No items found.
 						{/if}
 					</p>
+					<div class="mt-4 flex items-center justify-center gap-2">
+						{#if currentPage > 0}
+							<button
+								onclick={() => goToPage(0)}
+								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+							>First</button>
+							<button
+								onclick={() => goToPage(currentPage - 1)}
+								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+							>Prev</button>
+						{/if}
+						{#if selectedType === 'Organization' && kindFilter && nextCursor != null}
+							<button
+								onclick={() => goToPage(currentPage + 1)}
+								class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+								data-testid="org-kind-search-further"
+							>{t('org_kind_search_further')}</button>
+						{/if}
+					</div>
 				</div>
 			{:else}
 				<div class="divide-y divide-gray-200">
@@ -286,6 +368,13 @@
 										</button>
 										{#if titleOf(item)}
 											<span class="text-gray-700 truncate">- {titleOf(item)}</span>
+										{/if}
+										{#if selectedType === 'Organization'}
+											<span
+												class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap {kindOf(item) ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}"
+												title={kindOf(item) ? undefined : t('org_kind_unknown_title')}
+												data-testid="org-kind"
+											>{kindText(kindOf(item), t)}</span>
 										{/if}
 									</div>
 								</div>

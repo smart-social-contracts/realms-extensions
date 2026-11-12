@@ -1,6 +1,6 @@
 {
   "name": "admin_dashboard",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Look up what is stored in your realm by type, open records to read their details, and copy them for reference.",
   "author": "Realms Team",
   "operations": [

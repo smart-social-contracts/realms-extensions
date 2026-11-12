@@ -14,6 +14,9 @@ chapter of the town's own), on Madrid time; an IT admin team (department `IT`, s
 a sync source, Spain, that has published a release the realm runs behind; the check schedule; a failing method of the
 codex, which notifies the team; and an install job that an upgrade paused.
 
+For the data explorer's organisations (`seed_organisations_of_each_kind`): one organisation of each kind the realm accepts (GGG
+I-ORG-9), and one registered without a kind, as before kinds existed.
+
 For the voting page's tags (`seed_tagged_proposals`): six proposals filed with the tags of a town's areas, one without tags
 and one with the most a proposal can carry, 16; with `--bulk-proposals N`, N closed proposals more, two tags each, the
 last also tagged "rare-last" (`seed_bulk_proposals`).
@@ -106,6 +109,28 @@ legislation._record("eu/es/procedure.py", "check_proposal_create", "KeyError: wo
 from ggg import Notification
 print(json.dumps(sorted({n.href for n in Notification.instances() if n.topic == "codex.failing"})))
 '''
+
+
+# Organisations of each kind, for the data explorer's kind column and filter (ggg I-ORG-9), and one from before kinds existed.
+ORGANISATIONS = [
+    ("Clinic B", "A private clinic", "company"),
+    ("Harbour Party", "The party of the harbour", "party"),
+    ("Dockers", "The dockers' union", "union"),
+    ("Friends of the Park", "A neighbours' association", "association"),
+    ("Cooperativa del Mar", "A fishing cooperative, none of the four", "other"),
+]
+# A realm cannot reach a row without a kind (a new organisation is `other`, an older row is read as `other`): this one is written by hand, to see
+# what the page does when the realm states none.
+WITHOUT_KIND = """
+from ggg import Organization
+Organization(id="Old Registry", description="Registered before kinds existed", kind="")
+"""
+
+
+def seed_organisations_of_each_kind(realm):
+    for name, description, kind in ORGANISATIONS:
+        realm.op("organization_register", organization=name, description=description, kind=kind)
+    realm.shell(WITHOUT_KIND)
 
 
 # Proposals of the realm's own areas, for the voting page's tags (ggg I-GOV-15): a few filed as a member files them, and, with
@@ -328,6 +353,7 @@ def main():
     # A realm in setup took a legacy codex; only one kind runs at a time.
     realm.shell("from ggg import Codex\nfor c in Codex.instances():\n    c.status = 'inactive'")
     realm.op("realm_configure", timezone="Europe/Madrid")
+    seed_organisations_of_each_kind(realm)
     seed_planning(realm)
     older = install([(OWN, "tax")], "", 5 * DAY, "P-3")
     newer = install([], older["codex"], 2 * DAY, "P-12")
