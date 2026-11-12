@@ -8,6 +8,7 @@ import {
 	fetchPinned,
 	isStepBack,
 	readChangeList,
+	releaseChangeOf,
 	runningRelease,
 	summaryFor,
 	type ChapterEntry,
@@ -212,6 +213,26 @@ describe('the release of a layer the realm runs, and a step back', () => {
 		assert.equal(isStepBack([{}, ...marked], release), true); // a source that lists nothing
 		assert.equal(isStepBack([], release), false);
 		assert.equal(isStepBack(undefined, release), false); // a realm that does not say
+	});
+
+	it('is a step back when the realm says so of the proposal\'s own release, whatever the sources list', () => {
+		const release = { source: 'eu/es', version: '2.4.0' };
+		const older = releaseChangeOf({ source: 'eu/es', version: '2.4.0', runs: '2.6.0', order: 'older', step_back: true });
+		assert.equal(isStepBack([], release, older), true); // filed by hand: no source offers it
+		for (const order of ['newer', 'tied', 'unknown', 'same']) {
+			const change = releaseChangeOf({ source: 'eu/es', version: '2.4.0', runs: '2.6.0', order, step_back: false });
+			assert.equal(isStepBack([], release, change), false, order);
+		}
+	});
+
+	it('reads a release change only in the shape the realm sends it', () => {
+		const good = { source: 'eu/es', version: '2.4.0', runs: '2.6.0', published: 5, runs_published: 20, order: 'older', step_back: true };
+		assert.deepEqual(releaseChangeOf(good), { source: 'eu/es', version: '2.4.0', runs: '2.6.0', order: 'older', step_back: true });
+		assert.equal(releaseChangeOf({ ...good, step_back: 'yes' })?.step_back, false); // only a true is a mark
+		assert.equal(releaseChangeOf({ ...good, order: 'sideways' }), null);
+		assert.equal(releaseChangeOf({ ...good, runs: 6 }), null);
+		assert.equal(releaseChangeOf(undefined), null);
+		assert.equal(releaseChangeOf('older'), null);
 	});
 });
 

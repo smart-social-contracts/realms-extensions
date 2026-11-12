@@ -64,6 +64,8 @@ interface World {
 	unreadable?: boolean;
 	/** What ``codex_status`` says of the sync sources: the releases each could install, a step back marked. */
 	sources?: unknown[];
+	/** What ``proposal_get`` says of how the proposal's release stands against the one the realm runs. */
+	releaseChange?: Record<string, unknown> | null;
 	/** What shows the change has been read: the report, a failure or a release (none: nothing is shown for the proposal). */
 	ready?: string | null;
 }
@@ -76,6 +78,7 @@ async function open({
 	locale = 'en',
 	unreadable = false,
 	sources = [],
+	releaseChange = null,
 	ready = '[data-testid="report"], [data-testid="change-failure"], [data-testid="release-install"]',
 }: World) {
 	fetched = [];
@@ -92,7 +95,7 @@ async function open({
 		proposal_list: () => ({ ok: true, proposals: [], next: null }),
 		proposal_get: () => {
 			const { tally, ...row } = proposal;
-			return { ok: true, proposal: row, tally, eligible: 3, votes: [], next: null };
+			return { ok: true, proposal: row, tally, eligible: 3, votes: [], next: null, ...(releaseChange ? { release_change: releaseChange } : {}) };
 		},
 		department_list: () => ({ ok: true, departments: [{ id: 'Realm', is_root: true }] }),
 		realm_info: () => ({ ok: true, realm: { timezone: 'Europe/Madrid' } }),
@@ -112,9 +115,13 @@ async function open({
 	await settle(); // the report, and a page that has nothing to show for the proposal
 }
 
-afterEach(() => {
+function closePage() {
 	unmount(page);
 	target.remove();
+}
+
+afterEach(() => {
+	closePage();
 	vi.unstubAllGlobals();
 });
 
@@ -225,9 +232,54 @@ test('says so when the sync source marks the release a step back: it must not re
 	const installable = [{ source: 'eu/es', version: '2.4.0', effective_from: 1, step_back: true }];
 	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN(installable) });
 	expect(text('release-step-back')).toBe(
-		'This takes the realm back: eu/es 2.4.0 is older than 2.6.0, the release the realm runs now. The source went back to it.',
+		'This takes the realm back: eu/es 2.4.0 is older than 2.6.0, the release the realm runs now.',
 	);
 	expect(text('release-install')).toMatch(/^Installs release 2\.4\.0 of eu\/es whole\./); // what it does is still said
+});
+
+const CHANGE = (order: string, extra: Record<string, unknown> = {}) => ({
+	source: 'eu/es',
+	version: '2.4.0',
+	runs: '2.6.0',
+	published: 5,
+	runs_published: 20,
+	order,
+	step_back: order === 'older',
+	...extra,
+});
+
+test('marks an older release a member filed by hand, which no source offers: the realm says it takes the realm back', async () => {
+	// No sync source lists it as installable (only newer releases are), so only the proposal's own comparison says so.
+	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN([]), releaseChange: CHANGE('older') });
+	expect(text('release-step-back')).toBe(
+		'This takes the realm back: eu/es 2.4.0 is older than 2.6.0, the release the realm runs now.',
+	);
+	expect(text('release-runs')).toBe('The realm runs eu/es 2.6.0 now.');
+	expect(text('release-unplaced')).toBeNull();
+});
+
+test('says it cannot tell, without a mark, when the release was published with what the realm runs or its time is not known', async () => {
+	for (const [at, order] of ['tied', 'unknown'].entries()) {
+		if (at) closePage(); // the page of the case before
+		await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN([]), releaseChange: CHANGE(order) });
+		expect(text('release-step-back')).toBeNull();
+		expect(text('release-unplaced')).toBe('The realm cannot tell whether eu/es 2.4.0 is older than 2.6.0, the release it runs now.');
+	}
+});
+
+test('says nothing more of a newer release, or of the one the realm runs now', async () => {
+	for (const [at, order] of ['newer', 'same'].entries()) {
+		if (at) closePage();
+		await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN([]), releaseChange: CHANGE(order) });
+		expect(text('release-step-back')).toBeNull();
+		expect(text('release-unplaced')).toBeNull();
+	}
+});
+
+test('takes what the realm says of the release over what the sync sources mark, and falls back to them when it says nothing', async () => {
+	const marked = [{ source: 'eu/es', version: '2.4.0', effective_from: 1, step_back: true }];
+	await open({ proposal: proposal(RELEASE), files: {}, running: RUNS_2_6, sources: SPAIN(marked), releaseChange: null });
+	expect(text('release-step-back')).not.toBeNull(); // a realm before the comparison: the sources' mark is all there is
 });
 
 test('marks only the release the source went back to, not another release of the layer', async () => {

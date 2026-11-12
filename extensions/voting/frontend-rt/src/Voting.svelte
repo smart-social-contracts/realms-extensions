@@ -4,6 +4,7 @@
 	import { get } from 'svelte/store';
 	import FederalVotes from './FederalVotes.svelte';
 	import LegislationChange from './LegislationChange.svelte';
+	import { releaseChangeOf } from './legislationChange';
 	import LinkPicker from './LinkPicker.svelte';
 	import ProposalLinks from './ProposalLinks.svelte';
 	import {
@@ -381,6 +382,8 @@
 			vetoed: isVetoed(p.tally?.veto, detail?.votes),
 			org_scope: orgScope,
 			action: p.action ?? null,
+			// How the release an install proposal names stands against the one the realm runs (realms-gos §11.6).
+			release_change: releaseChangeOf(detail?.release_change),
 			links: Array.isArray(p.links) ? p.links : [],
 			replaced_by: String(p.replaced_by ?? ''),
 			my_vote: myChoice,
@@ -1517,6 +1520,7 @@
 							<LegislationChange
 								changeList={selectedProposalAction.change_list ?? null}
 								release={selectedProposalAction.release ?? null}
+								releaseChange={selectedProposal.release_change ?? null}
 								open={['voting', 'accepted', 'execution_scheduled'].includes(selectedProposal.status)}
 								{locale}
 								{read}
