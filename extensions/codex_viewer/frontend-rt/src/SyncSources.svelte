@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { t } from './lib/i18n';
 	import TimeText from './TimeText.svelte';
-	import { LEAST_INTERVAL, MOST_INTERVAL, complianceOf, parseInterval, type Release, type SyncSource } from './legislation';
+	import { LEAST_INTERVAL, MOST_INTERVAL, complianceOf, noteOf, parseInterval, type Release, type SyncSource } from './legislation';
 
 	let {
 		sources,
@@ -26,7 +26,8 @@
 		busy: boolean;
 		/** The proposals filed from this page, by `<source>@<version>`. */
 		proposed: Record<string, string>;
-		onPropose: (release: Release) => void;
+		/** `runs` is the release the realm runs of the layer, for a step back to name. */
+		onPropose: (release: Release, runs?: string) => void;
 		onCheckNow: () => void;
 		onSaveInterval: (hours: number) => void;
 		onOpenProposal: (proposal: string) => void;
@@ -53,6 +54,11 @@
 					{t('stale_layers', { layers: flag.stale.join(', ') })}
 				</p>
 			{/if}
+			{#each source.notes ?? [] as note (note.source + note.kind)}
+				<p class="notice" data-testid="source-note" data-kind={note.kind}>
+					{t(`note_${note.kind}`, { source: note.source, runs: note.runs, lists: note.lists })}
+				</p>
+			{/each}
 			{#if source.error}
 				<p class="error" data-testid="source-error">{t('check_failed', { reason: source.error })}</p>
 			{/if}
@@ -60,15 +66,21 @@
 
 			{#each source.installable as release (release.source + release.version)}
 				{@const key = `${release.source}@${release.version}`}
+				{@const runs = noteOf(source.notes, release.source, 'went_back')?.runs ?? ''}
 				<p class="line release" data-testid="release">
 					<span>{t('release_line', { source: release.source, version: release.version })}</span>
 					<span class="muted">{t('effective')} <TimeText epoch={release.effective_from} {zones} /></span>
 					{#if proposed[key]}
 						<button type="button" class="btn" onclick={() => onOpenProposal(proposed[key])}>{t('open_proposal', { proposal: proposed[key] })}</button>
 					{:else if canPropose}
-						<button type="button" class="btn primary" disabled={busy} onclick={() => onPropose(release)}>{t('propose_install')}</button>
+						<button type="button" class="btn" class:primary={!release.step_back} disabled={busy} onclick={() => onPropose(release, runs)}>
+							{release.step_back ? t('propose_step_back') : t('propose_install')}
+						</button>
 					{/if}
 				</p>
+				{#if release.step_back}
+					<p class="error" data-testid="step-back">{t('step_back_warning', { source: release.source, version: release.version, runs })}</p>
+				{/if}
 			{:else}
 				<p class="muted">{t('nothing_to_install')}</p>
 			{/each}
