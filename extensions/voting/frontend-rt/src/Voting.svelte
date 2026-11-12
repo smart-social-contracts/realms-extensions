@@ -28,9 +28,11 @@
 		castingNote,
 		castingVoteMatters,
 		endedText,
+		firstVoteOf,
 		isVetoed,
 		myVote,
 		requirementText,
+		secondVoteText,
 		vetoHoldersMissing,
 		votingRule,
 		waitingText,
@@ -372,6 +374,8 @@
 			eligible: detail ? Number(detail.eligible) || 0 : null,
 			// The rule stored when it was filed; null for a proposal that records none, or one not read in full.
 			rule: detail ? votingRule(p, !!orgScope) : null,
+			// The count of the first vote, when a tie put the proposal to this second vote.
+			first_vote: firstVoteOf(p),
 			casting_choice: '',
 			veto_holders_missing: vetoHoldersMissing(p.tally?.veto, detail?.votes),
 			vetoed: isVetoed(p.tally?.veto, detail?.votes),
@@ -606,7 +610,7 @@
 		if (!detail) return row ? normalizeProposal(row) : null;
 		const proposal = normalizeProposal(row, detail, await myVote(read, proposalId, detail, myPrincipal()));
 		// A tie at the threshold goes to the casting member's yes: only then is what they voted read, like the member's own.
-		if (castingVoteMatters(proposal.rule, proposal.votes)) {
+		if (castingVoteMatters(proposal.rule, proposal.votes, proposal.first_vote)) {
 			proposal.casting_choice = await myVote(read, proposalId, detail, proposal.rule.castingVote);
 		}
 		return proposal;
@@ -1068,6 +1072,9 @@
 			votes: { yes, no, abstain },
 			vetoed: proposal.vetoed,
 			castingChoice: proposal.casting_choice,
+			firstVote: proposal.first_vote,
+			// A first vote that tied expires the proposal when it ended after the time the proposal takes effect.
+			expiresIfTied: !!proposal.effective_at && !!proposal.voting_deadline && proposal.voting_deadline > proposal.effective_at,
 		};
 	}
 
@@ -1379,6 +1386,11 @@
 							{/if}
 						{/if}
 					</div>
+					{#if selectedProposal.first_vote}
+						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3" data-testid="second-vote-line">
+							{secondVoteText(t, selectedProposal.first_vote)}
+						</p>
+					{/if}
 					<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
 						<div class="text-center">
 							<div class="text-2xl font-bold text-green-600">{tally.yes}</div>
@@ -1403,7 +1415,7 @@
 					</div>
 
 					{#if tally.total > 0 || selectedProposal.enriched}
-						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal))}
+						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal), !!selectedProposal.first_vote)}
 						{@const casting = castingNote(t, voteState(selectedProposal), castingMember(selectedProposal))}
 						<div class="mb-4">
 							{#if tally.total > 0}
@@ -1973,6 +1985,9 @@
 								{@const tally = voteTally(proposal)}
 								{@const votingOpen = isVotingOpen(proposal, nowMs)}
 								<div class="pt-2 border-t border-gray-100">
+									{#if proposal.first_vote}
+										<p class="text-xs text-amber-700 mb-2" data-testid="card-second-vote">{t('second_vote_short')}</p>
+									{/if}
 									<div class="flex justify-between items-center mb-2 gap-2">
 										<div class="flex gap-3 text-xs">
 											<span class="text-green-600">Y:{tally.yes} ({votePercent(tally.yes, tally.total)})</span>

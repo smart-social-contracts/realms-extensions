@@ -1,7 +1,7 @@
 {
   "name": "@realms/voting-e2e",
   "version": "1.0.0",
-  "description": "Browser tests of the voting page: an install proposal, on the built bundle with a canned realm",
+  "description": "Browser tests of the voting page: an install proposal and department votes that count the votes cast, on the built bundle with a canned realm",
   "private": true,
   "scripts": {
     "test": "playwright test",
