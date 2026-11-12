@@ -102,10 +102,9 @@ describe('Settings wiring', () => {
 		assert.match(settings, /Applies immediately/);
 		assert.match(settings, /Needs a root vote/);
 		assert.match(settings, /realm\.configure\.branding/);
-		assert.ok(settings.indexOf('if savePreview') > 0);
-		// Continuing from the preview opens the proposal modal, which is the confirmation.
-		assert.match(settings, /openProposalForSettings\(/);
-		assert.ok(settings.indexOf('<ProposalModal') > 0);
+		const previewAt = settings.indexOf('if savePreview');
+		const confirmAt = settings.indexOf('if governedConfirm');
+		assert.ok(previewAt > 0 && confirmAt > previewAt);
 	});
 
 	it('mounts apply/destroy on the Advanced tab, not Department Management', () => {
@@ -115,8 +114,8 @@ describe('Settings wiring', () => {
 		assert.match(settings, /activeTab === 'advanced'[\s\S]*DepartmentTablePanel/);
 		assert.match(panel, /Apply table/);
 		assert.match(panel, /Destroy a department/);
-		assert.match(panel, /applyDepartmentTable/);
-		assert.match(panel, /department_delete/);
+		assert.match(panel, /apply_department_table/);
+		assert.match(panel, /delete_department/);
 		assert.match(panel, /Department tables \(JSON\)/);
 		assert.match(panel, /not Department Management CRUD/);
 	});
