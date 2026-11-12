@@ -105,6 +105,7 @@ describe('Settings wiring', () => {
 		assert.match(settings, /realm\.configure\.branding/);
 		// Continue files the save itself: since 1.11.0 there is no second confirmation modal.
 		assert.match(settings, /onclick=\{confirmSavePreview\}/);
+		assert.match(settings, /async function confirmSavePreview\(\) \{\s*savePreview = null;\s*await saveRealmSettings\(\);/);
 		assert.doesNotMatch(settings, /governedConfirm/);
 	});
 
