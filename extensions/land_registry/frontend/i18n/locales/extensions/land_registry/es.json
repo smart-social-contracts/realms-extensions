@@ -21,5 +21,7 @@
   "licence_status_suspended": "Suspendida",
   "licence_status_revoked": "Revocada",
   "licence_status_expired": "Caducada",
-  "licence_until": "hasta {date}"
+  "licence_until": "hasta {date}",
+  "planning_zones_capped": "Solo se han leído las primeras {count} zonas: puede faltar alguna en la lista.",
+  "licences_loading": "Leyendo las licencias…"
 }

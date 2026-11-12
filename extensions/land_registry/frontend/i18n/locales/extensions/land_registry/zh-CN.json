@@ -21,5 +21,7 @@
   "licence_status_suspended": "已暂停",
   "licence_status_revoked": "已撤销",
   "licence_status_expired": "已过期",
-  "licence_until": "有效期至 {date}"
+  "licence_until": "有效期至 {date}",
+  "planning_zones_capped": "仅读取了前 {count} 个区域：列表中可能缺少部分区域。",
+  "licences_loading": "正在读取许可证…"
 }

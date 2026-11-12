@@ -52,9 +52,14 @@
 	let zones: MapZone[] = $state([]);
 	// The zones the realm defines (planning areas, districts): they have no shape, so the map does not draw them.
 	let planning: Zone[] = $state([]);
+	// The licences are read when a parcel is opened, not with the registry: `license_list` has no filter by parcel, so it is every page.
 	let licences: Map<string, Licence[]> = $state(new Map());
 	let licencesProblem = $state('');
 	let licencesCapped = $state(false);
+	let licencesLoading = $state(false);
+	let licencesRead = false;
+	// The zones `land_map` lists are cut at MAX_PAGES pages: said, when that is where it stopped.
+	let zonesCapped = $state(false);
 	let permissions: string[] = $state([]);
 	let realmZone = $state(UTC);
 	let zoneFilter = $state('');
@@ -89,6 +94,8 @@
 	let map: any = null;
 	let maplibregl: any = null;
 	let h3: any = null;
+	// h3-js, asked for at the start: it tells a member's home cell from a zone the realm defines when `land_map` does not say.
+	let h3Ready: Promise<unknown> = Promise.resolve();
 	let landPopup: any = null;
 	let didFitBounds = false;
 	let unsubscribePrincipal: (() => void) | null = null;
@@ -100,6 +107,7 @@
 	const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 	const SOURCE_ZONES = 'zone-cells';
 	const SOURCE_POINTS = 'zone-points';
+	const H3_WAIT_MS = 3000;
 	const PAGE = 500;
 	const MAX_PAGES = 50;
 	const MAX_SPAN = 16;
@@ -307,8 +315,31 @@
 		updateLayerVisibility();
 	}
 
+	/** Every licence of the realm, once: the parcels' panels read their own from them. */
+	async function loadLicences() {
+		if (licencesRead) return;
+		licencesRead = true;
+		licencesLoading = true;
+		try {
+			const rows = await readPages('license_list', 'licenses');
+			licences = licencesByParcel(rows.rows);
+			licencesProblem = rows.error;
+			licencesCapped = rows.capped;
+		} finally {
+			licencesLoading = false;
+		}
+	}
+
+	/** Read the registry again, licences included. */
+	async function refresh() {
+		licencesRead = false;
+		await loadLands(true);
+		if (selectedLandId) void loadLicences();
+	}
+
 	function selectLand(land: Parcel | null) {
 		selectedLandId = land?.id || '';
+		if (land) void loadLicences();
 		zoneChoice = land ? [...land.zones] : [];
 		transfer = { owner_type: 'user', owner_id: '', order: '' };
 		disputeReason = '';
@@ -482,11 +513,10 @@
 		error = '';
 		accessDeniedOp = null;
 		try {
-			const [parcels, mapZones, users, licenceRows, me, info] = await Promise.all([
+			const [parcels, mapZones, users, me, info] = await Promise.all([
 				readPages('land_list', 'lands'),
 				readPages('land_map', 'zones'),
 				call(false, 'user_list', { from: 1, count: PAGE }),
-				readPages('license_list', 'licenses'),
 				call(false, 'me'),
 				call(false, 'realm_info'),
 			]);
@@ -496,17 +526,20 @@
 				else error = `Parcels are unavailable right now: ${parcels.error}`;
 			}
 			lands = parcels.rows.map(toParcel).filter((l) => l.id);
+			// A realm that does not say which zones it defined (no `defined`) is read by h3-js, which may be a moment away: not for long.
+			if (mapZones.rows.some((z) => typeof z?.defined !== 'boolean')) await Promise.race([h3Ready, new Promise((done) => setTimeout(done, H3_WAIT_MS))]);
+			const named = new Set(lands.flatMap((l) => l.zones));
+			const isValidCell = h3?.isValidCell ? (id: string) => !!h3.isValidCell(id) : undefined;
 			zones = mapZones.rows
-				.filter((z) => z?.id && !isDefinedZone(z))
+				.filter((z) => z?.id && !isDefinedZone(z, named, isValidCell))
 				.map((z) => ({ id: String(z.id), name: String(z.name || ''), kind: String(z.kind || 'unassigned') }));
-			planning = planningZones(mapZones.rows);
+			planning = planningZones(mapZones.rows, named, isValidCell);
+			zonesCapped = mapZones.capped;
 			if (zoneFilter && zoneFilter !== NO_ZONE && !planning.some((zone) => zone.id === zoneFilter)) zoneFilter = '';
 			if (mapZones.error) console.warn('land_map:', mapZones.error);
-			licences = licencesByParcel(licenceRows.rows);
-			licencesProblem = licenceRows.error;
-			licencesCapped = licenceRows.capped;
 			permissions = me.ok && Array.isArray(me.permissions) ? me.permissions : [];
-			const officialZone = info.ok ? info.realm?.timezone : '';
+			// The realm's official time: its own zone, or on a quarter its capital's (`timezone` is the quarter's own).
+			const officialZone = info.ok ? info.realm?.official_timezone || info.realm?.timezone : '';
 			realmZone = typeof officialZone === 'string' && isKnownZone(officialZone) ? officialZone : UTC;
 			if (users.ok) {
 				const names: Record<string, string> = {};
@@ -696,6 +729,7 @@
 	onMount(async () => {
 		window.addEventListener('keydown', onWindowKeydown);
 		unsubscribePrincipal = ctx.principal?.subscribe?.((value: string) => (principal = value || '')) ?? null;
+		h3Ready = loadH3Lib().then((lib) => (h3 = lib), () => null);
 		await loadLands(false);
 		await tick();
 		if (mapContainer) {
@@ -733,7 +767,7 @@
 					<p class="muted">{extensionDescription}</p>
 					<p class="muted">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</p>
 				</div>
-				<button type="button" class="ghost-btn" onclick={() => loadLands(true)} disabled={refreshing}>Refresh</button>
+				<button type="button" class="ghost-btn" onclick={refresh} disabled={refreshing}>Refresh</button>
 			</div>
 
 			{#if error}<div class="alert error">{error}</div>{/if}
@@ -784,6 +818,9 @@
 				</form>
 			{/if}
 
+			{#if zonesCapped}
+				<p class="muted note zone-filter" data-testid="zones-capped">{t('planning_zones_capped', { count: PAGE * MAX_PAGES })}</p>
+			{/if}
 			{#if planning.length}
 				<div class="zone-filter">
 					<label>{t('planning_filter_label')}
@@ -878,7 +915,9 @@
 
 					<div class="mini-form" data-testid="licences-panel">
 						<h4>{t('licences_title')}</h4>
-						{#if licencesProblem}
+						{#if licencesLoading}
+							<p class="muted note" data-testid="licences-loading">{t('licences_loading')}</p>
+						{:else if licencesProblem}
 							<p class="muted note" data-testid="licences-problem">{t('licences_unavailable', { reason: licencesProblem })}</p>
 						{:else if selectedLicences.length}
 							<ul class="licence-list">
@@ -892,7 +931,7 @@
 						{:else}
 							<p class="muted note">{t('licences_none')}</p>
 						{/if}
-						{#if licencesCapped}<p class="muted note">{t('licences_capped', { count: PAGE * MAX_PAGES })}</p>{/if}
+						{#if licencesCapped && !licencesLoading}<p class="muted note">{t('licences_capped', { count: PAGE * MAX_PAGES })}</p>{/if}
 					</div>
 
 					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); transferParcel(); }}>
