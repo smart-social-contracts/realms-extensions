@@ -15,6 +15,8 @@
 		type ChangeList,
 		type ChapterEntry,
 		type Fetched,
+		type ReleaseChange,
+		type SyncSourceView,
 	} from './legislationChange';
 
 	/**
@@ -25,6 +27,7 @@
 	let {
 		changeList,
 		release,
+		releaseChange,
 		open,
 		locale,
 		read,
@@ -33,6 +36,8 @@
 		changeList: { url: string; checksum: string } | null;
 		/** The action's `{source, version}` for the install of a release, which the realm builds when it runs. */
 		release: { source: string; version: string } | null;
+		/** What `proposal_get` says of how that release stands against the one the realm runs (`release_change`), if it does. */
+		releaseChange?: ReleaseChange | null;
 		/** Whether the proposal can still run: a change list the realm would refuse as stale is said so only then. */
 		open: boolean;
 		locale: string;
@@ -47,10 +52,13 @@
 	// The chapters whose changes are open, with the two texts once they are read.
 	let shown = $state<Record<string, { before: string; after: string } | { error: string } | 'loading'>>({});
 
-	// For the install of a release: the release of that layer the realm runs now ('' when none, or unknown), and whether a
-	// sync source says installing it is a step back (the source went back to it, §11.6).
+	// For the install of a release: the release of that layer the realm runs now ('' when none, or unknown), and the sync
+	// sources `codex_status` says (undefined until read), whose `installable` mark a step back.
 	let runsNow = $state('');
-	let stepBack = $state(false);
+	let sources = $state<SyncSourceView[] | undefined>(undefined);
+	// A step back when the realm says so of this proposal's release (`releaseChange`) or a sync source marks it (isStepBack).
+	let stepBack = $derived(!!release && isStepBack(sources, release, releaseChange));
+	let unplaced = $derived(releaseChange?.order === 'tied' || releaseChange?.order === 'unknown');
 
 	let summary = $derived(list ? summaryFor(list.summary, locale) : null);
 	let stale = $derived(open && !!list && !!running && (list.replaces ?? '') !== running.id);
@@ -63,7 +71,7 @@
 		const status = await read('codex_status', { count: 1 });
 		if (!status) return;
 		runsNow = runningRelease(status.codex?.chapters, release.source);
-		stepBack = isStepBack(status.sync_sources, release);
+		sources = status.sync_sources;
 	}
 
 	async function load() {
@@ -113,12 +121,16 @@
 <div class="space-y-4" data-testid="legislation-change">
 	{#if release}
 		<p class="text-sm text-gray-700" data-testid="release-install">{t('release_install', { version: release.version, source: release.source })}</p>
-		{#if runsNow}
-			<p class="text-sm text-gray-700" data-testid="release-runs">{t('release_runs', { version: runsNow, source: release.source })}</p>
+		{#if runsNow || releaseChange?.runs}
+			<p class="text-sm text-gray-700" data-testid="release-runs">{t('release_runs', { version: releaseChange?.runs || runsNow, source: release.source })}</p>
 		{/if}
 		{#if stepBack}
 			<p class="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2" data-testid="release-step-back">
-				{t('release_step_back', { version: release.version, source: release.source, runs: runsNow || '—' })}
+				{t('release_step_back', { version: release.version, source: release.source, runs: releaseChange?.runs || runsNow || '—' })}
+			</p>
+		{:else if unplaced}
+			<p class="text-xs text-gray-500" data-testid="release-unplaced">
+				{t('release_unplaced', { version: release.version, source: release.source, runs: releaseChange?.runs || runsNow || '—' })}
 			</p>
 		{/if}
 	{:else if failure}

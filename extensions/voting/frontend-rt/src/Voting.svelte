@@ -4,6 +4,7 @@
 	import { get } from 'svelte/store';
 	import FederalVotes from './FederalVotes.svelte';
 	import LegislationChange from './LegislationChange.svelte';
+	import { releaseChangeOf } from './legislationChange';
 	import LinkPicker from './LinkPicker.svelte';
 	import ProposalLinks from './ProposalLinks.svelte';
 	import {
@@ -339,11 +340,13 @@
 		if (op === 'transfer_create') {
 			return { op, fund: args.fund, token: args.symbol, amount: args.amount, to_principal: args.to };
 		}
-		if (op === 'codex_install' && args.checksum) {
-			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
-		}
+		// The branch the realm takes first (core.change_list.names_release): an action that names a release runs as one, whatever
+		// change list it carries beside it (the realm refuses the shape now; a proposal stored before still runs as the release).
 		if (op === 'codex_install' && args.source && !args.manifest) {
 			return { op, target: 'codex', release: { source: String(args.source), version: String(args.version ?? '') } };
+		}
+		if (op === 'codex_install' && args.checksum) {
+			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
 		}
 		if (UPGRADE_OPS[op]) {
 			return { op, target: UPGRADE_OPS[op], package_id: args.codex ?? args.extension, version: args.version };
@@ -381,6 +384,8 @@
 			vetoed: isVetoed(p.tally?.veto, detail?.votes),
 			org_scope: orgScope,
 			action: p.action ?? null,
+			// How the release an install proposal names stands against the one the realm runs (realms-gos §11.6).
+			release_change: releaseChangeOf(detail?.release_change),
 			links: Array.isArray(p.links) ? p.links : [],
 			replaced_by: String(p.replaced_by ?? ''),
 			my_vote: myChoice,
@@ -1517,6 +1522,7 @@
 							<LegislationChange
 								changeList={selectedProposalAction.change_list ?? null}
 								release={selectedProposalAction.release ?? null}
+								releaseChange={selectedProposal.release_change ?? null}
 								open={['voting', 'accepted', 'execution_scheduled'].includes(selectedProposal.status)}
 								{locale}
 								{read}

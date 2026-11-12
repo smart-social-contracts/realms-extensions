@@ -128,11 +128,41 @@ export function runningRelease(chapters: Record<string, { source?: string; versi
 }
 
 /**
- * Whether installing `release` takes the realm back: a sync source marks it `step_back` in `installable`, because it is
- * older than the release the realm runs and its source went back to it (§11.6). A step back filed any way, by the
- * "Propose install" of the codex page or by hand, must not read to a voter as a plain install.
+ * How the release a proposal installs stands against the one the realm runs of that layer, as `proposal_get` says it
+ * (`release_change`, §11.6): `order` is `older` (published strictly earlier: `step_back`), `newer`, `tied` or `unknown`
+ * (published together, or a time the realm does not know: a note, no mark), or `same` (the release it runs now).
  */
-export function isStepBack(sources: SyncSourceView[] | null | undefined, release: { source: string; version: string }): boolean {
+export interface ReleaseChange {
+	source: string;
+	version: string;
+	runs: string;
+	order: 'older' | 'newer' | 'tied' | 'unknown' | 'same';
+	step_back: boolean;
+}
+
+/** The `release_change` of a `proposal_get` reply, or null when it has none or not in this shape. */
+export function releaseChangeOf(raw: unknown): ReleaseChange | null {
+	const change = raw as Partial<ReleaseChange> | null | undefined;
+	const orders = ['older', 'newer', 'tied', 'unknown', 'same'];
+	if (!change || typeof change !== 'object') return null;
+	if (typeof change.source !== 'string' || typeof change.version !== 'string' || typeof change.runs !== 'string') return null;
+	if (typeof change.order !== 'string' || !orders.includes(change.order)) return null;
+	return { source: change.source, version: change.version, runs: change.runs, order: change.order, step_back: change.step_back === true };
+}
+
+/**
+ * Whether installing `release` takes the realm back, however it was filed: the one rule, for the page. Either is enough
+ * (the safer rule: a warning that is not needed costs a voter a line, one that is missing costs the vote its meaning): the
+ * realm says so of the proposal's own release in `release_change` (`change`: published strictly earlier than the one the
+ * realm runs), or a sync source marks that release `step_back` in the `installable` that `sources` carry (the only mark a
+ * realm sends before it compares a proposal's release). A step back must not read to a voter as a plain install.
+ */
+export function isStepBack(
+	sources: SyncSourceView[] | null | undefined,
+	release: { source: string; version: string },
+	change: ReleaseChange | null = null,
+): boolean {
+	if (change?.step_back === true) return true;
 	return (sources ?? []).some((source) =>
 		(source.installable ?? []).some((item) => item.step_back === true && item.source === release.source && item.version === release.version),
 	);
