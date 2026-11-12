@@ -97,6 +97,63 @@ test('the contract of a lot opens the contract page, which names the lot', async
   expect(await asked(page, 'contract_get')).toEqual([{ contract: 'C-10' }]);
 });
 
+test('the table of lots does not show counts or winners, nor the bids, before the bids are read', async ({ page }) => {
+  scenario = realm(MANAGER, tender(), { tender_get: { delay: 1500, reply: { ok: true, tender: tender() } } });
+  await openTender(page);
+  const row = page.getByTestId('lot-row').first();
+  await expect(row.getByRole('cell').nth(3)).toHaveText('…');
+  await expect(row.getByRole('cell').nth(4)).toHaveText('…');
+  await expect(page.getByRole('heading', { name: 'Bids (…)' })).toBeVisible();
+  await expect(page.getByTestId('lot-award')).toHaveCount(0); // nothing to choose among yet
+  await expect(page.getByRole('heading', { name: 'Bids (3)' })).toBeVisible();
+  await expect(row.getByRole('cell').nth(3)).toHaveText('2');
+  await expect(row.getByRole('cell').nth(4)).toHaveText('buildco');
+  await expect(page.getByTestId('lot-award')).toHaveCount(1);
+});
+
+test('a request the realm will not give shows no bids, and no lot can be decided on it', async ({ page }) => {
+  scenario = realm(MANAGER, tender(), { tender_get: { ok: false, error: 'unknown Tender \'T-5\'', kind: 'not_found' } });
+  await openTender(page);
+  await expect(page.getByText('This request could not be opened.')).toBeVisible();
+  const row = page.getByTestId('lot-row').first();
+  await expect(row.getByRole('cell').nth(3)).toHaveText('…');
+  await expect(row.getByRole('cell').nth(4)).toHaveText('…');
+  await expect(page.getByRole('heading', { name: 'Bids (…)' })).toBeVisible();
+  await expect(page.getByTestId('lot-award')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Leave this lot unawarded' })).toHaveCount(0);
+});
+
+test('the late reply of a request that was left does not replace the one now open', async ({ page }) => {
+  const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
+  scenario = realm(MANAGER, tender(), {
+    tender_list: TENDERS([tender(), second]),
+    tender_get: {
+      byArgs: [
+        { when: { tender: 'T-5' }, reply: { delay: 2500, reply: { ok: true, tender: tender() } } },
+        { when: { tender: 'T-7' }, reply: { ok: true, tender: second } },
+      ],
+    },
+  });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('row').filter({ hasText: 'T-5' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.getByRole('row').filter({ hasText: 'T-7' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+  // T-5's reply lands about two seconds from now: the page stays on T-7.
+  await page.waitForTimeout(3500);
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Bike lane works' })).toHaveCount(0);
+  await expect(page.getByTestId('lots')).toHaveCount(0);
+});
+
+test('a visitor whose permissions are not known is offered no award', async ({ page }) => {
+  scenario = realm(null, tender());
+  await openTender(page);
+  await expect(page.getByRole('heading', { name: 'Bids (3)' })).toBeVisible();
+  await expect(page.getByTestId('lot-row')).toHaveCount(2);
+  await expect(page.getByTestId('lot-award')).toHaveCount(0);
+});
+
 test('a reader without the permission to manage sees the lots and no way to award them', async ({ page }) => {
   scenario = realm(READER, tender());
   await openTender(page);

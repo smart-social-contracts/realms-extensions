@@ -89,6 +89,8 @@
 	let tenders = $state<any[]>([]);
 	let selected = $state<any | null>(null);
 	let bids = $state<any[]>([]);
+	// False from opening a request until its bids have been read: a count or a winner shown before that would be wrong.
+	let detailReady = $state(false);
 	let events = $state<any[] | null>(null);
 	let decryptedBids = $state<Record<string, BidPayload | null>>({});
 	let departments = $state<any[]>([]);
@@ -121,6 +123,8 @@
 
 	let detailStatus = $derived(selected?.status ?? 'draft');
 	let canManage = $derived(can('tender.manage'));
+	// Awarding a lot or leaving it unawarded is offered only to a caller known to hold the permission, once the bids are read.
+	let mayDecideLots = $derived(detailReady && perms !== null && can('tender.manage'));
 	// Unlike the actions above, a contract amendment is offered only to a caller known to hold its permission.
 	let mayAmend = $derived(perms !== null && can('contract.amend'));
 	let lots = $derived<Lot[]>(selected?.lots ?? []);
@@ -287,11 +291,18 @@
 		loading = false;
 	}
 
+	// The newest loadDetail: a reply to an earlier one that comes late (a request opened, left, another opened) is dropped.
+	let detailSeq = 0;
+
 	async function loadDetail(tenderId: string) {
+		const mine = ++detailSeq;
 		busy = true;
 		actionError = '';
 		decryptedBids = {};
 		const [res, log] = await Promise.all([read('tender_get', { tender: tenderId }), read('events', { count: 500 })]);
+		if (mine !== detailSeq) return;
+		// A request the realm did not give has no bids to show: nothing is offered on it.
+		detailReady = Boolean(res?.tender);
 		if (res?.tender) {
 			selected = res.tender;
 			bids = res.tender.bids ?? [];
@@ -331,6 +342,8 @@
 		winningBidId = '';
 		awardJustification = '';
 		bidLot = '';
+		bids = [];
+		detailReady = false;
 		lotWinners = {};
 		lotJustifications = {};
 		lotReasons = {};
@@ -868,8 +881,8 @@
 									<td class="py-1 pr-4 font-mono text-xs">{lot.id}</td>
 									<td class="py-1 pr-4">{lot.title}</td>
 									<td class="py-1 pr-4 text-right">{lot.estimated_value == null ? '—' : contextReady ? money(lot.estimated_value, facts.currency, facts.decimals) : '…'}</td>
-									<td class="py-1 pr-4 text-right">{bidsOfLot(bids, lot).length}</td>
-									<td class="py-1 pr-4">{winningBid(bids, lot)?.vendor ?? '—'}</td>
+									<td class="py-1 pr-4 text-right">{detailReady ? bidsOfLot(bids, lot).length : '…'}</td>
+									<td class="py-1 pr-4">{detailReady ? (winningBid(bids, lot)?.vendor ?? '—') : '…'}</td>
 									<td class="py-1 pr-4">{t(`lot_status_${lot.status}`)}</td>
 									<td class="py-1">
 										{#if lot.contract}
@@ -884,7 +897,7 @@
 					</table>
 				</div>
 
-				{#if selected.status === 'evaluation' && canManage}
+				{#if selected.status === 'evaluation' && mayDecideLots}
 					{#each openLots(lots) as lot (lot.id)}
 						<div class="mt-4 rounded-lg border border-gray-100 p-3 dark:border-gray-700" data-testid="lot-award">
 							<h4 class="text-sm font-medium">{t('lot_award_title', { lot: lot.id, title: lot.title })}</h4>
@@ -969,8 +982,10 @@
 		{/if}
 
 		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
-			<h3 class="font-medium">Bids ({bids.length})</h3>
-			{#if bids.length === 0}
+			<h3 class="font-medium">Bids ({detailReady ? bids.length : '…'})</h3>
+			{#if !detailReady}
+				<p class="text-sm text-gray-500">…</p>
+			{:else if bids.length === 0}
 				<p class="text-sm text-gray-500">No bids yet.</p>
 			{:else}
 				<ul class="mt-2 space-y-3">

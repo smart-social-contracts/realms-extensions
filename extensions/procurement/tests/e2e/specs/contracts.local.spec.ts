@@ -12,12 +12,22 @@ const OUT = join(__dirname, '..', 'test-results');
 
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
-test.use({ viewport: { width: 1280, height: 1500 } });
+test.use({ viewport: { width: 1280, height: 1800 } });
 
 const SLOW = { timeout: 120_000 };
 
+/**
+ * The viewport as it is: the page is a 100 %-high frame around the realm, so a full-page capture resizes it and captures
+ * nothing (a blank image, which three of the screenshots once were) while the content scrolls inside the frame.
+ * A capture too small to hold a page of text is refused instead of kept.
+ */
+const BLANK_BELOW = 20_000; // bytes: our screenshots of a page of text are 60 to 130 KB, a white one a few KB
+
 async function shot(page: Page, name: string) {
-  await page.screenshot({ path: join(OUT, `local-${name}.png`), fullPage: true });
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(800);
+  const picture = await page.screenshot({ path: join(OUT, `local-${name}.png`) });
+  expect(picture.length, `the screenshot ${name} is blank`).toBeGreaterThan(BLANK_BELOW);
 }
 
 async function contractsTab(ext: FrameLocator) {
@@ -150,6 +160,33 @@ test('a call-off names the body that holds the agreement, its reference and its 
   }
 });
 
+test('a member without the permissions reads the contracts and the lots, and is offered no action', async ({ page }) => {
+  const { ext, close } = await openExtension(page, 'procurement', { asMember: true });
+  try {
+    await openContract(ext, 'Bike lane works');
+    await expect(ext.getByTestId('amendment')).toHaveCount(2, SLOW);
+    await expect(ext.getByTestId('amend-floor')).toBeVisible();
+    await expect(ext.getByTestId('amend-denied')).toBeVisible();
+    await expect(ext.getByRole('button', { name: 'Propose the amendment' })).toHaveCount(0);
+    await shot(page, 'member-contract');
+
+    await ext.getByRole('button', { name: 'All contracts' }).click();
+    await ext.getByTestId('sections').getByRole('tab', { name: 'Requests' }).click();
+    await ext.getByRole('row').filter({ hasText: 'Bike lane works in the old town' }).getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
+    // The bids are read: the counts are real, and the lots that wait for an award are open (an admin is offered them here).
+    await expect(ext.getByRole('heading', { name: 'Bids (5)' })).toBeVisible(SLOW);
+    await expect(ext.getByTestId('lot-row').nth(1)).toContainText('Open');
+    await expect(ext.getByTestId('lot-row').nth(2)).toContainText('Open');
+    await expect(ext.getByTestId('lot-award')).toHaveCount(0);
+    await expect(ext.getByRole('button', { name: 'Award this lot' })).toHaveCount(0);
+    await expect(ext.getByRole('button', { name: 'Leave this lot unawarded' })).toHaveCount(0);
+    await shot(page, 'member-lots');
+  } finally {
+    await close();
+  }
+});
+
 test('a tender in lots: the table, the contract of an awarded lot, and each open lot awarded or left unawarded', async ({ page }) => {
   const { ext, close } = await openExtension(page, 'procurement');
   try {
@@ -216,27 +253,6 @@ test('a tender is created with lots, their budgets in the currency\'s base units
       { id: 'north', title: 'North schools', estimated_value: 5_000 * 10 ** 8, status: 'open', winner: null, contract: null },
       { id: 'south', title: 'South schools', estimated_value: null, status: 'open', winner: null, contract: null },
     ]);
-  } finally {
-    await close();
-  }
-});
-
-test('a member without the permissions reads the contracts and the lots, and is offered no action', async ({ page }) => {
-  const { ext, close } = await openExtension(page, 'procurement', { asMember: true });
-  try {
-    await openContract(ext, 'Bike lane works');
-    await expect(ext.getByTestId('amendment')).toHaveCount(2, SLOW);
-    await expect(ext.getByTestId('amend-floor')).toBeVisible();
-    await expect(ext.getByTestId('amend-denied')).toBeVisible();
-    await expect(ext.getByRole('button', { name: 'Propose the amendment' })).toHaveCount(0);
-    await shot(page, 'member-contract');
-
-    await ext.getByRole('button', { name: 'All contracts' }).click();
-    await ext.getByTestId('sections').getByRole('tab', { name: 'Requests' }).click();
-    await ext.getByRole('row').filter({ hasText: 'Bike lane works in the old town' }).getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
-    await expect(ext.getByRole('button', { name: 'Award this lot' })).toHaveCount(0);
-    await shot(page, 'member-lots');
   } finally {
     await close();
   }

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-12
+
+### Fixed
+- A request opened from the list shows `…` in the lots table's bids and winner columns, and in the Bids section, until
+  its bids have been read; before, it showed 0 bids and no winner (or the previous request's bids).
+- Awarding a lot and leaving it unawarded are offered only once the bids are read and to a caller known to hold
+  `tender.manage`, not while the caller's permissions are unknown.
+- The real-realm specs: the member's view of the lots is taken while the lots are open and after the bids are read, and
+  asserts that no award is offered where an admin has them; screenshots wait for the page to settle (one came out blank).
+
 ## [0.6.0] - 2026-11-12
 
 ### Added
