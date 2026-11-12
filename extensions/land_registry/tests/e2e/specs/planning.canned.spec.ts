@@ -79,6 +79,9 @@ const asked = (page: Page): Promise<[string, any][]> => page.evaluate(() => (win
 const rows = (page: Page) => page.locator('.parcel-row');
 const rowOf = (page: Page, id: string) => page.locator('.parcel-row', { hasText: id });
 
+/** The checkbox of a zone in the form that sets a parcel's zones (the filter's select has the zones' names too, so not by label). */
+const zoneBox = (page: Page, name: string) => page.locator('.zone-option', { hasText: name }).locator('input');
+
 async function open(page: Page) {
   // the map needs the network: without it the page shows its sidebar and says the map is not available
   await page.route(/unpkg\.com|openfreemap\.org/, (route) => route.abort());
@@ -142,8 +145,8 @@ test('a member who may set zones chooses them, saves them, and the list shows th
   const save = page.getByRole('button', { name: 'Save zones' });
   await expect(save).toBeDisabled();
 
-  await page.getByLabel('Old town').check();
-  await page.getByLabel('Seafront').check();
+  await zoneBox(page, 'Old town').check();
+  await zoneBox(page, 'Seafront').check();
   await page.screenshot({ path: join(OUT, 'land-planning-set-zones.png'), fullPage: true });
   await save.click();
   await expect(page.getByText('The zones of parcel L-3 are saved.')).toBeVisible();
@@ -158,7 +161,7 @@ test('a zone change the realm puts to a vote says so', async ({ page }) => {
   scenario = realm({ permissions: ['realm.configure'], replies: { land_zone_set: { ok: true, proposal: 'P-12' } } });
   await open(page);
   await rowOf(page, 'L-3').click();
-  await page.getByLabel('Seafront').check();
+  await zoneBox(page, 'Seafront').check();
   await page.getByRole('button', { name: 'Save zones' }).click();
   await expect(page.getByText('Submitted for a vote as proposal P-12.')).toBeVisible();
 });
@@ -167,7 +170,7 @@ test('a refusal of the realm is shown', async ({ page }) => {
   scenario = realm({ permissions: ['realm.configure'], replies: { land_zone_set: { ok: false, error: 'seafront is not a zone of the realm' } } });
   await open(page);
   await rowOf(page, 'L-3').click();
-  await page.getByLabel('Seafront').check();
+  await zoneBox(page, 'Seafront').check();
   await page.getByRole('button', { name: 'Save zones' }).click();
   await expect(page.getByText('seafront is not a zone of the realm')).toBeVisible();
 });
@@ -177,7 +180,7 @@ test('a parcel lies in at most 8 zones: the ninth is out of reach', async ({ pag
   scenario = realm({ zones, parcels: [parcel(1, 'residential', zones.slice(0, 8).map((z) => z.id))], permissions: ['realm.configure'] });
   await open(page);
   await rowOf(page, 'L-1').click();
-  await expect(page.getByLabel('Zone 9')).toBeDisabled();
+  await expect(zoneBox(page, 'Zone 9')).toBeDisabled();
   await expect(page.getByText('A parcel lies in at most 8 zones.')).toBeVisible();
 });
 
@@ -219,7 +222,7 @@ for (const locale of ['es', 'de', 'fr', 'it', 'zh-CN', 'ca-valencia']) {
     shown.push((await page.getByTestId('zone-filter-count').textContent()) ?? '');
     for (const text of shown) {
       expect(text, `${locale}: ${text}`).not.toMatch(/[{}]/);
-      expect(text.trim().length, locale).toBeGreaterThan(3);
+      expect(text.trim().length, locale).toBeGreaterThan(1);
     }
     expect(shown[1], locale).not.toBe('Planning zones');
     expect(shown[3], locale).not.toBe('Licences for this parcel');

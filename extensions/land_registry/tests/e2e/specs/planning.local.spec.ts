@@ -56,7 +56,7 @@ test('an admin sets the zones of a parcel, and the realm holds them', async ({ p
   try {
     await registry.ext.locator('.parcel-row', { hasText: third }).click({ timeout: 120_000 });
     await expect(registry.ext.getByText('This parcel lies in no planning zone.')).toBeVisible();
-    await registry.ext.getByLabel('Old town').check();
+    await registry.ext.locator('.zone-option', { hasText: 'Old town' }).locator('input').check();
     await page.screenshot({ path: join(OUT, 'local-land-planning-set-zones.png'), fullPage: true });
     await registry.ext.getByRole('button', { name: 'Save zones' }).click();
     await expect(registry.ext.getByText(`The zones of parcel ${third} are saved.`)).toBeVisible({ timeout: 120_000 });
