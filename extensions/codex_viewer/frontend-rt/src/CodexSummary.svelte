@@ -6,7 +6,7 @@
 	let { status, zones }: { status: CodexStatus; zones: { official: string; local: string } } = $props();
 
 	let codex = $derived(isLayered(status.codex) ? status.codex : null);
-	let layers = $derived(codex ? layerRows(codex) : []);
+	let layers = $derived(codex ? layerRows(codex, status.sync_sources ?? []) : []);
 </script>
 
 <section class="card" data-testid="in-force">

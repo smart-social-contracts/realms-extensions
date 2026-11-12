@@ -9,15 +9,34 @@ export interface Release {
 	source: string;
 	version: string;
 	effective_from: number;
+	/** An older release than the one the realm runs: the source went back to it (§11.6). */
+	step_back?: boolean;
+}
+
+/**
+ * What a flag does not say about a layer the realm runs and a source's record does not list (§11.6): `unlisted`, a version
+ * the source does not list while none it lists took effect after it; `went_back`, the source vouched for what the realm
+ * runs and now lists an older release. `lists` is the newest release the record has of the layer.
+ */
+export interface Note {
+	source: string;
+	kind: 'unlisted' | 'went_back';
+	runs: string;
+	lists: string;
 }
 
 export interface SyncSource {
+	/** The sync source's key: its capital, or the address of its stand-in record. */
 	source: string;
 	name: string;
+	/** The source id of the record's own layer, which a codex's `vouched_by` names; absent from an older realm. */
+	layer?: string;
 	compliance: Flag;
 	checked_at: number;
 	error: string;
 	installable: Release[];
+	/** Absent from a realm that does not say them (before §11.6 compared by effective date). */
+	notes?: Note[];
 }
 
 export interface Chapter {
@@ -26,6 +45,8 @@ export interface Chapter {
 	sha256: string;
 	vouched_by: string;
 	route: string;
+	/** When the release this layer came from took effect, when the realm kept it. */
+	effective_from?: number;
 }
 
 export interface LayeredCodex {
@@ -118,8 +139,17 @@ export interface LayerRow {
 	vouchedBy: string[];
 }
 
+/**
+ * How to show who vouched for a layer: the name of the sync source whose record it is (`vouched_by` names the record's own
+ * layer, or the source's key in a realm that wrote the key), else the id as it stands.
+ */
+export function sourceName(id: string, sources: SyncSource[] = []): string {
+	const found = sources.find((source) => (source.layer && source.layer === id) || source.source === id);
+	return found?.name || id;
+}
+
 /** The chapters of `codex` grouped by layer, in the order of its layers. A chapter id is `<source>/<domain>`. */
-export function layerRows(codex: LayeredCodex): LayerRow[] {
+export function layerRows(codex: LayeredCodex, sources: SyncSource[] = []): LayerRow[] {
 	return codex.layers.map((source, at) => {
 		const own = Object.entries(codex.chapters).filter(([, chapter]) => chapter.source === source);
 		const versions = [...new Set(own.map(([, chapter]) => chapter.version))];
@@ -128,7 +158,7 @@ export function layerRows(codex: LayeredCodex): LayerRow[] {
 			own: at === codex.layers.length - 1,
 			version: versions.join(', '),
 			domains: own.map(([id]) => id.slice(source.length + 1)).sort(),
-			vouchedBy: [...new Set(own.map(([, chapter]) => chapter.vouched_by).filter(Boolean))],
+			vouchedBy: [...new Set(own.map(([, chapter]) => chapter.vouched_by).filter(Boolean).map((id) => sourceName(id, sources)))],
 		};
 	});
 }
@@ -183,8 +213,18 @@ export function parseInterval(text: string): number | null {
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
-/** The title and description of the proposal "Propose install" files for `release` (§11.4), in the filer's language. */
-export function installProposal(t: Translate, release: Release): { title: string; description: string } {
-	const vars = { source: release.source, version: release.version };
-	return { title: t('install_title', vars), description: t('install_description', vars) };
+/**
+ * The title and description of the proposal "Propose install" files for `release` (§11.4), in the filer's language. A step
+ * back says so, and names the release the realm runs (`runs`): a vote on it must not read as catching up.
+ */
+export function installProposal(t: Translate, release: Release, runs = ''): { title: string; description: string } {
+	const vars = { source: release.source, version: release.version, runs };
+	return release.step_back
+		? { title: t('step_back_title', vars), description: t('step_back_description', vars) }
+		: { title: t('install_title', vars), description: t('install_description', vars) };
+}
+
+/** The note of a source about layer `source` of `kind`, if it has one. */
+export function noteOf(notes: Note[] | undefined, source: string, kind?: Note['kind']): Note | undefined {
+	return (notes ?? []).find((note) => note.source === source && (kind === undefined || note.kind === kind));
 }

@@ -65,8 +65,8 @@
 		await reload();
 	}
 
-	async function propose(release: Release) {
-		const { title, description } = installProposal(t, release);
+	async function propose(release: Release, runs = '') {
+		const { title, description } = installProposal(t, release, runs);
 		const reply = await run('proposal_create', {
 			title,
 			description,

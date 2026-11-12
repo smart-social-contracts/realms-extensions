@@ -8,11 +8,14 @@ import {
 	installProposal,
 	isLayered,
 	layerRows,
+	noteOf,
 	parseInterval,
 	rowOrigin,
 	shortId,
+	sourceName,
 	valueText,
 	type LayeredCodex,
+	type SyncSource,
 	type ViewRow,
 } from './legislation.ts';
 import { interpolate } from '../../../_shared/frontend/extension-i18n.ts';
@@ -154,6 +157,66 @@ describe('the check interval', () => {
 	});
 });
 
+const spain: SyncSource = {
+	source: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+	name: 'Spain',
+	layer: 'eu/es',
+	compliance: 'compliant',
+	checked_at: 1_800_000_000,
+	error: '',
+	installable: [],
+};
+
+describe('who vouched for a layer', () => {
+	it('names the sync source whose record it is: by the record\'s own layer, which a codex names, or by the source\'s key', () => {
+		assert.equal(sourceName('eu/es', [spain]), 'Spain');
+		assert.equal(sourceName('rrkah-fqaaa-aaaaa-aaaaq-cai', [spain]), 'Spain'); // a realm that wrote the key
+		assert.equal(sourceName('eu/es', [{ ...spain, layer: undefined }]), 'eu/es'); // an older realm says no layer
+		assert.equal(sourceName('eu/es', [{ ...spain, name: '' }]), 'eu/es'); // no name: the id
+		assert.equal(sourceName('eu/es', []), 'eu/es');
+		assert.equal(sourceName('eu/es'), 'eu/es');
+	});
+
+	it('shows it in the layers of the codex, and the id where no source is known', () => {
+		const names = layerRows(codex, [spain]).map((row) => row.vouchedBy);
+		assert.deepEqual(names, [['Spain'], ['Spain'], []]); // the realm\'s own layer has no chapter of anyone\'s vouching
+		assert.deepEqual(layerRows(codex).map((row) => row.vouchedBy), [['rrkah-fqaaa-aaaaa-aaaaq-cai'], ['rrkah-fqaaa-aaaaa-aaaaq-cai'], []]);
+	});
+});
+
+describe('a source that went back, and a version it does not list (§11.6)', () => {
+	const notes = [
+		{ source: 'eu/es', kind: 'went_back' as const, runs: '2.6.0', lists: '2.4.0' },
+		{ source: 'eu/es/vc', kind: 'unlisted' as const, runs: '1.2.0', lists: '1.1.0' },
+	];
+
+	it('finds the note of a layer, of a kind', () => {
+		assert.equal(noteOf(notes, 'eu/es', 'went_back')?.runs, '2.6.0');
+		assert.equal(noteOf(notes, 'eu/es', 'unlisted'), undefined);
+		assert.equal(noteOf(notes, 'eu/es/vc')?.kind, 'unlisted');
+		assert.equal(noteOf(undefined, 'eu/es'), undefined); // a realm that says no notes
+	});
+
+	it('files a step back as one, naming the release the realm runs, and an install as before', () => {
+		const t = (key: string, vars?: Record<string, string | number>) => interpolate(english[key] ?? key, vars);
+		const back = installProposal(t, { source: 'eu/es', version: '2.4.0', effective_from: 1_800_000_000, step_back: true }, '2.6.0');
+		assert.equal(back.title, 'Go back to eu/es 2.4.0');
+		assert.match(back.description, /older than 2\.6\.0, the release this realm runs/);
+		const forward = installProposal(t, { source: 'eu/es', version: '2.4.0', effective_from: 1_800_000_000 });
+		assert.equal(forward.title, 'Install eu/es 2.4.0');
+	});
+
+	it('says in every language that a step back is older than what the realm runs', () => {
+		for (const locale of ['en', ...OTHERS]) {
+			const text = strings(locale);
+			const t = (key: string, vars?: Record<string, string | number>) => interpolate(text[key] ?? key, vars);
+			const warning = t('step_back_warning', { source: 'eu/es', version: '2.4.0', runs: '2.6.0' });
+			assert.ok(warning.includes('2.4.0') && warning.includes('2.6.0'), `${locale}: ${warning}`);
+			assert.ok(!warning.includes('{'), locale);
+		}
+	});
+});
+
 const LOCALES = new URL('../../frontend/i18n/locales/extensions/codex_viewer/', import.meta.url);
 const strings = (locale: string): Record<string, string> => JSON.parse(readFileSync(new URL(`${locale}.json`, LOCALES), 'utf8'));
 const english = strings('en');
@@ -187,11 +250,12 @@ describe('the strings of the page', () => {
 		for (const source of sources) {
 			for (const [, key] of source.matchAll(/\bt\('([a-z_]+)'/g)) asked.add(key);
 		}
-		// Keys built from a state: t(`job_${status}`), t(`step_${step}`), t(`compliance_${state}`), t(`mark_${mark}`).
+		// Keys built from a state: t(`job_${status}`), t(`step_${step}`), t(`compliance_${state}`), t(`mark_${mark}`), t(`note_${kind}`).
 		for (const status of ['running', 'paused', 'failed', 'done']) asked.add(`job_${status}`);
 		for (const step of ['fetch_change_list', 'check_change_list', 'fetch_chapters', 'check_sources', 'build', 'confirm', 'switch', 'wait']) asked.add(`step_${step}`);
 		for (const state of ['compliant', 'non_compliant', 'unknown']) asked.add(`compliance_${state}`);
 		for (const mark of ['fixed', 'extension', 'overridable']) asked.add(`mark_${mark}`);
+		for (const kind of ['unlisted', 'went_back']) asked.add(`note_${kind}`);
 		const missing = [...asked].filter((key) => !(key in english));
 		assert.deepEqual(missing, []);
 		const unused = Object.keys(english).filter((key) => !asked.has(key));
