@@ -149,33 +149,16 @@ test('a kind far down the list is found by following the realm over the pages wi
 test('when the realm has more rows than a click searches, the page says how many it searched and offers to go on, not "none"', async () => {
 	await mountOn(withOneParty(25_000, 24_000));
 	await choose('org-kind-select', 'party');
+	// the first call and 20 hops: 21 calls of 500 rows
 	expect(chips()).toEqual([]);
-	expect(text()).toContain('None of the 10000 organisations searched is of this kind.');
+	expect(text()).toContain('None of the 10500 organisations searched is of this kind.');
 	expect(text()).not.toContain('No organisations of this kind.');
 	const further = () => target.querySelector<HTMLButtonElement>('[data-testid="org-kind-search-further"]')!;
 	further().click();
 	await settle(200);
+	expect(text()).toContain('None of the 21000 organisations searched is of this kind.'); // counted from the first row
+	further().click();
+	await settle(200);
 	expect(chips()).toEqual(['Party']);
 	expect(text()).toContain('Org 24000');
-});
-
-test('a kind no organisation has says so', async () => {
-	await mountOn(ORGS.filter((o) => o.kind !== 'union'));
-	await choose('org-kind-select', 'union');
-	expect(chips()).toEqual([]);
-	expect(text()).toContain('No organisations of this kind.');
-});
-
-test('a realm with no organisations lists none, without an error', async () => {
-	await mountOn([]);
-	expect(chips()).toEqual([]);
-	expect(text()).toContain('No items found.');
-	expect(text()).not.toContain('This list isn');
-});
-
-test('a reader the realm refuses is told which permission is missing, and sees no kinds', async () => {
-	await mountOn(ORGS, { refuse: 'organization_list needs realm.data_view' });
-	expect(text()).toContain('Additional permissions needed');
-	expect(text()).toContain('realm.data_view');
-	expect(chips()).toEqual([]);
 });

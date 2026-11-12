@@ -58,10 +58,12 @@
 	let expandedItem: number | null = $state(null);
 	let currentPage = $state(0);
 	let nextCursor: number | null = $state(null);
-	// The rows the realm read through for the page shown: what "none of this kind" can claim when the realm has more.
+	// The rows the realm read through for the pages shown, from the first: what "none of this kind" can claim when the realm has more.
 	let searched = $state(0);
 	// cursors[i] is the `from` of page i (null: the operation's default start).
 	let cursors: (number | null)[] = [null];
+	// scans[i] is the rows the realm read through to fill page i (hops over empty pages included).
+	let scans: number[] = [];
 	let requestSeq = 0;
 
 	function getIcon(className: string): string {
@@ -192,7 +194,8 @@
 		} else {
 			items = page.rows;
 			nextCursor = page.next;
-			searched = readThrough;
+			scans = [...scans.slice(0, pageIndex), readThrough];
+			searched = scans.reduce((total, rows) => total + rows, 0);
 			currentPage = pageIndex;
 			cursors = [...cursors.slice(0, pageIndex + 1), page.next];
 		}
@@ -221,6 +224,7 @@
 		kindFilter;
 		untrack(() => {
 			cursors = [null];
+			scans = [];
 			currentPage = 0;
 			loadData(0);
 		});
