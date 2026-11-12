@@ -132,7 +132,7 @@ test('the sheet prints to a PDF with the Chinese text in it', async ({ page }) =
   await expect(sheet(page).locator('h1')).toBeVisible();
   const file = join(OUT, 'journal-zh-CN.pdf');
   writeFileSync(file, await printedPdf(page));
-  const text = execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' });
+  const text = pdfText(file);
   expect(text).toContain('瓦伦西亚官方公报');
   expect(text).toMatch(/第\s*3\s*期/); // the text of a PDF has its own spacing
   expect(text).toContain('2026年11月9日星期一');
@@ -215,8 +215,9 @@ function gazette(locale: string, realm: string): Scenario {
   };
 }
 
+/** The text of a PDF with its spacing made plain: how pdftotext spaces and wraps a line depends on the fonts of the machine. Form feeds stay: they end the pages. */
 function pdfText(file: string): string {
-  return execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' });
+  return execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' }).replace(/[^\S\f]+/g, ' ');
 }
 
 /** The sheet as one tall picture, since the page's own height is the iframe's. */

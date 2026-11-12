@@ -7,14 +7,14 @@ on:
       - 'extensions/test_bench/**'
       - '.github/workflows/test_bench-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/test_bench/**'
       - '.github/workflows/test_bench-test.yml'
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout repository

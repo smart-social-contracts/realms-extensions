@@ -5,16 +5,18 @@ on:
     branches: [ main, develop ]
     paths:
       - 'extensions/realm_settings/**'
+      - 'extensions/_shared/frontend/**'
       - '.github/workflows/realm_settings-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/realm_settings/**'
+      - 'extensions/_shared/frontend/**'
       - '.github/workflows/realm_settings-test.yml'
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
