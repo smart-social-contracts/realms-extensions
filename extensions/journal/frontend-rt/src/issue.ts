@@ -35,8 +35,8 @@ export interface Issue {
 	today: string;
 	timezone: string;
 	entries: Entry[];
-	/** `provisional` (today's: signed once the day has closed), `signed` or `unsigned` (closed, not signed yet). A realm
-	 * that does not sign says nothing. */
+	/** `provisional` (today's: it can be signed once the day has closed), `signed` or `unsigned` (closed, and nobody has asked
+	 * the realm to sign it). A realm that does not sign says nothing. */
 	status?: 'provisional' | 'signed' | 'unsigned';
 	/** Present when the issue is signed. */
 	proof?: Proof;

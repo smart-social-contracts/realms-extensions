@@ -1,10 +1,10 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CAPITAL, CODEX_ID, FOUND, INSTALL, issueOf, LOGO, NOT_RECORDED, PROOF_CODE, PROOF_DIGEST, PROOF_KEY, PROOF_SIGNATURE, PUBLISHED, REVERT,
-  signedIssueOf, startRealm, VERIFY_PAGE, type Scenario,
+  signedIssueOf, signReplyOf, startRealm, unsignedIssueOf, VERIFY_PAGE, type Scenario,
 } from '../realm';
 
 const OUT = join(__dirname, '..', 'test-results', '.playwright');
@@ -428,7 +428,7 @@ test('an issue signed in a batch shows the root of the batch', async ({ page }) 
 });
 
 test('today\'s issue says it is provisional and a closed one that is not signed yet says so, and neither has the box', async ({ page }) => {
-  for (const [status, text] of [['provisional', 'Provisional issue: the realm signs it once its day has closed.'], ['unsigned', 'Not signed yet: the realm signs each issue once its day has closed.']]) {
+  for (const [status, text] of [['provisional', 'Provisional issue: it can be signed once its day has closed.'], ['unsigned', 'Not signed yet: the realm signs an issue when someone asks for its signature.']]) {
     const reply = issueOf('2026-11-09', 3, [INSTALL]);
     scenario = signed('en', 'Agora', { ...reply, issue: { ...reply.issue, status } } as any);
     await page.goto(`${url}/extensions/journal`);
@@ -463,3 +463,132 @@ test('a quarter shows the capital\'s signature, which checks against the capital
   await expect(slot).toBeVisible();
   await expect(slot.locator('[data-field="verification_url"]')).toHaveText(`${VERIFY_PAGE}?canister=${CAPITAL}&code=${PROOF_CODE}`);
 });
+
+// ---- an issue nobody has signed can be signed by anyone who asks
+
+const DAY = '2026-11-08';
+const LANGUAGES = ['en', 'es', 'de', 'fr', 'it', 'zh-CN', 'ca-valencia'];
+const WORDS = join(__dirname, '..', '..', '..', 'frontend', 'i18n', 'locales', 'extensions', 'journal');
+
+function words(locale: string): Record<string, string> {
+  return JSON.parse(readFileSync(join(WORDS, `${locale}.json`), 'utf8'));
+}
+
+/** A closed day nobody has signed, which is read as signed once `journal_sign` has answered as `sign` says. */
+function asking(sign: unknown, locale = 'en', realm = 'Agora'): Scenario {
+  return {
+    locale,
+    realm: { name: realm, logoUrl: LOGO },
+    replies: {
+      journal_issue: { byDay: { [DAY]: { sequence: [unsignedIssueOf(DAY, 2, [INSTALL], realm), signedIssueOf(DAY, 2, [INSTALL], realm)] } } },
+      journal_sign: sign,
+    },
+  };
+}
+
+const askedNames = (page: Page) => page.evaluate(() => (window as any).asked.map(([name]: [string]) => name));
+
+test('a closed issue nobody has signed offers a button, signed out too, and the signature box, code and QR appear once it is signed', async ({ page }) => {
+  scenario = asking({ ...signReplyOf(DAY, 2, [INSTALL]), delayMs: 400 });
+  await page.goto(`${url}/extensions/journal/${DAY}`);
+  const paper = sheet(page);
+  const slot = paper.locator('.authentication[data-slot="signature"]');
+  await expect(paper.getByText('Not signed yet: the realm signs an issue when someone asks for its signature.')).toBeVisible();
+  await expect(slot).toBeHidden();
+  const button = page.getByRole('button', { name: 'Request signature' });
+  await expect(button).toBeEnabled();
+  await expect(page.getByText('Anyone may ask. The realm signs the issue once and keeps the signature.')).toBeVisible();
+  await page.screenshot({ path: join(OUT, 'journal-request-unsigned.png'), fullPage: true });
+
+  await button.click();
+  await expect(page.getByRole('button', { name: 'Signing…' })).toBeDisabled(); // the call is out
+  await expect(slot).toBeVisible();
+  await expect(slot.locator('[data-field="verification_code"]')).toHaveText(PROOF_CODE);
+  await expect(slot.locator('[data-field="signature"]')).toHaveText(PROOF_SIGNATURE);
+  await expect(slot.locator('[data-field="verification_qr"] svg')).toBeVisible();
+  await expect(slot.locator('[data-field="verification_url"]')).toHaveText(`${VERIFY_PAGE}?canister=${CAPITAL}&code=${PROOF_CODE}`);
+  await expect(paper.locator('.signature-note')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Request signature|Signing/ })).toHaveCount(0); // nothing left to ask for
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(await askedNames(page)).toEqual(['journal_issue', 'journal_sign', 'journal_issue']);
+  expect(await page.evaluate(() => (window as any).asked[1])).toEqual(['journal_sign', { day: DAY }]);
+  await page.screenshot({ path: join(OUT, 'journal-request-signed.png'), fullPage: true });
+});
+
+test('while another call is signing the issue the page says so and asks again until it is signed', async ({ page }) => {
+  scenario = asking({ sequence: [{ ok: true, day: DAY, status: 'pending' }, signReplyOf(DAY, 2, [INSTALL])] });
+  await page.goto(`${url}/extensions/journal/${DAY}`);
+  await page.getByRole('button', { name: 'Request signature' }).click();
+  await expect(page.getByText('The issue is being signed. Checking again…')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Signing…' })).toBeDisabled();
+  await page.screenshot({ path: join(OUT, 'journal-request-pending.png'), fullPage: true });
+  await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeVisible({ timeout: 10_000 }); // asked again after a few seconds
+  expect(await askedNames(page)).toEqual(['journal_issue', 'journal_sign', 'journal_sign', 'journal_issue']);
+});
+
+test('a signature that could not be made is an error beside the button, which may be pressed again', async ({ page }) => {
+  const refused = { ok: false, kind: 'unavailable', error: 'the signature could not be made: the realm has 5 cycles' };
+  scenario = asking({ sequence: [refused, signReplyOf(DAY, 2, [INSTALL])] });
+  await page.goto(`${url}/extensions/journal/${DAY}`);
+  await page.getByRole('button', { name: 'Request signature' }).click();
+  await expect(page.getByRole('alert')).toHaveText('The issue could not be signed: the signature could not be made: the realm has 5 cycles');
+  await expect(page.getByRole('button', { name: 'Request signature' })).toBeEnabled();
+  await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeHidden();
+  await page.screenshot({ path: join(OUT, 'journal-request-error.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Request signature' }).click();
+  await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('there is nothing to ask for on today\'s issue, on a signed one or on a quarter\'s', async ({ page }) => {
+  const request = page.getByRole('button', { name: 'Request signature' });
+  const reply = issueOf('2026-11-09', 3, [INSTALL]);
+  scenario = { locale: 'en', realm: { name: 'Agora', logoUrl: LOGO }, replies: { journal_issue: { ...reply, issue: { ...reply.issue, status: 'provisional' } } } };
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).getByText('Provisional issue: it can be signed once its day has closed.')).toBeVisible();
+  await expect(request).toHaveCount(0);
+  scenario = signed('en', 'Agora');
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeVisible();
+  await expect(request).toHaveCount(0);
+  scenario = {
+    locale: 'en',
+    realm: { name: 'Agora North', logoUrl: LOGO },
+    replies: {
+      journal_issue: { ok: true, issued: false, capital: CAPITAL },
+      journal_capital_issue: { ...unsignedIssueOf(DAY, 2, [INSTALL], 'Agora'), issued: false }, // the capital's, which this quarter cannot ask
+    },
+  };
+  await page.goto(`${url}/extensions/journal/${DAY}`);
+  await expect(sheet(page).getByText('Not signed yet')).toBeVisible();
+  await expect(request).toHaveCount(0);
+});
+
+test('the sheet of an unsigned day, on screen and on paper, has no signature box and says it can be signed on request', async ({ page }) => {
+  scenario = asking({ ok: true, day: DAY, status: 'pending' });
+  await page.goto(`${url}/extensions/journal/${DAY}/print`);
+  const paper = sheet(page);
+  await expect(paper.getByText('Not signed yet: the realm signs an issue when someone asks for its signature.')).toBeVisible();
+  await expect(paper.locator('.authentication[data-slot="signature"]')).toBeHidden();
+  const file = join(OUT, 'journal-unsigned.pdf');
+  writeFileSync(file, await printedPdf(page));
+  const text = pdfText(file).replace(/\s+/g, ' ');
+  expect(text).toContain('Not signed yet: the realm signs an issue when someone asks for its signature.');
+  expect(text).not.toContain('Verification code');
+  expect(text).not.toContain('Request signature'); // the button is the realm's page, not the paper
+  expect(execFileSync('pdfinfo', [file], { encoding: 'utf8' })).toMatch(/Pages:\s+1\b/);
+});
+
+for (const locale of LANGUAGES) {
+  test(`the button, what it says and the line on the sheet are in ${locale}`, async ({ page }) => {
+    const said = words(locale);
+    scenario = asking({ ...signReplyOf(DAY, 2, [INSTALL]), delayMs: 300 }, locale);
+    await page.goto(`${url}/extensions/journal/${DAY}`);
+    await expect(sheet(page).getByText(said.signature_unsigned)).toBeVisible();
+    await expect(page.getByText(said.sign_hint)).toBeVisible();
+    await page.getByRole('button', { name: said.sign_request }).click();
+    await expect(page.getByRole('button', { name: said.sign_busy })).toBeDisabled();
+    await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeVisible();
+    await expect(sheet(page).getByRole('heading', { name: said.signature_title, level: 2 })).toBeVisible();
+  });
+}

@@ -31,5 +31,14 @@
   "timezone_now": "Heure officielle actuelle : {time}",
   "timezone_preview": "À {zone}, il est maintenant {time}.",
   "timezone_applies_now": "Un changement s'applique dès l'enregistrement.",
-  "timezone_needs_vote": "Un changement relève de {department} (politique {policy}) : l'enregistrement dépose une proposition, et le fuseau change une fois celle-ci acceptée."
+  "timezone_needs_vote": "Un changement relève de {department} (politique {policy}) : l'enregistrement dépose une proposition, et le fuseau change une fois celle-ci acceptée.",
+  "section_journal_signing": "Signatures du Journal officiel",
+  "section_journal_signing_desc": "Le canister du royaume signe un numéro de son journal officiel quand quelqu'un le demande, une seule fois, et conserve la signature. Chaque signature coûte des cycles au royaume (environ 26 milliards sur le réseau de production) ; le royaume peut aussi signer chaque numéro à la fin de sa journée.",
+  "journal_signing": "Quand les numéros sont signés",
+  "journal_signing_on_request": "Quand quelqu'un le demande (par défaut)",
+  "journal_signing_daily": "Chaque jour, à la fin de sa journée",
+  "journal_signing_on_request_note": "Ne coûte rien tant que personne ne le demande, et au plus une signature par jour.",
+  "journal_signing_daily_note": "Une signature par jour : environ 9,5 billions de cycles par an. En passant à ce mode, tous les jours faits depuis le dernier signé sont signés, une fois : environ 12 signatures (0,3 billion de cycles) pour une année sans signature.",
+  "journal_signing_applies_now": "Un changement s'applique dès l'enregistrement.",
+  "journal_signing_needs_vote": "Un changement relève de {department} (politique {policy}) : l'enregistrement dépose une proposition, et le changement s'applique une fois celle-ci acceptée."
 }
