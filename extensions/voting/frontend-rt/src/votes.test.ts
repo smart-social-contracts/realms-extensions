@@ -12,11 +12,13 @@ import {
 	choiceOf,
 	endedText,
 	finalOutcome,
+	firstVoteOf,
 	isVetoed,
 	missingVoters,
 	myVote,
 	quorumReached,
 	requirementText,
+	secondVoteText,
 	vetoHoldersMissing,
 	votingRule,
 	waitingText,
@@ -172,6 +174,7 @@ const departmentRule: VotingRule = {
 	castingVote: '',
 	seats: 3,
 	veto: true,
+	majorityOfCast: false,
 };
 // The realm's own rule: more than half of the yes and no votes cast.
 const realmRule: VotingRule = {
@@ -181,6 +184,7 @@ const realmRule: VotingRule = {
 	castingVote: '',
 	seats: null,
 	veto: false,
+	majorityOfCast: false,
 };
 
 // A department vote needing 2 approvals, 5 eligible, 3 votes cast of which 1 yes; each case changes what is missing.
@@ -192,6 +196,7 @@ const department: OpenVote = {
 	votes: tally(1, 1, 1),
 	vetoed: false,
 	castingChoice: '',
+	firstVote: null,
 	vetoHoldersMissing: 2,
 };
 const realmWide: OpenVote = {
@@ -202,6 +207,7 @@ const realmWide: OpenVote = {
 	votes: tally(2, 1),
 	vetoed: false,
 	castingChoice: '',
+	firstVote: null,
 	vetoHoldersMissing: 0,
 };
 
@@ -333,6 +339,7 @@ describe('votingRule', () => {
 			castingVote: 'dana-id',
 			seats: null,
 			veto: false,
+			majorityOfCast: false,
 		});
 		assert.equal(votingRule({ ...realm, threshold_of: 'eligible' }, false)?.thresholdOf, 'eligible');
 	});
@@ -353,6 +360,43 @@ describe('votingRule', () => {
 		assert.equal(votingRule({ ...stored, tally: '{}' }, true), null);
 		assert.equal(votingRule({ ...stored, tally: { ...stored.tally, seats: 0 } }, true), null);
 		assert.equal(votingRule({ ...stored, tally: { yes: 0, no: 0, abstain: 0, required: 2 } }, true), null);
+	});
+
+	it("reads that a department's vote counts the votes cast, as its policy says", () => {
+		const counted = { ...stored, threshold: 50 * PERCENT, threshold_of: 'cast', casting_vote: 'dana-id', majority_of_cast: true };
+		assert.deepEqual(votingRule(counted, true), {
+			threshold: 50 * PERCENT,
+			quorum: 40 * PERCENT,
+			thresholdOf: 'cast',
+			castingVote: 'dana-id',
+			seats: 3,
+			veto: true,
+			majorityOfCast: true,
+		});
+	});
+
+	it('is a department vote by seats unless the proposal says it counts the votes cast', () => {
+		assert.equal(votingRule({ ...stored, majority_of_cast: false }, true)?.majorityOfCast, false);
+		assert.equal(votingRule({ ...stored, majority_of_cast: 'yes' }, true)?.majorityOfCast, false);
+		assert.equal(votingRule({ ...stored, majority_of_cast: null }, true)?.majorityOfCast, false);
+	});
+
+	it('never takes a realm-wide vote for one that counts the votes cast', () => {
+		const realm = { ...stored, threshold_of: 'cast', majority_of_cast: true, tally: { yes: 0, no: 0, abstain: 0 } };
+		assert.equal(votingRule(realm, false)?.majorityOfCast, false);
+	});
+});
+
+describe('firstVoteOf', () => {
+	it('reads the count the realm kept of a tied first vote', () => {
+		assert.deepEqual(firstVoteOf({ first_vote: { yes: 2, no: 2, abstain: 1, eligible: 5, seats: 5 } }), tally(2, 2, 1));
+	});
+
+	it('is null for a vote that is the first, whatever else the proposal says', () => {
+		assert.equal(firstVoteOf({ first_vote: null }), null);
+		assert.equal(firstVoteOf({}), null);
+		assert.equal(firstVoteOf(undefined), null);
+		assert.equal(firstVoteOf({ first_vote: '{}' }), null); // a Json field read as text
 	});
 });
 
@@ -396,7 +440,9 @@ type Case = {
 	eligible: number;
 	vetoed?: boolean;
 	casting?: string;
-	ends: 'accepted' | 'rejected';
+	/** Whether this is the second vote, which a tied first vote (1 yes, 1 no, 2 abstentions) put the proposal to. */
+	second?: boolean;
+	ends: 'accepted' | 'rejected' | 'second_vote';
 	page?: Outcome;
 };
 const asRealm = (rule: Partial<VotingRule>): VotingRule => ({ ...realmRule, ...rule });
@@ -479,6 +525,71 @@ const DEPARTMENT_CASES: Case[] = [
 	{ name: '3 of 3: three yes and a no', source: 'adapted', rule: asDepartment(3, 3), votes: tally(3, 1), eligible: 4, ends: 'accepted' },
 ];
 
+// A department that counts the votes cast (realms-gos tests/ggg/test_department_majority.py): Civil Registry seats dana (its head, the
+// casting member), bob, alice and carla, so four voters whatever its policy's n; a majority of the votes cast, a half unless stated.
+const asMajority = (n: number, rule: Partial<VotingRule> = {}): VotingRule => ({
+	...asDepartment(1, n),
+	threshold: 50 * PERCENT,
+	thresholdOf: 'cast',
+	castingVote: 'dana',
+	majorityOfCast: true,
+	...rule,
+});
+const quarter = (rule: Partial<VotingRule> = {}) => asMajority(4, { threshold: 75 * PERCENT, ...rule });
+const FIRST_VOTE = tally(1, 1, 2); // the tied first vote of the cases that are a second vote
+
+const MAJORITY_CASES: Case[] = [
+	// test_the_yes_votes_must_exceed_the_no_votes_and_abstentions_count_for_the_quorum_only (quorum 50 %)
+	{ name: '2 yes, 1 no, 1 abstention', source: 'copied', rule: asMajority(4, { quorum: 50 * PERCENT }), votes: tally(2, 1, 1), eligible: 4, ends: 'accepted' },
+	{ name: '1 yes, 1 no, 2 abstentions is a tie, not a majority', source: 'copied', rule: asMajority(4, { quorum: 50 * PERCENT }), votes: tally(1, 1, 2), eligible: 4, ends: 'second_vote' },
+	{ name: '1 yes, 2 no, 1 abstention', source: 'copied', rule: asMajority(4, { quorum: 50 * PERCENT }), votes: tally(1, 2, 1), eligible: 4, ends: 'rejected' },
+	// test_a_vote_that_has_not_ended_is_decided_at_its_deadline_not_before
+	{ name: '2 yes at the deadline', source: 'copied', rule: asMajority(4), votes: tally(2), eligible: 4, ends: 'accepted' },
+	{ name: 'one yes against no one: abstentions do not count against it', source: 'new', rule: asMajority(4), votes: tally(1, 0, 3), eligible: 4, ends: 'accepted' },
+	{ name: 'nobody voted', source: 'new', rule: asMajority(4), votes: tally(0), eligible: 4, ends: 'rejected' },
+	// test_the_quorum_is_over_the_policys_n_so_a_vacancy_never_makes_the_vote_easier (four seats filled, quorum 50 %)
+	{ name: 'n = 8: all four voting is 50 % of the seats', source: 'copied', rule: asMajority(8, { quorum: 50 * PERCENT }), votes: tally(4), eligible: 4, ends: 'accepted' },
+	{ name: 'n = 10: all four voting is 40 % of the seats', source: 'copied', rule: asMajority(10, { quorum: 50 * PERCENT }), votes: tally(4), eligible: 4, ends: 'rejected' },
+	// test_a_tie_in_the_first_vote_is_put_to_a_second ..., test_a_tie_at_the_deadline_is_recorded_by_finalize_as_a_second_vote
+	{ name: 'a tie at the deadline', source: 'copied', rule: asMajority(4), votes: tally(1, 1), eligible: 4, ends: 'second_vote' },
+	// test_a_tie_in_the_second_vote_is_decided_by_the_casting_vote_only_when_it_voted_yes: the realm accepts the first; it depends on
+	// the casting member's standing, which the screen cannot read
+	{ name: 'second vote, tied, the casting member voted yes', source: 'copied', rule: asMajority(4), votes: tally(1, 1), eligible: 4, second: true, casting: 'yes', ends: 'accepted', page: castingDecides },
+	{ name: 'second vote, tied, the casting member voted no', source: 'copied', rule: asMajority(4), votes: tally(1, 1), eligible: 4, second: true, casting: 'no', ends: 'rejected' },
+	{ name: 'second vote, tied, the casting member abstained', source: 'copied', rule: asMajority(4), votes: tally(1, 1, 1), eligible: 4, second: true, casting: 'abstain', ends: 'rejected' },
+	{ name: 'second vote, tied, the casting member did not vote', source: 'new', rule: asMajority(4), votes: tally(1, 1), eligible: 4, second: true, casting: '', ends: 'rejected' },
+	{ name: 'second vote, a majority, whatever the casting member voted', source: 'new', rule: asMajority(4), votes: tally(2, 1), eligible: 4, second: true, casting: 'no', ends: 'accepted' },
+	{ name: 'second vote, the casting yes does not turn a majority of no into a tie', source: 'new', rule: asMajority(4), votes: tally(1, 2), eligible: 4, second: true, casting: 'yes', ends: 'rejected' },
+	// test_a_head_who_holds_no_seat_neither_votes_nor_casts_the_deciding_vote: they cannot vote, so the screen finds no vote of theirs
+	{ name: 'second vote, tied, the head holds no seat', source: 'copied', rule: asMajority(4, { castingVote: 'mallory' }), votes: tally(1, 1), eligible: 4, second: true, casting: '', ends: 'rejected' },
+	// test_with_no_head_a_tie_in_the_second_vote_rejects
+	{ name: 'second vote, tied, no head', source: 'copied', rule: asMajority(4, { castingVote: '' }), votes: tally(1, 1), eligible: 4, second: true, ends: 'rejected' },
+	// test_the_second_vote_is_decided_like_the_first_so_one_that_misses_its_quorum_is_rejected (quorum 75 %)
+	{ name: 'first vote: three of four voted and tied', source: 'copied', rule: asMajority(4, { quorum: 75 * PERCENT }), votes: tally(1, 1, 1), eligible: 4, ends: 'second_vote' },
+	{ name: 'second vote: one of four voted', source: 'copied', rule: asMajority(4, { quorum: 75 * PERCENT }), votes: tally(1), eligible: 4, second: true, ends: 'rejected' },
+	// test_a_veto_holders_no_rejects_a_tied_first_vote_instead_of_putting_it_to_a_second
+	{ name: 'veto: a tie with the veto holder against', source: 'copied', rule: asMajority(4, { veto: true }), votes: tally(1, 1, 2), eligible: 4, vetoed: true, ends: 'rejected' },
+	{ name: 'veto: a majority with the veto holder against', source: 'new', rule: asMajority(4, { veto: true }), votes: tally(3, 1), eligible: 4, vetoed: true, ends: 'rejected' },
+	{ name: 'veto: a veto holder who has not voted does not hold it', source: 'new', rule: asMajority(4, { veto: true }), votes: tally(2), eligible: 4, ends: 'accepted' },
+	// test_a_stricter_threshold_has_its_own_tie_decided_as_the_default_is (75 %)
+	{ name: '75 %: 3 yes of 4 is exactly the threshold, a tie', source: 'copied', rule: quarter(), votes: tally(3, 1), eligible: 4, ends: 'second_vote' },
+	{ name: '75 %: the second vote, with the casting yes', source: 'copied', rule: quarter(), votes: tally(3, 1), eligible: 4, second: true, casting: 'yes', ends: 'accepted', page: castingDecides },
+	{ name: '75 %: a half is below the threshold, no tie', source: 'copied', rule: quarter(), votes: tally(2, 2), eligible: 4, ends: 'rejected' },
+	{ name: '75 %: 4 of 4 exceeds it', source: 'new', rule: quarter(), votes: tally(4), eligible: 4, ends: 'accepted' },
+	// test_eligible_adds_an_absolute_majority_of_the_policys_n_to_the_majority_of_the_votes_cast (n = 4, a half of the seats is two)
+	{ name: 'eligible: 1 yes beats 0 no, but 2 of 4 seats is half', source: 'copied', rule: asMajority(4, { thresholdOf: 'eligible' }), votes: tally(1, 0, 3), eligible: 4, ends: 'rejected' },
+	{ name: 'cast: the same votes pass', source: 'copied', rule: asMajority(4), votes: tally(1, 0, 3), eligible: 4, ends: 'accepted' },
+	{ name: 'eligible: 2 yes reach half the seats and beat 1 no', source: 'copied', rule: asMajority(4, { thresholdOf: 'eligible' }), votes: tally(2, 1, 1), eligible: 4, ends: 'accepted' },
+	{ name: 'eligible: a tie still goes to a second vote', source: 'copied', rule: asMajority(4, { thresholdOf: 'eligible' }), votes: tally(2, 2), eligible: 4, ends: 'second_vote' },
+	{ name: 'eligible: a first vote tied below the seats still goes to a second vote', source: 'new', rule: asMajority(4, { thresholdOf: 'eligible', threshold: ONE }), votes: tally(2, 2), eligible: 4, ends: 'second_vote' },
+	{ name: 'eligible: a second vote tied, the casting yes, but below the seats', source: 'new', rule: asMajority(4, { thresholdOf: 'eligible', threshold: 75 * PERCENT }), votes: tally(2, 2), eligible: 4, second: true, casting: 'yes', ends: 'rejected' },
+	// test_under_eligible_a_stricter_threshold_is_a_share_of_the_policys_n_not_of_the_votes_cast (n = 4, 75 % is three seats)
+	{ name: 'eligible 75 %: 3 yes and 1 no reach three seats and beat one no', source: 'copied', rule: asMajority(4, { thresholdOf: 'eligible', threshold: 75 * PERCENT }), votes: tally(3, 1), eligible: 4, ends: 'accepted' },
+	{ name: 'eligible 75 %: 2 yes against 0 no do not reach three seats', source: 'new', rule: asMajority(4, { thresholdOf: 'eligible', threshold: 75 * PERCENT }), votes: tally(2, 0, 2), eligible: 4, ends: 'rejected' },
+	// test_under_eligible_the_majority_of_the_votes_cast_stays_at_a_half_with_its_own_tie (n = 2, 75 % of two seats is two)
+	{ name: 'eligible 75 % of n = 2: 2 yes and 2 no tie at a half of the votes cast', source: 'copied', rule: asMajority(2, { thresholdOf: 'eligible', threshold: 75 * PERCENT }), votes: tally(2, 2), eligible: 4, ends: 'second_vote' },
+];
+
 describe('the vote ends as the realm settles it', () => {
 	const en = translator('en');
 	const stateOf = (c: Case, department: boolean): VoteState => ({
@@ -488,11 +599,13 @@ describe('the vote ends as the realm settles it', () => {
 		votes: c.votes,
 		vetoed: c.vetoed ?? false,
 		castingChoice: c.casting ?? '',
+		firstVote: c.second ? FIRST_VOTE : null,
 	});
 
 	for (const [kind, cases, department] of [
 		['realm-wide', REALM_CASES, false],
 		['department', DEPARTMENT_CASES, true],
+		['department, majority of the votes cast', MAJORITY_CASES, true],
 	] as const) {
 		describe(kind, () => {
 			for (const c of cases) {
@@ -530,12 +643,22 @@ describe('the vote ends as the realm settles it', () => {
 	});
 
 	it("reads the casting member's vote only for a tie at the threshold of a vote that has one", () => {
-		assert.equal(castingVoteMatters(null, tally(1, 1)), false);
-		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(2, 1)), false);
-		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(0)), false);
-		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(1, 1)), true);
-		assert.equal(castingVoteMatters(asRealm({ castingVote: '' }), tally(1, 1)), false);
-		assert.equal(castingVoteMatters(asDepartment(1, 2, { castingVote: 'dana' }), tally(1, 1)), false);
+		assert.equal(castingVoteMatters(null, tally(1, 1), null), false);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(2, 1), null), false);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(0), null), false);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: 'dana' }), tally(1, 1), null), true);
+		assert.equal(castingVoteMatters(asRealm({ castingVote: '' }), tally(1, 1), null), false);
+		assert.equal(castingVoteMatters(asDepartment(1, 2, { castingVote: 'dana' }), tally(1, 1), null), false);
+	});
+
+	it("reads the casting member's vote for a department that counts the votes cast only for a tie in its second vote", () => {
+		const rule = asMajority(4);
+		assert.equal(castingVoteMatters(rule, tally(1, 1), null), false); // a first vote's tie goes to a second vote
+		assert.equal(castingVoteMatters(rule, tally(1, 1), FIRST_VOTE), true);
+		assert.equal(castingVoteMatters(rule, tally(2, 1), FIRST_VOTE), false);
+		assert.equal(castingVoteMatters(rule, tally(0), FIRST_VOTE), false);
+		assert.equal(castingVoteMatters(asMajority(4, { castingVote: '' }), tally(1, 1), FIRST_VOTE), false);
+		assert.equal(castingVoteMatters(asMajority(4, { thresholdOf: 'eligible', threshold: 75 * PERCENT }), tally(1, 1), FIRST_VOTE), true); // a half of the votes cast
 	});
 
 	it('knows nothing of a vote whose rule or electorate it does not have', () => {
@@ -652,6 +775,7 @@ describe('castingNote', () => {
 		votes: tally(1, 1),
 		vetoed: false,
 		castingChoice: 'yes',
+		firstVote: null,
 	};
 
 	it('says the casting vote decides a tie it voted yes in', () => {
@@ -733,6 +857,221 @@ describe('endedText', () => {
 	});
 });
 
+describe('a department vote that counts the votes cast', () => {
+	const en = translator('en');
+	const who = 'aaaaa-a…bbbbb';
+	const council = asMajority(5, { quorum: 40 * PERCENT });
+	const open = (state: Partial<OpenVote> = {}): OpenVote => ({
+		deadline: true,
+		department: true,
+		rule: council,
+		eligible: 5,
+		votes: tally(1, 1),
+		vetoed: false,
+		castingChoice: '',
+		firstVote: null,
+		vetoHoldersMissing: 0,
+		...state,
+	});
+
+	describe('requirementText', () => {
+		const rule = (r: VotingRule) => requirementText(en, r, who);
+
+		it('says a majority of the yes and no votes cast, abstentions not counted, a quorum of the seats and the tie', () => {
+			assert.equal(
+				rule(council),
+				'Requirement: more than 50% yes of the yes and no votes cast, abstentions are not counted, at least 40% of the policy\'s 5 seats must vote, a tie at the threshold goes to a second vote and a tie at the threshold in the second vote goes to the yes of the casting vote (aaaaa-a…bbbbb)',
+			);
+		});
+
+		it('names a veto, and leaves out a quorum that is not asked', () => {
+			const text = rule({ ...council, quorum: 0, veto: true });
+			assert.ok(text.includes('abstentions are not counted, no veto holder may vote no, a tie'), text);
+			assert.ok(!/seats must vote\b(?! yes)/.test(text) && !text.includes('at least'), text);
+		});
+
+		it('says a tie in the second vote rejects when the vote has no casting member', () => {
+			assert.ok(rule({ ...council, castingVote: '' }).endsWith('a tie at the threshold in the second vote rejects it'));
+		});
+
+		it('gives the stricter threshold of the votes cast, exactly', () => {
+			assert.ok(rule({ ...council, threshold: 75 * PERCENT }).startsWith('Requirement: more than 75% yes of the yes and no votes cast, abstentions are not counted'));
+		});
+
+		it('adds the yes votes the seats need under `eligible`, to a majority that stays at a half', () => {
+			const text = rule({ ...council, thresholdOf: 'eligible', threshold: 60 * PERCENT });
+			assert.ok(
+				text.startsWith("Requirement: 3 of the policy's 5 seats must vote yes, more than 50% yes of the yes and no votes cast, abstentions are not counted"),
+				text,
+			);
+		});
+
+		it("does not say that abstentions count against it, or that the eligible members vote, as a department's seats do", () => {
+			for (const text of [rule(council), rule({ ...council, thresholdOf: 'eligible' })]) assert.ok(!/count against|eligible members/.test(text), text);
+		});
+
+		it("keeps the seat wording for a department that decides by m of n", () => {
+			assert.equal(
+				rule(asDepartment(3, 5, { quorum: 40 * PERCENT, castingVote: '' })),
+				"Requirement: 3 of the policy's 5 seats must vote yes, abstentions and members who do not vote count against it and at least 40% of the eligible members must vote",
+			);
+		});
+	});
+
+	describe('the bar', () => {
+		it('measures the yes votes among the yes and no votes cast, with the threshold of them marked', () => {
+			assert.deepEqual(approvalBar(council, tally(2, 1, 1), 5), { basis: 3, fill: 2 / 3, mark: 0.5 });
+			assert.deepEqual(approvalBar(asMajority(5, { threshold: 75 * PERCENT }), tally(1, 1), 5), { basis: 2, fill: 0.5, mark: 0.75 });
+			assert.equal(approvalLabel(en, council), 'Approval: more than 50% yes of the yes and no votes cast');
+		});
+
+		it("measures the yes votes against the policy's seats under `eligible`", () => {
+			const seats = asMajority(5, { thresholdOf: 'eligible', threshold: 60 * PERCENT });
+			assert.deepEqual(approvalBar(seats, tally(2, 1), 5), { basis: 5, fill: 0.4, mark: 0.6 });
+			assert.equal(approvalLabel(en, seats), "Approval: 3 of the policy's 5 seats must vote yes");
+		});
+
+		it('is the first words of the Requirement line', () => {
+			for (const rule of [council, asMajority(5, { thresholdOf: 'eligible', threshold: 60 * PERCENT }), asMajority(1, { castingVote: '' })]) {
+				const label = approvalLabel(en, rule).replace('Approval: ', '');
+				assert.ok(requirementText(en, rule, who).startsWith(`Requirement: ${label}`), label);
+			}
+		});
+
+		it('draws its fill past the threshold mark exactly when the votes cast make a majority, where nothing else decides', () => {
+			const plain = MAJORITY_CASES.filter((c) => !c.rule.quorum && !c.rule.veto && !c.second && c.rule.thresholdOf === 'cast');
+			for (const c of plain) {
+				const bar = approvalBar(c.rule as VotingRule, c.votes, c.eligible);
+				assert.equal(bar.fill > bar.mark, c.ends === 'accepted', c.name);
+			}
+		});
+	});
+
+	describe('waitingText', () => {
+		it('waits for the voters who have not voted, until the deadline', () => {
+			assert.equal(waitingText(en, open()), 'Waiting for 3 more voters, or the deadline');
+			assert.equal(waitingText(en, open({ votes: tally(2, 1, 1) })), 'Waiting for 1 more voter, or the deadline');
+			assert.equal(waitingText(en, open({ votes: tally(2, 1, 2) })), '');
+		});
+
+		it('is not met by approvals, as a department that counts seats is: only everyone voting ends it early', () => {
+			assert.equal(waitingText(en, open({ votes: tally(4) })), 'Waiting for 1 more voter, or the deadline');
+		});
+
+		it('says how a vote with no deadline stays open', () => {
+			assert.equal(waitingText(en, open({ deadline: false })), 'Waiting for 3 more voters: it stays open until everyone has voted');
+			assert.equal(waitingText(en, open({ deadline: false, votes: tally(2, 2) })), 'Waiting for 1 more voter: it stays open until everyone has voted');
+		});
+
+		it('does not wait for a veto holder who has not voted, nor for a quorum that is short', () => {
+			const rule = asMajority(5, { veto: true, quorum: 80 * PERCENT });
+			assert.equal(waitingText(en, open({ rule, vetoHoldersMissing: 2 })), 'Waiting for 3 more voters, or the deadline');
+		});
+
+		it("names a veto holder's no, whatever else is missing, until it changes", () => {
+			assert.equal(waitingText(en, open({ vetoed: true })), 'Waiting for a veto holder to change their no, or the deadline');
+			assert.equal(
+				waitingText(en, open({ vetoed: true, deadline: false })),
+				'Waiting for a veto holder to change their no: it stays open until everyone has voted',
+			);
+		});
+
+		it('says nothing of a vote whose electorate is not known', () => {
+			assert.equal(waitingText(en, open({ eligible: null })), '');
+			assert.equal(waitingText(en, open({ eligible: 0, vetoed: true })), '');
+		});
+	});
+
+	describe('castingNote', () => {
+		const second = (state: Partial<VoteState> = {}): VoteState => ({ ...open(), firstVote: FIRST_VOTE, ...state });
+
+		it('says the casting vote decides a tie in the second vote that it voted yes in', () => {
+			assert.equal(
+				castingNote(en, second({ castingChoice: 'yes' }), 'dana'),
+				'Yes and no are tied at the threshold again: the yes of the casting vote (dana) decides it, if they still hold a seat.',
+			);
+		});
+
+		it('says it passes only with the casting yes while that has not been given', () => {
+			for (const castingChoice of ['', 'no', 'abstain']) {
+				assert.equal(
+					castingNote(en, second({ castingChoice }), 'dana'),
+					'Yes and no are tied at the threshold again: it passes only with a yes from the casting vote (dana).',
+				);
+			}
+		});
+
+		it('says a tie in the second vote rejects when there is no casting member', () => {
+			assert.equal(
+				castingNote(en, second({ rule: { ...council, castingVote: '' } }), 'dana'),
+				'Yes and no are tied at the threshold again, and the vote has no casting vote: it is rejected.',
+			);
+		});
+
+		it("says nothing of a first vote's tie, which goes to a second vote, or of votes that do not tie", () => {
+			assert.equal(castingNote(en, open({ castingChoice: 'yes' }), 'dana'), '');
+			assert.equal(castingNote(en, second({ votes: tally(2, 1) }), 'dana'), '');
+			assert.equal(castingNote(en, second({ votes: tally(0) }), 'dana'), '');
+		});
+	});
+
+	describe('endedText', () => {
+		const when = 'Nov 8, 2026, 10:00';
+		const say = (why: string) => `Voting period ended ${when} — ${why}. Awaiting finalization.`;
+		const ended = (state: Partial<VoteState>) => endedText(en, { ...open(), ...state }, when);
+
+		it('says the yes votes exceed the threshold, or do not', () => {
+			assert.equal(ended({ votes: tally(3, 1, 1) }), say('the yes votes exceed the threshold'));
+			assert.equal(ended({ votes: tally(1, 2, 2) }), say('the yes votes do not exceed the threshold'));
+		});
+
+		it('says a tie in the first vote goes to a second vote', () => {
+			assert.equal(ended({ votes: tally(2, 2, 1) }), say('yes and no are tied at the threshold, so a second vote follows'));
+		});
+
+		it('says a tie in the second vote waits for the casting yes, or is rejected without it', () => {
+			const second = { firstVote: FIRST_VOTE, votes: tally(2, 2, 1) };
+			assert.equal(
+				ended({ ...second, castingChoice: 'yes' }),
+				say('yes and no are tied at the threshold again, and the casting vote decides it, if its holder still holds a seat'),
+			);
+			assert.equal(
+				ended({ ...second, castingChoice: 'no' }),
+				say('yes and no are tied at the threshold again, and without a yes from the casting vote it is rejected'),
+			);
+		});
+
+		it('says a veto holder voted no, or the quorum was not reached, before anything about the votes', () => {
+			assert.equal(ended({ votes: tally(2, 2, 1), vetoed: true }), say('a veto holder voted no'));
+			assert.equal(ended({ votes: tally(1) }), say('the quorum was not reached')); // 40 % of 5 seats is two voters
+			assert.equal(ended({ votes: tally(1), vetoed: true }), say('a veto holder voted no'));
+			assert.equal(ended({ votes: tally(2) }), say('the yes votes exceed the threshold')); // two voters reach it
+		});
+
+		it('says how many approvals the seats need under `eligible`, when the votes cast are a majority but not enough', () => {
+			const rule = asMajority(5, { thresholdOf: 'eligible', threshold: 60 * PERCENT });
+			assert.equal(ended({ rule, votes: tally(2, 1, 1) }), say('needs 3 approvals, 2 received'));
+		});
+
+		it('keeps "needs N approvals, M received" for the seats of a department that decides by m of n', () => {
+			assert.equal(ended({ ...department, firstVote: null, votes: tally(1, 1, 1), vetoHoldersMissing: 0 } as Partial<VoteState>), say('needs 2 approvals, 1 received'));
+		});
+	});
+
+	describe('secondVoteText', () => {
+		it('says the first vote tied, and what it came to', () => {
+			assert.equal(
+				secondVoteText(en, tally(2, 2, 1)),
+				'Second vote: the first vote ended in a tie (2 yes, 2 no, 1 abstain) and was put to a second vote under the same rule.',
+			);
+		});
+
+		it('says nothing of a first vote', () => {
+			assert.equal(secondVoteText(en, null), '');
+		});
+	});
+});
+
 describe('the voting strings in every language', () => {
 	const english = strings('en');
 	const locales = ['es', 'de', 'fr', 'it', 'zh-CN', 'ca-valencia'];
@@ -749,6 +1088,7 @@ describe('the voting strings in every language', () => {
 	});
 
 	it('read out every case of the waiting text, with nothing left to fill in', () => {
+		const counted: OpenVote = { ...department, rule: asMajority(5, { quorum: 40 * PERCENT }), votes: tally(1, 1), vetoHoldersMissing: 0 };
 		const cases: OpenVote[] = [
 			department,
 			{ ...department, votes: tally(0, 1, 2), vetoHoldersMissing: 1 },
@@ -764,6 +1104,11 @@ describe('the voting strings in every language', () => {
 			{ ...realmWide, votes: tally(2, 2) },
 			{ ...realmWide, deadline: false },
 			{ ...realmWide, deadline: false, votes: tally(2, 2) },
+			counted,
+			{ ...counted, votes: tally(1) },
+			{ ...counted, deadline: false },
+			{ ...counted, deadline: false, votes: tally(2, 2) },
+			{ ...counted, deadline: false, vetoed: true },
 		];
 		for (const locale of ['en', ...locales]) {
 			const t = translator(locale);
@@ -789,8 +1134,11 @@ describe('the voting strings in every language', () => {
 			votes: tally(1, 1),
 			vetoed: false,
 			castingChoice: 'yes',
+			firstVote: null,
 		};
 		const ended = (state: Partial<VoteState>): VoteState => ({ ...department, ...state });
+		const council = asMajority(5, { quorum: 40 * PERCENT, veto: true });
+		const secondTie: VoteState = { ...department, rule: council, votes: tally(1, 1), castingChoice: 'yes', firstVote: FIRST_VOTE };
 		for (const locale of ['en', ...locales]) {
 			const t = translator(locale);
 			const rules = [
@@ -800,13 +1148,23 @@ describe('the voting strings in every language', () => {
 				requirementText(t, { ...realmRule, thresholdOf: 'eligible' }, 'dana'),
 				requirementText(t, tie.rule, 'dana'),
 				requirementText(t, null, 'dana'),
+				requirementText(t, council, 'dana'),
+				requirementText(t, { ...council, castingVote: '' }, 'dana'),
+				requirementText(t, { ...council, thresholdOf: 'eligible', threshold: 60 * PERCENT }, 'dana'),
 			];
-			const notes = [castingNote(t, tie, 'dana'), castingNote(t, { ...tie, castingChoice: '' }, 'dana')];
+			const notes = [
+				castingNote(t, tie, 'dana'),
+				castingNote(t, { ...tie, castingChoice: '' }, 'dana'),
+				castingNote(t, secondTie, 'dana'),
+				castingNote(t, { ...secondTie, castingChoice: '' }, 'dana'),
+				castingNote(t, { ...secondTie, rule: { ...council, castingVote: '' } }, 'dana'),
+			];
 			const labels = [
 				approvalLabel(t, realmRule),
 				approvalLabel(t, { ...realmRule, thresholdOf: 'eligible' }),
 				approvalLabel(t, departmentRule),
 			];
+			const secondVotes = [secondVoteText(t, tally(2, 2, 1)), t('second_vote_short')];
 			const ends = [
 				endedText(t, ended({ votes: tally(1, 1, 1) }), '8 Nov'),
 				endedText(t, ended({ rule: asDepartment(1, 3), votes: tally(0, 2) }), '8 Nov'),
@@ -817,8 +1175,12 @@ describe('the voting strings in every language', () => {
 				endedText(t, { ...tie, rule: realmRule, votes: tally(1, 3) }, '8 Nov'),
 				endedText(t, tie, '8 Nov'),
 				endedText(t, ended({ rule: null }), '8 Nov'),
+				endedText(t, ended({ rule: council, votes: tally(2, 2, 1) }), '8 Nov'),
+				endedText(t, secondTie, '8 Nov'),
+				endedText(t, { ...secondTie, castingChoice: '' }, '8 Nov'),
+				endedText(t, ended({ rule: { ...council, thresholdOf: 'eligible', threshold: 60 * PERCENT }, votes: tally(2, 1, 1) }), '8 Nov'),
 			];
-			for (const group of [rules, notes, labels, ends]) {
+			for (const group of [rules, notes, labels, secondVotes, ends]) {
 				for (const text of group) assert.ok(text && !/[{}]/.test(text), `${locale}: ${text}`);
 				assert.equal(new Set(group).size, group.length, `${locale}: each case reads differently`);
 			}
