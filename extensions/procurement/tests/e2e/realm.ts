@@ -16,7 +16,7 @@ export interface Scenario {
   /**
    * The replies by operation name. A reply may be `{ byArgs: [{ when, reply }, ...] }`: the first entry whose `when` fields
    * all equal the call's arguments answers, the last one (without `when`) otherwise; or `{ seq: [first, second, ...] }`: each
-   * call gets the next reply, the last one again after that.
+   * call gets the next reply, the last one again after that. `{ delay: ms, reply }` answers after that long.
    */
   replies: Record<string, any>;
 }
@@ -44,6 +44,7 @@ function page(scenario: Scenario): string {
     let reply = scenario.replies[name];
     if (reply?.byArgs) reply = reply.byArgs.find((entry) => matches(entry.when, args))?.reply;
     else if (reply?.seq) reply = reply.seq[Math.min(window.asked.filter(([asked]) => asked === name).length - 1, reply.seq.length - 1)];
+    if (reply?.delay) return new Promise((resolve) => setTimeout(() => resolve(reply.reply), reply.delay));
     return Promise.resolve(reply === undefined ? { ok: false, error: name + ' is not open to you' } : reply);
   };
   mount(document.getElementById('root'), {

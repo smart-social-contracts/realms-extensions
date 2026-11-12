@@ -95,6 +95,8 @@
 	let organizations = $state<any[]>([]);
 	let facts = $state<RealmFacts>({ zone: 'UTC', currency: '', decimals: 0, tokens: {}, externals: [], realms: {} });
 	let contractId = $state('');
+	// The realm's zone, currency and decimals decide how a contract's days and amounts read: nothing shows them before they are known.
+	let contextReady = $state(false);
 
 	let formTitle = $state('');
 	let formDescription = $state('');
@@ -263,6 +265,7 @@
 		organizations = orgs?.organizations ?? [];
 		formDepartment ||= (departments.find((d) => d.is_root) ?? departments[0])?.id ?? '';
 		bidVendor ||= organizations[0]?.id ?? '';
+		contextReady = true;
 	}
 
 	async function loadTenders() {
@@ -864,7 +867,7 @@
 								<tr class="border-t border-gray-100 dark:border-gray-700" data-testid="lot-row">
 									<td class="py-1 pr-4 font-mono text-xs">{lot.id}</td>
 									<td class="py-1 pr-4">{lot.title}</td>
-									<td class="py-1 pr-4 text-right">{lot.estimated_value != null ? money(lot.estimated_value, facts.currency, facts.decimals) : '—'}</td>
+									<td class="py-1 pr-4 text-right">{lot.estimated_value == null ? '—' : contextReady ? money(lot.estimated_value, facts.currency, facts.decimals) : '…'}</td>
 									<td class="py-1 pr-4 text-right">{bidsOfLot(bids, lot).length}</td>
 									<td class="py-1 pr-4">{winningBid(bids, lot)?.vendor ?? '—'}</td>
 									<td class="py-1 pr-4">{t(`lot_status_${lot.status}`)}</td>
@@ -1046,16 +1049,24 @@
 			</section>
 		{/if}
 	{:else if view === 'contracts'}
-		<Contracts {read} {facts} {narrow} onOpen={openContract} />
+		{#if contextReady}
+			<Contracts {read} {facts} {narrow} onOpen={openContract} />
+		{:else}
+			<p class="text-gray-500">{t('contracts_loading')}</p>
+		{/if}
 	{:else if view === 'contract'}
-		<ContractPage
-			{read}
-			{run}
-			{facts}
-			{contractId}
-			{mayAmend}
-			onOpenTender={(id) => openDetail({ id })}
-			navigate={(path) => ctx.navigate?.(path)}
-		/>
+		{#if contextReady}
+			<ContractPage
+				{read}
+				{run}
+				{facts}
+				{contractId}
+				{mayAmend}
+				onOpenTender={(id) => openDetail({ id })}
+				navigate={(path) => ctx.navigate?.(path)}
+			/>
+		{:else}
+			<p class="text-gray-500">{t('contract_loading')}</p>
+		{/if}
 	{/if}
 </div>

@@ -26,7 +26,8 @@ async function contractsTab(ext: FrameLocator) {
 
 async function openContract(ext: FrameLocator, title: string) {
   await contractsTab(ext);
-  await ext.getByTestId('contract-row').filter({ hasText: title }).getByRole('button', { name: 'Open' }).click(SLOW);
+  // The title cell, whole: "Bike lane works" is also the beginning of another contract's title.
+  await ext.getByTestId('contract-row').filter({ has: ext.getByText(title, { exact: true }) }).getByRole('button', { name: 'Open' }).click(SLOW);
   await expect(ext.getByTestId('contract-page')).toBeVisible();
 }
 
@@ -86,8 +87,8 @@ test('the contract page and its amendments, oldest first, as the realm recorded 
 
     // The rule the form states is the realm's own: what has been paid, and who governs, by vote.
     await expect(ext.getByTestId('amend-floor')).toContainText('cannot be set below 12,000 REALM');
-    await expect(ext.getByTestId('amend-vote')).toContainText('Infrastructure governs this contract and decides by vote');
-    expect([detail.governed_by, detail.needs_vote]).toEqual(['Infrastructure', true]);
+    await expect(ext.getByTestId('amend-vote')).toContainText('Planning governs this contract and decides by vote');
+    expect([detail.governed_by, detail.needs_vote]).toEqual(['Planning', true]);
     await shot(page, 'contract-page');
   } finally {
     await close();
@@ -139,7 +140,7 @@ test('a call-off names the body that holds the agreement, its reference and its 
     await shot(page, 'call-off-external');
 
     await ext.getByRole('button', { name: 'All contracts' }).click();
-    await ext.getByTestId('contract-row').filter({ hasText: 'Street lighting' }).getByRole('button', { name: 'Open' }).click();
+    await ext.getByTestId('contract-row').filter({ has: ext.getByText('Street lighting', { exact: true }) }).getByRole('button', { name: 'Open' }).click();
     // Another realm, which this one is not linked to: its capital, shortened.
     await expect(ext.getByTestId('framework-holder')).toContainText('Realm rrkah-…-cai', SLOW);
     await expect(ext.getByTestId('framework-winners')).toContainText('does not know the winners');
@@ -236,6 +237,34 @@ test('a member without the permissions reads the contracts and the lots, and is 
     await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
     await expect(ext.getByRole('button', { name: 'Award this lot' })).toHaveCount(0);
     await shot(page, 'member-lots');
+  } finally {
+    await close();
+  }
+});
+
+test('the screens in dark mode: the realm tells its extensions the theme when its page takes the class dark', async ({ page }) => {
+  const { ext, realm, close } = await openExtension(page, 'procurement');
+  try {
+    await contractsTab(ext);
+    await expect(ext.getByTestId('contract-row').first()).toBeVisible(SLOW); // the realm has what the tests before made, too
+    await realm.locator('html').evaluate((html) => html.classList.add('dark'));
+    await page.waitForTimeout(1_500);
+    await shot(page, 'dark-contracts-list');
+
+    await openContract(ext, 'Bike lane works');
+    await expect(ext.getByTestId('amendment')).toHaveCount(2, SLOW);
+    await shot(page, 'dark-contract-page');
+
+    await ext.getByRole('button', { name: 'All contracts' }).click();
+    await ext.getByTestId('contract-row').filter({ has: ext.getByText('Electricity for the council buildings', { exact: true }) }).getByRole('button', { name: 'Open' }).click();
+    await expect(ext.getByTestId('contract-framework')).toBeVisible();
+    await shot(page, 'dark-call-off');
+
+    await ext.getByRole('button', { name: 'All contracts' }).click();
+    await ext.getByTestId('sections').getByRole('tab', { name: 'Requests' }).click();
+    await ext.getByRole('row').filter({ hasText: 'Bike lane works in the old town' }).getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
+    await shot(page, 'dark-tender-lots');
   } finally {
     await close();
   }

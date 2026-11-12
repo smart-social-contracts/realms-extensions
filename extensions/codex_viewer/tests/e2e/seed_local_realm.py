@@ -143,9 +143,22 @@ def titled(cls, title):
 '''
 
 
+def seed_procurement_realm_settings(realm, prelude):
+    """The realm's currency and time zone. A bare local realm has no token, so no currency and no decimals (a contract then
+    reads in base units, with no symbol), and it keeps UTC: REALM with 8 decimals, as a realm that has its token, and Madrid."""
+    realm.shell(prelude + '''
+from ggg import Token
+if Token["REALM"] is None:
+    do("token_register", symbol="REALM", ledger="ryjl3-tyaaa-aaaaa-aaaba-cai", decimals=8, fee=10_000)
+do("realm_configure_tokens", accounting_currency="REALM", accounting_currency_decimals=8)
+do("realm_configure", timezone="Europe/Madrid")
+''')
+
+
 def seed_procurement_people_and_bodies(realm, prelude):
-    """Four people, the departments Infrastructure (head and one more seat holder) and Finance, the organizations BuildCo and
-    RoadCorp with their administrators, and the Province as an outside body: the parties the procurement screens name."""
+    """Four people, the departments Infrastructure and Finance (each decides alone) and Planning (two seats, which will decide
+    by vote), the organizations BuildCo and RoadCorp with their administrators, and the Province as an outside body: the
+    parties the procurement screens name."""
     realm.shell(prelude + '''
 from ggg import Department, External, Organization, Position, User
 NAMES = {2: "Jordi", 3: "Laia", 6: "Biel", 7: "Aina"}
@@ -156,11 +169,13 @@ for n, name in NAMES.items():
 for department, description in (("Finance", "Budgets, funds and payments"), ("Infrastructure", "Roads, lanes and works")):
     if Department[department] is None:
         do("department_create", department=department, description=description)
-if Position["infrastructure.planning_officer"] is None:
-    do("position_create", department="Infrastructure", position="infrastructure.planning_officer", title="Planning officer", headcount=2)
-    do("appoint", position="infrastructure.planning_officer", user=P[6])
-    do("appoint", position="infrastructure.planning_officer", user=P[7])
-    do("department_edit", department="Infrastructure", head=P[6])
+if Department["Planning"] is None:
+    do("department_create", department="Planning", description="Plans the works and holds their contracts")
+if Position["planning.officer"] is None:
+    do("position_create", department="Planning", position="planning.officer", title="Planning officer", headcount=2)
+    do("appoint", position="planning.officer", user=P[6])
+    do("appoint", position="planning.officer", user=P[7])
+    do("department_edit", department="Planning", head=P[6])
 for name, admin in (("BuildCo", 2), ("RoadCorp", 3)):
     if Organization[name] is None:
         do("organization_register", organization=name, description=name, kind="company")
@@ -171,9 +186,9 @@ if External["province"] is None:
 
 
 def seed_procurement_contracts(realm, prelude):
-    """The fund ROADS with an adopted capital line; a plain tender and, from it, the contract "Bike lane works": 50 000 spread
-    over FY2026 and FY2027, 12 000 paid on it from the capital line, amended twice (the first decided by the department at
-    once; then Infrastructure goes to a vote of 1 of its 2 seats, and the second is carried by a proposal) and a third attempt
+    """The fund ROADS with an adopted capital line; a plain tender of Planning and, from it, the contract "Bike lane works": 50 000
+    spread over FY2026 and FY2027, 12 000 paid on it from the capital line, amended twice (the first decided by Planning at
+    once; then Planning goes to a vote of 1 of its 2 seats, and the second is carried by a proposal) and a third attempt
     refused for going below what was paid; two call-offs under a framework agreement, one held by the Province and one by
     another realm. The payment is written as a Transfer row: a local network has no ledger to pay through, so the fund's
     balance and the line's actual do not move. Ids come from the realm's replies; a step is done when its title exists."""
@@ -200,21 +215,21 @@ capital = capital_line()
 river = titled(Tender, "Bike lane along the river")
 if river is None:
     with at(NOW - 40 * DAY):
-        river = Tender[do("tender_create", title="Bike lane along the river", requester="Infrastructure", kind="works",
+        river = Tender[do("tender_create", title="Bike lane along the river", requester="Planning", kind="works",
                           procedure="open", opens_at=NOW - 40 * DAY, closes_at=NOW - 30 * DAY,
                           rubric={"price": 60_000_000, "quality": 40_000_000})["tender"]]
 lane = titled(Contract, "Bike lane works")
 if lane is None:
     with at(NOW - 30 * DAY):
-        lane = Contract[do("contract_create", title="Bike lane works", parties=["Department:Infrastructure", "Organization:BuildCo"],
+        lane = Contract[do("contract_create", title="Bike lane works", parties=["Department:Planning", "Organization:BuildCo"],
                            value=50_000 * U, symbol=currency(), tender=river.id, starts_at=NOW - 30 * DAY, ends_at=NOW + 90 * DAY,
                            split=[{"period": "FY2026", "amount": 30_000 * U}, {"period": "FY2027", "amount": 20_000 * U}])["contract"]]
     with at(NOW - 20 * DAY):  # money paid on it from the capital line, so that its value cannot fall below it
         Transfer(id=next_id(Transfer, "TR"), sender="Fund:ROADS", to="Organization:BuildCo", symbol=currency(), amount=12_000 * U,
                  status="completed", at=NOW - 20 * DAY, contract=lane.id, budget=capital.id)
-    with at(NOW - 12 * DAY):  # Infrastructure still decides alone: applied at once
+    with at(NOW - 12 * DAY):  # Planning still decides alone: applied at once
         do("contract_amend", contract=lane.id, ends_at=NOW + 150 * DAY)
-    do("department_set_policy", department="Infrastructure", m=1, n=2)
+    do("department_set_policy", department="Planning", m=1, n=2)
     with at(NOW - 5 * DAY):  # now a vote of its seats: the amendment is a proposal, carried by one yes
         filed = do("contract_amend", contract=lane.id,
                    split=[{"period": "FY2026", "amount": 12_000 * U}, {"period": "FY2027", "amount": 38_000 * U}])
@@ -278,9 +293,8 @@ def seed_procurement(realm, home, principals_file):
     founder = json.loads((Path(home) / "state.json").read_text())["principal"]
     identities = json.loads(Path(principals_file).read_text())["identities"]
     prelude = PROCUREMENT_PRELUDE % {"founder": founder, "principals": {i["index"] + 1: i["principal"] for i in identities}}
+    seed_procurement_realm_settings(realm, prelude)
     seed_procurement_people_and_bodies(realm, prelude)
-    # The lots first: the contracts' step ends with Infrastructure deciding by a vote, after which it files a proposal
-    # instead of creating a tender.
     seed_procurement_lots(realm, prelude)
     seed_procurement_contracts(realm, prelude)
 

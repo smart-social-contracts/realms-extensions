@@ -347,6 +347,18 @@ test('a contract that has ended is shown with the realm\'s reason, not an amendm
   await expect(page.getByTestId('amendment-form')).toHaveCount(0);
 });
 
+test('nothing shows amounts or days before the realm has said its currency and zone', async ({ page }) => {
+  // A contract page that came first would read 5,000,000,000 REALM for 50,000 (no decimals yet) and a day in UTC.
+  scenario = realm(AMENDER, [contract({ value: 5_000_000_000 })], {
+    realm_info: { delay: 1500, reply: INFO() },
+    budget_view: { ok: true, currency: 'REALM', decimals: 8, funds: [], periods: [] },
+  });
+  await contractsTab(page);
+  await expect(page.getByText('Loading contracts…')).toBeVisible();
+  await expect(page.getByTestId('contract-row')).toContainText('50 REALM');
+  expect(await page.getByTestId('contracts').innerText()).not.toContain('5,000,000,000');
+});
+
 test('an amount in a token reads in that token\'s decimals, and in the currency\'s when it is the currency', async ({ page }) => {
   const gold = contract({ symbol: 'GOLD', value: 4_800_000, split: [] });
   scenario = realm(AMENDER, [gold, contract({ id: 'C-8', value: 5_000_000_000 })], {
