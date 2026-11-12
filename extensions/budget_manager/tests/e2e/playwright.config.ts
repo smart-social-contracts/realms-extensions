@@ -1,15 +1,20 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Runs against a local realm: `realms local start` and `realms local setup`.
-// No baseURL: the spec opens the realm inside a portal host page it serves itself.
+/**
+ * The browser tests of the budget screens need no realm: they mount the built bundle (`npm run build` in frontend-rt)
+ * on a page that plays the realm, with the replies the canister gives. The tests that need a local realm
+ * (`*.local.spec.ts`) run with playwright.local.config.ts.
+ */
 export default defineConfig({
   testDir: './specs',
+  // Playwright empties its output folder at each run: the screenshots the specs write to test-results/ stay.
+  outputDir: './test-results/.playwright',
+  testIgnore: '**/*.local.spec.ts',
+  timeout: 60 * 1000,
   fullyParallel: false,
-  workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: 0,
-  timeout: 5 * 60 * 1000,
-  reporter: [['list'], ['html', { open: 'never' }]],
-  use: { trace: 'on', screenshot: 'on', video: 'on', headless: true, viewport: { width: 1280, height: 900 } },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } } }],
+  retries: process.env.CI ? 2 : 0,
+  reporter: [['list']],
+  use: { screenshot: 'off', video: 'off' },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

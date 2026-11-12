@@ -1,16 +1,35 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import QuarterSweeps from './QuarterSweeps.svelte';
 	import Sankey from './Sankey.svelte';
+	import ScheduledPayments from './ScheduledPayments.svelte';
+	import SpendingStages from './SpendingStages.svelte';
 	import Timeline from './Timeline.svelte';
 	import {
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
 	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
+	import { UTC, isKnownZone } from '../../../_shared/frontend/realm-time';
 	import { ONE, formatPercent, toRatio } from '../../../_shared/frontend/units';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import { formatMoney } from './money.ts';
+	import type { Payment } from './payments.ts';
+	import { isPending, type BudgetLine } from './stages.ts';
+	import { roleIn, type BookedEntry, type Sweep, type SweepRule } from './sweeps.ts';
 
 	let { ctx }: { ctx: any } = $props();
+
+	// Only the texts of the spending stages, the scheduled payments and the sweeps are translated; the older ones are English.
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
 
 	const cn = $derived(
 		ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')),
@@ -78,28 +97,61 @@
 	let selectedPeriod = $state('');
 	let entries: any[] = [];
 	let budgetRows: any[] = [];
+	// What the spending stages, the scheduled payments and the sweeps read besides the budget view.
+	let budgetLines: BudgetLine[] = [];
+	let zone = $state(UTC);
+	let tokenDecimals: Record<string, number> = $state({});
+	let stageLines: BudgetLine[] = $state.raw([]);
+	let pendingLines: BudgetLine[] = $state.raw([]);
+	let lineById: Record<string, BudgetLine> = $state.raw({});
+	let now = $state(Math.floor(Date.now() / 1000));
+	// Read when their tab is opened: null until then.
+	let payments: Payment[] | null = $state.raw(null);
+	let sweeps: Sweep[] | null = $state.raw(null);
+	let sweepEntries: BookedEntry[] = $state.raw([]);
+	let sweepBookings = $state(false);
+	let tabError = $state('');
+	let sweepRules: SweepRule[] = $state.raw([]);
+	let role: 'capital' | 'quarter' | null = $state(null);
+	let quarterNames: Record<string, string> = $state.raw({});
 
-	type Tab = 'flow' | 'timeline' | 'allocation' | 'budgets' | 'settings';
+	type Tab = 'flow' | 'timeline' | 'allocation' | 'budgets' | 'scheduled' | 'sweeps' | 'settings';
 	let activeTab: Tab = $state('budgets');
 
 	const decimals = $derived(overview?.decimals ?? 8);
 	const currency = $derived(overview?.currency ?? '');
 
 	function fmt(raw: number): string {
-		const v = (raw ?? 0) / 10 ** decimals;
-		const s = v.toLocaleString(undefined, { maximumFractionDigits: 4 });
-		return `${s} ${currency}`;
+		return formatMoney(raw, decimals, currency);
+	}
+
+	/** ``raw`` of the token ``symbol``: the realm's currency, or one of the other tokens it holds. */
+	function fmtIn(raw: number, symbol: string): string {
+		const places = symbol === currency ? decimals : tokenDecimals[symbol];
+		return places === undefined ? `${raw} ${symbol}` : formatMoney(raw, places, symbol);
 	}
 
 	function isoDate(ts: number): string {
 		return new Date(ts * 1000).toISOString().slice(0, 10);
 	}
 
+	/** A read the older screens do not need: when the realm refuses it they go on without it. */
+	async function readOptional(name: string) {
+		try {
+			return await read(name);
+		} catch (e) {
+			console.warn(`[budget_manager] ${name}:`, e);
+			return null;
+		}
+	}
+
 	async function loadOverview() {
-		let [view, me, departments] = await Promise.all([
+		let [view, me, departments, info, directory] = await Promise.all([
 			budgetView(selectedPeriod),
 			read('me'),
 			pages('department_list', {}, 'departments'),
+			readOptional('realm_info'),
+			readOptional('quarter_directory'),
 		]);
 		if (!selectedPeriod) {
 			// The view reads the budgets of one period: the one covering now, or else the latest.
@@ -118,6 +170,7 @@
 		// The ledger is for those who may read it; everyone else sees the budgets and the rules.
 		entries = can('treasury.view') ? await ledgerEntries(view.currency) : [];
 		budgetRows = view.funds.flatMap((f: any) => f.budgets.map((b: any) => ({ ...b, fund: f.id })));
+		await loadAlongside(info, directory, config.sweep ?? []);
 		const periods = [...view.periods].sort((a: any, b: any) => a.starts_at - b.starts_at);
 		overview = {
 			currency: view.currency,
@@ -148,6 +201,58 @@
 			settingsGovernor,
 		};
 		syncSettingsDraft();
+	}
+
+	/** The realm's time zone, what it is in a federation, and for those who read the treasury, its tokens and every budget line. */
+	async function loadAlongside(info: any, directory: any, rules: SweepRule[]) {
+		const timezone = info?.realm?.timezone;
+		zone = timezone && isKnownZone(timezone) ? timezone : UTC;
+		sweepRules = rules;
+		role = roleIn(directory) ?? (rules.length > 0 ? 'capital' : null);
+		quarterNames = Object.fromEntries((directory?.quarters ?? []).map((q: any) => [q.id, q.name]));
+		if (!hasLedger) return;
+		const [treasury, lines] = await Promise.all([read('treasury_view'), pages('budget_list', {}, 'budgets')]);
+		tokenDecimals = Object.fromEntries(treasury.tokens.map((k: any) => [k.id, k.decimals]));
+		budgetLines = lines;
+		lineById = Object.fromEntries(lines.map((line: BudgetLine) => [line.id, line]));
+	}
+
+	async function loadPayments() {
+		const [scheduled, cancelled] = await Promise.all(
+			['scheduled', 'cancelled'].map((status) => pages('transfer_list', { status }, 'transfers')),
+		);
+		now = Math.floor(Date.now() / 1000);
+		payments = [...scheduled, ...cancelled];
+	}
+
+	/** Every sweep, and the books' entries that book them: those of the realm's currency are read already. */
+	async function loadSweeps() {
+		const rows: Sweep[] = await pages('sweep_list', {}, 'sweeps');
+		const others = [...new Set(rows.map((sweep) => sweep.symbol))].filter((symbol) => symbol !== currency);
+		const more = await Promise.all(others.map(ledgerEntries));
+		const all = [...entries, ...more.flat()];
+		// A realm that does not name the sweep on its entries has no booking to show.
+		sweepBookings = all.some((entry) => 'sweep' in entry);
+		sweepEntries = all.filter((entry) => entry.sweep);
+		sweeps = rows;
+	}
+
+	/** Open a tab; a tab that reads more than the overview does reads it the first time, and says why it cannot. */
+	async function openTab(tab: Tab) {
+		activeTab = tab;
+		tabError = '';
+		try {
+			if (tab === 'scheduled' && payments === null) await loadPayments();
+			if (tab === 'sweeps' && sweeps === null && hasLedger) await loadSweeps();
+		} catch (e: any) {
+			tabError = e?.message || String(e);
+		}
+	}
+
+	/** Show the budget line a payment is charged to, among the stages of its period. */
+	async function showLine(line: BudgetLine) {
+		activeTab = 'budgets';
+		if (line.period !== selectedPeriod) await selectPeriod(line.period);
 	}
 
 	function sum(values: Record<string, number>): number {
@@ -217,6 +322,8 @@
 				.map((b) => ({ ...b, variance: b.actual - b.planned }))
 				.sort((a, b) => a.fund.localeCompare(b.fund)),
 		};
+		stageLines = budgetRows.filter((b) => b.period === selectedPeriod);
+		pendingLines = budgetLines.filter((b) => b.period === selectedPeriod && isPending(b));
 	}
 
 	function loadTimeline() {
@@ -409,15 +516,21 @@
 		}
 	}
 
-	// Flow and Timeline are drawn from the ledger, which only those who may read it see.
+	// Flow, Timeline and the scheduled payments are drawn from the treasury, which only those who may read it see; the
+	// sweeps are for a realm that is a capital or a quarter.
 	const tabs: { id: Tab; label: string }[] = $derived(
 		[
 			{ id: 'flow' as Tab, label: 'Flow' },
 			{ id: 'timeline' as Tab, label: 'Timeline' },
 			{ id: 'allocation' as Tab, label: 'Allocation' },
 			{ id: 'budgets' as Tab, label: 'Budgets' },
+			{ id: 'scheduled' as Tab, label: t('tab_scheduled') },
+			{ id: 'sweeps' as Tab, label: t('tab_sweeps') },
 			{ id: 'settings' as Tab, label: 'Settings' },
-		].filter((t) => hasLedger || (t.id !== 'flow' && t.id !== 'timeline')),
+		].filter((tab) => {
+			if (tab.id === 'sweeps') return role !== null;
+			return hasLedger || !['flow', 'timeline', 'scheduled'].includes(tab.id);
+		}),
 	);
 
 	let narrow = $state(isNarrowViewport());
@@ -540,7 +653,7 @@
 			{#each tabs as tab (tab.id)}
 				<button
 					type="button"
-					onclick={() => (activeTab = tab.id)}
+					onclick={() => openTab(tab.id)}
 					class="chrome-tab {activeTab === tab.id ? 'is-on' : ''}"
 					title={tab.label}
 					aria-label={tab.label}
@@ -561,6 +674,14 @@
 					{:else if tab.id === 'budgets'}
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+						</svg>
+					{:else if tab.id === 'scheduled'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+						</svg>
+					{:else if tab.id === 'sweeps'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
 						</svg>
 					{:else}
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -821,6 +942,44 @@
 					{/if}
 				{:else}
 					<p class="text-sm text-gray-400 py-4">No budgets recorded for this epoch.</p>
+				{/if}
+			</div>
+			<div class={cn(panelClass, 'mt-4')}>
+				<SpendingStages period={selectedPeriod} lines={stageLines} pending={pendingLines} {fmt} {narrow} />
+			</div>
+		{:else if activeTab === 'scheduled'}
+			<div class={panelClass}>
+				{#if tabError}
+					<p class="py-4 text-sm text-red-600">{tabError}</p>
+				{:else if payments === null}
+					<div class="flex items-center justify-center py-12">
+						<div class="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+					</div>
+				{:else}
+					<ScheduledPayments {payments} lines={lineById} {zone} {now} {fmtIn} {narrow} onshowline={showLine} />
+				{/if}
+			</div>
+		{:else if activeTab === 'sweeps'}
+			<div class={panelClass}>
+				{#if tabError}
+					<p class="py-4 text-sm text-red-600">{tabError}</p>
+				{:else if hasLedger && sweeps === null}
+					<div class="flex items-center justify-center py-12">
+						<div class="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+					</div>
+				{:else if role}
+					<QuarterSweeps
+						{role}
+						rules={sweepRules}
+						sweeps={sweeps ?? []}
+						entries={sweepEntries}
+						bookings={sweepBookings}
+						names={quarterNames}
+						canRead={hasLedger}
+						{zone}
+						{fmtIn}
+						{narrow}
+					/>
 				{/if}
 			</div>
 		{:else if activeTab === 'settings'}
