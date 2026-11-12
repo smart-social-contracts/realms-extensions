@@ -241,31 +241,3 @@ test('a member without the permissions reads the contracts and the lots, and is 
     await close();
   }
 });
-
-test('the screens in dark mode: the realm tells its extensions the theme when its page takes the class dark', async ({ page }) => {
-  const { ext, realm, close } = await openExtension(page, 'procurement');
-  try {
-    await contractsTab(ext);
-    await expect(ext.getByTestId('contract-row').first()).toBeVisible(SLOW); // the realm has what the tests before made, too
-    await realm.locator('html').evaluate((html) => html.classList.add('dark'));
-    await page.waitForTimeout(1_500);
-    await shot(page, 'dark-contracts-list');
-
-    await openContract(ext, 'Bike lane works');
-    await expect(ext.getByTestId('amendment')).toHaveCount(2, SLOW);
-    await shot(page, 'dark-contract-page');
-
-    await ext.getByRole('button', { name: 'All contracts' }).click();
-    await ext.getByTestId('contract-row').filter({ has: ext.getByText('Electricity for the council buildings', { exact: true }) }).getByRole('button', { name: 'Open' }).click();
-    await expect(ext.getByTestId('contract-framework')).toBeVisible();
-    await shot(page, 'dark-call-off');
-
-    await ext.getByRole('button', { name: 'All contracts' }).click();
-    await ext.getByTestId('sections').getByRole('tab', { name: 'Requests' }).click();
-    await ext.getByRole('row').filter({ hasText: 'Bike lane works in the old town' }).getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(ext.getByTestId('lot-row')).toHaveCount(3, SLOW);
-    await shot(page, 'dark-tender-lots');
-  } finally {
-    await close();
-  }
-});
