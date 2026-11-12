@@ -100,7 +100,8 @@ def get_active_tokens(args: str) -> str:
             tokens.append(
                 {
                     "name": token_obj.name,
-                    "symbol": getattr(token_obj, "symbol", token_obj.name) or token_obj.name,
+                    "symbol": getattr(token_obj, "symbol", token_obj.name)
+                    or token_obj.name,
                     "ledger": token_obj.ledger,
                     "indexer": token_obj.indexer,
                     "decimals": token_obj.decimals,
@@ -137,9 +138,7 @@ def initialize(args: str):
             fee=getattr(token, "fee", 10) or 10,
         )
         registered.append(token.name)
-    logger.info(
-        f"Vault: active tokens registered: {registered}"
-    )
+    logger.info(f"Vault: active tokens registered: {registered}")
 
 
 def register_entities():
@@ -239,9 +238,7 @@ def refresh(args: str):
             results[token] = yield wallet.refresh(token, subaccount=subaccount)
         else:
             for name in _target_token_names(wallet):
-                results[name] = yield wallet.refresh(
-                    name, subaccount=subaccount
-                )
+                results[name] = yield wallet.refresh(name, subaccount=subaccount)
 
         total_new = sum(r.get("new_txs", 0) for r in results.values())
         try:
@@ -549,9 +546,7 @@ def get_balance(args: str) -> str:
 
         balances = {}
         for name in _target_token_names(wallet):
-            balances[name] = wallet.cached_balance(
-                name, principal=principal_id
-            )
+            balances[name] = wallet.cached_balance(name, principal=principal_id)
         return _ok({"Balance": {"principal_id": principal_id, "balances": balances}})
     except Exception as e:
         return _err(e)
