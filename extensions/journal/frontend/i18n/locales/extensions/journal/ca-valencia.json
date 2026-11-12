@@ -59,7 +59,13 @@
   "signature_verification_url": "Verifica en",
   "signature_batch_root": "Arrel del seu lot",
   "signature_how": "Llig el codi o obri l'adreça i introduïx el codi de verificació per a comprovar la signatura que el regne ha posat a este número.",
-  "signature_provisional": "Número provisional: el regne el signa quan ha acabat el seu dia.",
-  "signature_unsigned": "Encara sense signar: el regne signa cada número quan ha acabat el seu dia.",
-  "signature_mismatch": "La signatura que el regne dona per a este número no coincideix amb el que mostra este full. No s'hi ha de confiar."
+  "signature_provisional": "Número provisional: es pot signar quan haja acabat el seu dia.",
+  "signature_unsigned": "Encara sense signar: el regne signa un número quan algú ho demana.",
+  "signature_mismatch": "La signatura que el regne dona per a este número no coincideix amb el que mostra este full. No s'hi ha de confiar.",
+  "sign_request": "Sol·licitar la signatura",
+  "sign_busy": "Signant…",
+  "sign_hint": "Qualsevol pot demanar-la. El regne signa el número una sola vegada i en conserva la signatura.",
+  "sign_pending": "El número s'està signant. Comprovant de nou…",
+  "sign_error": "No s'ha pogut signar el número: {reason}",
+  "sign_waiting": "La signatura tarda més del normal. Torna-ho a provar d'ací a un moment."
 }

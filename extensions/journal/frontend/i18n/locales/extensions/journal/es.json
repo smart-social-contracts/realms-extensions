@@ -59,7 +59,13 @@
   "signature_verification_url": "Verificar en",
   "signature_batch_root": "Raíz de su lote",
   "signature_how": "Lea el código o abra la dirección e introduzca el código de verificación para comprobar la firma que el reino ha puesto a este número.",
-  "signature_provisional": "Número provisional: el reino lo firma cuando ha terminado su día.",
-  "signature_unsigned": "Aún sin firmar: el reino firma cada número cuando ha terminado su día.",
-  "signature_mismatch": "La firma que el reino da para este número no coincide con lo que muestra esta hoja. No se fíe de ella."
+  "signature_provisional": "Número provisional: puede firmarse cuando haya terminado su día.",
+  "signature_unsigned": "Aún sin firmar: el reino firma un número cuando alguien se lo pide.",
+  "signature_mismatch": "La firma que el reino da para este número no coincide con lo que muestra esta hoja. No se fíe de ella.",
+  "sign_request": "Solicitar la firma",
+  "sign_busy": "Firmando…",
+  "sign_hint": "Cualquiera puede pedirla. El reino firma el número una sola vez y conserva la firma.",
+  "sign_pending": "El número se está firmando. Comprobando de nuevo…",
+  "sign_error": "No se pudo firmar el número: {reason}",
+  "sign_waiting": "La firma tarda más de lo habitual. Inténtelo de nuevo en un momento."
 }

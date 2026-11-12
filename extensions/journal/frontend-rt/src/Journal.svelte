@@ -6,6 +6,7 @@
 	import type { Issue } from './issue';
 	import { basePath, parseRoute, pathFor, realmPrefix, shiftDay, type Route } from './route';
 	import { sheetHtml } from './sheet';
+	import { requestSignature } from './sign';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -21,6 +22,10 @@
 	let locale = $state('en');
 	let logoUrl = $state('');
 	let frame: HTMLIFrameElement | undefined = $state();
+	// Asking the realm to sign the issue shown: idle, the call is out (busy), or another call is signing it and it is asked
+	// about again in a moment (pending); and why it did not work, if it did not.
+	let signing: 'idle' | 'busy' | 'pending' = $state('idle');
+	let signProblem = $state('');
 
 	// A quarter's logo is not the capital's, whose journal it shows, and nor are its proposals and codices: the sheet has
 	// no logo and no links then.
@@ -81,6 +86,8 @@
 		const mine = ++asked;
 		loading = true;
 		problem = '';
+		signing = 'idle';
+		signProblem = '';
 		const args = day ? { day } : {};
 		try {
 			let reply = await ctx.read('journal_issue', args);
@@ -98,6 +105,26 @@
 			if (mine === asked) fail(e?.message ?? String(e));
 		} finally {
 			if (mine === asked) loading = false;
+		}
+	}
+
+	// Anyone may ask, signed in or not. The issue is read again once it is signed, so the sheet shows the signature as the
+	// realm serves it, and the reader may have gone to another day meanwhile: that answer is no longer the page's.
+	async function sign() {
+		if (!issue || signing !== 'idle') return;
+		const day = issue.day;
+		signing = 'busy';
+		signProblem = '';
+		const outcome = await requestSignature(
+			(asked) => ctx.run('journal_sign', { day: asked }),
+			day,
+			() => (signing = 'pending'),
+		);
+		if (issue?.day !== day) return;
+		if (outcome.state === 'signed') await load(day);
+		else {
+			signing = 'idle';
+			signProblem = outcome.state === 'refused' ? t('sign_error', { reason: outcome.reason }) : t('sign_waiting');
 		}
 	}
 
@@ -197,6 +224,20 @@
 			{/if}
 		</nav>
 
+		<!-- An issue nobody has signed can be signed by anyone who asks. Not on a quarter, whose issue is its capital's: the
+		     request goes to the realm that issues the journal. -->
+		{#if issue.status === 'unsigned' && !capital}
+			<div class="sign">
+				<button type="button" class="primary" disabled={signing !== 'idle'} onclick={sign}>
+					{signing === 'idle' ? t('sign_request') : t('sign_busy')}
+				</button>
+				<span class="hint">{signing === 'pending' ? t('sign_pending') : t('sign_hint')}</span>
+			</div>
+			{#if signProblem}
+				<p class="note error" role="alert">{signProblem}</p>
+			{/if}
+		{/if}
+
 		<!-- The sheet is its own document, so what is printed is the paper and nothing of the realm's page. It runs no
 		     script (no allow-scripts); the realm's JSON is only text in it. -->
 		<iframe
@@ -233,6 +274,16 @@
 		flex-wrap: wrap;
 		gap: 8px;
 		align-items: flex-end;
+	}
+	.sign {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 12px;
+		align-items: center;
+	}
+	.sign .hint {
+		font-size: 13px;
+		opacity: 0.75;
 	}
 	.bar label {
 		display: flex;

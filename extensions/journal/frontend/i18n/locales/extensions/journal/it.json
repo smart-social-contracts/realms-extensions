@@ -59,7 +59,13 @@
   "signature_verification_url": "Verifica su",
   "signature_batch_root": "Radice del suo lotto",
   "signature_how": "Leggi il codice, oppure apri l'indirizzo e inserisci il codice di verifica, per controllare la firma che il regno ha apposto a questo numero.",
-  "signature_provisional": "Numero provvisorio: il regno lo firma quando la sua giornata è conclusa.",
-  "signature_unsigned": "Non ancora firmato: il regno firma ogni numero quando la sua giornata è conclusa.",
-  "signature_mismatch": "La firma che il regno dà per questo numero non corrisponde a quanto mostra questo foglio. Non farci affidamento."
+  "signature_provisional": "Numero provvisorio: può essere firmato quando la sua giornata è conclusa.",
+  "signature_unsigned": "Non ancora firmato: il regno firma un numero quando qualcuno lo richiede.",
+  "signature_mismatch": "La firma che il regno dà per questo numero non corrisponde a quanto mostra questo foglio. Non farci affidamento.",
+  "sign_request": "Richiedi la firma",
+  "sign_busy": "Firma in corso…",
+  "sign_hint": "Chiunque può richiederla. Il regno firma il numero una sola volta e ne conserva la firma.",
+  "sign_pending": "Il numero è in corso di firma. Nuovo controllo…",
+  "sign_error": "Non è stato possibile firmare il numero: {reason}",
+  "sign_waiting": "La firma richiede più tempo del solito. Riprova tra un momento."
 }
