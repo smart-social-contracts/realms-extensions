@@ -17,6 +17,10 @@ codex, which notifies the team; and an install job that an upgrade paused.
 For the data explorer's organisations (`seed_organisations_of_each_kind`): one organisation of each kind the realm accepts (GGG
 I-ORG-9), and one registered without a kind, as before kinds existed.
 
+For the voting page's tags (`seed_tagged_proposals`): six proposals filed with the tags of a town's areas, one without tags
+and one with the most a proposal can carry, 16; with `--bulk-proposals N`, N closed proposals more, two tags each, the
+last also tagged "rare-last" (`seed_bulk_proposals`).
+
 For the land registry's planning (`seed_planning`): two planning zones the realm defines (Seafront, Old town), an organisation that
 owns four parcels, three of them in a zone or two, and two licences that name one of the parcels (one active until 2030, one applied for).
 """
@@ -127,6 +131,50 @@ def seed_organisations_of_each_kind(realm):
     for name, description, kind in ORGANISATIONS:
         realm.op("organization_register", organization=name, description=description, kind=kind)
     realm.shell(WITHOUT_KIND)
+
+
+# Proposals of the realm's own areas, for the voting page's tags (ggg I-GOV-15): a few filed as a member files them, and, with
+# --bulk-proposals, as many closed ones as a town's year holds (the JGL files ~3,600) to measure what a tag filter costs.
+TAGGED_PROPOSALS = [
+    ("Bike lane on Main Street", ["mobility", "district-3"]),
+    ("Plant 40 trees on Avenida del Puerto", ["parks", "district-3"]),
+    ("Minutes of the October council", ["minutes"]),
+    ("Close Carrer Major to traffic on Sundays", ["mobility"]),
+    ("A proposal filed without tags", []),
+    ("Every area at once", [f"area {i}" for i in range(1, 17)]),  # the most a proposal can carry
+]
+AREAS = [f"district-{i}" for i in range(1, 13)]
+KINDS = ["mobility", "parks", "minutes", "licences", "budget", "culture"]
+
+BULK_PROPOSALS = '''
+import json
+from core import chain
+from core.db import next_id
+from ggg import Proposal
+areas, kinds, first, last, total = %(areas)r, %(kinds)r, %(first)d, %(last)d, %(total)d
+now = chain.now()
+for n in range(first, last + 1):
+    tags = [areas[n %% len(areas)], kinds[n %% len(kinds)]]
+    if n == total:
+        tags.append("rare-last")  # carried by the last proposal only: a search for it reads every row before it
+    Proposal(id=next_id(Proposal, "P"), title="Proposal %%d of the year" %% n, description="Filed by the town hall",
+             proposer="town-hall", status="executed", opens_at=now - (total - n) * 3600, deadline=now - (total - n) * 3600 + 600,
+             tags=tags, tally={"yes": 5, "no": 1, "abstain": 0, "eligible": 9})
+print(json.dumps(Proposal.max_id()))
+'''
+
+
+def seed_tagged_proposals(realm):
+    """The proposals the voting page's tags screens show: tagged by their proposers, one untagged, one with 16 tags."""
+    for title, tags in TAGGED_PROPOSALS:
+        realm.op("proposal_create", title=title, description=f"{title}: filed by the seed", **({"tags": tags} if tags else {}))
+
+
+def seed_bulk_proposals(realm, total, batch=100):
+    """``total`` closed proposals, two tags each from AREAS and KINDS, the last also tagged "rare-last"."""
+    for first in range(1, total + 1, batch):
+        code = BULK_PROPOSALS % {"areas": AREAS, "kinds": KINDS, "first": first, "last": min(first + batch - 1, total), "total": total}
+        realm.shell(code)
 
 
 # Planning zones and parcels for the land registry (ggg domain `planning`: Land.zones, set with land_zone_set; License.land, I-LIC-4).
@@ -279,6 +327,7 @@ def main():
     parser.add_argument("--home", required=True, help="the directory of the local realm's icp.yaml")
     parser.add_argument("--backend", required=True, help="the realm backend's canister id")
     parser.add_argument("--fixture", required=True, type=Path, help="tests/fixtures/legislation/valencia of realms-gos")
+    parser.add_argument("--bulk-proposals", type=int, default=0, help="also file this many closed, tagged proposals (voting tags)")
     parser.add_argument("--budget-screens", action="store_true", help="also seed what budget_manager 2.2.0 shows (the budget, "
                         "its payments and the sweeps): for a realm of its own, since it makes the realm a capital")
     args = parser.parse_args()
@@ -313,6 +362,9 @@ def main():
     realm.op("it_team_set", department="IT")
     alert_links = json.loads(realm.shell(CHECKS % {"spain": SPAIN, "day": DAY}))
     assert alert_links == ["/extensions/codex_viewer"], alert_links  # the team's alert links to the codex page
+    seed_tagged_proposals(realm)
+    if args.bulk_proposals:
+        seed_bulk_proposals(realm, args.bulk_proposals)
     print(json.dumps({"older": older["codex"], "newer": newer["codex"]}))
     if args.budget_screens:
         seed_budget_screens(realm)
