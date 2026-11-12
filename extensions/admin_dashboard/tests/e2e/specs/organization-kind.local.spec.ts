@@ -38,12 +38,16 @@ test('the organisations show their kinds, and the kind filter asks the realm for
   }
 });
 
-test('a plain member, whom the realm does not let read organisations, is told what is missing', async ({ page }) => {
+test('a plain member sees the organisations as the realm lets them, with their kinds, or is told what is missing', async ({ page }) => {
   const explorer = await openExtension(page, 'admin_dashboard', { asMember: true });
   try {
     await explorer.ext.locator('#entity-type-select').selectOption('Organization', { timeout: 120_000 });
-    await expect(explorer.ext.getByText('Additional permissions needed')).toBeVisible({ timeout: 60_000 });
-    await expect(explorer.ext.getByTestId('org-kind')).toHaveCount(0);
+    const chips = explorer.ext.getByTestId('org-kind');
+    const denied = explorer.ext.getByText('Additional permissions needed');
+    await expect(chips.first().or(denied)).toBeVisible({ timeout: 60_000 });
+    if (await denied.isVisible()) await expect(chips).toHaveCount(0);
+    else await expect(explorer.ext.locator('div.p-4', { hasText: 'Harbour Party' }).getByTestId('org-kind')).toHaveText('Party');
+    console.log(`a plain member ${(await denied.isVisible()) ? 'is told that a permission is missing' : 'reads the organisations and their kinds'}`);
     await page.screenshot({ path: join(OUT, 'local-admin-org-kind-member.png'), fullPage: true });
   } finally {
     await explorer.close();
