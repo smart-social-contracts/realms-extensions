@@ -11,5 +11,7 @@
   "org_kind_hint": "El tipus és el que l'organització diu que és: el regne no ho comprova.",
   "org_kind_none": "No hi ha organitzacions d'aquest tipus.",
   "org_kind_searched": "Cap de les {count} organitzacions revisades és d'aquest tipus.",
-  "org_kind_search_further": "Seguir buscant"
+  "org_kind_search_further": "Seguir buscant",
+  "org_kind_no_more": "No hi ha més organitzacions d'aquest tipus.",
+  "org_kind_searched_next": "Cap de les {count} organitzacions següents revisades és d'aquest tipus."
 }

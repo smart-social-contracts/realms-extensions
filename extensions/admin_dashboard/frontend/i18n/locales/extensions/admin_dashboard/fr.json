@@ -11,5 +11,7 @@
   "org_kind_hint": "Le type est ce que l'organisation dit être : le royaume ne le vérifie pas.",
   "org_kind_none": "Aucune organisation de ce type.",
   "org_kind_searched": "Aucune des {count} organisations parcourues n'est de ce type.",
-  "org_kind_search_further": "Poursuivre la recherche"
+  "org_kind_search_further": "Poursuivre la recherche",
+  "org_kind_no_more": "Plus aucune organisation de ce type.",
+  "org_kind_searched_next": "Aucune des {count} organisations suivantes parcourues n'est de ce type."
 }

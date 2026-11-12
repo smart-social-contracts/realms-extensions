@@ -11,5 +11,7 @@
   "org_kind_hint": "El tipo es lo que la organización dice ser: el reino no lo comprueba.",
   "org_kind_none": "No hay organizaciones de este tipo.",
   "org_kind_searched": "Ninguna de las {count} organizaciones revisadas es de este tipo.",
-  "org_kind_search_further": "Seguir buscando"
+  "org_kind_search_further": "Seguir buscando",
+  "org_kind_no_more": "No hay más organizaciones de este tipo.",
+  "org_kind_searched_next": "Ninguna de las {count} organizaciones siguientes revisadas es de este tipo."
 }

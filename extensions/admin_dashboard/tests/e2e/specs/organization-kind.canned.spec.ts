@@ -109,6 +109,20 @@ test('the next page of a filtered list keeps the kind, and a rare kind far down 
   await expect(page.getByText('Org 1150')).toBeVisible();
 });
 
+test('a page after the first with no more of the kind says there are no more, and the way back is there', async ({ page }) => {
+  const many: Org[] = Array.from({ length: 600 }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i === 9 || i === 19 ? 'party' : 'company' }));
+  scenario = realm(many);
+  await openOrganisations(page);
+  await page.locator('#org-kind-select').selectOption('party');
+  await expect(page.getByTestId('org-kind')).toHaveText(['Party', 'Party']);
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByText('No more organisations of this kind.')).toBeVisible();
+  await expect(page.getByText('No organisations of this kind.')).toHaveCount(0);
+  await page.screenshot({ path: join(OUT, 'admin-org-kind-no-more.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Prev' }).click();
+  await expect(page.getByTestId('org-kind')).toHaveText(['Party', 'Party']);
+});
+
 test('a kind no organisation has says so', async ({ page }) => {
   scenario = realm(TOWN.filter((o) => o.kind !== 'union'));
   await openOrganisations(page);

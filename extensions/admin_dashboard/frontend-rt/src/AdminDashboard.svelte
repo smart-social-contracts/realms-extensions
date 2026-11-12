@@ -58,12 +58,15 @@
 	let expandedItem: number | null = $state(null);
 	let currentPage = $state(0);
 	let nextCursor: number | null = $state(null);
-	// The rows the realm read through for the pages shown, from the first: what "none of this kind" can claim when the realm has more.
+	// What an empty page of a filtered list can claim: the rows the realm read through since the last page that had any, and whether an
+	// earlier page had some (then "none" is "no more", and the count does not take in rows that held matches).
 	let searched = $state(0);
+	let earlierRows = $state(false);
 	// cursors[i] is the `from` of page i (null: the operation's default start).
 	let cursors: (number | null)[] = [null];
-	// scans[i] is the rows the realm read through to fill page i (hops over empty pages included).
+	// scans[i] is the rows the realm read through to fill page i (hops over empty pages included), found[i] the rows page i holds.
 	let scans: number[] = [];
+	let found: number[] = [];
 	let requestSeq = 0;
 
 	function getIcon(className: string): string {
@@ -178,7 +181,8 @@
 		let page = await type.load(cursors[pageIndex] ?? null);
 		let readThrough = typeof page === 'string' ? 0 : (page.scanned ?? 0);
 		// Id-range pages can come back empty (deleted rows, or none of the rows had the kind asked for): follow `next` to the next rows.
-		for (let hops = 0; typeof page !== 'string' && page.rows.length === 0 && page.next != null && hops < MAX_HOPS; hops++) {
+		// A newer request (another type, another kind) leaves this chain: it makes no further call.
+		for (let hops = 0; seq === requestSeq && typeof page !== 'string' && page.rows.length === 0 && page.next != null && hops < MAX_HOPS; hops++) {
 			page = await type.load(page.next);
 			if (typeof page !== 'string') readThrough += page.scanned ?? 0;
 		}
@@ -195,7 +199,11 @@
 			items = page.rows;
 			nextCursor = page.next;
 			scans = [...scans.slice(0, pageIndex), readThrough];
-			searched = scans.reduce((total, rows) => total + rows, 0);
+			found = [...found.slice(0, pageIndex), page.rows.length];
+			let lastWithRows = pageIndex - 1;
+			while (lastWithRows >= 0 && found[lastWithRows] === 0) lastWithRows--;
+			earlierRows = lastWithRows >= 0;
+			searched = scans.slice(lastWithRows + 1).reduce((total, rows) => total + rows, 0);
 			currentPage = pageIndex;
 			cursors = [...cursors.slice(0, pageIndex + 1), page.next];
 		}
@@ -225,6 +233,7 @@
 		untrack(() => {
 			cursors = [null];
 			scans = [];
+			found = [];
 			currentPage = 0;
 			loadData(0);
 		});
@@ -316,20 +325,32 @@
 						{:else if unavailable}
 							This list isn't available right now.
 						{:else if selectedType === 'Organization' && kindFilter && nextCursor != null}
-							{t('org_kind_searched', { count: searched })}
+							{t(earlierRows ? 'org_kind_searched_next' : 'org_kind_searched', { count: searched })}
 						{:else if selectedType === 'Organization' && kindFilter}
-							{t('org_kind_none')}
+							{t(earlierRows ? 'org_kind_no_more' : 'org_kind_none')}
 						{:else}
 							No items found.
 						{/if}
 					</p>
-					{#if selectedType === 'Organization' && kindFilter && nextCursor != null}
-						<button
-							onclick={() => goToPage(currentPage + 1)}
-							class="mt-4 px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-sm"
-							data-testid="org-kind-search-further"
-						>{t('org_kind_search_further')}</button>
-					{/if}
+					<div class="mt-4 flex items-center justify-center gap-2">
+						{#if currentPage > 0}
+							<button
+								onclick={() => goToPage(0)}
+								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+							>First</button>
+							<button
+								onclick={() => goToPage(currentPage - 1)}
+								class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+							>Prev</button>
+						{/if}
+						{#if selectedType === 'Organization' && kindFilter && nextCursor != null}
+							<button
+								onclick={() => goToPage(currentPage + 1)}
+								class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+								data-testid="org-kind-search-further"
+							>{t('org_kind_search_further')}</button>
+						{/if}
+					</div>
 				</div>
 			{:else}
 				<div class="divide-y divide-gray-200">

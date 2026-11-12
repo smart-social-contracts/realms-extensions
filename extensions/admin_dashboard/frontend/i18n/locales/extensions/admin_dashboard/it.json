@@ -11,5 +11,7 @@
   "org_kind_hint": "Il tipo è ciò che l'organizzazione dichiara di essere: il regno non lo verifica.",
   "org_kind_none": "Nessuna organizzazione di questo tipo.",
   "org_kind_searched": "Nessuna delle {count} organizzazioni cercate è di questo tipo.",
-  "org_kind_search_further": "Continua la ricerca"
+  "org_kind_search_further": "Continua la ricerca",
+  "org_kind_no_more": "Nessun'altra organizzazione di questo tipo.",
+  "org_kind_searched_next": "Nessuna delle successive {count} organizzazioni cercate è di questo tipo."
 }

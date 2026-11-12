@@ -11,5 +11,7 @@
   "org_kind_hint": "类型是组织的自我声明：领域不会核实。",
   "org_kind_none": "没有这种类型的组织。",
   "org_kind_searched": "已搜索的 {count} 个组织中没有这种类型的。",
-  "org_kind_search_further": "继续搜索"
+  "org_kind_search_further": "继续搜索",
+  "org_kind_no_more": "没有更多这种类型的组织了。",
+  "org_kind_searched_next": "接下来搜索的 {count} 个组织中没有这种类型的。"
 }

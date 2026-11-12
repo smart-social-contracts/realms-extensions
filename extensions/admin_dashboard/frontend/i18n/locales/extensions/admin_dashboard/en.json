@@ -11,5 +11,7 @@
   "org_kind_hint": "A kind is what the organisation says it is: the realm does not check it.",
   "org_kind_none": "No organisations of this kind.",
   "org_kind_searched": "None of the {count} organisations searched is of this kind.",
-  "org_kind_search_further": "Search further"
+  "org_kind_search_further": "Search further",
+  "org_kind_no_more": "No more organisations of this kind.",
+  "org_kind_searched_next": "None of the next {count} organisations searched is of this kind."
 }

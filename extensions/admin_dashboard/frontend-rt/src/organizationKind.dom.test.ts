@@ -35,7 +35,7 @@ async function choose(id: string, value: string) {
 }
 
 /** Mounts the page on a realm that holds ``orgs``; it lists them as the realm does: a page of rows, filtered, and `next`. */
-async function mountOn(orgs: Org[], { refuse = '' } = {}) {
+async function mountOn(orgs: Org[], { refuse = '', hold }: { refuse?: string; hold?: { when: (args: any) => boolean; gate: Promise<void> } } = {}) {
 	asked = [];
 	vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => en }));
 	const replies: Record<string, (args: any) => unknown> = {
@@ -54,6 +54,7 @@ async function mountOn(orgs: Org[], { refuse = '' } = {}) {
 	const ctx = {
 		read: async (op: string, args: any) => {
 			asked.push([op, args]);
+			if (op === 'organization_list' && hold?.when(args)) await hold.gate; // a slow reply
 			return replies[op]?.(args) ?? { ok: false, error: `${op} is not open to you` };
 		},
 		principal: writable('carla'),
@@ -182,4 +183,56 @@ test('a reader the realm refuses is told which permission is missing, and sees n
 	expect(text()).toContain('Additional permissions needed');
 	expect(text()).toContain('realm.data_view');
 	expect(chips()).toEqual([]);
+});
+
+/** ``total`` organisations, of which the ones at the rows ``at`` are parties. */
+const withParties = (total: number, at: number[]): Org[] =>
+	Array.from({ length: total }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: at.includes(i + 1) ? 'party' : 'company' }));
+const button = (name: string) => [...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name)!;
+
+test('a page after the first with no more of the kind says there are no more, not that there are none', async () => {
+	await mountOn(withParties(600, [10, 20])); // both parties are in the first 500 rows
+	await choose('org-kind-select', 'party');
+	expect(chips()).toEqual(['Party', 'Party']);
+	expect(button('Next').disabled).toBe(false);
+
+	button('Next').click();
+	await settle();
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('No more organisations of this kind.');
+	expect(text()).not.toContain('No organisations of this kind.');
+	// and the way back is there
+	button('Prev').click();
+	await settle();
+	expect(chips()).toEqual(['Party', 'Party']);
+});
+
+test('a page after the first that searched far counts only the rows since the last page with a match', async () => {
+	await mountOn(withParties(12_000, [10, 11_900])); // a party in the first 500 rows, the other far down
+	await choose('org-kind-select', 'party');
+	expect(chips()).toEqual(['Party']);
+	expect(text()).toContain('Org 10');
+
+	button('Next').click(); // 21 calls of 500 rows from row 501: none of them holds a party
+	await settle(300);
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('None of the next 10500 organisations searched is of this kind.');
+	expect(text()).not.toContain('11000');
+	expect(text()).not.toContain('No more organisations of this kind.');
+
+	target.querySelector<HTMLButtonElement>('[data-testid="org-kind-search-further"]')!.click();
+	await settle(300);
+	expect(chips()).toEqual(['Party']);
+	expect(text()).toContain('Org 11900');
+});
+
+test('a chain of calls over empty pages stops when the kind is changed', async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	await mountOn(withParties(25_000, [24_000]), { hold: { when: (args) => args.kind === 'party', gate } });
+	await choose('org-kind-select', 'party'); // its first call is held
+	await choose('org-kind-select', 'company');
+	release();
+	await settle(200);
+	expect(organizationCalls().filter((args) => args.kind === 'party')).toHaveLength(1); // no hop after the first
 });

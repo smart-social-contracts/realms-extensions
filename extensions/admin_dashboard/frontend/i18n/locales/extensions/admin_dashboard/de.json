@@ -11,5 +11,7 @@
   "org_kind_hint": "Die Art ist das, was die Organisation von sich sagt: Das Realm prüft sie nicht.",
   "org_kind_none": "Keine Organisationen dieser Art.",
   "org_kind_searched": "Keine der {count} durchsuchten Organisationen hat diese Art.",
-  "org_kind_search_further": "Weitersuchen"
+  "org_kind_search_further": "Weitersuchen",
+  "org_kind_no_more": "Keine weiteren Organisationen dieser Art.",
+  "org_kind_searched_next": "Keine der nächsten {count} durchsuchten Organisationen hat diese Art."
 }
