@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Issue } from './issue.ts';
-import { CANISTER, CODE, DIGEST, SIGNATURE, canonicalOf, signed } from './proofFixture.ts';
+import { CANISTER, CODE, DIGEST, SIGNATURE, canonicalOf, signed } from '../tests/proofFixture.ts';
 import { VERIFY_URL, codeOf, qrSvg, signedOf, signedText, verificationUrl } from './proof.ts';
 
 const entry = { id: 'E-1', at: 1_790_000_000, kind: 'codex_installed', details: { codex: 'sha256:ab', proposal: 'P-1' } };
