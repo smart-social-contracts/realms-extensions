@@ -15,6 +15,11 @@ export function basePath(pathname: string): string {
 	return BASE.exec(pathname)?.[1] ?? '/extensions/journal';
 }
 
+/** Where the realm is served from: nothing, or the prefix before `/extensions/journal` (`/r/<slug>`). */
+export function realmPrefix(pathname: string): string {
+	return basePath(pathname).slice(0, -'/extensions/journal'.length);
+}
+
 export function parseRoute(pathname: string): Route {
 	const rest = pathname.slice(basePath(pathname).length).replace(/^\//, '');
 	const match = REST.exec(rest);
