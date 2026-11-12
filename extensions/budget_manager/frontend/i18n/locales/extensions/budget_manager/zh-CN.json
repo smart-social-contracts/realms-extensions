@@ -19,7 +19,7 @@
   "stage_actual": "实际",
   "stage_available": "可用",
   "stages_title": "支出阶段 — {period}",
-  "stages_hint": "每个支出项从计划到仍可用的金额：为尚未承诺的支出预留、已向第三方承诺但尚未扣款，以及实际（已扣款）。",
+  "stages_hint": "每个支出项从计划到仍可用的金额：为尚未承诺的支出预留、已向第三方承诺但尚未扣款，以及实际：已扣款，即已确认的义务，包括已欠付但尚未支付的款项。",
   "stages_legend": "资金阶段",
   "stages_bar": "计划 {planned}：已扣款 {actual}，已承诺 {committed}，已预留 {reserved}，可用 {available}",
   "stages_fund_total": "{fund} 合计",
@@ -72,5 +72,6 @@
   "entry_debit": "{category}：借 {amount}",
   "entry_credit": "{category}：贷 {amount}",
   "money_base_units": "{amount} {symbol}（最小单位）",
-  "stages_line_gone": "该预算项已不在生效项之列：后来的预算修订了它，或其所属期间已结束。"
+  "stages_line_gone": "该预算项已不在生效项之列：后来的预算修订了它，或其所属期间已结束。",
+  "stage_owed": "其中已欠付、尚未支付：{amount}"
 }

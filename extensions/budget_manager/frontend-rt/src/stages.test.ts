@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { bar, byFund, hasStages, isPending, stagesOf, type BudgetLine } from './stages.ts';
+import { bar, byFund, hasStages, isPending, slotOf, stagesOf, type BudgetLine } from './stages.ts';
 
 // ggg's example: Roads FY2026, capital: planned 300,000, reserved 40,000, committed 90,000, actual 120,500.
 const line = (over: Partial<BudgetLine> = {}): BudgetLine => ({
@@ -40,6 +40,13 @@ describe('the stages of a line', () => {
 		assert.equal(isPending(line({ status: 'proposed' })), true);
 		assert.equal(isPending(line({ status: 'draft', kind: 'revenue' })), false);
 		assert.equal(isPending(line()), false);
+	});
+});
+
+describe('the slot of a line', () => {
+	it('names the fund, period and category the versions of a line share', () => {
+		assert.equal(slotOf(line()), 'ROADS:FY2026:capital');
+		assert.equal(slotOf(line({ id: 'B-9', status: 'amended' })), slotOf(line()));
 	});
 });
 

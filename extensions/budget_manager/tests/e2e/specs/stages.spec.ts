@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { NOW, budgeting, budgetingIncomeOnly, startRealm, type Scenario } from '../realm';
+import { NOW, budgeting, budgetingIncomeOnly, owing, startRealm, type Scenario } from '../realm';
 
 // The spending stages of every expense line (ggg I-FIN-9): planned, reserved, committed, actual and available, as a
 // stacked bar and as numbers, with the totals of each fund and of the budget. The page is the built bundle on a
@@ -44,6 +44,9 @@ test('an admin sees each expense line from planned to available, and the totals 
   const stages = page.getByTestId('stages');
 
   await expect(stages.getByRole('heading', { name: 'Spending stages — FY2026' })).toBeVisible();
+  // Actual is the money charged: the obligations recognised, those owed and not yet paid included.
+  await expect(stages.getByText('actual: charged, that is the obligations recognised, including payments owed and not yet paid.')).toBeVisible();
+  await expect(stages.getByTestId('owed')).toHaveCount(0); // no payment is owed in this realm
   const cells = (selector: string) => stages.locator(selector).getByRole('cell');
   await expect(cells('[data-line="B-1"]')).toHaveText(['capital', '', '300,000 REALM', '40,000 REALM', '90,000 REALM', '120,500 REALM', '49,500 REALM']);
   await expect(cells('[data-line="B-2"]')).toHaveText(['upkeep', '', '50,000 REALM', '0 REALM', '0 REALM', '10,000 REALM', '40,000 REALM']);
@@ -93,7 +96,30 @@ test('a member sees the stages of the lines in force, and no line that is not', 
   await expect(stages.getByTestId('unadopted')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Scheduled payments' })).toHaveCount(0);
   expect(await asked(page)).not.toContain('budget_list'); // the lines not in force are for those who read the treasury
+  expect(await asked(page)).not.toContain('transfer_list'); // and so are the payments owed
   expect(errors).toEqual([]);
+});
+
+test('a reader of the treasury sees how much of each line\'s charged money is owed and not yet paid', async ({ page }) => {
+  const errors = consoleErrors(page);
+  scenario = owing();
+  await openBudgets(page);
+  const stages = page.getByTestId('stages');
+  // T-10 (12,000, committed money), T-11 (4,500) and T-12 (8,000) are scheduled; T-13 was cancelled and T-15 is charged to no line.
+  const actual = (line: string) => stages.locator(`[data-line="${line}"]`).getByRole('cell').nth(5);
+  await expect(actual('B-1')).toHaveText('120,500 REALM of which owed, not yet paid: 12,000 REALM');
+  await expect(actual('B-2')).toHaveText('10,000 REALM of which owed, not yet paid: 4,500 REALM');
+  await expect(actual('B-4')).toHaveText('30,000 REALM of which owed, not yet paid: 8,000 REALM');
+  await expect(stages.getByTestId('owed')).toHaveCount(3); // only the lines that owe something say so
+  await page.screenshot({ path: join(OUT, 'stages-owed.png'), fullPage: true });
+  expect(errors).toEqual([]);
+});
+
+test('on a narrow screen the card of a line says what is owed on it', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  scenario = owing();
+  await openBudgets(page);
+  await expect(page.getByTestId('stages').locator('[data-line="B-1"]').getByTestId('owed')).toHaveText('of which owed, not yet paid: 12,000 REALM');
 });
 
 test('a period with no expense line in force says so', async ({ page }) => {
@@ -126,6 +152,10 @@ test('the texts come in the realm\'s language', async ({ page }) => {
   const stages = page.getByTestId('stages');
   await expect(stages.getByRole('heading', { name: 'Fases del gasto — FY2026' })).toBeVisible({ timeout: 15_000 });
   await expect(stages.getByRole('columnheader', { name: 'Ejecutado' })).toBeVisible();
+  // The stages are named as Spanish public accounting names them.
+  await expect(stages).toContainText('reservado (autorización)');
+  await expect(stages).toContainText('comprometido (disposición)');
+  await expect(stages).toContainText('ejecutado (obligación reconocida)');
   await expect(stages.locator('[data-total="budget"]')).toContainText('Total del presupuesto');
   await page.screenshot({ path: join(OUT, 'stages-es.png'), fullPage: true });
 });

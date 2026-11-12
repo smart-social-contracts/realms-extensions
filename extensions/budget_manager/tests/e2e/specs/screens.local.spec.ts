@@ -30,7 +30,11 @@ test('the spending stages of each expense line, the totals of each fund and of t
   try {
     await ext.getByRole('button', { name: 'Budgets' }).click();
     const stages = ext.getByTestId('stages');
-    const figures = (b: any) => [money(b.planned), money(b.reserved), money(b.committed), money(b.actual), money(b.planned - b.reserved - b.committed - b.actual)];
+    // What is owed and not yet paid is part of a line's actual money: scheduled payments are charged when they are recognised.
+    const scheduled = realmCall('transfer_list', { status: 'scheduled' }).transfers;
+    const owedOn = (b: any) => scheduled.filter((t: any) => t.budget === b.id).reduce((total: number, t: any) => total + t.amount, 0);
+    const actualText = (b: any) => (owedOn(b) ? `${money(b.actual)} of which owed, not yet paid: ${money(owedOn(b))}` : money(b.actual));
+    const figures = (b: any) => [money(b.planned), money(b.reserved), money(b.committed), actualText(b), money(b.planned - b.reserved - b.committed - b.actual)];
     for (const line of adopted) {
       await expect(stages.locator(`[data-line="${line.id}"]`).getByRole('cell')).toHaveText([line.category.replace(/_/g, ' '), '', ...figures(line)]);
     }

@@ -19,7 +19,7 @@
   "stage_actual": "Executat",
   "stage_available": "Disponible",
   "stages_title": "Fases de la despesa — {period}",
-  "stages_hint": "Cada partida de despesa, d'allò previst a allò que encara està disponible: reservat per a una despesa encara no compromesa, compromés amb un tercer i encara no carregat, i executat (carregat).",
+  "stages_hint": "Cada partida de despesa, d'allò previst a allò que encara està disponible: reservat (autorització) per a una despesa encara no compromesa, compromés (disposició) amb un tercer i encara no carregat, i executat (obligació reconeguda): allò carregat, inclosos els pagaments deguts i encara no pagats.",
   "stages_legend": "Fases dels diners",
   "stages_bar": "{planned} previstos: {actual} carregats, {committed} compromesos, {reserved} reservats, {available} disponibles",
   "stages_fund_total": "Total {fund}",
@@ -72,5 +72,6 @@
   "entry_debit": "{category}: dèbit {amount}",
   "entry_credit": "{category}: crèdit {amount}",
   "money_base_units": "{amount} {symbol} (unitats mínimes)",
-  "stages_line_gone": "Eixa partida ja no està entre les que estan en vigor: un pressupost posterior la va modificar, o el seu període s'ha tancat."
+  "stages_line_gone": "Eixa partida ja no està entre les que estan en vigor: un pressupost posterior la va modificar, o el seu període s'ha tancat.",
+  "stage_owed": "dels quals deguts i encara no pagats: {amount}"
 }

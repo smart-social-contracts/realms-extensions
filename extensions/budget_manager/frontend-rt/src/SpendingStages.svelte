@@ -1,6 +1,6 @@
 <script lang="ts">
 	import StageBar, { STAGE_COLORS } from './StageBar.svelte';
-	import { byFund, stagesOf, type BudgetLine, type StageName, type Stages } from './stages.ts';
+	import { byFund, slotOf, stagesOf, type BudgetLine, type StageName, type Stages } from './stages.ts';
 	import { t } from './lib/i18n';
 
 	/**
@@ -14,6 +14,7 @@
 		fmt,
 		narrow,
 		focus,
+		owed,
 	}: {
 		period: string;
 		lines: BudgetLine[];
@@ -22,7 +23,11 @@
 		narrow: boolean;
 		/** A line to point at, e.g. the one a payment is charged to. */
 		focus: BudgetLine | null;
+		/** What is owed and not yet paid on each line, by slot: the part of its actual money that has not been paid. */
+		owed: Record<string, number>;
 	} = $props();
+
+	const owedOn = (line: BudgetLine) => owed[slotOf(line)] ?? 0;
 
 	const funds = $derived(byFund(lines));
 	// A line of another version or period is not among those in force: the page says so rather than show nothing.
@@ -60,21 +65,25 @@
 	const words = (category: string) => category.replace(/_/g, ' ');
 </script>
 
-{#snippet cells(s: Stages)}
+{#snippet cells(s: Stages, owedAmount: number = 0)}
 	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.planned)}</td>
 	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.reserved)}</td>
 	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.committed)}</td>
-	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.actual)}</td>
+	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">
+		{fmt(s.actual)}
+		{#if owedAmount > 0}<div class="text-xs font-normal text-gray-400" data-testid="owed">{t('stage_owed', { amount: fmt(owedAmount) })}</div>{/if}
+	</td>
 	<td class="py-2 text-right tabular-nums font-medium text-gray-900">{fmt(s.available)}</td>
 {/snippet}
 
-{#snippet figures(s: Stages)}
+{#snippet figures(s: Stages, owedAmount: number = 0)}
 	<dl class="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-600">
 		<div class="flex justify-between gap-2"><dt>{t('stage_reserved')}</dt><dd>{fmt(s.reserved)}</dd></div>
 		<div class="flex justify-between gap-2"><dt>{t('stage_committed')}</dt><dd>{fmt(s.committed)}</dd></div>
 		<div class="flex justify-between gap-2"><dt>{t('stage_actual')}</dt><dd>{fmt(s.actual)}</dd></div>
 		<div class="flex justify-between gap-2 font-medium text-gray-900"><dt>{t('stage_available')}</dt><dd>{fmt(s.available)}</dd></div>
 	</dl>
+	{#if owedAmount > 0}<p class="mt-1 text-xs text-gray-400" data-testid="owed">{t('stage_owed', { amount: fmt(owedAmount) })}</p>{/if}
 {/snippet}
 
 <div data-testid="stages" bind:this={root}>
@@ -114,7 +123,7 @@
 								<span class="shrink-0 text-xs text-gray-500">{t('stage_planned')} {fmt(line.planned)}</span>
 							</div>
 							<StageBar stages={line} label={barLabel(line)} />
-							{@render figures(line)}
+							{@render figures(line, owedOn(line))}
 						</article>
 					{/each}
 					<div class="pt-2 border-t border-gray-100" data-total={f.fund}>
@@ -164,7 +173,7 @@
 								<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400">{' · '}{t('stages_extended')}</span>{/if}
 							</td>
 							<td class="py-2 pr-3"><StageBar stages={line} label={barLabel(line)} /></td>
-							{@render cells(line)}
+							{@render cells(line, owedOn(line))}
 						</tr>
 					{/each}
 					<tr class="font-medium border-t border-gray-200" data-total={f.fund}>

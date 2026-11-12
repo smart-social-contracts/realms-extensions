@@ -19,7 +19,7 @@
   "stage_actual": "Effettivo",
   "stage_available": "Disponibile",
   "stages_title": "Fasi della spesa — {period}",
-  "stages_hint": "Ogni voce di spesa, da ciò che è previsto a ciò che resta disponibile: riservato per una spesa non ancora impegnata, impegnato verso un terzo e non ancora addebitato, ed effettivo (addebitato).",
+  "stages_hint": "Ogni voce di spesa, da ciò che è previsto a ciò che resta disponibile: riservato per una spesa non ancora impegnata, impegnato verso un terzo e non ancora addebitato, ed effettivo: addebitato, cioè le obbligazioni riconosciute, compresi i pagamenti dovuti e non ancora pagati.",
   "stages_legend": "Fasi del denaro",
   "stages_bar": "{planned} previsti: {actual} addebitati, {committed} impegnati, {reserved} riservati, {available} disponibili",
   "stages_fund_total": "Totale {fund}",
@@ -72,5 +72,6 @@
   "entry_debit": "{category}: dare {amount}",
   "entry_credit": "{category}: avere {amount}",
   "money_base_units": "{amount} {symbol} (unità minime)",
-  "stages_line_gone": "Questa voce non è più tra quelle in vigore: un bilancio successivo l'ha modificata, oppure il suo periodo è chiuso."
+  "stages_line_gone": "Questa voce non è più tra quelle in vigore: un bilancio successivo l'ha modificata, oppure il suo periodo è chiuso.",
+  "stage_owed": "di cui dovuto, non ancora pagato: {amount}"
 }

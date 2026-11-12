@@ -19,7 +19,7 @@
   "stage_actual": "Actual",
   "stage_available": "Available",
   "stages_title": "Spending stages — {period}",
-  "stages_hint": "Each expense line from what is planned to what is still available: reserved for a spending not yet committed, committed to a third party and not yet charged, and actual (charged).",
+  "stages_hint": "Each expense line from what is planned to what is still available: reserved for a spending not yet committed, committed to a third party and not yet charged, and actual: charged, that is the obligations recognised, including payments owed and not yet paid.",
   "stages_legend": "Stages of the money",
   "stages_bar": "{planned} planned: {actual} charged, {committed} committed, {reserved} reserved, {available} available",
   "stages_fund_total": "Total {fund}",
@@ -72,5 +72,6 @@
   "entry_debit": "{category}: debit {amount}",
   "entry_credit": "{category}: credit {amount}",
   "money_base_units": "{amount} {symbol} (smallest units)",
-  "stages_line_gone": "That line is no longer among the lines in force: a later budget amended it, or its period has closed."
+  "stages_line_gone": "That line is no longer among the lines in force: a later budget amended it, or its period has closed.",
+  "stage_owed": "of which owed, not yet paid: {amount}"
 }

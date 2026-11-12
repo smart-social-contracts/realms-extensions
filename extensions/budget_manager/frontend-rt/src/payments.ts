@@ -3,6 +3,7 @@
  * keeps times in UTC seconds; the days and months people read are the realm's own (its time zone).
  */
 import { dayInZone } from './days.ts';
+import { slotOf, type BudgetLine } from './stages.ts';
 
 export interface Payment {
 	id: string;
@@ -57,6 +58,19 @@ export function listed(payments: Payment[], filter: Filter, now: number, zone: s
 export function owed(payments: Payment[]): Record<string, number> {
 	const total: Record<string, number> = {};
 	for (const payment of payments.filter(isScheduled)) total[payment.symbol] = (total[payment.symbol] ?? 0) + payment.amount;
+	return total;
+}
+
+/**
+ * What is owed and not yet paid on each budget line, by slot (a line and the versions it was amended through): the owed
+ * payments charged to it. A payment charged to no line, or to one the realm does not list, is on none.
+ */
+export function owedOnLines(payments: Payment[], lines: Record<string, BudgetLine>): Record<string, number> {
+	const total: Record<string, number> = {};
+	for (const payment of payments.filter(isScheduled)) {
+		const line = payment.budget ? lines[payment.budget] : undefined;
+		if (line) total[slotOf(line)] = (total[slotOf(line)] ?? 0) + payment.amount;
+	}
 	return total;
 }
 
