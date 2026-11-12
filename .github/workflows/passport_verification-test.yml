@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/**'
       - '.github/workflows/passport_verification-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/passport_verification/**'
       - 'extensions/_shared/**'
@@ -17,7 +17,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     
     steps:

@@ -139,6 +139,114 @@ def seed_planning(realm):
     realm.shell(LICENCE_FACTS % {"licence": building, "until": 1_893_456_000})
 
 
+# --- budget_manager 2.2.0: spending stages, scheduled payments, quarter sweeps (--budget-screens) -------------------
+
+HOLDINGS = '''
+import json
+from ggg import Fund
+for fund, tokens in %(balances)r.items():  # a scheduled payment is owed from what its fund holds
+    Fund[fund].balances = {"REALM": tokens * 100}
+print(json.dumps({"ok": True}))
+'''
+
+LINES_AND_DUE_DATES = '''
+import json
+from ggg import Budget, Transfer
+for line, stage in %(lines)r.items():  # the charged amount of ggg's example set directly (it replaces what the payments booked)
+    Budget[line].status = stage.get("status", Budget[line].status)
+    if "actual" in stage:
+        Budget[line].actual = stage["actual"] * 100
+for transfer, days in %(due)r.items():  # the realm refuses a due date in the past: an overdue payment is made later
+    Transfer[transfer].due_at = %(now)d + days * %(day)d
+print(json.dumps({"ok": True}))
+'''
+
+FEDERATION = '''
+import json
+from ggg import Quarter, Realm
+realm = Realm["1"]
+realm.is_quarter, realm.is_capital = True, True  # the capital of a federation, which alone sets sweep rules
+for cid, name, index in %(quarters)r:
+    Quarter(id=cid, name=name, index=index, status="active")
+print(json.dumps({"ok": True}))
+'''
+
+SWEEPS = '''
+import json
+from api import treasury
+from core import chain
+from ggg import Fund, Sweep
+to = {"owner": chain.self_id(), "subaccount": None}
+for key, quarter, fund, into, tokens, days_ago, block in %(sweeps)r:  # as quarter_sweep_report books what a quarter reports
+    amount, at = tokens * 100, %(now)d - days_ago * %(day)d
+    booked = Sweep(id=key, quarter=quarter, rule=f"{fund}:REALM", status="booked", reported_at=at + 300, fund=fund,
+                   symbol="REALM", into=into, to=to, epoch=at - at %% (30 * %(day)d), amount=amount, fee=10,
+                   created_at=at, block=str(block))
+    lines = [("asset", "cash", amount, 0, Fund[into]), ("equity", "sweep", 0, amount, Fund[into])]
+    treasury.post(treasury.booking_period(), lines, "REALM", f"sweep {booked.id} (block {block})", sweep=booked)
+print(json.dumps({"ok": True}))
+'''
+
+BUDGET_FUNDS = {"ROOT": "Root", "ROADS": "Roads", "WELFARE": "Welfare"}
+NORTH = "ryjl3-tyaaa-aaaaa-aaaba-cai"
+SOUTH = "renrk-eyaaa-aaaaa-aaada-cai"
+
+
+def seed_budget_screens(realm):
+    """What the screens of budget_manager 2.2.0 show (`budget_manager/tests/e2e/specs/screens.local.spec.ts`): REALM, a
+    token of two decimals, and three funds; FY2026 with Roads' capital and upkeep, a toll revenue line and Welfare's care,
+    stages on the capital line (reserved 40,000, committed 90,000 of which the 12,000 payment below draws on, and 120,500
+    charged: the figure of ggg's example, set directly, since this realm pays nothing through a ledger), a drafted and a
+    proposed line that are not in force; payments owed (two fall due this month, one of them overdue, one next month) and one cancelled
+    unpaid; and a capital with two quarters, its sweep rules and the three sweeps they reported, booked."""
+    now = int(realm.shell("from core import chain\nprint(chain.now())").strip())
+    realm.op("token_register", symbol="REALM", ledger="aaaaa-aa", decimals=2, fee=10)
+    realm.op("realm_configure_tokens", accounting_currency="REALM")
+    for fund, name in BUDGET_FUNDS.items():
+        realm.op("fund_create", fund=fund, name=name)
+    assert json.loads(realm.shell(HOLDINGS % {"balances": {"ROADS": 500_000, "WELFARE": 200_000}}))["ok"]
+    realm.op("period_open", period="FY2026", starts_at=now - 60 * DAY, ends_at=now + 300 * DAY)
+
+    def line(fund, category, kind, tokens):
+        return realm.op("budget_draft", fund=fund, period="FY2026", category=category, kind=kind, planned=tokens * 100)["budget"]
+
+    capital, upkeep = line("ROADS", "capital", "expense", 300_000), line("ROADS", "upkeep", "expense", 50_000)
+    line("ROADS", "tolls", "revenue", 80_000)
+    care = line("WELFARE", "care", "expense", 120_000)
+    realm.op("budget_propose", period="FY2026")  # the root approves alone: the lines are adopted at once
+    lighting = line("ROADS", "street_lighting", "expense", 20_000)  # drafted, not proposed
+    schools = line("WELFARE", "schools", "expense", 75_000)  # proposed, as when a vote has yet to decide it
+
+    realm.op("budget_stage", budget=capital, reserve=40_000 * 100, commit=90_000 * 100)
+
+    def payment(fund, to, tokens, category, days, **more):
+        return realm.op("transfer_create", fund=fund, to=to, amount=tokens * 100, category=category,
+                        due_at=now + days * DAY, **more)["transfer"]
+
+    payment("ROADS", "buildco", 12_000, "capital", 17, committed=True)  # falls due this month, from committed money
+    overdue = payment("ROADS", "buildco", 4_500, "upkeep", 1)
+    payment("WELFARE", "carehome", 8_000, "care", 33)
+    revoked = payment("ROADS", "buildco", 5_000, "upkeep", 20)
+    realm.op("transfer_revert", transfer=revoked)  # cancelled, unpaid
+
+    lines = {capital: {"actual": 120_500}, schools: {"status": "proposed"}}
+    done = json.loads(realm.shell(LINES_AND_DUE_DATES % {"lines": lines, "due": {overdue: -9}, "now": now, "day": DAY}))
+    assert done["ok"], done
+    done = json.loads(realm.shell(FEDERATION % {"quarters": [(NORTH, "North", 1), (SOUTH, "South", 2)]}))
+    assert done["ok"], done
+    realm.op("treasury_configure", config={"sweep": [
+        {"fund": "ROOT", "symbol": "REALM", "into": "ROADS", "keep": 100 * 100},
+        {"fund": "WELFARE", "symbol": "REALM", "into": "WELFARE", "keep": 0}]})
+    done = json.loads(realm.shell(SWEEPS % {
+        "now": now, "day": DAY,
+        "sweeps": [(f"{NORTH}/SW-1", NORTH, "ROOT", "ROADS", 890, 11, 90113), (f"{SOUTH}/SW-1", SOUTH, "ROOT", "ROADS", 420, 10, 90210),
+                   (f"{NORTH}/SW-2", NORTH, "ROOT", "ROADS", 310, 42, 85002)],
+    }))
+    assert done["ok"], done
+    print(json.dumps({"budget_screens": {"capital": capital, "upkeep": upkeep, "care": care, "lighting": lighting,
+                                         "schools": schools}}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--network", required=True, choices=["local"], help="only a local network is accepted")
@@ -146,6 +254,8 @@ def main():
     parser.add_argument("--home", required=True, help="the directory of the local realm's icp.yaml")
     parser.add_argument("--backend", required=True, help="the realm backend's canister id")
     parser.add_argument("--fixture", required=True, type=Path, help="tests/fixtures/legislation/valencia of realms-gos")
+    parser.add_argument("--budget-screens", action="store_true", help="also seed what budget_manager 2.2.0 shows (the budget, "
+                        "its payments and the sweeps): for a realm of its own, since it makes the realm a capital")
     args = parser.parse_args()
     realm = Realm(args.network, args.identity, args.home, args.backend)
 
@@ -178,6 +288,8 @@ def main():
     alert_links = json.loads(realm.shell(CHECKS % {"spain": SPAIN, "day": DAY}))
     assert alert_links == ["/extensions/codex_viewer"], alert_links  # the team's alert links to the codex page
     print(json.dumps({"older": older["codex"], "newer": newer["codex"]}))
+    if args.budget_screens:
+        seed_budget_screens(realm)
 
 
 if __name__ == "__main__":

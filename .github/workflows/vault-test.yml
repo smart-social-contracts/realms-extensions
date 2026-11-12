@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/**'
       - '.github/workflows/vault-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/vault/**'
       - 'extensions/_shared/**'
@@ -18,7 +18,7 @@ on:
 jobs:
   lint-and-unit-tests:
     name: Linting & Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout repository

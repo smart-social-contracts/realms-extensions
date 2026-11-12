@@ -59,7 +59,13 @@
   "signature_verification_url": "Prüfen unter",
   "signature_batch_root": "Wurzel seiner Charge",
   "signature_how": "Code scannen oder die Adresse öffnen und den Prüfcode eingeben, um die Signatur des Reichs unter dieser Ausgabe zu prüfen.",
-  "signature_provisional": "Vorläufige Ausgabe: Das Reich signiert sie, sobald der Tag zu Ende ist.",
-  "signature_unsigned": "Noch nicht signiert: Das Reich signiert jede Ausgabe, sobald ihr Tag zu Ende ist.",
-  "signature_mismatch": "Die Signatur, die das Reich für diese Ausgabe angibt, stimmt nicht mit dem überein, was dieses Blatt zeigt. Verlassen Sie sich nicht darauf."
+  "signature_provisional": "Vorläufige Ausgabe: Sie kann signiert werden, sobald ihr Tag zu Ende ist.",
+  "signature_unsigned": "Noch nicht signiert: Das Reich signiert eine Ausgabe, wenn jemand es verlangt.",
+  "signature_mismatch": "Die Signatur, die das Reich für diese Ausgabe angibt, stimmt nicht mit dem überein, was dieses Blatt zeigt. Verlassen Sie sich nicht darauf.",
+  "sign_request": "Signatur anfordern",
+  "sign_busy": "Wird signiert…",
+  "sign_hint": "Jeder kann sie anfordern. Das Reich signiert die Ausgabe einmal und bewahrt die Signatur auf.",
+  "sign_pending": "Die Ausgabe wird gerade signiert. Es wird erneut geprüft…",
+  "sign_error": "Die Ausgabe konnte nicht signiert werden: {reason}",
+  "sign_waiting": "Die Signatur dauert länger als üblich. Versuchen Sie es gleich noch einmal."
 }

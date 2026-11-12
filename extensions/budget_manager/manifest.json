@@ -1,7 +1,7 @@
 {
   "name": "budget_manager",
-  "version": "2.1.0",
-  "description": "See how revenue moves through your treasury, set how each period's income is split across funds, compare planned spending to actuals, and choose whether allocation runs automatically.",
+  "version": "2.2.0",
+  "description": "See how revenue moves through your treasury, set how each period's income is split across funds, compare planned spending to actuals and follow each line through its spending stages, see the payments the realm owes and the money its quarters sweep to the capital, and choose whether allocation runs automatically.",
   "author": "Smart Social Contracts",
   "permissions": [],
   "profiles": [
@@ -28,7 +28,13 @@
   },
   "operations": [
     "budget_view",
+    "budget_list",
     "ledger_view",
+    "transfer_list",
+    "sweep_list",
+    "treasury_view",
+    "quarter_directory",
+    "realm_info",
     "me",
     "department_list",
     "department_get",
