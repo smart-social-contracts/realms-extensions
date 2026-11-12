@@ -93,7 +93,7 @@
 	let decryptedBids = $state<Record<string, BidPayload | null>>({});
 	let departments = $state<any[]>([]);
 	let organizations = $state<any[]>([]);
-	let facts = $state<RealmFacts>({ zone: 'UTC', currency: '', decimals: 0, externals: [], realms: {} });
+	let facts = $state<RealmFacts>({ zone: 'UTC', currency: '', decimals: 0, tokens: {}, externals: [], realms: {} });
 	let contractId = $state('');
 
 	let formTitle = $state('');
@@ -237,20 +237,24 @@
 	}
 
 	async function loadContext() {
-		const [mine, depts, orgs, info, outside] = await Promise.all([
+		const [mine, depts, orgs, info, outside, budget, treasury] = await Promise.all([
 			read('me'),
 			read('department_list', { count: 500 }),
 			read('organization_list', { status: 'active', count: 500 }),
 			read('realm_info'),
 			read('external_list', { count: 500 }),
+			read('budget_view', { count: 1 }),
+			read('treasury_view', { count: 1 }),
 		]);
 		if (mine) perms = new Set(mine.permissions ?? []);
 		if (info?.realm) {
 			const zone = info.realm.official_timezone || info.realm.timezone;
 			facts = {
 				zone: isKnownZone(zone) ? zone : 'UTC',
-				currency: info.realm.accounting_currency ?? '',
-				decimals: info.realm.accounting_currency_decimals ?? 0,
+				// The budget page's currency and decimals (the token registry's); the realm's own when it is not readable.
+				currency: budget?.currency ?? info.realm.accounting_currency ?? '',
+				decimals: budget?.decimals ?? info.realm.accounting_currency_decimals ?? 0,
+				tokens: Object.fromEntries((treasury?.tokens ?? []).map((token: { id: string; decimals: number }) => [token.id, token.decimals])),
 				externals: outside?.externals ?? [],
 				realms: linkedRealms(info.sync_sources ?? []),
 			};

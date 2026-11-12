@@ -25,10 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capital), its reference and its winners.
 - The texts of these screens are translated into the seven languages of the realm (en, es, ca-valencia, de, fr, it,
   zh-CN); the screens that existed keep their English texts.
-- Unit tests (`npm test` in `frontend-rt`) and browser tests on a canned realm (`npm test` in `tests/e2e`).
+- A contract that has ended (terminated or fulfilled) shows that it is not amended instead of the form.
+- Amounts are shown in the decimals of the realm's currency as the budget page has them (`budget_view`), and in a token's
+  own decimals when the realm says them (`treasury_view`).
+- Unit tests (`npm test` in `frontend-rt`), browser tests on a canned realm (`npm test` in `tests/e2e`) and on a real local
+  realm (`npm run test:local`, seeded by `seed_local_realm.py --only procurement` of codex_viewer), run on pull requests
+  (`run_tests.sh`) but for the real-realm ones.
 
 ### Changed
 - The manifest lists the operations the new screens call: `contract_list`, `contract_get`, `contract_amend`,
-  `tender_lot_void`, `realm_info`, `external_list`. `contract_list` and the fields `contract_get` gained (`paid`,
+  `tender_lot_void`, `realm_info`, `external_list`, `budget_view`, `treasury_view`. `contract_list` and the fields `contract_get` gained (`paid`,
   `governed_by`, `needs_vote`, `budgets`) are in realms-gos from the pull request that adds them: an older realm answers
   neither, and the page then says that it cannot propose amendments.

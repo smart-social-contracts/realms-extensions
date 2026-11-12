@@ -113,6 +113,7 @@ print(json.dumps(sorted({n.href for n in Notification.instances() if n.topic == 
 PROCUREMENT_PRELUDE = '''
 import json
 from core import chain
+from core.db import next_id
 from core.op import call
 FOUNDER = %(founder)r
 P = %(principals)r  # identity number -> principal
@@ -134,6 +135,11 @@ def do(operation, /, who=None, **args):
     out = call(operation, args, user=P[who] if who else FOUNDER)
     assert out.get("ok", True) is not False, (operation, who, args, out)
     return out
+
+
+def titled(cls, title):
+    # The row of cls with this title, or None: the step that made it is done. Ids are the realm's to give.
+    return next((row for row in cls.instances() if row.title == title), None)
 '''
 
 
@@ -165,11 +171,12 @@ if External["province"] is None:
 
 
 def seed_procurement_contracts(realm, prelude):
-    """The fund ROADS with an adopted capital line; a plain tender T-2 and, from it, the contract of the bike lane works C-1:
-    50 000 spread over FY2026 and FY2027, 12 000 paid on it from the capital line, amended twice (the first decided by the
-    department at once; then Infrastructure goes to a vote of 1 of its 2 seats, and the second is carried by a proposal) and
-    a third attempt refused for going below what was paid; two call-offs under a framework agreement, one held by the Province
-    and one by another realm."""
+    """The fund ROADS with an adopted capital line; a plain tender and, from it, the contract "Bike lane works": 50 000 spread
+    over FY2026 and FY2027, 12 000 paid on it from the capital line, amended twice (the first decided by the department at
+    once; then Infrastructure goes to a vote of 1 of its 2 seats, and the second is carried by a proposal) and a third attempt
+    refused for going below what was paid; two call-offs under a framework agreement, one held by the Province and one by
+    another realm. The payment is written as a Transfer row: a local network has no ledger to pay through, so the fund's
+    balance and the line's actual do not move. Ids come from the realm's replies; a step is done when its title exists."""
     print(realm.shell(prelude + '''
 from api.treasury import currency, decimals_of
 from ggg import Budget, Contract, ContractAmendment, FiscalPeriod, Fund, Tender, Transfer
@@ -180,79 +187,89 @@ if Fund["ROADS"] is None:
     do("fund_create", fund="ROADS", name="Roads", department="Infrastructure")
 if FiscalPeriod["FY2026"] is None:
     do("period_open", period="FY2026", starts_at=start, ends_at=start + YEAR)
-if not list(Budget.instances()):
+
+
+def capital_line():
+    return next((b for b in Budget.instances() if b.fund.id == "ROADS" and b.category == "capital" and b.status == "adopted"), None)
+
+
+if capital_line() is None:
     do("budget_draft", fund="ROADS", period="FY2026", category="capital", kind="expense", planned=300_000 * U)
     do("budget_propose", period="FY2026", fund="ROADS")
-capital = next(b for b in Budget.instances() if b.category == "capital" and b.status == "adopted")
-if Tender["T-2"] is None:
+capital = capital_line()
+river = titled(Tender, "Bike lane along the river")
+if river is None:
     with at(NOW - 40 * DAY):
-        do("tender_create", title="Bike lane along the river", requester="Infrastructure", kind="works", procedure="open",
-           opens_at=NOW - 40 * DAY, closes_at=NOW - 30 * DAY, rubric={"price": 60_000_000, "quality": 40_000_000})
-if Contract["C-1"] is None:
+        river = Tender[do("tender_create", title="Bike lane along the river", requester="Infrastructure", kind="works",
+                          procedure="open", opens_at=NOW - 40 * DAY, closes_at=NOW - 30 * DAY,
+                          rubric={"price": 60_000_000, "quality": 40_000_000})["tender"]]
+lane = titled(Contract, "Bike lane works")
+if lane is None:
     with at(NOW - 30 * DAY):
-        do("contract_create", title="Bike lane works", parties=["Department:Infrastructure", "Organization:BuildCo"],
-           value=50_000 * U, symbol=currency(), tender="T-2", starts_at=NOW - 30 * DAY, ends_at=NOW + 90 * DAY,
-           split=[{"period": "FY2026", "amount": 30_000 * U}, {"period": "FY2027", "amount": 20_000 * U}])
+        lane = Contract[do("contract_create", title="Bike lane works", parties=["Department:Infrastructure", "Organization:BuildCo"],
+                           value=50_000 * U, symbol=currency(), tender=river.id, starts_at=NOW - 30 * DAY, ends_at=NOW + 90 * DAY,
+                           split=[{"period": "FY2026", "amount": 30_000 * U}, {"period": "FY2027", "amount": 20_000 * U}])["contract"]]
     with at(NOW - 20 * DAY):  # money paid on it from the capital line, so that its value cannot fall below it
-        Transfer(id="TR-1", sender="Fund:ROADS", to="Organization:BuildCo", symbol=currency(), amount=12_000 * U,
-                 status="completed", at=NOW - 20 * DAY, contract="C-1", budget=capital.id)
+        Transfer(id=next_id(Transfer, "TR"), sender="Fund:ROADS", to="Organization:BuildCo", symbol=currency(), amount=12_000 * U,
+                 status="completed", at=NOW - 20 * DAY, contract=lane.id, budget=capital.id)
     with at(NOW - 12 * DAY):  # Infrastructure still decides alone: applied at once
-        do("contract_amend", contract="C-1", ends_at=NOW + 150 * DAY)
+        do("contract_amend", contract=lane.id, ends_at=NOW + 150 * DAY)
     do("department_set_policy", department="Infrastructure", m=1, n=2)
     with at(NOW - 5 * DAY):  # now a vote of its seats: the amendment is a proposal, carried by one yes
-        filed = do("contract_amend", contract="C-1",
+        filed = do("contract_amend", contract=lane.id,
                    split=[{"period": "FY2026", "amount": 12_000 * U}, {"period": "FY2027", "amount": 38_000 * U}])
         assert filed.get("requires_vote"), filed
         decided = do("proposal_vote", 6, proposal=filed["proposal"], choice="yes")
         assert decided["status"] == "executed", decided
-    refused = call("contract_amend", {"contract": "C-1", "value": 10_000 * U, "split": []}, user=FOUNDER)
+    refused = call("contract_amend", {"contract": lane.id, "value": 10_000 * U, "split": []}, user=FOUNDER)
     assert refused.get("kind") == "conflict" and "paid" in refused["error"], refused
-if Contract["C-2"] is None:
+if titled(Contract, "Electricity for the council buildings") is None:
     with at(NOW - 15 * DAY):
         do("contract_create", title="Electricity for the council buildings", parties=["Department:Finance", "Organization:BuildCo"],
            value=9_000 * U, symbol=currency(), kind="supplies",
            framework={"holder": {"External": "province"}, "reference": "AM-2025/04", "winners": ["BuildCo", "RoadCorp"]})
+if titled(Contract, "Street lighting") is None:
     with at(NOW - 10 * DAY):
         do("contract_create", title="Street lighting", parties=["Department:Infrastructure", "Organization:RoadCorp"],
            value=4_000 * U, symbol=currency(), kind="supplies",
            framework={"holder": {"Realm": "rrkah-fqaaa-aaaaa-aaaaq-cai"}, "reference": "T-12", "winners": []})
-print([(c.id, c.value // U, c.lot, c.framework and c.framework["reference"]) for c in Contract.instances()],
+print([(c.id, c.title, c.value // U, c.lot, c.framework and c.framework["reference"]) for c in Contract.instances()],
       [(a.id, a.proposal) for a in ContractAmendment.instances()], capital.id)
 '''))
 
 
 def seed_procurement_lots(realm, prelude):
-    """A tender T-1 in three lots, bid on, scored and revealed: lot 1 awarded (its contract names the lot), lot 3 left without an
-    award, lot 2 still open with two scored bids, so that the award and void screens have something to do."""
+    """A tender "Bike lane works in the old town" in three lots, bid on, scored and revealed: lot 1 awarded (its contract names
+    the lot), lots 2 and 3 still open with their scored bids, so that the award and the leave-unawarded screens have
+    something to do. Done once its title exists."""
     print(realm.shell(prelude + '''
 from api.procurement import seal
 from api.treasury import currency, decimals_of
 from ggg import Contract, Tender
 U = 10 ** decimals_of(currency())
-if Tender["T-1"] is None:
+if titled(Tender, "Bike lane works in the old town") is None:
     rubric = {"price": 60_000_000, "quality": 40_000_000}
     lots = [{"id": "1", "title": "Bike lanes", "estimated_value": 40_000 * U}, {"id": "2", "title": "Bike racks", "estimated_value": 10_000 * U},
             {"id": "3", "title": "Signs", "estimated_value": 5_000 * U}]
     with at(NOW - 10 * DAY):
-        do("tender_create", title="Bike lane works in the old town", requester="Infrastructure", kind="works", procedure="open",
-           estimated_value=55_000 * U, opens_at=NOW - 10 * DAY, closes_at=NOW - 3 * DAY, rubric=rubric, lots=lots)
-        do("tender_open", tender="T-1")
+        t = do("tender_create", title="Bike lane works in the old town", requester="Infrastructure", kind="works", procedure="open",
+               estimated_value=55_000 * U, opens_at=NOW - 10 * DAY, closes_at=NOW - 3 * DAY, rubric=rubric, lots=lots)["tender"]
+        do("tender_open", tender=t)
     offers = {"b1": (2, "BuildCo", "1", 48_000), "b2": (2, "BuildCo", "2", 9_000), "b3": (3, "RoadCorp", "1", 52_000),
               "b4": (3, "RoadCorp", "2", 9_500), "b5": (3, "RoadCorp", "3", 4_000)}
     ids = {}
     with at(NOW - 6 * DAY):
         for key, (who, vendor, lot, price) in offers.items():
-            ids[key] = do("bid_submit", who, tender="T-1", vendor=vendor, lot=lot, payload_ref=f"vetkey:{vendor}:T-1:{lot}",
+            ids[key] = do("bid_submit", who, tender=t, vendor=vendor, lot=lot, payload_ref=f"vetkey:{vendor}:{t}:{lot}",
                           payload_hash=seal(price * U, key))["bid"]
     with at(NOW - 2 * DAY):
-        do("bids_reveal", tender="T-1", openings={ids[k]: {"price": offers[k][3] * U, "nonce": k} for k in offers})
+        do("bids_reveal", tender=t, openings={ids[k]: {"price": offers[k][3] * U, "nonce": k} for k in offers})
         for key, marks in (("b1", (9, 8)), ("b3", (7, 7)), ("b2", (6, 7)), ("b4", (8, 5)), ("b5", (6, 6))):
             do("bid_score", bid=ids[key], scores={"price": marks[0], "quality": marks[1]})
     with at(NOW - 1 * DAY):
-        do("tender_award", tender="T-1", lot="1")
-        do("tender_lot_void", tender="T-1", lot="3", reason="no bid within the estimate")
-t = Tender["T-1"]
-print(t.status, [(l["id"], l["status"], l["winner"], l["contract"]) for l in t.lots], [(c.id, c.lot) for c in Contract.instances() if c.lot])
+        do("tender_award", tender=t, lot="1")
+t = titled(Tender, "Bike lane works in the old town")
+print(t.id, t.status, [(l["id"], l["status"], l["winner"], l["contract"]) for l in t.lots], [(c.id, c.value // U, c.lot) for c in Contract.instances() if c.lot])
 '''))
 
 

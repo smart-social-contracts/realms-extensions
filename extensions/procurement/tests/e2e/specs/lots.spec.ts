@@ -150,7 +150,7 @@ test('a bid on a tender with lots names the lot, and its sealed scope does too',
 
   await page.getByLabel('Amount (quote)').fill('900000');
   await page.getByRole('button', { name: 'Submit sealed bid' }).click();
-  await expect(page.getByText('Choose the lot you bid for')).toBeVisible();
+  await expect(page.getByText('Choose the lot your bid is for.')).toBeVisible();
   expect(await asked(page, 'bid_submit')).toEqual([]);
 
   await page.getByTestId('bid-lot').selectOption('2');

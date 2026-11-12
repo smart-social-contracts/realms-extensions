@@ -130,8 +130,8 @@
 						<tr>
 							<th class="w-24 px-4 py-3">{t('col_reference')}</th>
 							<th class="px-4 py-3">{t('col_contract')}</th>
-							<th class="w-40 px-4 py-3">{t('col_supplier')}</th>
-							<th class="w-40 px-4 py-3 text-right">{t('col_value')}</th>
+							<th class="w-36 px-4 py-3">{t('col_supplier')}</th>
+							<th class="w-36 px-4 py-3 text-right">{t('col_value')}</th>
 							<th class="w-28 px-4 py-3">{t('col_status')}</th>
 							<th class="w-56 px-4 py-3">{t('col_term')}</th>
 							<th class="w-20 px-4 py-3"></th>

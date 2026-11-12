@@ -4,6 +4,8 @@ import {
 	amendment,
 	dayIn,
 	dayStart,
+	decimalsFor,
+	hasEnded,
 	holderOf,
 	isCallOff,
 	linkedRealms,
@@ -56,6 +58,23 @@ describe('money', () => {
 		assert.equal(money(1_234_567, 'REALM', 2, 'en-US'), '12,345.67 REALM');
 		assert.equal(money(7, 'REALM', 0, 'en-US'), '7 REALM');
 		assert.equal(money(0, '', 2, 'en-US'), '0');
+	});
+});
+
+describe('the decimals of an amount', () => {
+	const facts = { zone: 'UTC', currency: 'REALM', decimals: 8, tokens: { GOLD: 3 }, externals: [], realms: {} };
+
+	it('are its token\'s, else the currency\'s, else none', () => {
+		assert.equal(decimalsFor('GOLD', facts), 3);
+		assert.equal(decimalsFor('REALM', facts), 8);
+		assert.equal(decimalsFor('REALM', { ...facts, tokens: { REALM: 6 } }), 6);
+		assert.equal(decimalsFor('OTHER', facts), 0);
+	});
+});
+
+describe('contracts that have ended', () => {
+	it('are the terminated and the fulfilled', () => {
+		assert.deepEqual(['draft', 'active', 'fulfilled', 'terminated', 'disputed'].map((status) => hasEnded({ ...lane, status })), [false, false, true, true, false]);
 	});
 });
 

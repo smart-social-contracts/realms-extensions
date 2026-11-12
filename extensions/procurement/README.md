@@ -209,6 +209,15 @@ screens read the realm's own records and rules; the extension keeps none of its 
 Amounts are shown in the realm's accounting currency and its decimals; a contract in another token is shown in that
 token's base units.
 
+## Tests
+
+- `frontend-rt`: `npm test` (node tests: the arithmetic, the form's arguments, the translations) and `npm run build`.
+- `tests/e2e`: `npm test` mounts the built bundle on a page that plays the realm with canned replies; `npm run test:local`
+  runs the real thing on a local realm built from a realms-gos that has `contract_list` (see
+  `../codex_viewer/tests/e2e/README.md` for starting one) and seeded with
+  `python3 ../codex_viewer/tests/e2e/seed_local_realm.py --network local --identity <id> --home <dir of icp.yaml> --backend <realm backend> --only procurement --principals <realms-gos>/config/deterministic-test-identity-principals.json`.
+  The real-realm tests change the realm: seed a fresh one before each run.
+
 ## Backend RPC
 
 Callable via `extension_sync_call('procurement', '<function>', args)`.

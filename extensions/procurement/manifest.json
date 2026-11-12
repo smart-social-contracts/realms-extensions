@@ -69,7 +69,9 @@
     "contract_get",
     "contract_amend",
     "realm_info",
-    "external_list"
+    "external_list",
+    "budget_view",
+    "treasury_view"
   ],
   "entities": {
     "Rfp": {

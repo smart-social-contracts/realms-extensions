@@ -328,15 +328,36 @@ test('someone without the permission reads the rule but cannot file', async ({ p
   await expect(page.getByRole('button', { name: 'Propose the amendment' })).toHaveCount(0);
 });
 
-test('a visitor signed out reads the contracts and cannot file', async ({ page }) => {
+test('a visitor signed out is told the contracts are not available, as the realm refuses them', async ({ page }) => {
   const errors = consoleErrors(page);
-  scenario = realm(null, [contract()]);
-  await openContract(page, 'C-9');
-  await expect(page.getByTestId('amendment')).toHaveCount(2);
-  await expect(page.getByTestId('amend-denied')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Propose the amendment' })).toHaveCount(0);
-  // `me` is refused to a visitor: the page logs that as a warning, never as a page error.
+  // The realm answers reads "sign in first" to a visitor: no reply of ours stands for that.
+  scenario = realm(null, [contract()], { contract_list: undefined, contract_get: undefined });
+  await contractsTab(page);
+  await expect(page.getByText('Contracts are not available to you right now.')).toBeVisible();
+  await expect(page.getByTestId('contract-row')).toHaveCount(0);
   expect(errors.filter((error) => error.startsWith('page error'))).toEqual([]);
+});
+
+test('a contract that has ended is shown with the realm\'s reason, not an amendment form', async ({ page }) => {
+  const ended = contract({ status: 'terminated' });
+  scenario = realm(AMENDER, [ended], { contract_get: detail(ended) });
+  await openContract(page, 'C-9');
+  await expect(page.getByTestId('contract-status')).toHaveText('Terminated');
+  await expect(page.getByTestId('amend-ended')).toHaveText('A contract that has ended is not amended.');
+  await expect(page.getByTestId('amendment-form')).toHaveCount(0);
+});
+
+test('an amount in a token reads in that token\'s decimals, and in the currency\'s when it is the currency', async ({ page }) => {
+  const gold = contract({ symbol: 'GOLD', value: 4_800_000, split: [] });
+  scenario = realm(AMENDER, [gold, contract({ id: 'C-8', value: 5_000_000_000 })], {
+    // The realm has no accounting currency set: its payments go in its oldest token, REALM, at 8 decimals.
+    realm_info: INFO({ accounting_currency: '', accounting_currency_decimals: 8 }),
+    budget_view: { ok: true, currency: 'REALM', decimals: 8, funds: [], periods: [] },
+    treasury_view: { ok: true, tokens: [{ id: 'REALM', decimals: 8 }, { id: 'GOLD', decimals: 3 }], funds: {} },
+  });
+  await contractsTab(page);
+  await expect(page.getByTestId('contract-row').filter({ hasText: 'C-9' })).toContainText('4,800 GOLD');
+  await expect(page.getByTestId('contract-row').filter({ hasText: 'C-8' })).toContainText('50 REALM');
 });
 
 test('a realm that does not say what an amendment is held to offers no form', async ({ page }) => {

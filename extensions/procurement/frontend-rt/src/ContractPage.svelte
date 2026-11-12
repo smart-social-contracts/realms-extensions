@@ -5,6 +5,7 @@
 	import {
 		dayIn,
 		decimalsFor,
+		hasEnded,
 		holderOf,
 		isCallOff,
 		money,
@@ -295,10 +296,12 @@
 			{/if}
 		</section>
 
-		{#if rule}
-			<AmendmentForm {contract} {rule} {facts} {mayAmend} {run} onApplied={reload} />
-		{:else}
+		{#if !rule}
 			<p class="text-sm text-gray-500" data-testid="amend-rule-unknown">{t('amend_rule_unknown')}</p>
+		{:else if hasEnded(contract)}
+			<p class="text-sm text-gray-500" data-testid="amend-ended">{t('amend_ended')}</p>
+		{:else}
+			<AmendmentForm {contract} {rule} {facts} {mayAmend} {run} onApplied={reload} />
 		{/if}
 	</div>
 {/if}

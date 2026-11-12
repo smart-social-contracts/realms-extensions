@@ -80,17 +80,24 @@ export interface External {
 export interface RealmFacts {
 	/** The realm's official time zone. */
 	zone: string;
-	/** The realm's accounting currency and its decimals. */
+	/** The currency the realm's payments default to, and its decimals, as the budget page has them. */
 	currency: string;
 	decimals: number;
+	/** The decimals of each token the realm registers, by symbol, where the caller may read them. */
+	tokens: Record<string, number>;
 	externals: External[];
 	/** The realms this one is linked to, by capital. */
 	realms: Record<string, string>;
 }
 
-/** The decimals of an amount in `symbol`: the realm knows them for its accounting currency. */
+/** The decimals of an amount in `symbol`: its token's when the realm says them, else the currency's, else none. */
 export function decimalsFor(symbol: string, facts: RealmFacts): number {
-	return symbol === facts.currency ? facts.decimals : 0;
+	return facts.tokens[symbol] ?? (symbol === facts.currency ? facts.decimals : 0);
+}
+
+/** A contract that has ended is not amended. */
+export function hasEnded(contract: Contract): boolean {
+	return contract.status === 'terminated' || contract.status === 'fulfilled';
 }
 
 export function isCallOff(contract: Contract): boolean {

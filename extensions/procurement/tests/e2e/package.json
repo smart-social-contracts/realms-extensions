@@ -1,10 +1,11 @@
 {
   "name": "@realms/procurement-e2e",
   "version": "1.0.0",
-  "description": "Browser tests of the procurement extension: contracts, lots and framework call-offs, on the built bundle with a canned realm",
+  "description": "Browser tests of the procurement extension: on the built bundle with a canned realm (npm test), and on a real local realm (npm run test:local)",
   "private": true,
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:local": "playwright test -c playwright.local.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.52.0",
