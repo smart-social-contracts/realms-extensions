@@ -31,5 +31,14 @@
   "timezone_now": "Hora oficial ahora: {time}",
   "timezone_preview": "En {zone} ahora es {time}.",
   "timezone_applies_now": "Un cambio se aplica en cuanto guardas.",
-  "timezone_needs_vote": "Un cambio lo gobierna {department} (política {policy}): al guardar se presenta una propuesta, y la zona cambia cuando se acepta."
+  "timezone_needs_vote": "Un cambio lo gobierna {department} (política {policy}): al guardar se presenta una propuesta, y la zona cambia cuando se acepta.",
+  "section_journal_signing": "Firmas del Diario Oficial",
+  "section_journal_signing_desc": "El canister del reino firma un número de su diario oficial cuando alguien se lo pide, una sola vez, y conserva la firma. Cada firma cuesta ciclos al reino (unos 26 mil millones en la red de producción); el reino también puede firmar cada número al cerrarse su día.",
+  "journal_signing": "Cuándo se firman los números",
+  "journal_signing_on_request": "Cuando alguien lo pide (por defecto)",
+  "journal_signing_daily": "Cada día, al cerrarse su día",
+  "journal_signing_on_request_note": "No cuesta nada hasta que alguien lo pide, y como mucho una firma al día.",
+  "journal_signing_daily_note": "Una firma al día: unos 9,5 billones de ciclos al año.",
+  "journal_signing_applies_now": "Un cambio se aplica en cuanto guardas.",
+  "journal_signing_needs_vote": "Un cambio lo gobierna {department} (política {policy}): al guardar se presenta una propuesta, y se aplica cuando se acepta."
 }

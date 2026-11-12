@@ -59,7 +59,13 @@
   "signature_verification_url": "验证地址",
   "signature_batch_root": "所属批次的根",
   "signature_how": "扫描二维码，或打开该地址并输入验证码，以核验领域对本期的签名。",
-  "signature_provisional": "临时版本：当天结束后由领域签名。",
-  "signature_unsigned": "尚未签名：领域在每期当天结束后签名。",
-  "signature_mismatch": "领域给出的本期签名与此页所示内容不一致，请勿依赖。"
+  "signature_provisional": "临时版本：当天结束后可申请签名。",
+  "signature_unsigned": "尚未签名：有人申请时，领域才会为本期签名。",
+  "signature_mismatch": "领域给出的本期签名与此页所示内容不一致，请勿依赖。",
+  "sign_request": "申请签名",
+  "sign_busy": "正在签名…",
+  "sign_hint": "任何人都可以申请。领域只对本期签名一次，并保存该签名。",
+  "sign_pending": "本期正在签名，正在重新查看…",
+  "sign_error": "无法为本期签名：{reason}",
+  "sign_waiting": "签名所需时间比平时长，请稍后再试。"
 }

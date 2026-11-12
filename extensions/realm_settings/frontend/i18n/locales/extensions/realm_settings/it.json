@@ -31,5 +31,14 @@
   "timezone_now": "Ora ufficiale adesso: {time}",
   "timezone_preview": "In {zone} adesso è {time}.",
   "timezone_applies_now": "Una modifica si applica non appena salvi.",
-  "timezone_needs_vote": "Una modifica dipende da {department} (politica {policy}): salvando si presenta una proposta e il fuso cambia quando viene accettata."
+  "timezone_needs_vote": "Una modifica dipende da {department} (politica {policy}): salvando si presenta una proposta e il fuso cambia quando viene accettata.",
+  "section_journal_signing": "Firme della Gazzetta ufficiale",
+  "section_journal_signing_desc": "Il canister del regno firma un numero della sua gazzetta ufficiale quando qualcuno lo chiede, una sola volta, e ne conserva la firma. Ogni firma costa al regno dei cicli (circa 26 miliardi sulla rete di produzione); il regno può anche firmare ogni numero alla conclusione della sua giornata.",
+  "journal_signing": "Quando i numeri sono firmati",
+  "journal_signing_on_request": "Quando qualcuno lo chiede (predefinito)",
+  "journal_signing_daily": "Ogni giorno, a giornata conclusa",
+  "journal_signing_on_request_note": "Non costa nulla finché nessuno lo chiede, e al massimo una firma al giorno.",
+  "journal_signing_daily_note": "Una firma al giorno: circa 9,5 mila miliardi di cicli l'anno.",
+  "journal_signing_applies_now": "Una modifica si applica non appena salvi.",
+  "journal_signing_needs_vote": "Una modifica dipende da {department} (politica {policy}): salvando si presenta una proposta e la modifica si applica quando viene accettata."
 }

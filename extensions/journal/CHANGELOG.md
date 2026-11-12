@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-12
+
+### Added
+- A closed issue nobody has signed offers a **Request signature** button, for anyone, signed in or not (the realm signs an
+  issue when someone asks, once, and keeps the signature: realms-gos `journal_sign`, `docs/codices/journal-signature.md`).
+  While the call is out the button reads "Signing…"; if another call is signing the issue the page says so and asks again
+  every few seconds, which costs the realm nothing once it is signed; if the realm refuses or cannot, the reason is shown
+  beside the button, which may be pressed again. Once it is signed the issue is read again and the sheet shows its signature
+  box, code and QR code, as for any signed issue. There is no button on today's issue, on a signed one, or on a quarter's
+  (whose issue is its capital's, and the request goes to the realm that issues the journal). In the seven languages.
+- `src/sign.ts`: asking, with its unit tests (signed at once, pending then signed, pending for good, refused, failed call).
+
+### Changed
+- The sheet of an unsigned day says it is signed when someone asks, and today's that it can be signed once its day has
+  closed (it said the realm signs each issue when its day has closed): the realm no longer signs by itself unless its
+  setting says so. The sheet of an unsigned day, on screen and on paper, has no signature box.
+- The text a realm signs now says `made_at`, when the realm made the document, where the documents the earlier release signed
+  as it made them say `signed_at`; the sheet checks the same things of both.
+- The manifest lists `journal_sign`.
+
 ## [1.5.0] - 2026-11-12
 
 ### Added

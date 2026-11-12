@@ -31,5 +31,14 @@
   "timezone_now": "Hora oficial ara: {time}",
   "timezone_preview": "A {zone} ara és {time}.",
   "timezone_applies_now": "Un canvi s'aplica tan prompte com guardes.",
-  "timezone_needs_vote": "Un canvi el governa {department} (política {policy}): en guardar es presenta una proposta, i la zona canvia quan s'accepta."
+  "timezone_needs_vote": "Un canvi el governa {department} (política {policy}): en guardar es presenta una proposta, i la zona canvia quan s'accepta.",
+  "section_journal_signing": "Signatures del Diari Oficial",
+  "section_journal_signing_desc": "El canister del regne signa un número del seu diari oficial quan algú ho demana, una sola vegada, i en conserva la signatura. Cada signatura costa cicles al regne (uns 26 mil milions a la xarxa de producció); el regne també pot signar cada número quan acaba el seu dia.",
+  "journal_signing": "Quan se signen els números",
+  "journal_signing_on_request": "Quan algú ho demana (per defecte)",
+  "journal_signing_daily": "Cada dia, quan acaba el seu dia",
+  "journal_signing_on_request_note": "No costa res fins que algú ho demana, i com a màxim una signatura al dia.",
+  "journal_signing_daily_note": "Una signatura al dia: uns 9,5 bilions de cicles a l'any.",
+  "journal_signing_applies_now": "Un canvi s'aplica tan prompte com guardes.",
+  "journal_signing_needs_vote": "Un canvi el governa {department} (política {policy}): en guardar es presenta una proposta, i s'aplica quan s'accepta."
 }
