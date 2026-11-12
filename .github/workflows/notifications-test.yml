@@ -7,14 +7,14 @@ on:
       - 'extensions/notifications/**'
       - '.github/workflows/notifications-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/notifications/**'
       - '.github/workflows/notifications-test.yml'
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout repository

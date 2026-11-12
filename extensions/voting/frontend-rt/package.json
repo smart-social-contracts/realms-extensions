@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --experimental-strip-types --test src/links.test.ts src/tags.test.ts src/votes.test.ts src/legislationChange.test.ts ../../_shared/frontend/realm-time.test.ts && vitest run"
+    "test": "node --experimental-strip-types --test src/links.test.ts src/tags.test.ts src/votes.test.ts src/legislationChange.test.ts ../../_shared/frontend/realm-time.test.ts ../../_shared/frontend/units.test.ts && vitest run"
   },
   "devDependencies": {
     "@monaco-editor/loader": "^1.5.0",
