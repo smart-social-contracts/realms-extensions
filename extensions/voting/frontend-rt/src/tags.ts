@@ -80,11 +80,12 @@ function rowNumber(row: any): number | null {
  * Up to ``want`` proposals that carry at least one of ``tags``, read from row ``from`` on. The realm filters a page
  * of ``SCAN_ROWS`` rows at a time and sends back only the matches, so a rare tag takes several calls: this makes at
  * most ``MAX_SCANS`` of them for one screenful, then stops and says how far it got, rather than reading a year of
- * proposals behind a spinner. Null when the realm refuses the first call.
+ * proposals behind a spinner. Null when the realm refuses the first call, or when ``stale`` says the search is not wanted any
+ * more (the filter changed): it is asked before each call and after each reply, so an old search stops making calls.
  */
 export async function searchTagged(
 	read: Read,
-	opts: { tags: string[]; status?: string; from: number; want: number; scan?: number; maxScans?: number },
+	opts: { tags: string[]; status?: string; from: number; want: number; scan?: number; maxScans?: number; stale?: () => boolean },
 ): Promise<TagSearch | null> {
 	const scan = opts.scan ?? SCAN_ROWS;
 	const maxScans = opts.maxScans ?? MAX_SCANS;
@@ -94,7 +95,9 @@ export async function searchTagged(
 	for (let calls = 0; from != null && calls < maxScans && found.length < opts.want; calls++) {
 		const args: Record<string, unknown> = { from, count: scan, tags: opts.tags };
 		if (opts.status) args.status = opts.status;
+		if (opts.stale?.()) return null;
 		const reply = await read('proposal_list', args);
+		if (opts.stale?.()) return null;
 		if (!reply) {
 			// A refusal after the first call keeps what was found, and the next search starts here again.
 			if (calls === 0) return null;
@@ -106,11 +109,12 @@ export async function searchTagged(
 		if (from != null) searched += scan;
 	}
 	// A page of 500 rows can hold more matches than a screenful: show a screenful and continue right after the last
-	// one shown, so the ones cut off come next.
-	const last = found.length > opts.want ? rowNumber(found[opts.want - 1]) : null;
-	if (last != null) {
+	// one shown, so the ones cut off come next. The realm's ids are `P-<n>`; for one that is not, there is no row to
+	// continue from, and the rest of the page is left out rather than read in full (500 `proposal_get` for one screen).
+	if (found.length > opts.want) {
+		const last = rowNumber(found[opts.want - 1]);
 		found.length = opts.want;
-		from = last + 1;
+		if (last != null) from = last + 1;
 	}
 	return { proposals: found, next: from, searched, capped: from != null && found.length < opts.want };
 }

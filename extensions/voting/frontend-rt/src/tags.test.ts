@@ -176,6 +176,28 @@ describe('searchTagged', () => {
 		assert.ok(seen.length < MAX_SCANS);
 	});
 
+	it('stops making calls, and answers none, once it is stale', async () => {
+		const seen: Record<string, any>[] = [];
+		let stale = false;
+		const read = realm(100_000, () => [], seen);
+		const watching: Read = async (name, args) => {
+			const reply = await read(name, args);
+			if (seen.length === 3) stale = true; // the filter changes while the third call is out
+			return reply;
+		};
+		assert.equal(await searchTagged(watching, { tags: ['none'], from: 1, want: 30, stale: () => stale }), null);
+		assert.equal(seen.length, 3);
+		assert.equal(await searchTagged(read, { tags: ['none'], from: 1, want: 30, stale: () => true }), null);
+		assert.equal(seen.length, 3, 'a search already stale makes no call');
+	});
+
+	it('shows a screenful and no more of a page whose ids are not P-<n>, and leaves the rest of it out', async () => {
+		const odd: Read = async () => ({ ok: true, proposals: Array.from({ length: 500 }, (_, i) => ({ id: `x${i}`, tags: ['a'] })), next: 501 });
+		const found = await searchTagged(odd, { tags: ['a'], from: 1, want: 30 });
+		assert.equal(found?.proposals.length, 30);
+		assert.equal(found?.next, 501);
+	});
+
 	it('is null when the realm refuses the first call, and keeps what it found when a later one is refused', async () => {
 		assert.equal(await searchTagged(async () => null, { tags: ['a'], from: 1, want: 5 }), null);
 		let calls = 0;

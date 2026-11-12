@@ -35,7 +35,7 @@ async function type(input: HTMLInputElement, value: string, enter = false) {
  * Mounts the page on a realm that holds ``rows``, and answers `proposal_list` as realms-gos does: it reads ``count`` rows
  * from ``from``, sends back the ones that carry a tag asked for, and `next` is the row after the page.
  */
-async function mountOn(rows: Row[], realm: { signedOut?: boolean } = {}) {
+async function mountOn(rows: Row[], realm: { signedOut?: boolean; hold?: { when: (args: any) => boolean; gate: Promise<void> } } = {}) {
 	asked = [];
 	created = [];
 	window.matchMedia = (() => ({ matches: false })) as unknown as typeof window.matchMedia; // jsdom has none
@@ -60,6 +60,7 @@ async function mountOn(rows: Row[], realm: { signedOut?: boolean } = {}) {
 	const ctx = {
 		read: async (op: string, args: any) => {
 			asked.push([op, args]);
+			if (op === 'proposal_list' && realm.hold?.when(args)) await realm.hold.gate; // a slow reply
 			return replies[op]?.(args) ?? { ok: false };
 		},
 		run: async (op: string, args: any) => {
@@ -218,4 +219,53 @@ test('a refusal of the realm is shown, with the tags still in the form', async (
 	expect(target.textContent).toContain('sign in first');
 	expect(texts('tag-chip').map((t) => t?.replace('×', '').trim())).toEqual(['parks']);
 	expect(created).toEqual([]);
+});
+
+const cardIds = () => all('[data-proposal-id]').map((e) => e.getAttribute('data-proposal-id'));
+
+test('a tag search still running when the filter is cleared does not put its older list back', async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	await mountOn([row(1, ['slow']), row(2), row(3)], { hold: { when: (args) => args.tags?.includes('slow'), gate } });
+	await type(byTestId('tag-input')[0] as HTMLInputElement, 'slow', true); // its reply is held
+
+	button('Clear filters').click();
+	await settle();
+	expect(cardIds()).toEqual(['P-1', 'P-2', 'P-3']);
+
+	release(); // the old search answers now, with the one proposal it found
+	await settle();
+	expect(cardIds()).toEqual(['P-1', 'P-2', 'P-3']);
+	expect(text()).not.toContain('Filtered');
+});
+
+test('a page that "Load more" was reading when the filter changes is not merged into the new list', async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const rows = Array.from({ length: 60 }, (_, i) => row(i + 1, i === 6 ? ['x'] : []));
+	await mountOn(rows, { hold: { when: (args) => !args.tags && args.from === 31, gate } });
+	button('Load more proposals').click(); // rows 31 to 60 are on their way
+	await settle();
+
+	await type(byTestId('tag-input')[0] as HTMLInputElement, 'x', true);
+	expect(cardIds()).toEqual(['P-7']);
+
+	release();
+	await settle();
+	expect(cardIds()).toEqual(['P-7']);
+	expect(byTestId('tags-searched')).toHaveLength(0);
+});
+
+test('an old tag search stops making calls once the filter has changed', async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	// 5,100 untagged rows: a search for "none" would take ten calls
+	const rows = Array.from({ length: 5_100 }, (_, i) => row(i + 1, []));
+	await mountOn(rows, { hold: { when: (args) => args.tags?.includes('none'), gate } });
+	await type(byTestId('tag-input')[0] as HTMLInputElement, 'none', true);
+	button('Clear filters').click();
+	await settle();
+	release();
+	await settle(200);
+	expect(listCalls().filter((args) => args.tags?.includes('none'))).toHaveLength(1);
 });

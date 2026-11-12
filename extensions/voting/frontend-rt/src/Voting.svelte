@@ -634,12 +634,22 @@
 		return proposal;
 	}
 
-	async function fetchProposalsPage(from: number | null) {
+	// Each load of the list starts a generation. A reply that comes back after a newer load began (the filter changed, the list was
+	// refreshed) belongs to a list that is gone: it is dropped, and a tag search for it stops making calls.
+	let listGeneration = 0;
+
+	async function fetchProposalsPage(from: number | null, generation: number) {
 		const args: Record<string, any> = { from: from ?? 1, count: LIST_FETCH_SIZE };
 		if (statusFilter) args.status = statusFilter;
 		// The realm keeps only the tagged rows of each page it reads, so a tag filter is a search over several pages.
 		const res = tagFilter.length
-			? await searchTagged(read, { tags: tagFilter, status: statusFilter, from: args.from, want: LIST_FETCH_SIZE })
+			? await searchTagged(read, {
+					tags: tagFilter,
+					status: statusFilter,
+					from: args.from,
+					want: LIST_FETCH_SIZE,
+					stale: () => generation !== listGeneration,
+				})
 			: await read('proposal_list', args);
 		if (!res) return null;
 		const rows: any[] = Array.isArray(res.proposals) ? res.proposals : [];
@@ -681,6 +691,8 @@
 	async function loadProposals(opts: { reset?: boolean; background?: boolean } = {}) {
 		const reset = opts.reset !== false;
 		const background = opts.background === true;
+		const generation = ++listGeneration;
+		listLoadingMore = false;
 		if (reset && !background) {
 			listLoading = true;
 			listNext = null;
@@ -688,7 +700,8 @@
 		error = '';
 		try {
 			if (!rootDepartment) await loadOrgOptions();
-			const page = await fetchProposalsPage(1);
+			const page = await fetchProposalsPage(1, generation);
+			if (generation !== listGeneration) return;
 			listUnavailable = !page;
 			proposals = page?.proposals ?? [];
 			currentPage = 1;
@@ -697,9 +710,7 @@
 			listSearched = page?.searched ?? 0;
 			listCapped = page?.capped ?? false;
 		} finally {
-			if (!background) {
-				listLoading = false;
-			}
+			if (generation === listGeneration) listLoading = false;
 		}
 	}
 
@@ -742,8 +753,10 @@
 		if (listLoadingMore || !listHasMore) return;
 		listLoadingMore = true;
 		error = '';
+		const generation = listGeneration;
 		try {
-			const page = await fetchProposalsPage(listNext);
+			const page = await fetchProposalsPage(listNext, generation);
+			if (generation !== listGeneration) return;
 			if (!page) {
 				listHasMore = false;
 				return;
@@ -754,7 +767,7 @@
 			listSearched += page.searched;
 			listCapped = page.capped;
 		} finally {
-			listLoadingMore = false;
+			if (generation === listGeneration) listLoadingMore = false;
 		}
 	}
 
