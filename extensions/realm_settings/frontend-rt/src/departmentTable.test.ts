@@ -96,15 +96,16 @@ describe('formatApplyResult', () => {
 });
 
 describe('Settings wiring', () => {
-	it('shows a governance preview modal before the confirmation modal', () => {
+	it('asks once, in a governance preview modal, before saving', () => {
 		const settings = readFileSync(new URL('./RealmSettings.svelte', import.meta.url), 'utf8');
-		assert.match(settings, /requestSavePreview/);
+		assert.match(settings, /onclick=\{\(\) => requestSavePreview\(\)\}/);
+		assert.match(settings, /\{#if savePreview\}/);
 		assert.match(settings, /Applies immediately/);
 		assert.match(settings, /Needs a root vote/);
 		assert.match(settings, /realm\.configure\.branding/);
-		const previewAt = settings.indexOf('if savePreview');
-		const confirmAt = settings.indexOf('if governedConfirm');
-		assert.ok(previewAt > 0 && confirmAt > previewAt);
+		// Continue files the save itself: since 1.11.0 there is no second confirmation modal.
+		assert.match(settings, /onclick=\{confirmSavePreview\}/);
+		assert.doesNotMatch(settings, /governedConfirm/);
 	});
 
 	it('mounts apply/destroy on the Advanced tab, not Department Management', () => {
@@ -114,8 +115,8 @@ describe('Settings wiring', () => {
 		assert.match(settings, /activeTab === 'advanced'[\s\S]*DepartmentTablePanel/);
 		assert.match(panel, /Apply table/);
 		assert.match(panel, /Destroy a department/);
-		assert.match(panel, /apply_department_table/);
-		assert.match(panel, /delete_department/);
+		assert.match(panel, /applyDepartmentTable\(/);
+		assert.match(panel, /'department_delete'/);
 		assert.match(panel, /Department tables \(JSON\)/);
 		assert.match(panel, /not Department Management CRUD/);
 	});
