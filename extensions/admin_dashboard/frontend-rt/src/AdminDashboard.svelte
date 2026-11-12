@@ -2,8 +2,19 @@
 	import { untrack } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
 	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import { KINDS, kindOf, kindText } from './organizationKind';
 
 	let { ctx }: { ctx: any } = $props();
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
 
 	/** One page of rows, or the realm's reason for refusing it. */
 	type Page = { rows: any[]; next: number | null } | string;
@@ -27,6 +38,8 @@
 	const MAX_HOPS = 20;
 
 	let selectedType = $state('User');
+	// The kind the organisations are listed by; the realm does the filtering (`organization_list` takes a `kind`).
+	let kindFilter = $state('');
 	let accessDeniedOp: string | null = $state(null);
 	let unavailable = $state(false);
 
@@ -65,10 +78,10 @@
 		}
 	}
 
-	/** A paginated list operation whose rows are under `key`. */
-	function listed(op: string, key: string) {
+	/** A paginated list operation whose rows are under `key`; `filters` are the arguments that narrow it, read at each call. */
+	function listed(op: string, key: string, filters: () => Record<string, unknown> = () => ({})) {
 		return async (from: number | null): Promise<Page> => {
-			const reply = await read(op, { ...(from != null ? { from } : {}), count: pageSize });
+			const reply = await read(op, { ...(from != null ? { from } : {}), count: pageSize, ...filters() });
 			if (!reply.ok) return reply.error;
 			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: reply.next ?? null };
 		};
@@ -115,7 +128,7 @@
 		entity('LedgerEntry', listed('ledger_view', 'entries')),
 		entity('License', listed('license_list', 'licenses')),
 		entity('NFTToken', registeredTokens('nft_tokens')),
-		entity('Organization', listed('organization_list', 'organizations')),
+		entity('Organization', listed('organization_list', 'organizations', () => (kindFilter ? { kind: kindFilter } : {}))),
 		entity('Proposal', listed('proposal_list', 'proposals')),
 		entity('Realm', loadRealm),
 		entity('Task', listed('task_list', 'tasks')),
@@ -189,6 +202,7 @@
 
 	$effect(() => {
 		selectedType;
+		kindFilter;
 		untrack(() => {
 			cursors = [null];
 			currentPage = 0;
@@ -233,7 +247,23 @@
 					<option value={type.value}>{type.label}</option>
 				{/each}
 			</select>
+			{#if selectedType === 'Organization'}
+				<label for="org-kind-select" class="font-medium text-gray-700">{t('org_kind_label')}:</label>
+				<select
+					id="org-kind-select"
+					bind:value={kindFilter}
+					class="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+				>
+					<option value="">{t('org_kind_all')}</option>
+					{#each KINDS as kind}
+						<option value={kind}>{kindText(kind, t)}</option>
+					{/each}
+				</select>
+			{/if}
 		</div>
+		{#if selectedType === 'Organization'}
+			<p class="mt-3 text-xs text-gray-500">{t('org_kind_hint')}</p>
+		{/if}
 		<p class="mt-3 text-xs text-gray-500">
 			Records are read-only here. Only record types the realm offers a list for are shown.
 		</p>
@@ -265,6 +295,8 @@
 							Nothing to show.
 						{:else if unavailable}
 							This list isn't available right now.
+						{:else if selectedType === 'Organization' && kindFilter}
+							{t('org_kind_none')}
 						{:else}
 							No items found.
 						{/if}
@@ -286,6 +318,13 @@
 										</button>
 										{#if titleOf(item)}
 											<span class="text-gray-700 truncate">- {titleOf(item)}</span>
+										{/if}
+										{#if selectedType === 'Organization'}
+											<span
+												class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap {kindOf(item) ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}"
+												title={kindOf(item) ? undefined : t('org_kind_unknown_title')}
+												data-testid="org-kind"
+											>{kindText(kindOf(item), t)}</span>
 										{/if}
 									</div>
 								</div>

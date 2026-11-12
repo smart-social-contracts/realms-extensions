@@ -1,0 +1,13 @@
+{
+  "org_kind_label": "Art",
+  "org_kind_all": "Alle Arten",
+  "org_kind_company": "Unternehmen",
+  "org_kind_party": "Partei",
+  "org_kind_union": "Gewerkschaft",
+  "org_kind_association": "Vereinigung",
+  "org_kind_other": "Sonstige",
+  "org_kind_unknown": "Unbekannt",
+  "org_kind_unknown_title": "Diese Organisation wurde ohne Art registriert.",
+  "org_kind_hint": "Die Art ist das, was die Organisation von sich sagt: Das Realm prüft sie nicht.",
+  "org_kind_none": "Keine Organisationen dieser Art."
+}

@@ -1,0 +1,13 @@
+{
+  "org_kind_label": "Tipo",
+  "org_kind_all": "Tutti i tipi",
+  "org_kind_company": "Impresa",
+  "org_kind_party": "Partito",
+  "org_kind_union": "Sindacato",
+  "org_kind_association": "Associazione",
+  "org_kind_other": "Altro",
+  "org_kind_unknown": "Sconosciuto",
+  "org_kind_unknown_title": "Questa organizzazione è stata registrata senza un tipo.",
+  "org_kind_hint": "Il tipo è ciò che l'organizzazione dichiara di essere: il regno non lo verifica.",
+  "org_kind_none": "Nessuna organizzazione di questo tipo."
+}

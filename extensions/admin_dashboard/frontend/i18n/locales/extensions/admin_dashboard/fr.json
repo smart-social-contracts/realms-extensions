@@ -1,0 +1,13 @@
+{
+  "org_kind_label": "Type",
+  "org_kind_all": "Tous les types",
+  "org_kind_company": "Entreprise",
+  "org_kind_party": "Parti",
+  "org_kind_union": "Syndicat",
+  "org_kind_association": "Association",
+  "org_kind_other": "Autre",
+  "org_kind_unknown": "Inconnu",
+  "org_kind_unknown_title": "Cette organisation a été enregistrée sans type.",
+  "org_kind_hint": "Le type est ce que l'organisation dit être : le royaume ne le vérifie pas.",
+  "org_kind_none": "Aucune organisation de ce type."
+}

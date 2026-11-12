@@ -1,0 +1,147 @@
+// The kind of an organization (ggg I-ORG-9) on the data explorer's list of organisations: a chip on each row, and a filter
+// that asks the realm (`organization_list` takes a `kind`) rather than filtering what is loaded. These tests mount the
+// real page on a small fake realm.
+import { mount, unmount } from 'svelte';
+import { writable } from 'svelte/store';
+import { afterEach, expect, test, vi } from 'vitest';
+import en from '../../frontend/i18n/locales/extensions/admin_dashboard/en.json';
+import AdminDashboard from './AdminDashboard.svelte';
+
+type Org = { id: string; description: string; status: string; kind?: unknown };
+
+const ORGS: Org[] = [
+	{ id: 'Clinic B', description: 'A private clinic', status: 'active', kind: 'company' },
+	{ id: 'Harbour Party', description: 'A party', status: 'active', kind: 'party' },
+	{ id: 'Dockers', description: 'The dockers', status: 'active', kind: 'union' },
+	{ id: 'Friends of the Park', description: 'An association', status: 'active', kind: 'association' },
+	{ id: 'Cooperativa', description: 'A cooperative', status: 'active', kind: 'other' },
+	{ id: 'Old Registry', description: 'Registered before kinds', status: 'active' },
+];
+
+let target: HTMLElement;
+let page: ReturnType<typeof mount>;
+let asked: [string, any][];
+
+const settle = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
+const text = () => target.textContent ?? '';
+const chips = () => [...target.querySelectorAll('[data-testid="org-kind"]')].map((e) => e.textContent?.trim());
+const select = (id: string) => target.querySelector<HTMLSelectElement>(`#${id}`)!;
+const organizationCalls = () => asked.filter(([op]) => op === 'organization_list').map(([, args]) => args);
+
+async function choose(id: string, value: string) {
+	select(id).value = value;
+	select(id).dispatchEvent(new Event('change', { bubbles: true }));
+	await settle();
+}
+
+/** Mounts the page on a realm that holds ``orgs``; it lists them as the realm does: a page of rows, filtered, and `next`. */
+async function mountOn(orgs: Org[], { refuse = '' } = {}) {
+	asked = [];
+	vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => en }));
+	const replies: Record<string, (args: any) => unknown> = {
+		organization_list: ({ from = 1, count = 100, kind }) => {
+			if (refuse) return { ok: false, error: refuse };
+			const rows = orgs.slice(from - 1, from - 1 + count);
+			return {
+				ok: true,
+				organizations: rows.filter((o) => !kind || o.kind === kind),
+				next: from - 1 + count < orgs.length ? from + count : null,
+			};
+		},
+		user_list: () => ({ ok: true, users: [], next: null }),
+	};
+	const ctx = {
+		read: async (op: string, args: any) => {
+			asked.push([op, args]);
+			return replies[op]?.(args) ?? { ok: false, error: `${op} is not open to you` };
+		},
+		principal: writable('carla'),
+		locale: writable('en'),
+	};
+	target = document.body.appendChild(document.createElement('div'));
+	page = mount(AdminDashboard, { target, props: { ctx } });
+	await settle();
+	await choose('entity-type-select', 'Organization');
+}
+
+afterEach(() => {
+	unmount(page);
+	target.remove();
+	vi.unstubAllGlobals();
+});
+
+test('every organisation shows its kind, and one registered without a kind reads as unknown', async () => {
+	await mountOn(ORGS);
+	expect(chips()).toEqual(['Company', 'Party', 'Union', 'Association', 'Other', 'Unknown']);
+	const unknown = [...target.querySelectorAll('[data-testid="org-kind"]')].at(-1)!;
+	expect(unknown.getAttribute('title')).toBe('This organisation was registered without a kind.');
+});
+
+test('a kind the page does not know is shown as the realm states it', async () => {
+	await mountOn([{ id: 'Odd', description: 'x', status: 'active', kind: 'cooperative' }]);
+	expect(chips()).toEqual(['cooperative']);
+});
+
+test('the kind filter is offered on organisations only, with the five kinds', async () => {
+	await mountOn(ORGS);
+	expect([...select('org-kind-select').options].map((o) => o.textContent?.trim())).toEqual([
+		'All kinds',
+		'Company',
+		'Party',
+		'Union',
+		'Association',
+		'Other',
+	]);
+	expect(text()).toContain('A kind is what the organisation says it is: the realm does not check it.');
+
+	await choose('entity-type-select', 'User');
+	expect(target.querySelector('#org-kind-select')).toBeNull();
+	expect(chips()).toEqual([]);
+});
+
+test('a kind asks the realm for it, and the list keeps the organisations of that kind', async () => {
+	await mountOn(ORGS);
+	expect(organizationCalls().at(-1)).not.toHaveProperty('kind');
+
+	await choose('org-kind-select', 'party');
+	expect(organizationCalls().at(-1)).toMatchObject({ kind: 'party' });
+	expect(chips()).toEqual(['Party']);
+	expect(text()).toContain('Harbour Party');
+	expect(text()).not.toContain('Clinic B');
+
+	await choose('org-kind-select', '');
+	expect(organizationCalls().at(-1)).not.toHaveProperty('kind');
+	expect(chips()).toHaveLength(6);
+});
+
+test('the next page keeps the kind', async () => {
+	const many: Org[] = Array.from({ length: 25 }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i % 2 ? 'union' : 'company' }));
+	await mountOn(many);
+	await choose('org-kind-select', 'union');
+	const next = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Next')!;
+	expect(next.disabled).toBe(false);
+	next.click();
+	await settle();
+	expect(organizationCalls().at(-1)).toMatchObject({ kind: 'union', from: 11 });
+});
+
+test('a kind no organisation has says so', async () => {
+	await mountOn(ORGS.filter((o) => o.kind !== 'union'));
+	await choose('org-kind-select', 'union');
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('No organisations of this kind.');
+});
+
+test('a realm with no organisations lists none, without an error', async () => {
+	await mountOn([]);
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('No items found.');
+	expect(text()).not.toContain('This list isn');
+});
+
+test('a reader the realm refuses is told which permission is missing, and sees no kinds', async () => {
+	await mountOn(ORGS, { refuse: 'organization_list needs realm.data_view' });
+	expect(text()).toContain('Additional permissions needed');
+	expect(text()).toContain('realm.data_view');
+	expect(chips()).toEqual([]);
+});

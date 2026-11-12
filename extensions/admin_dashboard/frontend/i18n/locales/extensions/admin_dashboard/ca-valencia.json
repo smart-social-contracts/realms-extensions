@@ -1,0 +1,13 @@
+{
+  "org_kind_label": "Tipus",
+  "org_kind_all": "Tots els tipus",
+  "org_kind_company": "Empresa",
+  "org_kind_party": "Partit",
+  "org_kind_union": "Sindicat",
+  "org_kind_association": "Associació",
+  "org_kind_other": "Altre",
+  "org_kind_unknown": "Desconegut",
+  "org_kind_unknown_title": "Aquesta organització es va registrar sense un tipus.",
+  "org_kind_hint": "El tipus és el que l'organització diu que és: el regne no ho comprova.",
+  "org_kind_none": "No hi ha organitzacions d'aquest tipus."
+}
