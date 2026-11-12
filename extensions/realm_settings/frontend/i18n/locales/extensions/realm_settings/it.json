@@ -38,7 +38,7 @@
   "journal_signing_on_request": "Quando qualcuno lo chiede (predefinito)",
   "journal_signing_daily": "Ogni giorno, a giornata conclusa",
   "journal_signing_on_request_note": "Non costa nulla finché nessuno lo chiede, e al massimo una firma al giorno.",
-  "journal_signing_daily_note": "Una firma al giorno: circa 9,5 mila miliardi di cicli l'anno.",
+  "journal_signing_daily_note": "Una firma al giorno: circa 9,5 mila miliardi di cicli l'anno. Passando a questa modalità si firmano, una volta, tutti i giorni fatti dopo l'ultimo firmato: circa 12 firme (300 miliardi di cicli) per un anno senza firme.",
   "journal_signing_applies_now": "Una modifica si applica non appena salvi.",
   "journal_signing_needs_vote": "Una modifica dipende da {department} (politica {policy}): salvando si presenta una proposta e la modifica si applica quando viene accettata."
 }

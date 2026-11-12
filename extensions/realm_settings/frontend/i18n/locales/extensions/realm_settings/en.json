@@ -38,7 +38,7 @@
   "journal_signing_on_request": "When someone asks (default)",
   "journal_signing_daily": "Every day, as its day closes",
   "journal_signing_on_request_note": "Costs nothing until someone asks, and at most one signature a day.",
-  "journal_signing_daily_note": "One signature a day: about 9.5 trillion cycles a year.",
+  "journal_signing_daily_note": "One signature a day: about 9.5 trillion cycles a year. Switching to it signs, once, every day made since the last signed one: about 12 signatures (0.3 trillion cycles) for a year without any.",
   "journal_signing_applies_now": "A change applies as soon as you save.",
   "journal_signing_needs_vote": "A change is governed by {department} (policy {policy}): saving files a proposal, and it applies once it is accepted."
 }

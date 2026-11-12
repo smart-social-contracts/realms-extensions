@@ -38,7 +38,7 @@
   "journal_signing_on_request": "有人申请时（默认）",
   "journal_signing_daily": "每天，当天结束时",
   "journal_signing_on_request_note": "有人申请之前不产生费用，且每天至多一次签名。",
-  "journal_signing_daily_note": "每天一次签名：每年约 9.5 万亿 cycles。",
+  "journal_signing_daily_note": "每天一次签名：每年约 9.5 万亿 cycles。切换到此模式时，会一次性为上一个已签名日之后的所有日期签名：一年没有签名的话约需 12 次签名（约 0.3 万亿 cycles）。",
   "journal_signing_applies_now": "保存后更改立即生效。",
   "journal_signing_needs_vote": "更改由 {department} 管理（政策 {policy}）：保存会提交一项提案，提案通过后更改才会生效。"
 }

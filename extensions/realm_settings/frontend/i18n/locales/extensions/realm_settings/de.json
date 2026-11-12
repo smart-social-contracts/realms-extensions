@@ -38,7 +38,7 @@
   "journal_signing_on_request": "Auf Anfrage (Standard)",
   "journal_signing_daily": "Täglich, sobald der Tag zu Ende ist",
   "journal_signing_on_request_note": "Kostet nichts, bis jemand darum bittet, und höchstens eine Signatur pro Tag.",
-  "journal_signing_daily_note": "Eine Signatur pro Tag: rund 9,5 Billionen Cycles im Jahr.",
+  "journal_signing_daily_note": "Eine Signatur pro Tag: rund 9,5 Billionen Cycles im Jahr. Beim Wechsel werden einmalig alle Tage signiert, die seit dem zuletzt signierten entstanden sind: etwa 12 Signaturen (0,3 Billionen Cycles) für ein Jahr ohne Signatur.",
   "journal_signing_applies_now": "Eine Änderung gilt, sobald du speicherst.",
   "journal_signing_needs_vote": "Eine Änderung unterliegt {department} (Richtlinie {policy}): Beim Speichern wird ein Vorschlag eingereicht, und sie gilt, sobald er angenommen ist."
 }

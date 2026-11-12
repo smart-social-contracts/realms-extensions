@@ -38,7 +38,7 @@
   "journal_signing_on_request": "Cuando alguien lo pide (por defecto)",
   "journal_signing_daily": "Cada día, al cerrarse su día",
   "journal_signing_on_request_note": "No cuesta nada hasta que alguien lo pide, y como mucho una firma al día.",
-  "journal_signing_daily_note": "Una firma al día: unos 9,5 billones de ciclos al año.",
+  "journal_signing_daily_note": "Una firma al día: unos 9,5 billones de ciclos al año. Al cambiar a este modo se firman, una vez, todos los días hechos desde el último firmado: unas 12 firmas (0,3 billones de ciclos) por un año sin ninguna.",
   "journal_signing_applies_now": "Un cambio se aplica en cuanto guardas.",
   "journal_signing_needs_vote": "Un cambio lo gobierna {department} (política {policy}): al guardar se presenta una propuesta, y se aplica cuando se acepta."
 }
