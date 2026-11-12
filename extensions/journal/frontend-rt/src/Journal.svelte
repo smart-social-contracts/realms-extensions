@@ -125,7 +125,11 @@
 		const link = (event.target as Element).closest('a[href]');
 		if (!link) return;
 		event.preventDefault();
-		void ctx.navigate(link.getAttribute('href')!);
+		const href = link.getAttribute('href')!;
+		// An address outside the realm (the page that verifies the signature) is its own page: the sheet's frame may open
+		// no window, so it is opened from here.
+		if (/^https?:\/\//i.test(href)) window.open(href, '_blank', 'noopener,noreferrer');
+		else void ctx.navigate(href);
 	}
 
 	function sheetLoaded() {

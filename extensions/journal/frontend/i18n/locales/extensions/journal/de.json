@@ -56,5 +56,10 @@
   "signature_signature": "Signatur",
   "signature_key_id": "Schlüssel",
   "signature_verification_code": "Prüfcode",
-  "signature_verification_url": "Prüfen unter"
+  "signature_verification_url": "Prüfen unter",
+  "signature_batch_root": "Wurzel seiner Charge",
+  "signature_how": "Code scannen oder die Adresse öffnen und den Prüfcode eingeben, um die Signatur des Reichs unter dieser Ausgabe zu prüfen.",
+  "signature_provisional": "Vorläufige Ausgabe: Das Reich signiert sie, sobald der Tag zu Ende ist.",
+  "signature_unsigned": "Noch nicht signiert: Das Reich signiert jede Ausgabe, sobald ihr Tag zu Ende ist.",
+  "signature_mismatch": "Die Signatur, die das Reich für diese Ausgabe angibt, stimmt nicht mit dem überein, was dieses Blatt zeigt. Verlassen Sie sich nicht darauf."
 }

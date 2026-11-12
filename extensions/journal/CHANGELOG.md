@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-12
+
+### Added
+- The sheet shows the signature of an issue the realm's canister has signed (realms-gos, `docs/codices/journal-signature.md`):
+  the hash of the issue, the signature, the key that made it, the verification code, the address that checks it and its QR
+  code, in the signature box that was hidden until now, in the seven languages. The QR code and the address lead to the
+  verify page with the canister and the code (`?canister=&code=`); the QR code is drawn on the sheet itself, as an SVG, so
+  it prints sharp. An issue signed together with others (days the realm signed late) also shows the root of its batch.
+  The address opens in its own tab from the page, since the sheet's frame may open no window.
+- An issue that is not signed says so instead of leaving a box that reads as "unsigned": today's is "Provisional issue",
+  a closed day not yet signed is "Not signed yet".
+- A signature is shown only when it is the issue's own: signed by the canister that issues the journal, for this day and
+  over the entries the sheet shows. Otherwise the sheet says the signature does not match, and shows no code.
+
+### Changed
+- `qrcode-generator` is a dependency, as in other extensions (import_export, census, role_manager).
+- Where the verify page is published is a constant of the extension (`VERIFY_URL` in `src/proof.ts`), a placeholder until the
+  organization publishes it.
+
 ## [1.4.0] - 2026-11-11
 
 ### Changed

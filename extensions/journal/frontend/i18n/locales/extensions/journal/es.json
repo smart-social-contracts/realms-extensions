@@ -56,5 +56,10 @@
   "signature_signature": "Firma",
   "signature_key_id": "Clave",
   "signature_verification_code": "Código de verificación",
-  "signature_verification_url": "Verificar en"
+  "signature_verification_url": "Verificar en",
+  "signature_batch_root": "Raíz de su lote",
+  "signature_how": "Lea el código o abra la dirección e introduzca el código de verificación para comprobar la firma que el reino ha puesto a este número.",
+  "signature_provisional": "Número provisional: el reino lo firma cuando ha terminado su día.",
+  "signature_unsigned": "Aún sin firmar: el reino firma cada número cuando ha terminado su día.",
+  "signature_mismatch": "La firma que el reino da para este número no coincide con lo que muestra esta hoja. No se fíe de ella."
 }

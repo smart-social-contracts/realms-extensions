@@ -8,6 +8,24 @@ export interface Entry {
 	details: Record<string, any>;
 }
 
+/** What the realm's canister signed and the signature on it, as `journal_issue` serves it (realms-gos,
+ * docs/codices/journal-signature.md). */
+export interface Proof {
+	/** The signed text: JSON that names the canister, the kind of document, the day, the issue's entries, the digest of the
+	 * issue before it and the key. */
+	canonical: string;
+	/** SHA-256 of the text, hex. */
+	digest: string;
+	/** What the signature covers, hex: the digest itself, or the root of the tree of the issues signed together with it. */
+	root: string;
+	/** The steps from the digest up to the root, `[side, sibling digest]`: none when the issue was signed alone. */
+	path: [string, string][];
+	/** Ed25519, hex. */
+	signature: string;
+	/** The verification code, `XXXX-XXXX-XXXX-XXXX`. */
+	code: string;
+}
+
 export interface Issue {
 	/** The name of the realm that issues it: on a quarter, the capital's. */
 	realm: string;
@@ -17,6 +35,11 @@ export interface Issue {
 	today: string;
 	timezone: string;
 	entries: Entry[];
+	/** `provisional` (today's: signed once the day has closed), `signed` or `unsigned` (closed, not signed yet). A realm
+	 * that does not sign says nothing. */
+	status?: 'provisional' | 'signed' | 'unsigned';
+	/** Present when the issue is signed. */
+	proof?: Proof;
 }
 
 export type Text = (key: string, vars?: Record<string, string | number>) => string;

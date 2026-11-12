@@ -56,5 +56,10 @@
   "signature_signature": "Signature",
   "signature_key_id": "Key",
   "signature_verification_code": "Verification code",
-  "signature_verification_url": "Verify at"
+  "signature_verification_url": "Verify at",
+  "signature_batch_root": "Root of its batch",
+  "signature_how": "Scan the code, or open the address and enter the verification code, to check the realm's signature of this issue.",
+  "signature_provisional": "Provisional issue: the realm signs it once its day has closed.",
+  "signature_unsigned": "Not signed yet: the realm signs each issue once its day has closed.",
+  "signature_mismatch": "The signature the realm gives for this issue does not match what this sheet shows. Do not rely on it."
 }

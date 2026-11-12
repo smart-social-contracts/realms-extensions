@@ -8,6 +8,7 @@
 import { dayOf, longDate, momentOf, timeOfDay, utcOffset } from './dates.ts';
 import { describe, SECTIONS, shortId, type Described } from './entries.ts';
 import { entryReference, issueReference, type Entry, type Issue, type Text } from './issue.ts';
+import { codeOf, qrSvg, signedOf, verificationUrl } from './proof.ts';
 import { pageRules, SHEET_STYLE } from './sheetStyle.ts';
 
 /** What the sheet shows of the realm that issues the journal besides the issue. */
@@ -114,24 +115,62 @@ function sectionsHtml(items: Item[], view: View): string {
 		.join('');
 }
 
-/** What the signature of an issue is made of, each a field of the slot below. */
-const SIGNATURE_FIELDS = ['issue_hash', 'signature', 'key_id', 'verification_code', 'verification_url'];
+/** What the signature of an issue is made of, each a field of the slot below: its label and what it shows. */
+interface Part {
+	field: string;
+	html: string;
+}
 
 /**
- * The place of the issue's signature and its verification. The signing work fills each `data-field` of it: the hash of the
- * issue, the realm's signature of it, the id of the key that made it, a code to check it by and the address that checks it,
- * with its QR in `verification_qr`, and takes off `hidden`. It is hidden until then: an empty box on paper reads as
- * "unsigned".
+ * The place of the issue's signature and its verification: the hash of the issue, the realm's signature, the key that made
+ * it, the code to check it by and the address that checks it, with its QR code. It is shown only for an issue that carries
+ * a signature that is its own: an empty box on paper reads as "unsigned", so any other issue has the slot hidden and, for
+ * one that is not signed, a line that says why (`signatureNoteHtml`).
  */
-function signatureSlotHtml({ t }: View): string {
-	const fields = SIGNATURE_FIELDS.map(
-		(field) => `<dt>${esc(t(`signature_${field}`))}</dt><dd class="mono" data-field="${field}">—</dd>`,
-	);
+function signatureSlotHtml({ issue, issuer, t }: View): string {
+	const signed = signedOf(issue, issuer.canisterId);
+	const proof = issue.proof;
+	let parts: Part[] = [];
+	let qr = '';
+	if (signed && proof) {
+		const code = codeOf(proof.digest)!; // the digest's, as the canister makes it: `signedOf` has seen it is the one sent
+		const url = verificationUrl(signed.realm, code);
+		parts = [
+			{ field: 'issue_hash', html: esc(proof.digest) },
+			// A batch of one is signed as its digest; one signed with others, as the root of their tree.
+			...(proof.path.length ? [{ field: 'batch_root', html: esc(proof.root) }] : []),
+			{ field: 'signature', html: esc(proof.signature) },
+			{ field: 'key_id', html: `${esc(signed.key.public_key)} (${esc(signed.key.name)}, ${esc(signed.key.path)})` },
+			{ field: 'verification_code', html: esc(code) },
+			{ field: 'verification_url', html: `<a href="${esc(url)}">${esc(url)}</a>` },
+		];
+		qr = qrSvg(url);
+	} else {
+		parts = ['issue_hash', 'signature', 'key_id', 'verification_code', 'verification_url'].map((field) => ({ field, html: '—' }));
+	}
+	const fields = parts.map(({ field, html }) => `<dt>${esc(t(`signature_${field}`))}</dt><dd class="mono" data-field="${field}">${html}</dd>`);
 	return (
-		`<section class="authentication" data-slot="signature" hidden aria-labelledby="authentication-title">` +
+		`<section class="authentication" data-slot="signature"${signed ? '' : ' hidden'} aria-labelledby="authentication-title">` +
 		`<h2 id="authentication-title">${esc(t('signature_title'))}</h2><dl>${fields.join('')}</dl>` +
-		`<div class="qr" data-field="verification_qr" aria-hidden="true"></div></section>`
+		`<div class="qr" data-field="verification_qr" aria-hidden="true">${qr}</div>` +
+		`<p class="how">${esc(t('signature_how'))}</p></section>`
 	);
+}
+
+/**
+ * What the sheet says when the issue has no signature of its own to show: that it is provisional (today's, signed once the
+ * day has closed), that it is not signed yet, or that the signature the realm gives is not this issue's. A realm that does
+ * not sign says nothing.
+ */
+function signatureNoteHtml({ issue, issuer, t }: View): string {
+	if (issue.proof) {
+		return signedOf(issue, issuer.canisterId)
+			? ''
+			: `<p class="signature-note mismatch" role="alert">${esc(t('signature_mismatch'))}</p>`;
+	}
+	if (issue.status === 'provisional') return `<p class="signature-note">${esc(t('signature_provisional'))}</p>`;
+	if (issue.status === 'unsigned') return `<p class="signature-note">${esc(t('signature_unsigned'))}</p>`;
+	return '';
 }
 
 function colophonHtml({ issue, t }: View, title: string): string {
@@ -158,7 +197,8 @@ export function sheetHtml(issue: Issue, issuer: Issuer, t: Text, locale: string)
 	return (
 		`<!doctype html><html lang="${esc(locale)}"><head><meta charset="utf-8"><title>${esc(title)} · ${esc(issue.day)}</title>` +
 		`<style>${pageRules(footer, t('page_of', { page: '{page}', pages: '{pages}' }))}${SHEET_STYLE}</style></head><body>` +
-		`${mastheadHtml(view, title)}${datelineHtml(view)}<main>${body}</main>${signatureSlotHtml(view)}${colophonHtml(view, title)}` +
+		`${mastheadHtml(view, title)}${datelineHtml(view)}<main>${body}</main>${signatureNoteHtml(view)}${signatureSlotHtml(view)}` +
+		`${colophonHtml(view, title)}` +
 		`</body></html>`
 	);
 }

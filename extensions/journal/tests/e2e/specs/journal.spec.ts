@@ -2,7 +2,10 @@ import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CAPITAL, CODEX_ID, FOUND, INSTALL, issueOf, LOGO, NOT_RECORDED, PUBLISHED, REVERT, startRealm, type Scenario } from '../realm';
+import {
+  CAPITAL, CODEX_ID, FOUND, INSTALL, issueOf, LOGO, NOT_RECORDED, PROOF_CODE, PROOF_DIGEST, PROOF_KEY, PROOF_SIGNATURE, PUBLISHED, REVERT,
+  signedIssueOf, startRealm, VERIFY_PAGE, type Scenario,
+} from '../realm';
 
 const OUT = join(__dirname, '..', 'test-results', '.playwright');
 let scenario: Scenario;
@@ -368,4 +371,94 @@ test('the sheet has no script, whatever the realm\'s text says, and its frame ma
       .map((node) => node.localName),
   );
   expect(scripted).toEqual([]);
+});
+
+// ---- the signature: a box for a signed issue, a line for one that is not
+
+function signed(locale: string, realm: string, issue = signedIssueOf('2026-11-09', 3, [FOUND, INSTALL], realm)): Scenario {
+  return { locale, realm: { name: realm, logoUrl: LOGO }, replies: { journal_issue: { byDay: { '': issue } } } };
+}
+
+for (const { locale, realm, title, box } of [
+  { locale: 'en', realm: 'Agora', title: 'Signature and verification', box: 'Verification code' },
+  { locale: 'es', realm: 'Valencia', title: 'Firma y verificación', box: 'Código de verificación' },
+  { locale: 'zh-CN', realm: '瓦伦西亚', title: '签名与验证', box: '验证码' },
+]) {
+  test(`a signed issue shows its signature box, its code and a QR code, and prints them, in ${locale}`, async ({ page, context }) => {
+    scenario = signed(locale, realm);
+    await page.goto(`${url}/extensions/journal`);
+    const paper = sheet(page);
+    const slot = paper.locator('.authentication[data-slot="signature"]');
+    await expect(slot).toBeVisible();
+    await expect(slot.getByRole('heading', { name: title, level: 2 })).toBeVisible();
+    await expect(slot.getByText(box, { exact: true })).toBeVisible();
+    await expect(slot.locator('[data-field="issue_hash"]')).toHaveText(PROOF_DIGEST);
+    await expect(slot.locator('[data-field="signature"]')).toHaveText(PROOF_SIGNATURE);
+    await expect(slot.locator('[data-field="key_id"]')).toHaveText(`${PROOF_KEY} (key_1, realms:journal)`);
+    await expect(slot.locator('[data-field="verification_code"]')).toHaveText(PROOF_CODE);
+    await expect(slot.locator('[data-field="batch_root"]')).toHaveCount(0); // signed alone
+    await expect(slot.locator('[data-field="verification_qr"] svg')).toBeVisible();
+    const address = `${VERIFY_PAGE}?canister=${CAPITAL}&code=${PROOF_CODE}`;
+    await expect(slot.locator('[data-field="verification_url"]')).toHaveText(address);
+    await expect(paper.locator('.signature-note')).toHaveCount(0);
+    await page.screenshot({ path: join(OUT, `journal-signed-${locale}.png`), fullPage: true });
+
+    // The address opens the verify page as its own page: the sheet's frame may not open windows, so the page does.
+    await context.route('https://smart-social-contracts.github.io/**', (route) => route.fulfill({ contentType: 'text/html', body: 'verify' }));
+    const [verify] = await Promise.all([context.waitForEvent('page'), slot.locator('[data-field="verification_url"] a').click()]);
+    expect(verify.url()).toBe(address);
+    await verify.close();
+    expect(page.url()).toBe(`${url}/extensions/journal`); // the realm's own page did not move
+
+    const file = join(OUT, `journal-signed-${locale}.pdf`);
+    writeFileSync(file, await printedPdf(page));
+    const text = pdfText(file).replace(/\s+/g, '');
+    for (const part of [PROOF_CODE, PROOF_DIGEST, PROOF_SIGNATURE, PROOF_KEY]) expect(text).toContain(part);
+    expect(text).toContain(address.replace(/\s+/g, ''));
+    expect(execFileSync('pdfinfo', [file], { encoding: 'utf8' })).toMatch(/Pages:\s+1\b/);
+    execFileSync('pdftoppm', ['-png', '-r', '110', file, join(OUT, `journal-signed-${locale}-print`)]);
+  });
+}
+
+test('an issue signed in a batch shows the root of the batch', async ({ page }) => {
+  scenario = signed('en', 'Agora', signedIssueOf('2026-11-09', 3, [INSTALL], 'Agora', { path: [['r', 'd4'.repeat(32)]], root: 'e5'.repeat(32) }));
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).locator('[data-field="batch_root"]')).toHaveText('e5'.repeat(32));
+});
+
+test('today\'s issue says it is provisional and a closed one that is not signed yet says so, and neither has the box', async ({ page }) => {
+  for (const [status, text] of [['provisional', 'Provisional issue: the realm signs it once its day has closed.'], ['unsigned', 'Not signed yet: the realm signs each issue once its day has closed.']]) {
+    const reply = issueOf('2026-11-09', 3, [INSTALL]);
+    scenario = signed('en', 'Agora', { ...reply, issue: { ...reply.issue, status } } as any);
+    await page.goto(`${url}/extensions/journal`);
+    await expect(sheet(page).getByText(text)).toBeVisible();
+    await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeHidden();
+    await page.screenshot({ path: join(OUT, `journal-${status}.png`), fullPage: true });
+  }
+});
+
+test('a signature that is not the issue\'s is not shown: the sheet warns, and the box stays hidden', async ({ page }) => {
+  const altered = signedIssueOf('2026-11-09', 3, [INSTALL]);
+  altered.issue.entries = [{ ...INSTALL, kind: 'codex_reverted' }]; // the entries the realm serves are not the signed ones
+  scenario = signed('en', 'Agora', altered as any);
+  await page.goto(`${url}/extensions/journal`);
+  await expect(sheet(page).getByRole('alert')).toHaveText(/does not match what this sheet shows/);
+  await expect(sheet(page).locator('.authentication[data-slot="signature"]')).toBeHidden();
+  await expect(sheet(page).getByText(PROOF_CODE)).toHaveCount(0);
+  await page.screenshot({ path: join(OUT, 'journal-mismatch.png'), fullPage: true });
+});
+
+test('a quarter shows the capital\'s signature, which checks against the capital', async ({ page }) => {
+  scenario = {
+    locale: 'en',
+    realm: { name: 'Agora North', logoUrl: LOGO },
+    replies: {
+      journal_issue: { ok: true, issued: false, capital: CAPITAL },
+      journal_capital_issue: { ...signedIssueOf('2026-11-09', 3, [INSTALL], 'Agora'), issued: false },
+    },
+  };
+  await page.goto(`${url}/extensions/journal`);
+  const slot = sheet(page).locator('.authentication[data-slot="signature"]');
+  await expect(slot).toBeVisible();
+  await expect(slot.locator('[data-field="verification_url"]')).toHaveText(`${VERIFY_PAGE}?canister=${CAPITAL}&code=${PROOF_CODE}`);
 });

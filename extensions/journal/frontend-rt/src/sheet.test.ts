@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { dayOf, longDate, momentOf, timeOfDay, utcOffset } from './dates.ts';
 import { entryReference, issueReference, type Issue } from './issue.ts';
-import { sheetHtml, type Issuer } from './sheet.ts';
+import { escapeHtml, sheetHtml, type Issuer } from './sheet.ts';
+import { CODE, DIGEST, PUBLIC_KEY, SIGNATURE, signed } from './proofFixture.ts';
+import { VERIFY_URL, verificationUrl } from './proof.ts';
 import { LOCALES, texts } from './testTexts.ts';
 
 const t = texts('en');
@@ -139,6 +141,104 @@ test('the place of the signature and its verification is on the sheet, marked an
 	assert.match(sheet(empty), /data-slot="signature"/); // an empty day is signed too
 });
 
+// ---- the signature: shown when the issue carries one that is its own, else a line that says what the issue is
+
+const ONE = { ...empty, entries: [install] };
+const slot = (html: string) => /<section class="authentication"[^>]*>[\s\S]*?<\/section>/.exec(html)![0];
+const field = (html: string, name: string) => new RegExp(`data-field="${name}">([\\s\\S]*?)</dd>`).exec(html)?.[1];
+
+test('a signed issue shows its signature box: the hash, the signature, the key, the code and the address, with a QR code', () => {
+	const html = sheet(signed(ONE));
+	assert.doesNotMatch(slot(html), /^<section[^>]* hidden/);
+	assert.equal(field(html, 'issue_hash'), DIGEST);
+	assert.equal(field(html, 'signature'), SIGNATURE);
+	assert.equal(field(html, 'key_id'), `${PUBLIC_KEY} (key_1, realms:journal)`);
+	assert.equal(field(html, 'verification_code'), CODE);
+	const url = verificationUrl(CANISTER, CODE);
+	assert.equal(field(html, 'verification_url'), `<a href="${url.replace(/&/g, '&amp;')}">${url.replace(/&/g, '&amp;')}</a>`);
+	assert.match(slot(html), /data-field="verification_qr" aria-hidden="true"><svg [\s\S]*<\/svg><\/div>/);
+	assert.match(slot(html), /<p class="how">Scan the code, or open the address and enter the verification code/);
+	assert.doesNotMatch(html, /class="signature-note/);
+});
+
+test('the address names the canister of the proof and starts with the verify page\'s', () => {
+	assert.ok(field(sheet(signed(ONE)), 'verification_url')!.includes(`${VERIFY_URL}?canister=${CANISTER}&amp;code=${CODE}`));
+});
+
+test('an issuer the sheet does not know has no signature shown: the sheet cannot say whose it is', () => {
+	const html = sheet(signed(ONE), { ...ISSUER, canisterId: '' });
+	assert.match(html, /<p class="signature-note mismatch" role="alert">/);
+	assert.match(slot(html), /^<section[^>]* hidden/);
+	assert.ok(!html.includes(CODE));
+});
+
+test('the code on the sheet is the digest\'s, whatever code the realm sends', () => {
+	assert.equal(field(sheet(signed(ONE)), 'verification_code'), CODE);
+	assert.match(sheet(signed(ONE, { code: 'AAAA-AAAA-AAAA-AAAA' })), /signature-note mismatch/); // not the issue's: not shown
+});
+
+test('an issue signed with others shows the root of their batch, and one signed alone does not', () => {
+	const alone = sheet(signed(ONE));
+	assert.doesNotMatch(alone, /data-field="batch_root"/);
+	const batch = signed(ONE, { path: [['r', 'aa'.repeat(32)]], root: '12'.repeat(32) });
+	assert.equal(field(sheet(batch), 'batch_root'), '12'.repeat(32));
+	assert.match(sheet(batch), /<dt>Root of its batch<\/dt>/);
+});
+
+test('the signature of an empty day is shown too', () => {
+	assert.doesNotMatch(slot(sheet(signed(empty))), /^<section[^>]* hidden/);
+});
+
+test('the day\'s open issue says it is provisional, and a closed one not yet signed says so, with no signature box', () => {
+	for (const [status, text] of [['provisional', /Provisional issue: the realm signs it once its day has closed\./], ['unsigned', /Not signed yet: the realm signs each issue/]] as const) {
+		const html = sheet({ ...ONE, status });
+		assert.match(html, text);
+		assert.match(slot(html), /^<section[^>]* hidden/);
+		assert.doesNotMatch(html, /<svg/);
+	}
+});
+
+test('a realm that does not sign says nothing of a signature, and the slot stays hidden', () => {
+	const html = sheet(ONE);
+	assert.doesNotMatch(html, /class="signature-note/);
+	assert.match(slot(html), /^<section[^>]* hidden/);
+});
+
+test('a signature that is not this issue\'s is not shown: not of another day, another canister, or other entries', () => {
+	const wrong = [
+		signed(ONE, {}, { subject: '2026-11-08' }),
+		signed(ONE, {}, { realm: 'aaaaa-aa' }),
+		{ ...signed(ONE), entries: [{ ...install, kind: 'codex_reverted' }] },
+		{ ...signed(ONE), entries: [] },
+	];
+	for (const issue of wrong) {
+		const html = sheet(issue);
+		assert.match(html, /<p class="signature-note mismatch" role="alert">The signature the realm gives for this issue does not match/);
+		assert.match(slot(html), /^<section[^>]* hidden/);
+		assert.ok(!html.includes(CODE) && !html.includes(SIGNATURE) && !html.includes('<svg'));
+	}
+});
+
+test('what the realm says in a proof cannot add markup to the sheet, and a proof not in its form is not shown at all', () => {
+	const hostile = '"><script>alert(1)</script>';
+	for (const proof of [{ digest: hostile }, { signature: hostile }, { root: hostile }, { code: hostile }, { path: [['r', hostile]] }]) {
+		const html = sheet(signed(ONE, proof));
+		assert.doesNotMatch(html, /<script>|alert\(1\)/);
+		assert.match(html, /signature-note mismatch/);
+		assert.match(slot(html), /^<section[^>]* hidden/);
+	}
+	const key = sheet(signed(ONE, {}, { key: { algorithm: 'ed25519', name: hostile, path: hostile, public_key: hostile } }));
+	assert.doesNotMatch(key, /<script>|alert\(1\)/);
+	assert.match(key, /signature-note mismatch/);
+});
+
+test('a signed sheet reads and prints: the box is not cut across pages and its address prints as text', () => {
+	const html = sheet(signed(ONE));
+	assert.match(html, /\.authentication \{[^}]*break-inside: avoid/);
+	assert.match(html, /@media print \{[\s\S]*a \{ color: inherit; text-decoration: none; \}/);
+	assert.match(html, /\.qr svg \{[^}]*width: 100%/);
+});
+
 test('text from the realm cannot add markup or style to the sheet', () => {
 	const hostile = '"><script>alert(1)</script></style><b>x</b>';
 	const issue = { ...empty, realm: hostile, entries: [{ ...install, kind: '<b>x</b>', details: { proposal: hostile } }, { ...install, details: { codex: hostile, proposal: hostile } }] };
@@ -182,6 +282,27 @@ test('the day of a release is the day in the realm\'s zone, written in the reade
 });
 
 const LANGUAGES = ['en', 'es', 'de', 'fr', 'it', 'zh-CN', 'ca-valencia'];
+
+test('a signed sheet in any language has no text of another and no placeholder left', () => {
+	const english = JSON.parse(readFileSync(new URL('en.json', LOCALES), 'utf8'));
+	for (const locale of LANGUAGES) {
+		const words = JSON.parse(readFileSync(new URL(`${locale}.json`, LOCALES), 'utf8'));
+		const batch = sheet(signed(ONE, { path: [['r', 'aa'.repeat(32)]] }), ISSUER, locale);
+		assert.doesNotMatch(batch, /\{\w+\}/, `${locale}: a placeholder is left`);
+		for (const key of ['signature_title', 'signature_how', 'signature_batch_root', 'signature_issue_hash']) {
+			assert.ok(batch.includes(escapeHtml(words[key])), `${locale}: ${key}`);
+		}
+		for (const [status, key] of [['provisional', 'signature_provisional'], ['unsigned', 'signature_unsigned']] as const) {
+			assert.ok(sheet({ ...ONE, status }, ISSUER, locale).includes(escapeHtml(words[key])), `${locale}: ${key}`);
+		}
+		assert.ok(sheet({ ...signed(ONE), entries: [] }, ISSUER, locale).includes(escapeHtml(words.signature_mismatch)), `${locale}: mismatch`);
+		if (locale !== 'en') {
+			for (const key of ['signature_how', 'signature_batch_root', 'signature_provisional', 'signature_unsigned', 'signature_mismatch']) {
+				assert.notEqual(words[key], english[key], `${locale}: ${key} is not translated`);
+			}
+		}
+	}
+});
 
 test('every language has the same texts as English', () => {
 	const english = Object.keys(JSON.parse(readFileSync(new URL('en.json', LOCALES), 'utf8'))).sort();

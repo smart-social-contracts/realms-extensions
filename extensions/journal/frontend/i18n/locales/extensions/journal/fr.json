@@ -56,5 +56,10 @@
   "signature_signature": "Signature",
   "signature_key_id": "Clé",
   "signature_verification_code": "Code de vérification",
-  "signature_verification_url": "Vérifier sur"
+  "signature_verification_url": "Vérifier sur",
+  "signature_batch_root": "Racine de son lot",
+  "signature_how": "Lisez le code ou ouvrez l'adresse et saisissez le code de vérification pour contrôler la signature que le royaume a apposée sur ce numéro.",
+  "signature_provisional": "Numéro provisoire : le royaume le signe une fois la journée terminée.",
+  "signature_unsigned": "Pas encore signé : le royaume signe chaque numéro une fois sa journée terminée.",
+  "signature_mismatch": "La signature que le royaume donne pour ce numéro ne correspond pas à ce que montre cette feuille. Ne vous y fiez pas."
 }

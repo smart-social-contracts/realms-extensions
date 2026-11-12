@@ -56,5 +56,10 @@
   "signature_signature": "签名",
   "signature_key_id": "密钥",
   "signature_verification_code": "验证码",
-  "signature_verification_url": "验证地址"
+  "signature_verification_url": "验证地址",
+  "signature_batch_root": "所属批次的根",
+  "signature_how": "扫描二维码，或打开该地址并输入验证码，以核验领域对本期的签名。",
+  "signature_provisional": "临时版本：当天结束后由领域签名。",
+  "signature_unsigned": "尚未签名：领域在每期当天结束后签名。",
+  "signature_mismatch": "领域给出的本期签名与此页所示内容不一致，请勿依赖。"
 }

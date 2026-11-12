@@ -8,9 +8,10 @@ extension, one per realm, installed by default. The design is in
 ## What it does
 
 - **The canister is the authority.** `journal_issue {day}` returns the issue of a day as JSON: its `number`, counted from
-  the journal's first day, and its `entries`. `day` is the realm's local day on the capital's clock (`YYYY-MM-DD`,
+  the journal's first day, its `entries`, its `status` (`provisional`, `signed`, `unsigned`) and, when signed, its `proof`. `day` is the realm's local day on the capital's clock (`YYYY-MM-DD`,
   default today). Every day from the first to today has an issue, with or without entries; a later day has none. The
-  page, the PDF and anything else are renderings of that JSON and are never checksummed.
+  page, the PDF and anything else are renderings of that JSON, never checksummed themselves: the canister signs the JSON of a
+  closed day, and the sheet shows that signature.
 - **A quarter issues nothing.** Its `journal_issue` says so (`issued: false`, and the `capital` whose journal it is), and
   the page asks the capital's issue through `journal_capital_issue`, an update the quarter makes to its capital because a
   read cannot call another canister. It needs a logged-in reader; a visitor is asked to log in. The sheet is headed with the
@@ -50,8 +51,13 @@ An issue reads as an official gazette:
 - **Paper:** A4 with margins; the foot of every page has the issue and its page number (in the browsers that print page
   margins), and the colophon ends the issue.
 - **Signature and verification:** a marked slot, `data-slot="signature"`, whose `data-field`s (`issue_hash`, `signature`,
-  `key_id`, `verification_code`, `verification_url`, `verification_qr`) the signing work fills and then shows (it is
-  `hidden` until then: an empty box on paper would read as "unsigned").
+  `key_id`, `verification_code`, `verification_url`, `verification_qr`, and `batch_root` for an issue signed with others) are
+  filled from the `proof` of `journal_issue` and shown only for an issue that carries a signature that is its own: the
+  canister's, for this day, over the entries the sheet shows. The QR code is drawn on the sheet as an SVG from
+  `qrcode-generator`, and the address and the code lead to the verify page (`VERIFY_URL` in `src/proof.ts`, a placeholder
+  until it is published) as `?canister=<id>&code=<code>`. An issue without a signature of its own has the slot `hidden` and a
+  line that says what it is: provisional (today's), not signed yet, or "the signature does not match". The sheet only shows
+  the signature; the verify page, served from elsewhere, checks it.
 
 The entry texts are in `src/entries.ts` (plain text, no markup), the page in `src/sheet.ts`. The seven languages are in
 `frontend/i18n/locales/extensions/journal/`.

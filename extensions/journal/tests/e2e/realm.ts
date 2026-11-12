@@ -27,6 +27,30 @@ export function issueOf(day: string, number: number, entries: any[] = [], realm 
   };
 }
 
+export const PROOF_CODE = 'UGQ2-DINB-UGQ2-DINB'; // the code of PROOF_DIGEST: its first 80 bits in base32
+export const PROOF_DIGEST = 'a1'.repeat(32);
+export const PROOF_SIGNATURE = 'b2'.repeat(64);
+export const PROOF_KEY = 'c3'.repeat(32);
+/** Where the verify page is published, as the extension has it until the organization publishes it. */
+export const VERIFY_PAGE = 'https://smart-social-contracts.github.io/realms-gos/verify/';
+
+/** What `journal_issue` answers for a day the canister has signed: the issue, its `status` and the `proof` it serves. */
+export function signedIssueOf(day: string, number: number, entries: any[] = [], realm = 'Agora', over: Record<string, unknown> = {}) {
+  const reply = issueOf(day, number, entries, realm);
+  const canonical = JSON.stringify({
+    v: 1,
+    kind: 'journal',
+    realm: CAPITAL,
+    subject: day,
+    body: { number, timezone: reply.issue.timezone, entries },
+    prev: null,
+    signed_at: Date.UTC(2026, 10, 10, 0, 1) / 1000,
+    key: { algorithm: 'ed25519', name: 'key_1', path: 'realms:journal', public_key: PROOF_KEY },
+  });
+  const proof = { canonical, digest: PROOF_DIGEST, root: PROOF_DIGEST, path: [], signature: PROOF_SIGNATURE, code: PROOF_CODE, ...over };
+  return { ...reply, issue: { ...reply.issue, status: 'signed', proof } };
+}
+
 /** A codex id as realms-gos writes it: `sha256:` and 64 hex digits. */
 export const CODEX_ID = 'sha256:4be1a2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f';
 const EARLIER_CODEX_ID = 'sha256:9c0de1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e';

@@ -56,5 +56,10 @@
   "signature_signature": "Signatura",
   "signature_key_id": "Clau",
   "signature_verification_code": "Codi de verificació",
-  "signature_verification_url": "Verifica en"
+  "signature_verification_url": "Verifica en",
+  "signature_batch_root": "Arrel del seu lot",
+  "signature_how": "Llig el codi o obri l'adreça i introduïx el codi de verificació per a comprovar la signatura que el regne ha posat a este número.",
+  "signature_provisional": "Número provisional: el regne el signa quan ha acabat el seu dia.",
+  "signature_unsigned": "Encara sense signar: el regne signa cada número quan ha acabat el seu dia.",
+  "signature_mismatch": "La signatura que el regne dona per a este número no coincideix amb el que mostra este full. No s'hi ha de confiar."
 }
