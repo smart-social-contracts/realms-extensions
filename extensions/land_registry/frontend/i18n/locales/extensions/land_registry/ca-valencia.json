@@ -23,5 +23,6 @@
   "licence_status_expired": "Caducada",
   "licence_until": "fins al {date}",
   "planning_zones_capped": "Només s'han llegit les primeres {count} zones: pot faltar-ne alguna a la llista.",
-  "licences_loading": "Llegint les llicències…"
+  "licences_loading": "Llegint les llicències…",
+  "parcels_capped": "Només s'han llegit les primeres {count} parcel·les: pot faltar-ne alguna a la llista."
 }

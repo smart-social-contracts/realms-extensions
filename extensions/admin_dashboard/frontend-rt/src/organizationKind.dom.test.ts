@@ -24,6 +24,8 @@ let asked: [string, any][];
 
 const settle = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
 const text = () => target.textContent ?? '';
+// the row of buttons under an empty page: it should be there only when there is a button in it
+const EMPTY_ROW = '.mt-4.flex.items-center.justify-center.gap-2';
 const chips = () => [...target.querySelectorAll('[data-testid="org-kind"]')].map((e) => e.textContent?.trim());
 const select = (id: string) => target.querySelector<HTMLSelectElement>(`#${id}`)!;
 const organizationCalls = () => asked.filter(([op]) => op === 'organization_list').map(([, args]) => args);
@@ -169,6 +171,7 @@ test('a kind no organisation has says so', async () => {
 	await choose('org-kind-select', 'union');
 	expect(chips()).toEqual([]);
 	expect(text()).toContain('No organisations of this kind.');
+	expect(target.querySelector(EMPTY_ROW)).toBeNull(); // no buttons, so no row of them
 });
 
 test('a realm with no organisations lists none, without an error', async () => {
@@ -176,6 +179,7 @@ test('a realm with no organisations lists none, without an error', async () => {
 	expect(chips()).toEqual([]);
 	expect(text()).toContain('No items found.');
 	expect(text()).not.toContain('This list isn');
+	expect(target.querySelector(EMPTY_ROW)).toBeNull();
 });
 
 test('a reader the realm refuses is told which permission is missing, and sees no kinds', async () => {
@@ -201,6 +205,7 @@ test('a page after the first with no more of the kind says there are no more, no
 	expect(chips()).toEqual([]);
 	expect(text()).toContain('No more organisations of this kind.');
 	expect(text()).not.toContain('No organisations of this kind.');
+	expect(target.querySelector(EMPTY_ROW)).not.toBeNull(); // First and Prev are there
 	// and the way back is there
 	button('Prev').click();
 	await settle();

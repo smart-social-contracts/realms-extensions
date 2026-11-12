@@ -23,5 +23,6 @@
   "licence_status_expired": "Abgelaufen",
   "licence_until": "bis {date}",
   "planning_zones_capped": "Nur die ersten {count} Zonen wurden gelesen: in der Liste kann eine fehlen.",
-  "licences_loading": "Lizenzen werden gelesen …"
+  "licences_loading": "Lizenzen werden gelesen …",
+  "parcels_capped": "Nur die ersten {count} Grundstücke wurden gelesen: in der Liste kann eines fehlen."
 }

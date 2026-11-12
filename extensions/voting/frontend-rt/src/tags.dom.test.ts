@@ -13,7 +13,7 @@ const FUTURE = 4_102_444_800;
 const row = (n: number, tags?: unknown): Row => ({ id: `P-${n}`, title: `Proposal ${n}`, ...(tags === undefined ? {} : { tags }) });
 
 let target: HTMLElement;
-let page: ReturnType<typeof mount>;
+let page: ReturnType<typeof mount> | undefined;
 /** What the page asked the realm, in order. */
 let asked: [string, any][];
 let created: Record<string, any>[];
@@ -80,7 +80,7 @@ async function mountOn(rows: Row[], realm: { signedOut?: boolean; hold?: { when:
 const listCalls = () => asked.filter(([op]) => op === 'proposal_list').map(([, args]) => args);
 
 afterEach(() => {
-	unmount(page);
+	if (page) unmount(page);
 	target.remove();
 	vi.unstubAllGlobals();
 });
@@ -269,4 +269,17 @@ test('an old tag search stops making calls once the filter has changed', async (
 	release();
 	await settle(200);
 	expect(listCalls().filter((args) => args.tags?.includes('none'))).toHaveLength(1);
+});
+
+test('a tag search still running when the page is closed stops making calls', async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const rows = Array.from({ length: 5_100 }, (_, i) => row(i + 1, []));
+	await mountOn(rows, { hold: { when: (args) => args.tags?.includes('none'), gate } });
+	await type(byTestId('tag-input')[0] as HTMLInputElement, 'none', true); // its first call is held
+	unmount(page!);
+	page = undefined;
+	release();
+	await settle(200);
+	expect(listCalls().filter((args) => args.tags?.includes('none'))).toHaveLength(1); // the other nine calls of the search are not made
 });

@@ -35,6 +35,10 @@ type Realm = {
 	official?: string;
 	/** A `land_map` that always has another page of zones. */
 	endlessZones?: boolean;
+	/** A `land_list` that always has another page of parcels. */
+	endlessParcels?: boolean;
+	/** h3-js, fetched from a CDN, never arrives. */
+	h3Hangs?: boolean;
 	zoneSet?: (args: any) => any;
 };
 
@@ -50,10 +54,10 @@ const rowOf = (id: string) => [...target.querySelectorAll<HTMLButtonElement>('.p
 /** Mounts the page on a realm that holds what ``realm`` says, as the realm answers its reads (a page of rows, and `next`). */
 async function mountOn(realm: Realm) {
 	asked = [];
-	vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => en }));
+	vi.stubGlobal('fetch', (url: string) => (realm.h3Hangs && String(url).includes('h3-js') ? new Promise(() => {}) : Promise.resolve({ ok: true, json: async () => en })));
 	const { parcels = [], zones = [], licences = [], timezone = 'Europe/Madrid' } = realm;
 	const replies: Record<string, (args: any) => unknown> = {
-		land_list: () => ({ ok: true, lands: parcels, next: null }),
+		land_list: ({ from = 1 }) => ({ ok: true, lands: from === 1 ? parcels : [], next: realm.endlessParcels ? from + 500 : null }),
 		land_map: ({ from = 1 }) => ({ ok: true, parcels: [], zones: from === 1 ? zones : [], next: realm.endlessZones ? from + 500 : null }),
 		user_list: () => ({ ok: true, users: [{ id: 'alice', nickname: 'Alice' }] }),
 		license_list: (args) => (typeof licences === 'function' ? licences(args) : { ok: true, licenses: licences, next: null }),
@@ -337,4 +341,27 @@ test('zones beyond the pages the page reads are said to be left out', async () =
 test('a registry that reads all its zones says nothing of a cut', async () => {
 	await mountOn({ parcels: [parcel(1)], zones: [SEAFRONT] });
 	expect(byTestId('zones-capped')).toHaveLength(0);
+});
+
+test('parcels beyond the pages the page reads are said to be left out', async () => {
+	await mountOn({ parcels: [parcel(1)], zones: [SEAFRONT], endlessParcels: true });
+	await settle(200);
+	expect(asked.filter(([op]) => op === 'land_list')).toHaveLength(50);
+	expect(byTestId('parcels-capped')[0].textContent).toBe('Only the first 25000 parcels were read: the list may be missing some.');
+});
+
+test('a registry that reads all its parcels says nothing of a cut', async () => {
+	await mountOn({ parcels: [parcel(1)], zones: [SEAFRONT] });
+	expect(byTestId('parcels-capped')).toHaveLength(0);
+});
+
+test('the parcels are on the screen while h3-js, which a realm without `defined` waits for, has not arrived', async () => {
+	// land_map sends no `defined`, and h3-js never comes: the zones wait for it (3 s at most), the parcels do not
+	await mountOn({ parcels: [parcel(1, ['seafront']), parcel(2)], zones: [SEAFRONT, { id: HOME_CELL, name: '', kind: 'residential', population: 1 }], h3Hangs: true });
+	expect(target.querySelectorAll('.parcel-row')).toHaveLength(2);
+	expect(text()).not.toContain('Loading lands');
+	expect(byTestId('zone-filter')).toHaveLength(0); // the zones are still waiting
+
+	await settle(3_300); // the wait ends, and the zones are read by the shape of their ids
+	expect([...select('zone-filter').options].map((o) => o.textContent?.trim())).toEqual(['All zones', 'Seafront', 'In no zone']);
 });

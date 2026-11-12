@@ -23,5 +23,6 @@
   "licence_status_expired": "Scaduta",
   "licence_until": "fino al {date}",
   "planning_zones_capped": "Sono state lette solo le prime {count} zone: nell'elenco ne potrebbe mancare qualcuna.",
-  "licences_loading": "Lettura delle licenze…"
+  "licences_loading": "Lettura delle licenze…",
+  "parcels_capped": "Sono state lette solo le prime {count} particelle: nell'elenco ne potrebbe mancare qualcuna."
 }

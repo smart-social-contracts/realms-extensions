@@ -23,5 +23,6 @@
   "licence_status_expired": "Expired",
   "licence_until": "until {date}",
   "planning_zones_capped": "Only the first {count} zones were read: the zone list may be missing some.",
-  "licences_loading": "Reading the licences…"
+  "licences_loading": "Reading the licences…",
+  "parcels_capped": "Only the first {count} parcels were read: the list may be missing some."
 }
