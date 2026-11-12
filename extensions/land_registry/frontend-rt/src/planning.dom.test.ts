@@ -31,6 +31,10 @@ type Realm = {
 	/** What `me` says the member holds; null for a reader whose `me` the realm refuses. */
 	permissions?: string[] | null;
 	timezone?: string;
+	/** `official_timezone` of `realm_info`, which a quarter takes from its capital. */
+	official?: string;
+	/** A `land_map` that always has another page of zones. */
+	endlessZones?: boolean;
 	zoneSet?: (args: any) => any;
 };
 
@@ -50,11 +54,11 @@ async function mountOn(realm: Realm) {
 	const { parcels = [], zones = [], licences = [], timezone = 'Europe/Madrid' } = realm;
 	const replies: Record<string, (args: any) => unknown> = {
 		land_list: () => ({ ok: true, lands: parcels, next: null }),
-		land_map: () => ({ ok: true, parcels: [], zones, next: null }),
+		land_map: ({ from = 1 }) => ({ ok: true, parcels: [], zones: from === 1 ? zones : [], next: realm.endlessZones ? from + 500 : null }),
 		user_list: () => ({ ok: true, users: [{ id: 'alice', nickname: 'Alice' }] }),
 		license_list: (args) => (typeof licences === 'function' ? licences(args) : { ok: true, licenses: licences, next: null }),
 		me: () => (realm.permissions === null ? { ok: false, error: 'sign in first' } : { ok: true, permissions: realm.permissions ?? [] }),
-		realm_info: () => ({ ok: true, realm: { timezone } }),
+		realm_info: () => ({ ok: true, realm: { timezone, ...(realm.official ? { official_timezone: realm.official } : {}) } }),
 		land_zone_set: (args) => realm.zoneSet?.(args) ?? { ok: true, land: args.land },
 	};
 	const ctx = {
@@ -82,6 +86,7 @@ async function pick(testid: string, value: string) {
 }
 
 afterEach(() => {
+	delete (window as any).h3;
 	unmount(page);
 	target.remove();
 	vi.unstubAllGlobals();
@@ -267,4 +272,69 @@ test('a reader who cannot read me still sees the zones and the licences, and is 
 	await settle();
 	expect(byTestId('parcel-zone')).toHaveLength(1);
 	expect(byTestId('planning-reason')).toHaveLength(1);
+});
+
+const licenceCalls = () => asked.filter(([op]) => op === 'license_list').length;
+const refresh = () => [...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Refresh')!;
+
+test('the licences are read when a parcel is opened, once, and again when the registry is refreshed', async () => {
+	await mountOn({ parcels: [parcel(1), parcel(2)], zones: [SEAFRONT], licences: [{ id: 'LIC-1', kind: 'building', holder: 'User:alice', status: 'active', expires_at: 0, land: 'L-2' }] });
+	expect(licenceCalls()).toBe(0); // the registry is on the screen without them
+
+	rowOf('L-1').click();
+	await settle();
+	expect(licenceCalls()).toBe(1);
+	rowOf('L-2').click();
+	await settle();
+	expect(licenceCalls()).toBe(1); // the one read serves every parcel
+	expect(byTestId('licence')).toHaveLength(1);
+
+	refresh().click();
+	await settle(200);
+	expect(licenceCalls()).toBe(2);
+	expect(byTestId('licence')).toHaveLength(1);
+});
+
+test('a parcel action does not read the licences again', async () => {
+	await mountOn({ parcels: [parcel(1)], zones: [SEAFRONT], permissions: ['realm.configure'] });
+	rowOf('L-1').click();
+	await settle();
+	expect(licenceCalls()).toBe(1);
+	target.querySelector<HTMLInputElement>('.zone-option input')!.click();
+	await settle();
+	[...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Save zones')!.click();
+	await settle();
+	expect(asked.filter(([op]) => op === 'land_zone_set')).toHaveLength(1);
+	expect(licenceCalls()).toBe(1);
+});
+
+test('a licence\'s expiry is in the realm\'s official time zone: the capital\'s, on a quarter', async () => {
+	const licences = [{ id: 'LIC-1', kind: 'building', holder: 'User:alice', status: 'active', expires_at: 1_893_456_000, land: 'L-1' }];
+	await mountOn({ parcels: [parcel(1)], licences, timezone: 'Europe/Madrid', official: 'Asia/Tokyo' });
+	rowOf('L-1').click();
+	await settle();
+	expect(byTestId('licence')[0].textContent).toContain('until 2030-01-01 09:00 Asia/Tokyo (UTC+09:00)');
+});
+
+test('a zone the parcels lie in is a planning zone when the realm does not say, though its id is the shape of a cell', async () => {
+	await mountOn({ parcels: [parcel(1, [HOME_CELL])], zones: [{ id: HOME_CELL, name: 'Heritage', kind: 'planning', population: 0 }, { id: '871f1d48bffffff', name: '', kind: 'residential', population: 1 }] });
+	expect([...select('zone-filter').options].map((o) => o.textContent?.trim())).toEqual(['All zones', 'Heritage', 'In no zone']);
+});
+
+test('h3-js, when it has loaded, decides which ids are home cells', async () => {
+	(window as any).h3 = { isValidCell: (id: string) => id === 'cell-0' };
+	await mountOn({ parcels: [parcel(1)], zones: [{ id: 'cell-0', name: 'A cell', kind: 'residential', population: 1 }, { id: HOME_CELL, name: 'Not a cell to h3-js', kind: 'planning', population: 0 }] });
+	expect([...select('zone-filter').options].map((o) => o.textContent?.trim())).toEqual(['All zones', 'Not a cell to h3-js', 'In no zone']);
+});
+
+test('zones beyond the pages the page reads are said to be left out', async () => {
+	await mountOn({ parcels: [parcel(1)], zones: [SEAFRONT], endlessZones: true });
+	await settle(200);
+	expect(asked.filter(([op]) => op === 'land_map')).toHaveLength(50);
+	expect(byTestId('zones-capped')[0].textContent).toBe('Only the first 25000 zones were read: the zone list may be missing some.');
+});
+
+test('a registry that reads all its zones says nothing of a cut', async () => {
+	await mountOn({ parcels: [parcel(1)], zones: [SEAFRONT] });
+	expect(byTestId('zones-capped')).toHaveLength(0);
 });

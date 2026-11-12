@@ -18,18 +18,25 @@ export function isHomeCell(id: string): boolean {
 /**
  * Whether a zone `land_map` lists is one the realm defines (`zone_define`) rather than a member's home cell: the realm says so
  * with `defined`. A realm whose `land_map` does not say yet (it lists both kinds with the same fields and no flag, and no
- * other read lists the defined zones alone) is read by the shape of the id, which is all there is to go by.
+ * other read lists the defined zones alone) is read from what is known: a zone some parcel lies in is defined (`land_zone_set`
+ * takes no other), and any other is a home cell when its id is an h3 index (``isValidCell`` of h3-js when it is loaded, else the
+ * shape of the id).
  */
-export function isDefinedZone(row: unknown): boolean {
+export function isDefinedZone(
+	row: unknown,
+	named: ReadonlySet<string> = new Set(),
+	isValidCell: (id: string) => boolean = isHomeCell,
+): boolean {
 	const { id, defined } = (row ?? {}) as { id?: unknown; defined?: unknown };
 	if (typeof defined === 'boolean') return defined;
-	return !isHomeCell(String(id ?? ''));
+	const zone = String(id ?? '');
+	return named.has(zone) || !isValidCell(zone);
 }
 
-/** The zones the realm defines among the zones `land_map` lists, by name. */
-export function planningZones(rows: unknown[]): Zone[] {
+/** The zones the realm defines among the zones `land_map` lists, by name (``named``: the zones the parcels lie in). */
+export function planningZones(rows: unknown[], named: ReadonlySet<string> = new Set(), isValidCell?: (id: string) => boolean): Zone[] {
 	return rows
-		.filter((row: any) => row?.id && isDefinedZone(row))
+		.filter((row: any) => row?.id && isDefinedZone(row, named, isValidCell))
 		.map((row: any) => ({ id: String(row.id), name: String(row.name ?? ''), kind: String(row.kind ?? '') }))
 		.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
 }

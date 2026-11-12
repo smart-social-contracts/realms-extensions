@@ -28,6 +28,18 @@ describe('isDefinedZone', () => {
 		assert.equal(isDefinedZone({ id: 'seafront', defined: 'yes' }), true);
 		assert.equal(isDefinedZone(null), true);
 	});
+
+	it('counts a zone some parcel lies in as defined when the realm does not say, whatever its id looks like', () => {
+		assert.equal(isDefinedZone({ id: HOME }, new Set([HOME])), true);
+		assert.equal(isDefinedZone({ id: HOME }, new Set(['seafront'])), false);
+		assert.equal(isDefinedZone({ id: HOME, defined: false }, new Set([HOME])), false); // the realm's word first
+	});
+
+	it('asks h3-js when it has loaded, instead of the shape of the id', () => {
+		const onlyCell0 = (id: string) => id === 'cell-0';
+		assert.equal(isDefinedZone({ id: 'cell-0' }, new Set(), onlyCell0), false);
+		assert.equal(isDefinedZone({ id: HOME }, new Set(), onlyCell0), true); // the shape of a cell, which h3-js does not take for one
+	});
 });
 
 describe('planningZones', () => {
@@ -42,6 +54,11 @@ describe('planningZones', () => {
 			{ id: HOME, name: 'Defined with an index for an id', kind: 'planning', defined: true },
 		];
 		assert.deepEqual(planningZones(rows), [{ id: HOME, name: 'Defined with an index for an id', kind: 'planning' }]);
+	});
+
+	it('lists a zone the parcels lie in, when the realm does not say and its id looks like a cell', () => {
+		const rows = [{ id: HOME, name: 'Defined with an index for an id', kind: 'planning' }, { id: '871f1d48bffffff', name: '', kind: 'residential' }];
+		assert.deepEqual(planningZones(rows, new Set([HOME])), [{ id: HOME, name: 'Defined with an index for an id', kind: 'planning' }]);
 	});
 
 	it('lists none for a realm that defines none', () => {

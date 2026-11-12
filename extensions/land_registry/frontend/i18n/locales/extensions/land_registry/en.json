@@ -21,5 +21,7 @@
   "licence_status_suspended": "Suspended",
   "licence_status_revoked": "Revoked",
   "licence_status_expired": "Expired",
-  "licence_until": "until {date}"
+  "licence_until": "until {date}",
+  "planning_zones_capped": "Only the first {count} zones were read: the zone list may be missing some.",
+  "licences_loading": "Reading the licences…"
 }
