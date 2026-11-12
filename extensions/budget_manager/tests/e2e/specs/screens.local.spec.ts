@@ -23,6 +23,7 @@ async function open(page: Page) {
 }
 
 test('the spending stages of each expense line, the totals of each fund and of the budget', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1800 }); // tall enough for the lines that are not in force, below the table
   const { budgets } = realmCall('budget_list');
   const adopted = budgets.filter((b: any) => b.kind === 'expense' && ['adopted', 'extended'].includes(b.status));
   const { ext, close } = await open(page);

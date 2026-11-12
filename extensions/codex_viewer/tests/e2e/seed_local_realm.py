@@ -49,7 +49,7 @@ class Realm:
         assert "Traceback" not in reply, reply
         return reply
 
-    def op(self, name, **args):
+    def op(self, name, /, **args):
         reply = json.loads(self.icp("run", f"({json.dumps(name)}, {json.dumps(json.dumps(args))})"))
         assert reply.get("ok", True) is not False, (name, reply)
         return reply
@@ -123,15 +123,21 @@ for transfer, days in %(due)r.items():  # the realm refuses a due date in the pa
 print(json.dumps({"ok": True}))
 '''
 
-CAPITAL_AND_SWEEPS = '''
+FEDERATION = '''
+import json
+from ggg import Quarter, Realm
+realm = Realm["1"]
+realm.is_quarter, realm.is_capital = True, True  # the capital of a federation, which alone sets sweep rules
+for cid, name, index in %(quarters)r:
+    Quarter(id=cid, name=name, index=index, status="active")
+print(json.dumps({"ok": True}))
+'''
+
+SWEEPS = '''
 import json
 from api import treasury
 from core import chain
-from ggg import Fund, Quarter, Realm, Sweep
-realm = Realm["1"]
-realm.is_quarter, realm.is_capital = True, True  # the capital of a federation
-for cid, name, index in %(quarters)r:
-    Quarter(id=cid, name=name, index=index, status="active")
+from ggg import Fund, Sweep
 to = {"owner": chain.self_id(), "subaccount": None}
 for key, quarter, fund, into, tokens, days_ago, block in %(sweeps)r:  # as quarter_sweep_report books what a quarter reports
     amount, at = tokens * 100, %(now)d - days_ago * %(day)d
@@ -188,11 +194,13 @@ def seed_budget_screens(realm):
     lines = {capital: {"actual": 120_500}, schools: {"status": "proposed"}}
     done = json.loads(realm.shell(LINES_AND_DUE_DATES % {"lines": lines, "due": {overdue: -9}, "now": now, "day": DAY}))
     assert done["ok"], done
+    done = json.loads(realm.shell(FEDERATION % {"quarters": [(NORTH, "North", 1), (SOUTH, "South", 2)]}))
+    assert done["ok"], done
     realm.op("treasury_configure", config={"sweep": [
         {"fund": "ROOT", "symbol": "REALM", "into": "ROADS", "keep": 100 * 100},
         {"fund": "WELFARE", "symbol": "REALM", "into": "WELFARE", "keep": 0}]})
-    done = json.loads(realm.shell(CAPITAL_AND_SWEEPS % {
-        "quarters": [(NORTH, "North", 1), (SOUTH, "South", 2)], "now": now, "day": DAY,
+    done = json.loads(realm.shell(SWEEPS % {
+        "now": now, "day": DAY,
         "sweeps": [(f"{NORTH}/SW-1", NORTH, "ROOT", "ROADS", 890, 11, 90113), (f"{SOUTH}/SW-1", SOUTH, "ROOT", "ROADS", 420, 10, 90210),
                    (f"{NORTH}/SW-2", NORTH, "ROOT", "ROADS", 310, 42, 85002)],
     }))
