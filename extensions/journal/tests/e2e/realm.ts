@@ -51,6 +51,17 @@ export function signedIssueOf(day: string, number: number, entries: any[] = [], 
   return { ...reply, issue: { ...reply.issue, status: 'signed', proof } };
 }
 
+/** What `journal_sign` answers once it has signed a day, or finds it signed: the proof `signedIssueOf` serves for the day. */
+export function signReplyOf(day: string, number: number, entries: any[] = [], over: Record<string, unknown> = {}) {
+  return { ok: true, day, status: 'signed', proof: signedIssueOf(day, number, entries).issue.proof, ...over };
+}
+
+/** `issueOf` for a closed day nobody has asked the realm to sign. */
+export function unsignedIssueOf(day: string, number: number, entries: any[] = [], realm = 'Agora') {
+  const reply = issueOf(day, number, entries, realm);
+  return { ...reply, issue: { ...reply.issue, status: 'unsigned' } };
+}
+
 /** A codex id as realms-gos writes it: `sha256:` and 64 hex digits. */
 export const CODEX_ID = 'sha256:4be1a2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f';
 const EARLIER_CODEX_ID = 'sha256:9c0de1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e';
@@ -112,7 +123,8 @@ export const PUBLISHED = {
 export interface Scenario {
   locale: string;
   realm: { name: string; logoUrl: string };
-  /** The replies by operation name; a function answers by the arguments. */
+  /** The replies by operation name. One with `byDay` answers by the day asked for; one with `sequence` answers each time
+   * with the next of its replies, the last again and again; one with `delayMs` answers that many milliseconds late. */
   replies: Record<string, any>;
 }
 
@@ -131,10 +143,20 @@ function page(scenario: Scenario): string {
   const store = (value) => ({ subscribe(run) { run(value); return () => {}; } });
   window.asked = [];
   window.printed = 0;
-  const answer = (name, args) => {
+  const turns = {};
+  const answer = async (name, args) => {
     window.asked.push([name, args]);
     const reply = scenario.replies[name];
-    return Promise.resolve(typeof reply === 'object' && reply.byDay ? (reply.byDay[args.day] ?? reply.byDay['']) : reply);
+    let value = typeof reply === 'object' && reply.byDay ? (reply.byDay[args.day] ?? reply.byDay['']) : reply;
+    // A list of replies is answered in turn, the last again and again; a reply with delayMs comes that late.
+    if (value && value.sequence) {
+      const key = name + ':' + (args.day ?? '');
+      const turn = turns[key] ?? 0;
+      turns[key] = turn + 1;
+      value = value.sequence[Math.min(turn, value.sequence.length - 1)];
+    }
+    if (value && value.delayMs) await new Promise((done) => setTimeout(done, value.delayMs));
+    return value;
   };
   mount(document.getElementById('root'), {
     read: answer,

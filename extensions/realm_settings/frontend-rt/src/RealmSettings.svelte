@@ -5,7 +5,9 @@
 	import QuartersPanel from './QuartersPanel.svelte';
 	import TrustPolicyPanel from './TrustPolicyPanel.svelte';
 	import DepartmentTablePanel from './DepartmentTablePanel.svelte';
+	import JournalSigningPanel from './JournalSigningPanel.svelte';
 	import TimeZonePanel from './TimeZonePanel.svelte';
+	import { journalSigningOf, type JournalSigning } from './journalSigning';
 	import { loadExtensionI18n } from './lib/i18n';
 	import { UTC, matchZone, timeZoneChoices } from '../../../_shared/frontend/realm-time';
 	import { loadRealmRow, opCaller, proposalOf, refusalText, refusedPermission } from './ops';
@@ -50,6 +52,7 @@
 	let realmSettingsBackgroundUrl = $state('');
 	let realmSettingsPrimaryColor = $state('#3b82f6');
 	let realmSettingsTimezone = $state(UTC);
+	let realmSettingsJournalSigning = $state<JournalSigning>('on_request');
 	let realmSettingsOpenRegistration = $state(false);
 	let realmSettingsAiAssistantEnabled = $state(true);
 	let realmSettingsFileRegistryId = $state('');
@@ -147,7 +150,15 @@
 	const SETTING_GROUPS: { op: string; keys: readonly string[] }[] = [
 		{
 			op: 'realm_configure',
-			keys: ['name', 'manifesto', 'welcome_message', 'timezone', 'open_registration', 'ai_assistant_enabled'],
+			keys: [
+				'name',
+				'manifesto',
+				'welcome_message',
+				'timezone',
+				'journal_signing',
+				'open_registration',
+				'ai_assistant_enabled',
+			],
 		},
 		{ op: 'realm_configure_branding', keys: ['logo_url', 'background_image_url', 'primary_color'] },
 		{
@@ -165,6 +176,7 @@
 			welcome_message: realmSettingsWelcome,
 			// The listed zone a person typed, whatever its case; anything else goes as typed, for the realm to refuse.
 			timezone: matchZone(zoneChoices, realmSettingsTimezone) ?? realmSettingsTimezone.trim(),
+			journal_signing: realmSettingsJournalSigning,
 			logo_url: realmSettingsLogoUrl,
 			background_image_url: realmSettingsBackgroundUrl,
 			primary_color: realmSettingsPrimaryColor,
@@ -262,6 +274,7 @@
 			realmSettingsManifesto = realm.manifesto || '';
 			realmSettingsWelcome = realm.welcome_message || '';
 			realmSettingsTimezone = realm.timezone || UTC;
+			realmSettingsJournalSigning = journalSigningOf(realm.journal_signing);
 			realmSettingsLogoUrl = realm.logo_url || '';
 			realmSettingsBackgroundUrl = realm.background_image_url || '';
 			realmSettingsPrimaryColor =
@@ -733,6 +746,12 @@
 				bind:value={realmSettingsTimezone}
 				saved={String(savedSnapshot?.timezone ?? UTC)}
 				choices={zoneChoices}
+				direct={governanceAppliesDirectly}
+				policy={governancePolicyLabel}
+				governedBy={governanceGovernedBy}
+			/>
+			<JournalSigningPanel
+				bind:value={realmSettingsJournalSigning}
 				direct={governanceAppliesDirectly}
 				policy={governancePolicyLabel}
 				governedBy={governanceGovernedBy}

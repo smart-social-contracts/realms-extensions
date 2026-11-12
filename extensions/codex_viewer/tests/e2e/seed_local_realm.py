@@ -16,6 +16,16 @@ It leaves: two layered codices of València's example legislation (the later rep
 chapter of the town's own), on Madrid time; an IT admin team (department `IT`, seat `it.seat`, which a test fills);
 a sync source, Spain, that has published a release the realm runs behind; the check schedule; a failing method of the
 codex, which notifies the team; and an install job that an upgrade paused.
+
+For the data explorer's organisations (`seed_organisations_of_each_kind`): one organisation of each kind the realm accepts (GGG
+I-ORG-9), and one registered without a kind, as before kinds existed.
+
+For the voting page's tags (`seed_tagged_proposals`): six proposals filed with the tags of a town's areas, one without tags
+and one with the most a proposal can carry, 16; with `--bulk-proposals N`, N closed proposals more, two tags each, the
+last also tagged "rare-last" (`seed_bulk_proposals`).
+
+For the land registry's planning (`seed_planning`): two planning zones the realm defines (Seafront, Old town), an organisation that
+owns four parcels, three of them in a zone or two, and two licences that name one of the parcels (one active until 2030, one applied for).
 """
 
 import argparse
@@ -52,7 +62,7 @@ class Realm:
         assert "Traceback" not in reply, reply
         return reply
 
-    def op(self, name, **args):
+    def op(self, name, /, **args):
         reply = json.loads(self.icp("run", f"({json.dumps(name)}, {json.dumps(json.dumps(args))})"))
         assert reply.get("ok", True) is not False, (name, reply)
         return reply
@@ -299,6 +309,215 @@ def seed_procurement(realm, home, principals_file):
     seed_procurement_contracts(realm, prelude)
 
 
+# Organisations of each kind, for the data explorer's kind column and filter (ggg I-ORG-9), and one from before kinds existed.
+ORGANISATIONS = [
+    ("Clinic B", "A private clinic", "company"),
+    ("Harbour Party", "The party of the harbour", "party"),
+    ("Dockers", "The dockers' union", "union"),
+    ("Friends of the Park", "A neighbours' association", "association"),
+    ("Cooperativa del Mar", "A fishing cooperative, none of the four", "other"),
+]
+# A realm cannot reach a row without a kind (a new organisation is `other`, an older row is read as `other`): this one is written by hand, to see
+# what the page does when the realm states none.
+WITHOUT_KIND = """
+from ggg import Organization
+Organization(id="Old Registry", description="Registered before kinds existed", kind="")
+"""
+
+
+def seed_organisations_of_each_kind(realm):
+    for name, description, kind in ORGANISATIONS:
+        realm.op("organization_register", organization=name, description=description, kind=kind)
+    realm.shell(WITHOUT_KIND)
+
+
+# Proposals of the realm's own areas, for the voting page's tags (ggg I-GOV-15): a few filed as a member files them, and, with
+# --bulk-proposals, as many closed ones as a town's year holds (the JGL files ~3,600) to measure what a tag filter costs.
+TAGGED_PROPOSALS = [
+    ("Bike lane on Main Street", ["mobility", "district-3"]),
+    ("Plant 40 trees on Avenida del Puerto", ["parks", "district-3"]),
+    ("Minutes of the October council", ["minutes"]),
+    ("Close Carrer Major to traffic on Sundays", ["mobility"]),
+    ("A proposal filed without tags", []),
+    ("Every area at once", [f"area {i}" for i in range(1, 17)]),  # the most a proposal can carry
+]
+AREAS = [f"district-{i}" for i in range(1, 13)]
+KINDS = ["mobility", "parks", "minutes", "licences", "budget", "culture"]
+
+BULK_PROPOSALS = '''
+import json
+from core import chain
+from core.db import next_id
+from ggg import Proposal
+areas, kinds, first, last, total = %(areas)r, %(kinds)r, %(first)d, %(last)d, %(total)d
+now = chain.now()
+for n in range(first, last + 1):
+    tags = [areas[n %% len(areas)], kinds[n %% len(kinds)]]
+    if n == total:
+        tags.append("rare-last")  # carried by the last proposal only: a search for it reads every row before it
+    Proposal(id=next_id(Proposal, "P"), title="Proposal %%d of the year" %% n, description="Filed by the town hall",
+             proposer="town-hall", status="executed", opens_at=now - (total - n) * 3600, deadline=now - (total - n) * 3600 + 600,
+             tags=tags, tally={"yes": 5, "no": 1, "abstain": 0, "eligible": 9})
+print(json.dumps(Proposal.max_id()))
+'''
+
+
+def seed_tagged_proposals(realm):
+    """The proposals the voting page's tags screens show: tagged by their proposers, one untagged, one with 16 tags."""
+    for title, tags in TAGGED_PROPOSALS:
+        realm.op("proposal_create", title=title, description=f"{title}: filed by the seed", **({"tags": tags} if tags else {}))
+
+
+def seed_bulk_proposals(realm, total, batch=100):
+    """``total`` closed proposals, two tags each from AREAS and KINDS, the last also tagged "rare-last"."""
+    for first in range(1, total + 1, batch):
+        code = BULK_PROPOSALS % {"areas": AREAS, "kinds": KINDS, "first": first, "last": min(first + batch - 1, total), "total": total}
+        realm.shell(code)
+
+
+# Planning zones and parcels for the land registry (ggg domain `planning`: Land.zones, set with land_zone_set; License.land, I-LIC-4).
+PLANNING_ZONES = [("seafront", "Seafront", "planning"), ("old-town", "Old town", "heritage")]
+PARCELS = [  # (x, kind, the zones it lies in)
+    (0, "residential", ["seafront"]),
+    (3, "commercial", ["seafront", "old-town"]),
+    (6, "agricultural", []),
+    (9, "residential", ["old-town"]),
+]
+LICENCE_FACTS = """
+import json
+from core import chain
+from ggg import License
+lic = License[%(licence)r]
+lic.status, lic.issued_at, lic.expires_at = "active", chain.now(), %(until)d
+print(json.dumps(lic.status))
+"""
+
+
+def seed_planning(realm):
+    for zone, name, kind in PLANNING_ZONES:
+        realm.op("zone_define", zone=zone, name=name, kind=kind)
+    owner = "Seafront Estates"
+    realm.op("organization_register", organization=owner, description="Owns the parcels of the seafront", kind="company")
+    parcels = []
+    for x, kind, zones in PARCELS:
+        land = realm.op("land_register", x=x, y=0, width=3, height=2, kind=kind, owner=f"Organization:{owner}")["land"]
+        if zones:
+            realm.op("land_zone_set", land=land, zones=zones)
+        parcels.append(land)
+    # two licences name the second parcel (License.land): the building one is issued, until 1 January 2030; the other is applied for
+    building = realm.op("license_apply", kind="building", holder=f"Organization:{owner}", land=parcels[1])["license"]
+    realm.op("license_apply", kind="demolition", holder=f"Organization:{owner}", land=parcels[1])
+    realm.shell(LICENCE_FACTS % {"licence": building, "until": 1_893_456_000})
+
+
+# --- budget_manager 2.2.0: spending stages, scheduled payments, quarter sweeps (--budget-screens) -------------------
+
+HOLDINGS = '''
+import json
+from ggg import Fund
+for fund, tokens in %(balances)r.items():  # a scheduled payment is owed from what its fund holds
+    Fund[fund].balances = {"REALM": tokens * 100}
+print(json.dumps({"ok": True}))
+'''
+
+LINES_AND_DUE_DATES = '''
+import json
+from ggg import Budget, Transfer
+for line, stage in %(lines)r.items():  # the charged amount of ggg's example set directly (it replaces what the payments booked)
+    Budget[line].status = stage.get("status", Budget[line].status)
+    if "actual" in stage:
+        Budget[line].actual = stage["actual"] * 100
+for transfer, days in %(due)r.items():  # the realm refuses a due date in the past: an overdue payment is made later
+    Transfer[transfer].due_at = %(now)d + days * %(day)d
+print(json.dumps({"ok": True}))
+'''
+
+FEDERATION = '''
+import json
+from ggg import Quarter, Realm
+realm = Realm["1"]
+realm.is_quarter, realm.is_capital = True, True  # the capital of a federation, which alone sets sweep rules
+for cid, name, index in %(quarters)r:
+    Quarter(id=cid, name=name, index=index, status="active")
+print(json.dumps({"ok": True}))
+'''
+
+SWEEPS = '''
+import json
+from api import treasury
+from core import chain
+from ggg import Fund, Sweep
+to = {"owner": chain.self_id(), "subaccount": None}
+for key, quarter, fund, into, tokens, days_ago, block in %(sweeps)r:  # as quarter_sweep_report books what a quarter reports
+    amount, at = tokens * 100, %(now)d - days_ago * %(day)d
+    booked = Sweep(id=key, quarter=quarter, rule=f"{fund}:REALM", status="booked", reported_at=at + 300, fund=fund,
+                   symbol="REALM", into=into, to=to, epoch=at - at %% (30 * %(day)d), amount=amount, fee=10,
+                   created_at=at, block=str(block))
+    lines = [("asset", "cash", amount, 0, Fund[into]), ("equity", "sweep", 0, amount, Fund[into])]
+    treasury.post(treasury.booking_period(), lines, "REALM", f"sweep {booked.id} (block {block})", sweep=booked)
+print(json.dumps({"ok": True}))
+'''
+
+BUDGET_FUNDS = {"ROOT": "Root", "ROADS": "Roads", "WELFARE": "Welfare"}
+NORTH = "ryjl3-tyaaa-aaaaa-aaaba-cai"
+SOUTH = "renrk-eyaaa-aaaaa-aaada-cai"
+
+
+def seed_budget_screens(realm):
+    """What the screens of budget_manager 2.2.0 show (`budget_manager/tests/e2e/specs/screens.local.spec.ts`): REALM, a
+    token of two decimals, and three funds; FY2026 with Roads' capital and upkeep, a toll revenue line and Welfare's care,
+    stages on the capital line (reserved 40,000, committed 90,000 of which the 12,000 payment below draws on, and 120,500
+    charged: the figure of ggg's example, set directly, since this realm pays nothing through a ledger), a drafted and a
+    proposed line that are not in force; payments owed (two fall due this month, one of them overdue, one next month) and one cancelled
+    unpaid; and a capital with two quarters, its sweep rules and the three sweeps they reported, booked."""
+    now = int(realm.shell("from core import chain\nprint(chain.now())").strip())
+    realm.op("token_register", symbol="REALM", ledger="aaaaa-aa", decimals=2, fee=10)
+    realm.op("realm_configure_tokens", accounting_currency="REALM")
+    for fund, name in BUDGET_FUNDS.items():
+        realm.op("fund_create", fund=fund, name=name)
+    assert json.loads(realm.shell(HOLDINGS % {"balances": {"ROADS": 500_000, "WELFARE": 200_000}}))["ok"]
+    realm.op("period_open", period="FY2026", starts_at=now - 60 * DAY, ends_at=now + 300 * DAY)
+
+    def line(fund, category, kind, tokens):
+        return realm.op("budget_draft", fund=fund, period="FY2026", category=category, kind=kind, planned=tokens * 100)["budget"]
+
+    capital, upkeep = line("ROADS", "capital", "expense", 300_000), line("ROADS", "upkeep", "expense", 50_000)
+    line("ROADS", "tolls", "revenue", 80_000)
+    care = line("WELFARE", "care", "expense", 120_000)
+    realm.op("budget_propose", period="FY2026")  # the root approves alone: the lines are adopted at once
+    lighting = line("ROADS", "street_lighting", "expense", 20_000)  # drafted, not proposed
+    schools = line("WELFARE", "schools", "expense", 75_000)  # proposed, as when a vote has yet to decide it
+
+    realm.op("budget_stage", budget=capital, reserve=40_000 * 100, commit=90_000 * 100)
+
+    def payment(fund, to, tokens, category, days, **more):
+        return realm.op("transfer_create", fund=fund, to=to, amount=tokens * 100, category=category,
+                        due_at=now + days * DAY, **more)["transfer"]
+
+    payment("ROADS", "buildco", 12_000, "capital", 17, committed=True)  # falls due this month, from committed money
+    overdue = payment("ROADS", "buildco", 4_500, "upkeep", 1)
+    payment("WELFARE", "carehome", 8_000, "care", 33)
+    revoked = payment("ROADS", "buildco", 5_000, "upkeep", 20)
+    realm.op("transfer_revert", transfer=revoked)  # cancelled, unpaid
+
+    lines = {capital: {"actual": 120_500}, schools: {"status": "proposed"}}
+    done = json.loads(realm.shell(LINES_AND_DUE_DATES % {"lines": lines, "due": {overdue: -9}, "now": now, "day": DAY}))
+    assert done["ok"], done
+    done = json.loads(realm.shell(FEDERATION % {"quarters": [(NORTH, "North", 1), (SOUTH, "South", 2)]}))
+    assert done["ok"], done
+    realm.op("treasury_configure", config={"sweep": [
+        {"fund": "ROOT", "symbol": "REALM", "into": "ROADS", "keep": 100 * 100},
+        {"fund": "WELFARE", "symbol": "REALM", "into": "WELFARE", "keep": 0}]})
+    done = json.loads(realm.shell(SWEEPS % {
+        "now": now, "day": DAY,
+        "sweeps": [(f"{NORTH}/SW-1", NORTH, "ROOT", "ROADS", 890, 11, 90113), (f"{SOUTH}/SW-1", SOUTH, "ROOT", "ROADS", 420, 10, 90210),
+                   (f"{NORTH}/SW-2", NORTH, "ROOT", "ROADS", 310, 42, 85002)],
+    }))
+    assert done["ok"], done
+    print(json.dumps({"budget_screens": {"capital": capital, "upkeep": upkeep, "care": care, "lighting": lighting,
+                                         "schools": schools}}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--network", required=True, choices=["local"], help="only a local network is accepted")
@@ -308,6 +527,9 @@ def main():
     parser.add_argument("--fixture", type=Path, help="tests/fixtures/legislation/valencia of realms-gos (not with --only)")
     parser.add_argument("--only", choices=["procurement"], help="seed only what one extension's screens show")
     parser.add_argument("--principals", type=Path, help="config/deterministic-test-identity-principals.json of realms-gos (--only)")
+    parser.add_argument("--bulk-proposals", type=int, default=0, help="also file this many closed, tagged proposals (voting tags)")
+    parser.add_argument("--budget-screens", action="store_true", help="also seed what budget_manager 2.2.0 shows (the budget, "
+                        "its payments and the sweeps): for a realm of its own, since it makes the realm a capital")
     args = parser.parse_args()
     realm = Realm(args.network, args.identity, args.home, args.backend)
     if args.only == "procurement":
@@ -335,6 +557,8 @@ def main():
     # A realm in setup took a legacy codex; only one kind runs at a time.
     realm.shell("from ggg import Codex\nfor c in Codex.instances():\n    c.status = 'inactive'")
     realm.op("realm_configure", timezone="Europe/Madrid")
+    seed_organisations_of_each_kind(realm)
+    seed_planning(realm)
     older = install([(OWN, "tax")], "", 5 * DAY, "P-3")
     newer = install([], older["codex"], 2 * DAY, "P-12")
     realm.op("department_create", department="IT")
@@ -342,7 +566,12 @@ def main():
     realm.op("it_team_set", department="IT")
     alert_links = json.loads(realm.shell(CHECKS % {"spain": SPAIN, "day": DAY}))
     assert alert_links == ["/extensions/codex_viewer"], alert_links  # the team's alert links to the codex page
+    seed_tagged_proposals(realm)
+    if args.bulk_proposals:
+        seed_bulk_proposals(realm, args.bulk_proposals)
     print(json.dumps({"older": older["codex"], "newer": newer["codex"]}))
+    if args.budget_screens:
+        seed_budget_screens(realm)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@
 	import { releaseChangeOf } from './legislationChange';
 	import LinkPicker from './LinkPicker.svelte';
 	import ProposalLinks from './ProposalLinks.svelte';
+	import TagPicker from './TagPicker.svelte';
 	import {
 		isNarrowViewport,
 		persistSessionFlag,
@@ -22,6 +23,7 @@
 	} from '../../../_shared/frontend/realm-time';
 	import { loadExtensionI18n, t } from './lib/i18n';
 	import { displayId, type Link, type Replaceable } from './links';
+	import { MAX_TAGS, knownTags, searchTagged, tagsOf } from './tags';
 	import {
 		VOTES_PAGE,
 		approvalBar,
@@ -162,10 +164,16 @@
 	let listLoadingMore = $state(false);
 	let listHasMore = $state(false);
 	let listNext: number | null = $state(null);
+	// With a tag filter the realm reads rows and keeps the tagged ones: how many it has read through for the list, and
+	// whether the last search stopped at its limit with less than a page found.
+	let listSearched = $state(0);
+	let listCapped = $state(false);
 	let listUnavailable = $state(false);
 	let orgFilter = $state('');
 	let statusFilter = $state('');
 	let typeFilter = $state('');
+	let tagFilter: string[] = $state([]);
+	let filtering = $derived(!!(orgFilter || statusFilter || typeFilter || tagFilter.length));
 	let sortBy = $state('newest');
 	// How each vote is drawn; the member's own is filled.
 	const VOTE_CHOICES = [
@@ -231,6 +239,7 @@
 	let formVersion = $state('');
 	let formEffectiveAt = $state('');
 	let formLinks: Link[] = $state([]);
+	let formTags: string[] = $state([]);
 	// The realm's official time zone: "takes effect at" is entered and shown in it.
 	let realmZone = $state(UTC);
 	let withdrawnProposals: Replaceable[] = $state([]);
@@ -388,6 +397,7 @@
 			// How the release an install proposal names stands against the one the realm runs (realms-gos §11.6).
 			release_change: releaseChangeOf(detail?.release_change),
 			links: Array.isArray(p.links) ? p.links : [],
+			tags: tagsOf(p),
 			replaced_by: String(p.replaced_by ?? ''),
 			my_vote: myChoice,
 			enriched: !!detail,
@@ -486,6 +496,7 @@
 		formVersion = '';
 		formEffectiveAt = '';
 		formLinks = [];
+		formTags = [];
 	}
 
 	function myPrincipal(): string {
@@ -543,6 +554,7 @@
 		if (orgScope) args.department = orgScope;
 
 		if (formLinks.length) args.links = formLinks;
+		if (formTags.length) args.tags = formTags;
 		if (formProposalType === 'poll') return args;
 
 		if (effectiveAt) {
@@ -622,10 +634,23 @@
 		return proposal;
 	}
 
-	async function fetchProposalsPage(from: number | null) {
+	// Each load of the list starts a generation. A reply that comes back after a newer load began (the filter changed, the list was
+	// refreshed) belongs to a list that is gone: it is dropped, and a tag search for it stops making calls.
+	let listGeneration = 0;
+
+	async function fetchProposalsPage(from: number | null, generation: number) {
 		const args: Record<string, any> = { from: from ?? 1, count: LIST_FETCH_SIZE };
 		if (statusFilter) args.status = statusFilter;
-		const res = await read('proposal_list', args);
+		// The realm keeps only the tagged rows of each page it reads, so a tag filter is a search over several pages.
+		const res = tagFilter.length
+			? await searchTagged(read, {
+					tags: tagFilter,
+					status: statusFilter,
+					from: args.from,
+					want: LIST_FETCH_SIZE,
+					stale: () => generation !== listGeneration,
+				})
+			: await read('proposal_list', args);
 		if (!res) return null;
 		const rows: any[] = Array.isArray(res.proposals) ? res.proposals : [];
 		const batch = await Promise.all(
@@ -636,6 +661,8 @@
 			proposals: batch.filter(Boolean),
 			hasMore: res.next != null && Number.isFinite(next),
 			next: res.next != null && Number.isFinite(next) ? next : null,
+			searched: Number(res.searched) || 0,
+			capped: !!res.capped,
 		};
 	}
 
@@ -664,6 +691,8 @@
 	async function loadProposals(opts: { reset?: boolean; background?: boolean } = {}) {
 		const reset = opts.reset !== false;
 		const background = opts.background === true;
+		const generation = ++listGeneration;
+		listLoadingMore = false;
 		if (reset && !background) {
 			listLoading = true;
 			listNext = null;
@@ -671,16 +700,17 @@
 		error = '';
 		try {
 			if (!rootDepartment) await loadOrgOptions();
-			const page = await fetchProposalsPage(1);
+			const page = await fetchProposalsPage(1, generation);
+			if (generation !== listGeneration) return;
 			listUnavailable = !page;
 			proposals = page?.proposals ?? [];
 			currentPage = 1;
 			listHasMore = page?.hasMore ?? false;
 			listNext = page?.next ?? null;
+			listSearched = page?.searched ?? 0;
+			listCapped = page?.capped ?? false;
 		} finally {
-			if (!background) {
-				listLoading = false;
-			}
+			if (generation === listGeneration) listLoading = false;
 		}
 	}
 
@@ -712,12 +742,21 @@
 		loadProposals();
 	}
 
+	/** A tag was clicked: the list of the proposals that carry it, from wherever the tag is shown. */
+	function showTagged(tag: string) {
+		tagFilter = [tag];
+		if (view === 'detail') goBackToList();
+		onFilterChange();
+	}
+
 	async function loadMoreProposals() {
 		if (listLoadingMore || !listHasMore) return;
 		listLoadingMore = true;
 		error = '';
+		const generation = listGeneration;
 		try {
-			const page = await fetchProposalsPage(listNext);
+			const page = await fetchProposalsPage(listNext, generation);
+			if (generation !== listGeneration) return;
 			if (!page) {
 				listHasMore = false;
 				return;
@@ -725,8 +764,10 @@
 			proposals = mergeProposals(proposals, page.proposals);
 			listHasMore = page.hasMore;
 			listNext = page.next;
+			listSearched += page.searched;
+			listCapped = page.capped;
 		} finally {
-			listLoadingMore = false;
+			if (generation === listGeneration) listLoadingMore = false;
 		}
 	}
 
@@ -1295,6 +1336,20 @@
 						</span>
 					{/if}
 				</div>
+				{#if selectedProposal.tags.length}
+					<div class="flex flex-wrap items-center gap-1.5 mb-2" data-testid="proposal-tags">
+						<span class="text-sm text-gray-500">{t('tags_title')}:</span>
+						{#each selectedProposal.tags as tag (tag)}
+							<button
+								type="button"
+								onclick={() => showTagged(tag)}
+								class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+								title={t('tags_show_tagged', { tag })}
+								data-testid="detail-tag"
+							>{tag}</button>
+						{/each}
+					</div>
+				{/if}
 				<div class="flex flex-wrap gap-4 text-sm text-gray-500">
 					<span>ID: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{proposalDisplayId(selectedProposal)}</code></span>
 					<span>Proposer: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{truncatePrincipal(selectedProposal.proposer)}</code></span>
@@ -1769,6 +1824,8 @@
 					disabled={submitting}
 				/>
 
+				<TagPicker bind:tags={formTags} suggestions={knownTags(proposals)} disabled={submitting} />
+
 				<div class="flex justify-end gap-3 pt-2">
 					<button
 						type="button"
@@ -1864,7 +1921,7 @@
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
 					<span class="chrome-label">Filters</span>
 				</button>
-				{#if orgFilter || statusFilter || typeFilter}
+				{#if filtering}
 					<span class="text-xs text-gray-400">Filtered</span>
 				{/if}
 			</div>
@@ -1912,9 +1969,10 @@
 						<option value={opt.value}>{opt.label}</option>
 					{/each}
 				</select>
-				{#if orgFilter || statusFilter || typeFilter}
+				<TagPicker bind:tags={tagFilter} compact max={MAX_TAGS} suggestions={knownTags(proposals)} onchange={onFilterChange} />
+				{#if filtering}
 					<button
-						onclick={() => { orgFilter = ''; statusFilter = ''; typeFilter = ''; onFilterChange(); }}
+						onclick={() => { orgFilter = ''; statusFilter = ''; typeFilter = ''; tagFilter = []; onFilterChange(); }}
 						class="text-xs text-indigo-600 hover:text-indigo-800"
 					>
 						Clear filters
@@ -1935,7 +1993,17 @@
 					{#if listUnavailable}
 						<p class="text-gray-500 text-sm">Proposals are not available to you right now.</p>
 						<p class="text-gray-400 text-xs mt-1">Try refreshing in a moment.</p>
-					{:else if orgFilter || statusFilter || typeFilter}
+					{:else if listCapped && proposals.length === 0}
+						<p class="text-gray-500 text-sm" data-testid="tags-searched">{t('tags_none_searched', { count: listSearched })}</p>
+						<button
+							onclick={() => loadMoreProposals()}
+							disabled={listLoadingMore}
+							class="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+							data-testid="tags-search-further"
+						>
+							{t('tags_search_further')}
+						</button>
+					{:else if filtering}
 						<p class="text-gray-500 text-sm">{t('no_proposals_filtered')}</p>
 						<p class="text-gray-400 text-xs mt-1">Try clearing the filters.</p>
 					{:else}
@@ -1968,6 +2036,15 @@
 												{proposal.org_scope}
 											</span>
 										{/if}
+										{#each proposal.tags as tag (tag)}
+											<button
+												type="button"
+												onclick={() => showTagged(tag)}
+												class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+												title={t('tags_show_tagged', { tag })}
+												data-testid="card-tag"
+											>{tag}</button>
+										{/each}
 									</div>
 								</div>
 								<button
@@ -2048,7 +2125,10 @@
 				{/if}
 
 				{#if listHasMore}
-					<div class="flex justify-center px-5 py-4 border-t border-gray-200">
+					<div class="flex flex-col items-center gap-2 px-5 py-4 border-t border-gray-200">
+						{#if listCapped}
+							<p class="text-xs text-gray-500" data-testid="tags-searched">{t('tags_searched', { count: listSearched })}</p>
+						{/if}
 						<button
 							onclick={() => loadMoreProposals()}
 							disabled={listLoadingMore}
@@ -2057,6 +2137,8 @@
 							{#if listLoadingMore}
 								<div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
 								Loading more…
+							{:else if listCapped}
+								{t('tags_search_further')}
 							{:else}
 								Load more proposals
 							{/if}

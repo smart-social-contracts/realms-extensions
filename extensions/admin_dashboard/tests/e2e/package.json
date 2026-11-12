@@ -5,6 +5,8 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:canned": "playwright test -c playwright.canned.config.ts",
+    "test:local": "playwright test -c playwright.local.config.ts",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug",
     "test:ui": "playwright test --ui",

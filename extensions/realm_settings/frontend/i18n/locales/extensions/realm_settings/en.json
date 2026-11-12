@@ -31,5 +31,14 @@
   "timezone_now": "Official time now: {time}",
   "timezone_preview": "In {zone} it is now {time}.",
   "timezone_applies_now": "A change applies as soon as you save.",
-  "timezone_needs_vote": "A change is governed by {department} (policy {policy}): saving files a proposal, and the zone changes once it is accepted."
+  "timezone_needs_vote": "A change is governed by {department} (policy {policy}): saving files a proposal, and the zone changes once it is accepted.",
+  "section_journal_signing": "Official Journal signatures",
+  "section_journal_signing_desc": "The realm's canister signs an issue of its official journal when someone asks it to, once, and keeps the signature. Each signature costs the realm cycles (about 26 billion on the production network); the realm can also sign every issue as its day closes.",
+  "journal_signing": "When issues are signed",
+  "journal_signing_on_request": "When someone asks (default)",
+  "journal_signing_daily": "Every day, as its day closes",
+  "journal_signing_on_request_note": "Costs nothing until someone asks, and at most one signature a day.",
+  "journal_signing_daily_note": "One signature a day: about 9.5 trillion cycles a year. Switching to it signs, once, every day made since the last signed one: about 12 signatures (0.3 trillion cycles) for a year without any.",
+  "journal_signing_applies_now": "A change applies as soon as you save.",
+  "journal_signing_needs_vote": "A change is governed by {department} (policy {policy}): saving files a proposal, and it applies once it is accepted."
 }

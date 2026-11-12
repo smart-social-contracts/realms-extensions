@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --experimental-strip-types --test src/route.test.ts src/entries.test.ts src/proof.test.ts src/sheet.test.ts"
+    "test": "node --experimental-strip-types --test src/route.test.ts src/entries.test.ts src/proof.test.ts src/sheet.test.ts src/sign.test.ts"
   },
   "dependencies": {
     "qrcode-generator": "^2.0.4"

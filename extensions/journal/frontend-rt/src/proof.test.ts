@@ -28,6 +28,13 @@ test('a proof is the issue\'s own when its canister, its day and its entries are
 	assert.equal(signedOf(issue, CANISTER), null); // no proof
 });
 
+test('a document the realm made (made_at) and one an earlier release signed as it made it (signed_at) are both the issue\'s own', () => {
+	const earlier = { made_at: undefined, signed_at: 1_790_000_000 };
+	assert.ok(signedOf(signed(issue), CANISTER));
+	assert.ok(signedOf(signed(issue, {}, earlier), CANISTER));
+	assert.ok(!('signed_at' in JSON.parse(canonicalOf(issue))) && 'made_at' in JSON.parse(canonicalOf(issue)));
+});
+
 test('a proof of another canister, another day, another number or other entries is not the issue\'s', () => {
 	assert.equal(signedOf(signed(issue, {}, { body: { number: 4, timezone: 'UTC', entries: [entry] } }), CANISTER), null);
 	assert.equal(signedOf(signed(issue), 'aaaaa-aa'), null);

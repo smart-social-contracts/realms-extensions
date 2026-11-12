@@ -9,12 +9,18 @@ const LOCALES = join(ROOT, 'frontend', 'i18n', 'locales', 'extensions', 'voting'
 
 export interface Scenario {
   locale: string;
-  /** The replies by operation name, or by the arguments of the call: `(args) => reply`. */
+  /**
+   * The replies by operation name, or by the arguments of the call: `(args, data) => reply`. A function is sent to the
+   * page as its source and run there, so it sees only its arguments and `data`, nothing of the spec around it.
+   */
   replies: Record<string, any>;
+  /** What the function replies read, such as the proposals the realm holds. */
+  data?: unknown;
 }
 
 function embedded(scenario: Scenario): string {
-  return JSON.stringify(scenario).replace(/</g, '\\u003c');
+  const source = (_key: string, value: unknown) => (typeof value === 'function' ? { __function: value.toString() } : value);
+  return JSON.stringify(scenario, source).replace(/</g, '\\u003c');
 }
 
 /** A page that plays the realm around the bundle: `ctx` answers from the scenario and records what it was asked. */
@@ -30,7 +36,8 @@ function page(scenario: Scenario): string {
   const answer = (name, args) => {
     window.asked.push([name, args]);
     const reply = scenario.replies[name];
-    return Promise.resolve(reply === undefined ? { ok: false, error: name + ' is not open to you' } : reply);
+    if (reply === undefined) return Promise.resolve({ ok: false, error: name + ' is not open to you' });
+    return Promise.resolve(reply && reply.__function ? (0, eval)('(' + reply.__function + ')')(args, scenario.data) : reply);
   };
   mount(document.getElementById('root'), {
     read: answer,

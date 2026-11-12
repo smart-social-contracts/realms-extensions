@@ -189,8 +189,8 @@ test('the signature of an empty day is shown too', () => {
 	assert.doesNotMatch(slot(sheet(signed(empty))), /^<section[^>]* hidden/);
 });
 
-test('the day\'s open issue says it is provisional, and a closed one not yet signed says so, with no signature box', () => {
-	for (const [status, text] of [['provisional', /Provisional issue: the realm signs it once its day has closed\./], ['unsigned', /Not signed yet: the realm signs each issue/]] as const) {
+test('the day\'s open issue says it is provisional, and a closed one not yet signed says it is signed when asked, with no signature box', () => {
+	for (const [status, text] of [['provisional', /Provisional issue: it can be signed once its day has closed\./], ['unsigned', /Not signed yet: the realm signs an issue when someone asks for its signature\./]] as const) {
 		const html = sheet({ ...ONE, status });
 		assert.match(html, text);
 		assert.match(slot(html), /^<section[^>]* hidden/);
@@ -297,7 +297,8 @@ test('a signed sheet in any language has no text of another and no placeholder l
 		}
 		assert.ok(sheet({ ...signed(ONE), entries: [] }, ISSUER, locale).includes(escapeHtml(words.signature_mismatch)), `${locale}: mismatch`);
 		if (locale !== 'en') {
-			for (const key of ['signature_how', 'signature_batch_root', 'signature_provisional', 'signature_unsigned', 'signature_mismatch']) {
+			for (const key of ['signature_how', 'signature_batch_root', 'signature_provisional', 'signature_unsigned', 'signature_mismatch',
+				'sign_request', 'sign_busy', 'sign_hint', 'sign_pending', 'sign_error', 'sign_waiting']) {
 				assert.notEqual(words[key], english[key], `${locale}: ${key} is not translated`);
 			}
 		}
