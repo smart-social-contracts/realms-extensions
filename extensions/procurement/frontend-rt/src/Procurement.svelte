@@ -1,16 +1,22 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import ContractPage from './ContractPage.svelte';
+	import Contracts from './Contracts.svelte';
 	import LifecycleSteps, { type LifecycleStep } from './LifecycleSteps.svelte';
+	import { linkedRealms, money, type RealmFacts } from './contracts';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import { bidsOfLot, lotsOf, openLots, winningBid, type Lot, type LotInput } from './lots';
 	import {
 		isNarrowViewport,
 		persistSessionFlag,
 		readSessionFlag,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { isKnownZone } from '../../../_shared/frontend/realm-time';
 	import { PERCENT, formatPercent } from '../../../_shared/frontend/units';
 
-	type View = 'list' | 'create' | 'detail';
+	type View = 'list' | 'create' | 'detail' | 'contracts' | 'contract';
 
 	interface RubricCriterion {
 		id: string;
@@ -61,6 +67,8 @@
 
 	let me = $state('');
 	ctx.principal?.subscribe?.((v: string) => (me = v || ''));
+	// The texts of the contract and lot screens are translated; the realm's locale may change while the page is open.
+	$effect(() => ctx.locale?.subscribe?.((next: string | null | undefined) => void loadExtensionI18n(next || 'en')));
 
 	// The caller's permissions from `me`; null when unknown, and the realm then decides on each action.
 	let perms = $state<Set<string> | null>(null);
@@ -85,24 +93,36 @@
 	let decryptedBids = $state<Record<string, BidPayload | null>>({});
 	let departments = $state<any[]>([]);
 	let organizations = $state<any[]>([]);
+	let facts = $state<RealmFacts>({ zone: 'UTC', currency: '', decimals: 0, externals: [], realms: {} });
+	let contractId = $state('');
 
 	let formTitle = $state('');
 	let formDescription = $state('');
 	let formOpens = $state('');
 	let formCloses = $state('');
 	let formDepartment = $state('');
+	let formLots = $state<LotInput[]>([]);
 
 	let bidVendor = $state('');
 	let bidAmount = $state('');
 	let bidDescription = $state('');
 	let bidTechnical = $state('');
+	let bidLot = $state('');
 
 	let scoreInputs = $state<Record<string, Record<string, number>>>({});
 	let winningBidId = $state('');
 	let awardJustification = $state('');
+	// A tender with lots is awarded one lot at a time: the bid chosen, the justification and the reason for leaving it, by lot.
+	let lotWinners = $state<Record<string, string>>({});
+	let lotJustifications = $state<Record<string, string>>({});
+	let lotReasons = $state<Record<string, string>>({});
 
 	let detailStatus = $derived(selected?.status ?? 'draft');
 	let canManage = $derived(can('tender.manage'));
+	// Unlike the actions above, a contract amendment is offered only to a caller known to hold its permission.
+	let mayAmend = $derived(perms !== null && can('contract.amend'));
+	let lots = $derived<Lot[]>(selected?.lots ?? []);
+	let onRequests = $derived(view === 'list' || view === 'create' || view === 'detail');
 	let biddingEnded = $derived(!!selected && (selected.closes_at || 0) * 1000 <= Date.now());
 
 	function can(permission: string) {
@@ -217,12 +237,24 @@
 	}
 
 	async function loadContext() {
-		const [mine, depts, orgs] = await Promise.all([
+		const [mine, depts, orgs, info, outside] = await Promise.all([
 			read('me'),
 			read('department_list', { count: 500 }),
 			read('organization_list', { status: 'active', count: 500 }),
+			read('realm_info'),
+			read('external_list', { count: 500 }),
 		]);
 		if (mine) perms = new Set(mine.permissions ?? []);
+		if (info?.realm) {
+			const zone = info.realm.official_timezone || info.realm.timezone;
+			facts = {
+				zone: isKnownZone(zone) ? zone : 'UTC',
+				currency: info.realm.accounting_currency ?? '',
+				decimals: info.realm.accounting_currency_decimals ?? 0,
+				externals: outside?.externals ?? [],
+				realms: linkedRealms(info.sync_sources ?? []),
+			};
+		}
 		departments = depts?.departments ?? [];
 		organizations = orgs?.organizations ?? [];
 		formDepartment ||= (departments.find((d) => d.is_root) ?? departments[0])?.id ?? '';
@@ -291,7 +323,18 @@
 		view = 'detail';
 		winningBidId = '';
 		awardJustification = '';
+		bidLot = '';
+		lotWinners = {};
+		lotJustifications = {};
+		lotReasons = {};
 		await loadDetail(tender.id);
+	}
+
+	function openContract(id: string) {
+		contractId = id;
+		view = 'contract';
+		actionError = '';
+		actionMsg = '';
 	}
 
 	async function createTender() {
@@ -301,6 +344,11 @@
 		}
 		if (!formDepartment) {
 			actionError = 'Choose the requesting department';
+			return;
+		}
+		const parts = lotsOf(formLots, facts.decimals);
+		if (parts.problem) {
+			actionError = t(`lot_problem_${parts.problem}`);
 			return;
 		}
 		busy = true;
@@ -314,10 +362,12 @@
 				opens_at: localInputToEpoch(formOpens),
 				closes_at: localInputToEpoch(formCloses),
 				rubric: { price: 50 * PERCENT, quality: 50 * PERCENT },
+				...(parts.lots.length ? { lots: parts.lots } : {}),
 			});
 			actionMsg = outcome(res, `Created ${res.tender}`);
 			formTitle = '';
 			formDescription = '';
+			formLots = [];
 			view = 'list';
 			await loadTenders();
 		} catch (e: any) {
@@ -377,6 +427,10 @@
 			actionError = 'Enter the quoted amount as a number';
 			return;
 		}
+		if (lots.length && !bidLot) {
+			actionError = t('bid_choose_lot');
+			return;
+		}
 		const tenderId = selected.id;
 		busy = true;
 		actionError = '';
@@ -392,7 +446,8 @@
 				nonce,
 			};
 			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(recipients, payload);
-			const scope = `user:${me}:procurement:${tenderId}:${bidVendor}`;
+			// A bid is made for a lot, and granting a scope again replaces its keys: each lot's bid has a scope of its own.
+			const scope = `user:${me}:procurement:${tenderId}:${bidVendor}${bidLot ? `:${bidLot}` : ''}`;
 			await ctx.crypto.grantScope(scope, wrappedDeks, { keep: [me] });
 
 			const res = await run('bid_submit', {
@@ -400,6 +455,7 @@
 				vendor: bidVendor,
 				payload_ref: JSON.stringify({ scope, ciphertext }),
 				payload_hash: `sha256:${await sha256Hex(`${price}:${nonce}`)}`,
+				...(bidLot ? { lot: bidLot } : {}),
 			});
 			actionMsg = outcome(res, `Sealed bid ${res.bid} submitted — it stays sealed until bidding closes`);
 			bidAmount = '';
@@ -427,6 +483,19 @@
 		if (winningBidId) args.bid = winningBidId;
 		if (awardJustification.trim()) args.justification = awardJustification.trim();
 		return act('tender_award', args, (res) => `Awarded to ${res.winner} — contract ${res.contract} signed`);
+	}
+
+	function awardLot(lot: Lot) {
+		const args: Record<string, unknown> = { tender: selected?.id, lot: lot.id };
+		if (lotWinners[lot.id]) args.bid = lotWinners[lot.id];
+		if (lotJustifications[lot.id]?.trim()) args.justification = lotJustifications[lot.id].trim();
+		return act('tender_award', args, (res) => t('lot_awarded', { lot: lot.id, winner: res.winner, contract: res.contract }));
+	}
+
+	function voidLot(lot: Lot) {
+		const args: Record<string, unknown> = { tender: selected?.id, lot: lot.id };
+		if (lotReasons[lot.id]?.trim()) args.reason = lotReasons[lot.id].trim();
+		return act('tender_lot_void', args, () => t('lot_voided', { lot: lot.id }));
 	}
 
 	function statusClass(status: string) {
@@ -501,8 +570,26 @@
 			<h1 class="text-3xl font-bold text-gray-900 dark:text-white">Procurement</h1>
 			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 		</div>
+		{#if view === 'list' || view === 'contracts'}
+			<div class="flex gap-2" role="tablist" data-testid="sections">
+				<button type="button" role="tab" class="chrome-btn" class:is-on={view === 'list'} aria-selected={view === 'list'} onclick={() => (view = 'list')}>
+					{t('tab_requests')}
+				</button>
+				<button type="button" role="tab" class="chrome-btn" class:is-on={view === 'contracts'} aria-selected={view === 'contracts'} onclick={() => (view = 'contracts')}>
+					{t('tab_contracts')}
+				</button>
+			</div>
+		{/if}
 		<div class="flex flex-wrap items-center gap-2">
-			{#if view !== 'list'}
+			{#if view === 'contract'}
+				<button class="chrome-btn" onclick={() => (view = 'contracts')} title={t('all_contracts')} aria-label={t('all_contracts')}>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+					</svg>
+					<span class="chrome-label">{t('all_contracts')}</span>
+				</button>
+			{/if}
+			{#if view === 'create' || view === 'detail'}
 				<button
 					class="chrome-btn"
 					onclick={() => {
@@ -535,7 +622,7 @@
 					<span class="chrome-label">New Request For Proposal</span>
 				</button>
 			{/if}
-			{#if tenders.length > 0 || view !== 'list'}
+			{#if onRequests && (tenders.length > 0 || view !== 'list')}
 				<button
 					type="button"
 					class="chrome-btn"
@@ -680,6 +767,19 @@
 					100 is the weighted average over evaluators.
 				</p>
 			</div>
+			<fieldset class="mt-3" data-testid="lots-form">
+				<legend class="text-sm font-medium text-gray-700 dark:text-gray-300">{t('form_lots')}</legend>
+				<p class="text-xs text-gray-500">{t('form_lots_help')}</p>
+				{#each formLots as row, index}
+					<div class="mt-2 flex flex-wrap items-center gap-2" data-testid="lot-form-row">
+						<input class="w-20 rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" aria-label={t('form_lot_id')} placeholder={t('form_lot_id')} bind:value={row.id} />
+						<input class="min-w-0 flex-1 rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" aria-label={t('form_lot_title')} placeholder={t('form_lot_title')} bind:value={row.title} />
+						<input class="w-36 rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" aria-label={t('form_lot_budget')} placeholder={t('form_lot_budget')} inputmode="decimal" bind:value={row.budget} />
+						<button type="button" class="text-sm text-red-600" onclick={() => (formLots = formLots.filter((_, i) => i !== index))}>{t('form_lot_remove')}</button>
+					</div>
+				{/each}
+				<button type="button" class="mt-2 text-sm text-blue-600 hover:underline" onclick={() => (formLots = [...formLots, { id: '', title: '', budget: '' }])}>{t('form_lot_add')}</button>
+			</fieldset>
 			<button class="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50" disabled={busy || !formDepartment} onclick={createTender}>
 				{busy ? 'Creating…' : 'Create draft'}
 			</button>
@@ -708,7 +808,8 @@
 			{#if selected.status === 'contracted' && selected.winner}
 				<p class="mt-1 text-xs text-gray-500">
 					Awarded to bid <span class="font-mono">{selected.winner}</span>{#if selected.contract}
-						· contract <span class="font-mono">{selected.contract}</span>{/if}
+						· contract
+						<button type="button" class="font-mono text-blue-600 hover:underline" onclick={() => openContract(selected.contract)}>{selected.contract}</button>{/if}
 				</p>
 			{/if}
 
@@ -722,11 +823,11 @@
 				{#if (selected.status === 'closed' || (selected.status === 'open' && biddingEnded)) && canManage}
 					<button class="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={revealBids}>Reveal bids &amp; start evaluation</button>
 				{/if}
-				{#if selected.status === 'evaluation' && canManage}
+				{#if selected.status === 'evaluation' && canManage && lots.length === 0}
 					<button class="rounded bg-purple-600 px-3 py-1.5 text-sm text-white" disabled={busy || bids.length === 0} onclick={awardTender}>Award</button>
 				{/if}
 			</div>
-			{#if selected.status === 'evaluation' && canManage}
+			{#if selected.status === 'evaluation' && canManage && lots.length === 0}
 				<p class="mt-2 text-xs text-gray-500">
 					Awarding signs the contract with the vendor. Without a selection the best-scored bid wins; choosing a
 					lower-scored bid needs a justification.
@@ -737,6 +838,79 @@
 				</label>
 			{/if}
 		</section>
+
+		{#if lots.length > 0}
+			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700" data-testid="lots">
+				<h3 class="font-medium">{t('lots_title', { count: lots.length })}</h3>
+				<div class="mt-2 overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead class="text-left text-gray-500">
+							<tr>
+								<th class="py-1 pr-4">{t('lot_col_id')}</th>
+								<th class="py-1 pr-4">{t('lot_col_name')}</th>
+								<th class="py-1 pr-4 text-right">{t('lot_col_budget')}</th>
+								<th class="py-1 pr-4 text-right">{t('lot_col_bids')}</th>
+								<th class="py-1 pr-4">{t('lot_col_winner')}</th>
+								<th class="py-1 pr-4">{t('lot_col_status')}</th>
+								<th class="py-1">{t('lot_col_contract')}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each lots as lot (lot.id)}
+								<tr class="border-t border-gray-100 dark:border-gray-700" data-testid="lot-row">
+									<td class="py-1 pr-4 font-mono text-xs">{lot.id}</td>
+									<td class="py-1 pr-4">{lot.title}</td>
+									<td class="py-1 pr-4 text-right">{lot.estimated_value != null ? money(lot.estimated_value, facts.currency, facts.decimals) : '—'}</td>
+									<td class="py-1 pr-4 text-right">{bidsOfLot(bids, lot).length}</td>
+									<td class="py-1 pr-4">{winningBid(bids, lot)?.vendor ?? '—'}</td>
+									<td class="py-1 pr-4">{t(`lot_status_${lot.status}`)}</td>
+									<td class="py-1">
+										{#if lot.contract}
+											<button type="button" class="font-mono text-xs text-blue-600 hover:underline" onclick={() => openContract(lot.contract!)}>{lot.contract}</button>
+										{:else}
+											—
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				{#if selected.status === 'evaluation' && canManage}
+					{#each openLots(lots) as lot (lot.id)}
+						<div class="mt-4 rounded-lg border border-gray-100 p-3 dark:border-gray-700" data-testid="lot-award">
+							<h4 class="text-sm font-medium">{t('lot_award_title', { lot: lot.id, title: lot.title })}</h4>
+							{#each bidsOfLot(bids, lot).filter((b) => !b.sealed) as bid (bid.id)}
+								<label class="mt-2 flex items-center gap-2 text-sm">
+									<input type="radio" name="winner-{lot.id}" value={bid.id} bind:group={lotWinners[lot.id]} />
+									{bid.vendor} <span class="font-mono text-xs text-gray-500">{bid.id}</span>{#if bid.score} · {t('lot_bid_score', { score: bid.score })}{/if}
+								</label>
+							{:else}
+								<p class="mt-2 text-xs text-gray-500">{t('lot_no_evaluated_bids')}</p>
+							{/each}
+							<p class="mt-2 text-xs text-gray-500">{t('lot_award_help')}</p>
+							<label class="mt-2 block text-sm">
+								<span class="text-gray-600">{t('lot_justification')}</span>
+								<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={lotJustifications[lot.id]} />
+							</label>
+							<label class="mt-2 block text-sm">
+								<span class="text-gray-600">{t('lot_void_reason')}</span>
+								<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={lotReasons[lot.id]} />
+							</label>
+							<div class="mt-3 flex flex-wrap gap-2">
+								<button type="button" class="rounded bg-purple-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy || bidsOfLot(bids, lot).length === 0} onclick={() => awardLot(lot)}>
+									{t('lot_award')}
+								</button>
+								<button type="button" class="rounded border px-3 py-1.5 text-sm disabled:opacity-50 dark:border-gray-600" disabled={busy} onclick={() => voidLot(lot)}>
+									{t('lot_void')}
+								</button>
+							</div>
+						</div>
+					{/each}
+				{/if}
+			</section>
+		{/if}
 
 		{#if selected.status === 'open' && !biddingEnded && can('bid.submit')}
 			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
@@ -757,6 +931,17 @@
 							<span class="mt-1 block text-xs text-gray-500">Bids are placed for a registered organization you represent; none is registered yet.</span>
 						{/if}
 					</label>
+					{#if lots.length > 0}
+						<label class="block">
+							<span class="text-sm">{t('bid_lot')}</span>
+							<select class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidLot} data-testid="bid-lot">
+								<option value="">{t('bid_lot_choose')}</option>
+								{#each openLots(lots) as lot (lot.id)}
+									<option value={lot.id}>{lot.id} — {lot.title}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
 					<label class="block">
 						<span class="text-sm">Amount (quote)</span>
 						<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidAmount} />
@@ -786,7 +971,7 @@
 						<li class="rounded-lg border border-gray-100 p-3 dark:border-gray-700">
 							<div class="flex flex-wrap items-center justify-between gap-2">
 								<span class="font-mono text-xs">{bid.id}</span>
-								<span class="text-xs text-gray-500">vendor {bid.vendor} · {bid.sealed ? 'sealed' : 'revealed'}</span>
+								<span class="text-xs text-gray-500">vendor {bid.vendor} · {bid.sealed ? 'sealed' : 'revealed'}{#if bid.lot} · {t('bid_for_lot', { lot: bid.lot })}{/if}</span>
 								{#if !bid.sealed && bid.score}
 									<span class="text-sm font-medium">Score {bid.score}</span>
 								{/if}
@@ -826,7 +1011,7 @@
 									<button class="mt-2 text-xs text-blue-600 hover:underline" disabled={busy} onclick={() => submitScoresForBid(bid.id)}>Save scores</button>
 								{/if}
 
-								{#if selected.status === 'evaluation' && canManage}
+								{#if selected.status === 'evaluation' && canManage && lots.length === 0}
 									<label class="mt-2 flex items-center gap-2 text-sm">
 										<input type="radio" name="winner" value={bid.id} bind:group={winningBidId} />
 										Select as winner
@@ -856,5 +1041,17 @@
 				{/if}
 			</section>
 		{/if}
+	{:else if view === 'contracts'}
+		<Contracts {read} {facts} {narrow} onOpen={openContract} />
+	{:else if view === 'contract'}
+		<ContractPage
+			{read}
+			{run}
+			{facts}
+			{contractId}
+			{mayAmend}
+			onOpenTender={(id) => openDetail({ id })}
+			navigate={(path) => ctx.navigate?.(path)}
+		/>
 	{/if}
 </div>

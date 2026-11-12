@@ -185,6 +185,30 @@ Every transition is logged in `RfpTransition` (append-only).
 
 ---
 
+## Contracts, lots and framework call-offs
+
+The **Contracts** tab lists the realm's contracts (`contract_list`) and opens each on its own page (`contract_get`). The
+screens read the realm's own records and rules; the extension keeps none of its own.
+
+- **Contract page**: supplier, value, the split of the value over fiscal periods, start and end days (in the realm's
+  official time zone), status, the request and lot it came from, how much has been paid on it and the budget line the
+  payments were charged to, when the realm knows one.
+- **Amendments** (ggg I-GOV-16): oldest first, each with the terms it changed (before → after), the proposal that carried
+  it (a link into `voting`, or "applied directly" when the governing department decided without one) and when it took
+  effect. The realm's journal publishes no entry for a contract amendment today, so none is shown.
+- **Propose an amendment**: for callers holding `contract.amend`. The form says what the realm says it applies: the least the
+  value may be amended to (what has been paid on the contract) and whether the governing department decides by vote (the
+  amendment opens a proposal) or directly (it applies at once). Both come from `contract_get`, not from this extension.
+- **Lots** (ggg I-PRC-5): a request with lots shows a table of its lots (name, budget, bids, winner, contract). Lots are
+  awarded one at a time, or left without an award; a bid names the lot it prices. A request without lots reads as before.
+  The form that creates a request takes an optional list of lots.
+- **Framework call-offs** (ggg I-PRC-6): a contract that is a call-off shows who holds the agreement (an outside body of the
+  realm, or another realm, by name when this realm is linked to it, else by its capital), the agreement's reference and its
+  winners. The contracts list has a filter for them.
+
+Amounts are shown in the realm's accounting currency and its decimals; a contract in another token is shown in that
+token's base units.
+
 ## Backend RPC
 
 Callable via `extension_sync_call('procurement', '<function>', args)`.
