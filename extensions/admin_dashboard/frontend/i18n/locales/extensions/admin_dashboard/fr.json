@@ -7,7 +7,9 @@
   "org_kind_association": "Association",
   "org_kind_other": "Autre",
   "org_kind_unknown": "Inconnu",
-  "org_kind_unknown_title": "Cette organisation a été enregistrée sans type.",
+  "org_kind_unknown_title": "Le royaume n'indique aucun type pour cette organisation.",
   "org_kind_hint": "Le type est ce que l'organisation dit être : le royaume ne le vérifie pas.",
-  "org_kind_none": "Aucune organisation de ce type."
+  "org_kind_none": "Aucune organisation de ce type.",
+  "org_kind_searched": "Aucune des {count} organisations parcourues n'est de ce type.",
+  "org_kind_search_further": "Poursuivre la recherche"
 }

@@ -41,6 +41,7 @@ async function mountOn(orgs: Org[], { refuse = '' } = {}) {
 	const replies: Record<string, (args: any) => unknown> = {
 		organization_list: ({ from = 1, count = 100, kind }) => {
 			if (refuse) return { ok: false, error: refuse };
+			count = Math.min(count, 500); // the realm reads 500 rows a call at most, then keeps the ones of the kind asked for
 			const rows = orgs.slice(from - 1, from - 1 + count);
 			return {
 				ok: true,
@@ -74,7 +75,7 @@ test('every organisation shows its kind, and one registered without a kind reads
 	await mountOn(ORGS);
 	expect(chips()).toEqual(['Company', 'Party', 'Union', 'Association', 'Other', 'Unknown']);
 	const unknown = [...target.querySelectorAll('[data-testid="org-kind"]')].at(-1)!;
-	expect(unknown.getAttribute('title')).toBe('This organisation was registered without a kind.');
+	expect(unknown.getAttribute('title')).toBe('The realm states no kind for this organisation.');
 });
 
 test('a kind the page does not know is shown as the realm states it', async () => {
@@ -114,15 +115,48 @@ test('a kind asks the realm for it, and the list keeps the organisations of that
 	expect(chips()).toHaveLength(6);
 });
 
-test('the next page keeps the kind', async () => {
-	const many: Org[] = Array.from({ length: 25 }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i % 2 ? 'union' : 'company' }));
+test('the next page keeps the kind, and a filtered call reads as many rows as the realm allows', async () => {
+	const many: Org[] = Array.from({ length: 1_200 }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i % 2 ? 'union' : 'company' }));
 	await mountOn(many);
 	await choose('org-kind-select', 'union');
+	expect(organizationCalls().at(-1)).toMatchObject({ kind: 'union', count: 500 });
 	const next = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Next')!;
 	expect(next.disabled).toBe(false);
 	next.click();
 	await settle();
-	expect(organizationCalls().at(-1)).toMatchObject({ kind: 'union', from: 11 });
+	expect(organizationCalls().at(-1)).toMatchObject({ kind: 'union', from: 501, count: 500 });
+});
+
+/** ``total`` organisations, of which only the ``at``th is a party. */
+const withOneParty = (total: number, at: number): Org[] =>
+	Array.from({ length: total }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i + 1 === at ? 'party' : 'company' }));
+
+test('the only party among 300 organisations, at row 250, is found', async () => {
+	await mountOn(withOneParty(300, 250));
+	await choose('org-kind-select', 'party');
+	expect(chips()).toEqual(['Party']);
+	expect(text()).toContain('Org 250');
+	expect(text()).not.toContain('No organisations of this kind.');
+});
+
+test('a kind far down the list is found by following the realm over the pages with none of it', async () => {
+	await mountOn(withOneParty(1_200, 1_150));
+	await choose('org-kind-select', 'party');
+	expect(chips()).toEqual(['Party']);
+	expect(organizationCalls().filter((args) => args.kind === 'party')).toHaveLength(3); // rows 1-500, 501-1000, 1001-1200
+});
+
+test('when the realm has more rows than a click searches, the page says how many it searched and offers to go on, not "none"', async () => {
+	await mountOn(withOneParty(25_000, 24_000));
+	await choose('org-kind-select', 'party');
+	expect(chips()).toEqual([]);
+	expect(text()).toContain('None of the 10000 organisations searched is of this kind.');
+	expect(text()).not.toContain('No organisations of this kind.');
+	const further = () => target.querySelector<HTMLButtonElement>('[data-testid="org-kind-search-further"]')!;
+	further().click();
+	await settle(200);
+	expect(chips()).toEqual(['Party']);
+	expect(text()).toContain('Org 24000');
 });
 
 test('a kind no organisation has says so', async () => {

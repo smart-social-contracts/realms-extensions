@@ -7,7 +7,9 @@
   "org_kind_association": "Association",
   "org_kind_other": "Other",
   "org_kind_unknown": "Unknown",
-  "org_kind_unknown_title": "This organisation was registered without a kind.",
+  "org_kind_unknown_title": "The realm states no kind for this organisation.",
   "org_kind_hint": "A kind is what the organisation says it is: the realm does not check it.",
-  "org_kind_none": "No organisations of this kind."
+  "org_kind_none": "No organisations of this kind.",
+  "org_kind_searched": "None of the {count} organisations searched is of this kind.",
+  "org_kind_search_further": "Search further"
 }

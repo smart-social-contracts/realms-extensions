@@ -34,7 +34,7 @@ const TOWN: Org[] = [
 // What the canned realm answers, run in the page: `data.orgs` are the organisations it holds.
 const organizationList = (args: any, data: any) => {
   const from = args.from || 1;
-  const count = args.count || 100;
+  const count = Math.min(args.count || 100, 500);
   const rows = data.orgs.slice(from - 1, from - 1 + count);
   return {
     ok: true,
@@ -63,7 +63,7 @@ test('every organisation shows its kind, and one registered without a kind reads
   scenario = realm(TOWN);
   await openOrganisations(page);
   await expect(page.getByTestId('org-kind')).toHaveText(['Company', 'Party', 'Union', 'Association', 'Other', 'Unknown']);
-  await expect(page.getByTestId('org-kind').last()).toHaveAttribute('title', 'This organisation was registered without a kind.');
+  await expect(page.getByTestId('org-kind').last()).toHaveAttribute('title', 'The realm states no kind for this organisation.');
   await page.screenshot({ path: join(OUT, 'admin-org-kind-list.png'), fullPage: true });
 });
 
@@ -95,14 +95,18 @@ test('the kind filter belongs to the organisations: other record types show neit
   await expect(page.getByTestId('org-kind')).toHaveCount(0);
 });
 
-test('the next page of a filtered list keeps the kind', async ({ page }) => {
-  const many: Org[] = Array.from({ length: 25 }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i % 2 ? 'union' : 'company' }));
+test('the next page of a filtered list keeps the kind, and a rare kind far down the list is found', async ({ page }) => {
+  const many: Org[] = Array.from({ length: 1_200 }, (_, i) => ({ id: `Org ${i + 1}`, description: 'x', status: 'active', kind: i === 1_149 ? 'party' : i % 2 ? 'union' : 'company' }));
   scenario = realm(many);
   await openOrganisations(page);
   await page.locator('#org-kind-select').selectOption('union');
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(page.getByText('Page 2')).toBeVisible();
-  expect((await organizationCalls(page)).at(-1)).toMatchObject({ kind: 'union', from: 11 });
+  expect((await organizationCalls(page)).at(-1)).toMatchObject({ kind: 'union', from: 501, count: 500 });
+
+  await page.locator('#org-kind-select').selectOption('party'); // the only one, at row 1,150: three calls of 500 rows
+  await expect(page.getByTestId('org-kind')).toHaveText(['Party']);
+  await expect(page.getByText('Org 1150')).toBeVisible();
 });
 
 test('a kind no organisation has says so', async ({ page }) => {

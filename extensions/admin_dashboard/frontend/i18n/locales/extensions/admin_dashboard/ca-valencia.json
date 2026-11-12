@@ -7,7 +7,9 @@
   "org_kind_association": "Associació",
   "org_kind_other": "Altre",
   "org_kind_unknown": "Desconegut",
-  "org_kind_unknown_title": "Aquesta organització es va registrar sense un tipus.",
+  "org_kind_unknown_title": "El regne no indica cap tipus per a aquesta organització.",
   "org_kind_hint": "El tipus és el que l'organització diu que és: el regne no ho comprova.",
-  "org_kind_none": "No hi ha organitzacions d'aquest tipus."
+  "org_kind_none": "No hi ha organitzacions d'aquest tipus.",
+  "org_kind_searched": "Cap de les {count} organitzacions revisades és d'aquest tipus.",
+  "org_kind_search_further": "Seguir buscant"
 }

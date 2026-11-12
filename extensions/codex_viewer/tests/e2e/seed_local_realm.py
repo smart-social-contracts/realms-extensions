@@ -112,6 +112,8 @@ ORGANISATIONS = [
     ("Friends of the Park", "A neighbours' association", "association"),
     ("Cooperativa del Mar", "A fishing cooperative, none of the four", "other"),
 ]
+# A realm cannot reach a row without a kind (a new organisation is `other`, an older row is read as `other`): this one is written by hand, to see
+# what the page does when the realm states none.
 WITHOUT_KIND = """
 from ggg import Organization
 Organization(id="Old Registry", description="Registered before kinds existed", kind="")

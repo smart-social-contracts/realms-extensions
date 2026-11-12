@@ -17,7 +17,7 @@
 	});
 
 	/** One page of rows, or the realm's reason for refusing it. */
-	type Page = { rows: any[]; next: number | null } | string;
+	type Page = { rows: any[]; next: number | null; scanned?: number } | string;
 
 	interface EntityType {
 		value: string;
@@ -35,6 +35,9 @@
 
 	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
 	const pageSize = 10;
+	// The rows the realm reads through per call (its most) when a filter makes most of them not match: a page of 10 would find
+	// a rare kind a hop at a time.
+	const filteredCount = 500;
 	const MAX_HOPS = 20;
 
 	let selectedType = $state('User');
@@ -55,6 +58,8 @@
 	let expandedItem: number | null = $state(null);
 	let currentPage = $state(0);
 	let nextCursor: number | null = $state(null);
+	// The rows the realm read through for the page shown: what "none of this kind" can claim when the realm has more.
+	let searched = $state(0);
 	// cursors[i] is the `from` of page i (null: the operation's default start).
 	let cursors: (number | null)[] = [null];
 	let requestSeq = 0;
@@ -78,12 +83,17 @@
 		}
 	}
 
-	/** A paginated list operation whose rows are under `key`; `filters` are the arguments that narrow it, read at each call. */
-	function listed(op: string, key: string, filters: () => Record<string, unknown> = () => ({})) {
+	/**
+	 * A paginated list operation whose rows are under `key`; `filters` are the arguments that narrow it, and `perCall` the rows
+	 * it reads through, both read at each call. The realm filters a page of rows after reading it, so a page can hold fewer
+	 * rows than `perCall`, or none, while more follow (`next`): `scanned` is what the call read through.
+	 */
+	function listed(op: string, key: string, filters: () => Record<string, unknown> = () => ({}), perCall: () => number = () => pageSize) {
 		return async (from: number | null): Promise<Page> => {
-			const reply = await read(op, { ...(from != null ? { from } : {}), count: pageSize, ...filters() });
+			const count = perCall();
+			const reply = await read(op, { ...(from != null ? { from } : {}), count, ...filters() });
 			if (!reply.ok) return reply.error;
-			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: reply.next ?? null };
+			return { rows: Array.isArray(reply[key]) ? reply[key] : [], next: reply.next ?? null, scanned: count };
 		};
 	}
 
@@ -128,7 +138,10 @@
 		entity('LedgerEntry', listed('ledger_view', 'entries')),
 		entity('License', listed('license_list', 'licenses')),
 		entity('NFTToken', registeredTokens('nft_tokens')),
-		entity('Organization', listed('organization_list', 'organizations', () => (kindFilter ? { kind: kindFilter } : {}))),
+		entity(
+			'Organization',
+			listed('organization_list', 'organizations', () => (kindFilter ? { kind: kindFilter } : {}), () => (kindFilter ? filteredCount : pageSize)),
+		),
 		entity('Proposal', listed('proposal_list', 'proposals')),
 		entity('Realm', loadRealm),
 		entity('Task', listed('task_list', 'tasks')),
@@ -161,9 +174,11 @@
 		unavailable = false;
 
 		let page = await type.load(cursors[pageIndex] ?? null);
-		// Id-range pages can come back empty (deleted rows): follow `next` to the next rows.
+		let readThrough = typeof page === 'string' ? 0 : (page.scanned ?? 0);
+		// Id-range pages can come back empty (deleted rows, or none of the rows had the kind asked for): follow `next` to the next rows.
 		for (let hops = 0; typeof page !== 'string' && page.rows.length === 0 && page.next != null && hops < MAX_HOPS; hops++) {
 			page = await type.load(page.next);
+			if (typeof page !== 'string') readThrough += page.scanned ?? 0;
 		}
 		if (seq !== requestSeq) return;
 
@@ -177,6 +192,7 @@
 		} else {
 			items = page.rows;
 			nextCursor = page.next;
+			searched = readThrough;
 			currentPage = pageIndex;
 			cursors = [...cursors.slice(0, pageIndex + 1), page.next];
 		}
@@ -295,12 +311,21 @@
 							Nothing to show.
 						{:else if unavailable}
 							This list isn't available right now.
+						{:else if selectedType === 'Organization' && kindFilter && nextCursor != null}
+							{t('org_kind_searched', { count: searched })}
 						{:else if selectedType === 'Organization' && kindFilter}
 							{t('org_kind_none')}
 						{:else}
 							No items found.
 						{/if}
 					</p>
+					{#if selectedType === 'Organization' && kindFilter && nextCursor != null}
+						<button
+							onclick={() => goToPage(currentPage + 1)}
+							class="mt-4 px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+							data-testid="org-kind-search-further"
+						>{t('org_kind_search_further')}</button>
+					{/if}
 				</div>
 			{:else}
 				<div class="divide-y divide-gray-200">

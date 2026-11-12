@@ -7,7 +7,9 @@
   "org_kind_association": "Vereinigung",
   "org_kind_other": "Sonstige",
   "org_kind_unknown": "Unbekannt",
-  "org_kind_unknown_title": "Diese Organisation wurde ohne Art registriert.",
+  "org_kind_unknown_title": "Das Realm nennt für diese Organisation keine Art.",
   "org_kind_hint": "Die Art ist das, was die Organisation von sich sagt: Das Realm prüft sie nicht.",
-  "org_kind_none": "Keine Organisationen dieser Art."
+  "org_kind_none": "Keine Organisationen dieser Art.",
+  "org_kind_searched": "Keine der {count} durchsuchten Organisationen hat diese Art.",
+  "org_kind_search_further": "Weitersuchen"
 }
