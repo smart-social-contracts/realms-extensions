@@ -61,7 +61,11 @@ h3 { margin: 2px 0 6px; font-size: 12.5pt; line-height: 1.25; break-after: avoid
 .authentication h2 { grid-column: 1 / -1; font-size: 9.5pt; letter-spacing: .08em; text-transform: uppercase; }
 .authentication dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; align-content: start; }
 .authentication dt { font-weight: 700; }
-.qr { width: 30mm; height: 30mm; border: 1px dashed #777; }
+.authentication .how { grid-column: 1 / -1; font-size: 8.5pt; color: #4a4a4a; }
+.qr { width: 30mm; height: 30mm; }
+.qr svg { display: block; width: 100%; height: 100%; }
+.signature-note { margin-top: 14px; padding: 6px 12px; border: 1px solid #777; font-size: 9pt; font-style: italic; break-inside: avoid; }
+.signature-note.mismatch { border-color: #b91c1c; color: #b91c1c; font-style: normal; font-weight: 700; }
 
 @media (max-width: 560px) {
 	body { padding: 16px 14px; }

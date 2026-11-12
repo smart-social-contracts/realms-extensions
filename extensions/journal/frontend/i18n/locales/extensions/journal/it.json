@@ -56,5 +56,10 @@
   "signature_signature": "Firma",
   "signature_key_id": "Chiave",
   "signature_verification_code": "Codice di verifica",
-  "signature_verification_url": "Verifica su"
+  "signature_verification_url": "Verifica su",
+  "signature_batch_root": "Radice del suo lotto",
+  "signature_how": "Leggi il codice, oppure apri l'indirizzo e inserisci il codice di verifica, per controllare la firma che il regno ha apposto a questo numero.",
+  "signature_provisional": "Numero provvisorio: il regno lo firma quando la sua giornata è conclusa.",
+  "signature_unsigned": "Non ancora firmato: il regno firma ogni numero quando la sua giornata è conclusa.",
+  "signature_mismatch": "La firma che il regno dà per questo numero non corrisponde a quanto mostra questo foglio. Non farci affidamento."
 }
