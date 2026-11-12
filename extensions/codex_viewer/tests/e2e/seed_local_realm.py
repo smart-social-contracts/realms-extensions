@@ -279,8 +279,10 @@ def seed_procurement(realm, home, principals_file):
     identities = json.loads(Path(principals_file).read_text())["identities"]
     prelude = PROCUREMENT_PRELUDE % {"founder": founder, "principals": {i["index"] + 1: i["principal"] for i in identities}}
     seed_procurement_people_and_bodies(realm, prelude)
-    seed_procurement_contracts(realm, prelude)
+    # The lots first: the contracts' step ends with Infrastructure deciding by a vote, after which it files a proposal
+    # instead of creating a tender.
     seed_procurement_lots(realm, prelude)
+    seed_procurement_contracts(realm, prelude)
 
 
 def main():
