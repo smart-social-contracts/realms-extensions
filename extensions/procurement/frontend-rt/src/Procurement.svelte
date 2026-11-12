@@ -291,12 +291,18 @@
 		loading = false;
 	}
 
+	// The newest loadDetail: a reply to an earlier one that comes late (a request opened, left, another opened) is dropped.
+	let detailSeq = 0;
+
 	async function loadDetail(tenderId: string) {
+		const mine = ++detailSeq;
 		busy = true;
 		actionError = '';
 		decryptedBids = {};
 		const [res, log] = await Promise.all([read('tender_get', { tender: tenderId }), read('events', { count: 500 })]);
-		detailReady = true;
+		if (mine !== detailSeq) return;
+		// A request the realm did not give has no bids to show: nothing is offered on it.
+		detailReady = Boolean(res?.tender);
 		if (res?.tender) {
 			selected = res.tender;
 			bids = res.tender.bids ?? [];

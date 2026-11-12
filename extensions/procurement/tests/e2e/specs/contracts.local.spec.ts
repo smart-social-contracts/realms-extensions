@@ -12,15 +12,22 @@ const OUT = join(__dirname, '..', 'test-results');
 
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
-test.use({ viewport: { width: 1280, height: 1500 } });
+test.use({ viewport: { width: 1280, height: 1800 } });
 
 const SLOW = { timeout: 120_000 };
 
+/**
+ * The viewport as it is: the page is a 100 %-high frame around the realm, so a full-page capture resizes it and captures
+ * nothing (a blank image, which three of the screenshots once were) while the content scrolls inside the frame.
+ * A capture too small to hold a page of text is refused instead of kept.
+ */
+const BLANK_BELOW = 20_000; // bytes: our screenshots of a page of text are 60 to 130 KB, a white one a few KB
+
 async function shot(page: Page, name: string) {
-  // The realm's page may still be laying out (the first shot of a run came out blank).
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(800);
-  await page.screenshot({ path: join(OUT, `local-${name}.png`), fullPage: true });
+  const picture = await page.screenshot({ path: join(OUT, `local-${name}.png`) });
+  expect(picture.length, `the screenshot ${name} is blank`).toBeGreaterThan(BLANK_BELOW);
 }
 
 async function contractsTab(ext: FrameLocator) {
