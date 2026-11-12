@@ -840,47 +840,6 @@
 						<span>{ownerLabel(selectedLand)}</span>
 					</p>
 
-					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); transferParcel(); }}>
-						<h4>Ownership</h4>
-						{#if selectedLand.status === 'active' || selectedLand.status === 'disputed'}
-							<select bind:value={transfer.owner_type}>
-								<option value="user">Citizen</option>
-								<option value="organization">Organization</option>
-							</select>
-							<input
-								type="text"
-								bind:value={transfer.owner_id}
-								placeholder={transfer.owner_type === 'user' ? 'User ID' : 'Organization ID'}
-								list={transfer.owner_type === 'user' ? 'land-registry-users' : undefined}
-							/>
-							<input type="text" bind:value={transfer.order} placeholder="Court order (Verdict ID)" />
-							<p class="muted note">Ownership moves under an issued court verdict about this parcel.</p>
-							<button type="submit" class="primary-btn green" disabled={submitting || !transfer.owner_id.trim() || !transfer.order.trim()}>Update ownership</button>
-						{:else}
-							<p class="muted note">This parcel's ownership is settled.</p>
-						{/if}
-					</form>
-
-					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); if (selectedLand?.status === 'disputed') unfreezeParcel(); else freezeParcel(); }}>
-						<h4>Properties</h4>
-						<p class="readonly-field">
-							<span class="readonly-label">Type</span>
-							<span>{selectedLand.land_type || 'unassigned'}</span>
-						</p>
-						<p class="readonly-field">
-							<span class="readonly-label">Status</span>
-							<span>{statusLabel(selectedLand.status)}</span>
-						</p>
-						{#if selectedLand.status === 'active'}
-							<input type="text" bind:value={disputeReason} placeholder="Reason (optional)" />
-							<button type="submit" class="primary-btn amber" disabled={submitting}>Mark disputed</button>
-						{:else if selectedLand.status === 'disputed'}
-							<button type="submit" class="primary-btn amber" disabled={submitting}>End dispute</button>
-						{:else}
-							<p class="muted note">This status is final.</p>
-						{/if}
-					</form>
-
 					<div class="mini-form" data-testid="planning-panel">
 						<h4>{t('planning_title')}</h4>
 						{#if selectedLand.zones.length}
@@ -935,6 +894,47 @@
 						{/if}
 						{#if licencesCapped}<p class="muted note">{t('licences_capped', { count: PAGE * MAX_PAGES })}</p>{/if}
 					</div>
+
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); transferParcel(); }}>
+						<h4>Ownership</h4>
+						{#if selectedLand.status === 'active' || selectedLand.status === 'disputed'}
+							<select bind:value={transfer.owner_type}>
+								<option value="user">Citizen</option>
+								<option value="organization">Organization</option>
+							</select>
+							<input
+								type="text"
+								bind:value={transfer.owner_id}
+								placeholder={transfer.owner_type === 'user' ? 'User ID' : 'Organization ID'}
+								list={transfer.owner_type === 'user' ? 'land-registry-users' : undefined}
+							/>
+							<input type="text" bind:value={transfer.order} placeholder="Court order (Verdict ID)" />
+							<p class="muted note">Ownership moves under an issued court verdict about this parcel.</p>
+							<button type="submit" class="primary-btn green" disabled={submitting || !transfer.owner_id.trim() || !transfer.order.trim()}>Update ownership</button>
+						{:else}
+							<p class="muted note">This parcel's ownership is settled.</p>
+						{/if}
+					</form>
+
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); if (selectedLand?.status === 'disputed') unfreezeParcel(); else freezeParcel(); }}>
+						<h4>Properties</h4>
+						<p class="readonly-field">
+							<span class="readonly-label">Type</span>
+							<span>{selectedLand.land_type || 'unassigned'}</span>
+						</p>
+						<p class="readonly-field">
+							<span class="readonly-label">Status</span>
+							<span>{statusLabel(selectedLand.status)}</span>
+						</p>
+						{#if selectedLand.status === 'active'}
+							<input type="text" bind:value={disputeReason} placeholder="Reason (optional)" />
+							<button type="submit" class="primary-btn amber" disabled={submitting}>Mark disputed</button>
+						{:else if selectedLand.status === 'disputed'}
+							<button type="submit" class="primary-btn amber" disabled={submitting}>End dispute</button>
+						{:else}
+							<p class="muted note">This status is final.</p>
+						{/if}
+					</form>
 
 					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); mintNFT(); }}>
 						<h4>Mint NFT</h4>

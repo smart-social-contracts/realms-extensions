@@ -60,7 +60,8 @@ test('an admin sets the zones of a parcel, and the realm holds them', async ({ p
     await page.screenshot({ path: join(OUT, 'local-land-planning-set-zones.png'), fullPage: true });
     await registry.ext.getByRole('button', { name: 'Save zones' }).click();
     await expect(registry.ext.getByText(`The zones of parcel ${third} are saved.`)).toBeVisible({ timeout: 120_000 });
-    await expect(registry.ext.getByTestId('parcel-zone')).toHaveText(['Old town']);
+    // the page says the zones are saved, then reads the registry again: the chips follow
+    await expect(registry.ext.getByTestId('parcel-zone')).toHaveText(['Old town'], { timeout: 60_000 });
     expect(realmCall('land_list', { count: 500 }).lands.find((land: any) => land.id === third).lies_in).toEqual(['old-town']);
 
     // put it back, as the other tests expect the seed's zones
