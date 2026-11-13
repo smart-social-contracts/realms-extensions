@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-13
+
+### Fixed
+- An action or a bid on a request reloads that request only while it is the one open: a late reply no longer takes the
+  user back to a request they left.
+- The reply of a request that was left while it was read (its refusal too) is dropped, so its error does not show on the
+  list of requests.
+- Opening a request clears what the last one said (its message and its error); a late reply lands after that and names its request.
+- What an action or a bid answers is about its own request: when that is not the one open, the message names it
+  (`T-5: Lot 2 awarded to B-3 — contract C-11 signed`), instead of reading as a message about the open request.
+- The real-realm specs refuse a blank screenshot by a capture of the extension's own element (floor 40 KB: the pages are
+  56 to 102 KB, the extension painted white 6.5 KB, reduced to its header 20.8 KB), not by the whole viewport, whose
+  sidebar, breadcrumb and footer encode to more than a white extension; a spec checks that a painted page is refused.
+
 ## [0.6.1] - 2026-11-12
 
 ### Fixed
@@ -14,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its bids have been read; before, it showed 0 bids and no winner (or the previous request's bids).
 - Awarding a lot and leaving it unawarded are offered only once the bids are read and to a caller known to hold
   `tender.manage`, not while the caller's permissions are unknown.
+- A request the realm does not give (also a failed reload after an action) shows `…` and the error, no bids, and no award
+  or leave-unawarded button: `Bids (0)` and an enabled button on a lot that has bids were shown.
+- The reply of an earlier request that comes late (a request opened, left, another opened) no longer replaces the one now open.
+- Three of the real-realm screenshots (the call-offs filter, a member's contract, the decided lots) were blank: the page is a
+  100 %-high frame around the realm, so a full-page capture captured nothing. They are viewport captures now and the
+  spec fails a blank one.
 - The real-realm specs: the member's view of the lots is taken while the lots are open and after the bids are read, and
   asserts that no award is offered where an admin has them; screenshots wait for the page to settle (one came out blank).
 

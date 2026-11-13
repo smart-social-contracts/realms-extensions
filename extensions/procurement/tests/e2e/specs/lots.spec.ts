@@ -146,6 +146,74 @@ test('the late reply of a request that was left does not replace the one now ope
   await expect(page.getByTestId('lots')).toHaveCount(0);
 });
 
+test('a late reply to an action does not take the user back to the request they left', async ({ page }) => {
+  const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
+  scenario = realm(MANAGER, tender(), {
+    tender_list: TENDERS([tender(), second]),
+    tender_get: { byArgs: [{ when: { tender: 'T-5' }, reply: { ok: true, tender: tender() } }, { reply: { ok: true, tender: second } }] },
+    tender_award: { delay: 2000, reply: { ok: true, winner: 'B-3', score: 80, contract: 'C-11', justification: '' } },
+  });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('row').filter({ hasText: 'T-5' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByTestId('lot-award').getByRole('button', { name: 'Award this lot' }).click();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.getByRole('row').filter({ hasText: 'T-7' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+  // The award answers about two seconds after it was asked: the page stays on T-7, and T-5 is not read again.
+  await page.waitForTimeout(3500);
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+  expect(await asked(page, 'tender_award')).toEqual([{ tender: 'T-5', lot: '2' }]);
+  expect(await asked(page, 'tender_get')).toEqual([{ tender: 'T-5' }, { tender: 'T-7' }]);
+  // What it said is about T-5, and says so: on T-7 it would be taken for a message about T-7.
+  await expect(page.getByText('T-5: Lot 2 awarded to B-3 — contract C-11 signed')).toBeVisible();
+});
+
+test('what an action said about the request open is gone when another request is opened', async ({ page }) => {
+  const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
+  scenario = realm(MANAGER, tender(), {
+    tender_list: TENDERS([tender(), second]),
+    tender_get: { byArgs: [{ when: { tender: 'T-5' }, reply: { ok: true, tender: tender() } }, { reply: { ok: true, tender: second } }] },
+    tender_award: { ok: true, winner: 'B-3', score: 80, contract: 'C-11', justification: '' },
+  });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('row').filter({ hasText: 'T-5' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByTestId('lot-award').getByRole('button', { name: 'Award this lot' }).click();
+  await expect(page.getByText('Lot 2 awarded to B-3 — contract C-11 signed')).toBeVisible();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.getByRole('row').filter({ hasText: 'T-7' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+  await expect(page.getByText('Lot 2 awarded to B-3')).toHaveCount(0);
+});
+
+test('a late bid says which request it was made on, not that it was made on the one open', async ({ page }) => {
+  const open = PLAIN_TENDER('open');
+  const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
+  scenario = realm(MANAGER, open, {
+    tender_list: TENDERS([open, second]),
+    tender_get: { byArgs: [{ when: { tender: 'T-6' }, reply: { ok: true, tender: open } }, { reply: { ok: true, tender: second } }] },
+    bid_submit: { delay: 2000, reply: { ok: true, bid: 'B-9' } },
+    department_get: { ok: true, department: { id: 'Infrastructure', head: 'dana' }, positions: [] },
+  });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('row').filter({ hasText: 'T-6' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByLabel('Amount (quote)').fill('900000');
+  await page.getByRole('button', { name: 'Submit sealed bid' }).click();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.getByRole('row').filter({ hasText: 'T-7' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByText('T-6: Sealed bid B-9 submitted — it stays sealed until bidding closes')).toBeVisible({ timeout: 6000 });
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+});
+
+test('the refusal of a request that was left does not show on the list', async ({ page }) => {
+  scenario = realm(MANAGER, tender(), { tender_get: { delay: 1500, reply: { ok: false, error: 'unknown Tender', kind: 'not_found' } } });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('table').getByRole('button', { name: 'Open', exact: true }).first().click();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.waitForTimeout(2500);
+  await expect(page.getByRole('table')).toBeVisible();
+  await expect(page.getByText('This request could not be opened.')).toHaveCount(0);
+});
+
 test('a visitor whose permissions are not known is offered no award', async ({ page }) => {
   scenario = realm(null, tender());
   await openTender(page);

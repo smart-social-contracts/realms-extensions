@@ -1,5 +1,5 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { openExtension, realmCall } from '../../../../_shared/testing/e2e/local-realm';
 
@@ -19,15 +19,22 @@ const SLOW = { timeout: 120_000 };
 /**
  * The viewport as it is: the page is a 100 %-high frame around the realm, so a full-page capture resizes it and captures
  * nothing (a blank image, which three of the screenshots once were) while the content scrolls inside the frame.
- * A capture too small to hold a page of text is refused instead of kept.
+ * The floor is on a capture of the extension's own element, which leaves out the host's sidebar, breadcrumb and footer (they
+ * alone encode to more than a floor that a white extension should fail). Measured on this realm: the pages are 56 to 102 KB,
+ * the extension painted white is 6.5 KB and reduced to its header 20.8 KB: below 40 KB is blank, or as good as.
  */
-const BLANK_BELOW = 20_000; // bytes: our screenshots of a page of text are 60 to 130 KB, a white one a few KB
+const BLANK_BELOW = 40_000; // bytes
+
+function extensionElement(page: Page) {
+  return page.frameLocator('#realm').locator('[data-extension-id="procurement"]');
+}
 
 async function shot(page: Page, name: string) {
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(800);
-  const picture = await page.screenshot({ path: join(OUT, `local-${name}.png`) });
-  expect(picture.length, `the screenshot ${name} is blank`).toBeGreaterThan(BLANK_BELOW);
+  const element = await extensionElement(page).screenshot();
+  expect(element.length, `the screenshot ${name} is blank`).toBeGreaterThan(BLANK_BELOW);
+  await page.screenshot({ path: join(OUT, `local-${name}.png`) });
 }
 
 async function contractsTab(ext: FrameLocator) {
@@ -255,5 +262,26 @@ test('a tender is created with lots, their budgets in the currency\'s base units
     ]);
   } finally {
     await close();
+  }
+});
+
+test('a screenshot of the extension painted white, or reduced to its header, is refused', async ({ page }) => {
+  const { ext, close } = await openExtension(page, 'procurement');
+  try {
+    await contractsTab(ext);
+    await expect(ext.getByTestId('contract-row').first()).toBeVisible(SLOW);
+    await shot(page, 'guard-control'); // the page as it is passes
+    const hide = (keep: string) =>
+      extensionElement(page).evaluate((root, selector) => {
+        root.querySelectorAll('*').forEach((node) => ((node as HTMLElement).style.visibility = 'hidden'));
+        if (selector) root.querySelectorAll(selector).forEach((node) => ((node as HTMLElement).style.visibility = 'visible'));
+      }, keep);
+    await hide('');
+    await expect(shot(page, 'guard-white')).rejects.toThrow(/is blank/);
+    await hide('header, header *');
+    await expect(shot(page, 'guard-header')).rejects.toThrow(/is blank/);
+  } finally {
+    await close();
+    rmSync(join(OUT, 'local-guard-control.png'), { force: true });
   }
 });

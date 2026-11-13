@@ -301,6 +301,11 @@
 		decryptedBids = {};
 		const [res, log] = await Promise.all([read('tender_get', { tender: tenderId }), read('events', { count: 500 })]);
 		if (mine !== detailSeq) return;
+		if (view !== 'detail') {
+			// The request was left while it was read: its reply, a refusal too, belongs to no page now.
+			busy = false;
+			return;
+		}
 		// A request the realm did not give has no bids to show: nothing is offered on it.
 		detailReady = Boolean(res?.tender);
 		if (res?.tender) {
@@ -344,6 +349,9 @@
 		bidLot = '';
 		bids = [];
 		detailReady = false;
+		// What the last request said is not about this one; a late reply to it lands after this and names its request.
+		actionMsg = '';
+		actionError = '';
 		lotWinners = {};
 		lotJustifications = {};
 		lotReasons = {};
@@ -397,6 +405,16 @@
 		}
 	}
 
+	/** Whether `tenderId` is the request on the page now. */
+	function isOpen(tenderId: string) {
+		return selected?.id === tenderId && view === 'detail';
+	}
+
+	/** What an action says: the message lands on whatever page is open, so one about a request that is not open names it. */
+	function about(tenderId: string, text: string) {
+		return isOpen(tenderId) ? text : `${tenderId}: ${text}`;
+	}
+
 	/** Run a lifecycle operation on the selected request, then reload it and the list. */
 	async function act(name: string, args: Record<string, unknown>, message: (reply: any) => string) {
 		if (!selected) return;
@@ -406,11 +424,11 @@
 		actionMsg = '';
 		try {
 			const res = await run(name, args);
-			actionMsg = outcome(res, message(res));
-			await loadDetail(tenderId);
+			actionMsg = about(tenderId, outcome(res, message(res)));
+			if (isOpen(tenderId)) await loadDetail(tenderId);
 			await loadTenders();
 		} catch (e: any) {
-			actionError = e?.message ?? String(e);
+			actionError = about(tenderId, e?.message ?? String(e));
 		} finally {
 			busy = false;
 		}
@@ -477,13 +495,13 @@
 				payload_hash: `sha256:${await sha256Hex(`${price}:${nonce}`)}`,
 				...(bidLot ? { lot: bidLot } : {}),
 			});
-			actionMsg = outcome(res, `Sealed bid ${res.bid} submitted — it stays sealed until bidding closes`);
+			actionMsg = about(tenderId, outcome(res, `Sealed bid ${res.bid} submitted — it stays sealed until bidding closes`));
 			bidAmount = '';
 			bidDescription = '';
 			bidTechnical = '';
-			await loadDetail(tenderId);
+			if (isOpen(tenderId)) await loadDetail(tenderId);
 		} catch (e: any) {
-			actionError = e?.message ?? String(e);
+			actionError = about(tenderId, e?.message ?? String(e));
 		} finally {
 			busy = false;
 		}
