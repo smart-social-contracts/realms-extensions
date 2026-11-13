@@ -164,6 +164,27 @@ test('a late reply to an action does not take the user back to the request they 
   await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
   expect(await asked(page, 'tender_award')).toEqual([{ tender: 'T-5', lot: '2' }]);
   expect(await asked(page, 'tender_get')).toEqual([{ tender: 'T-5' }, { tender: 'T-7' }]);
+  // What it said is about T-5, and says so: on T-7 it would be taken for a message about T-7.
+  await expect(page.getByText('T-5: Lot 2 awarded to B-3 — contract C-11 signed')).toBeVisible();
+});
+
+test('a late bid says which request it was made on, not that it was made on the one open', async ({ page }) => {
+  const open = PLAIN_TENDER('open');
+  const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
+  scenario = realm(MANAGER, open, {
+    tender_list: TENDERS([open, second]),
+    tender_get: { byArgs: [{ when: { tender: 'T-6' }, reply: { ok: true, tender: open } }, { reply: { ok: true, tender: second } }] },
+    bid_submit: { delay: 2000, reply: { ok: true, bid: 'B-9' } },
+    department_get: { ok: true, department: { id: 'Infrastructure', head: 'dana' }, positions: [] },
+  });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('row').filter({ hasText: 'T-6' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByLabel('Amount (quote)').fill('900000');
+  await page.getByRole('button', { name: 'Submit sealed bid' }).click();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.getByRole('row').filter({ hasText: 'T-7' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByText('T-6: Sealed bid B-9 submitted — it stays sealed until bidding closes')).toBeVisible({ timeout: 6000 });
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
 });
 
 test('the refusal of a request that was left does not show on the list', async ({ page }) => {
