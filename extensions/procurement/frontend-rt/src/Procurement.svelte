@@ -349,6 +349,9 @@
 		bidLot = '';
 		bids = [];
 		detailReady = false;
+		// What the last request said is not about this one; a late reply to it lands after this and names its request.
+		actionMsg = '';
+		actionError = '';
 		lotWinners = {};
 		lotJustifications = {};
 		lotReasons = {};
@@ -402,9 +405,14 @@
 		}
 	}
 
+	/** Whether `tenderId` is the request on the page now. */
+	function isOpen(tenderId: string) {
+		return selected?.id === tenderId && view === 'detail';
+	}
+
 	/** What an action says: the message lands on whatever page is open, so one about a request that is not open names it. */
 	function about(tenderId: string, text: string) {
-		return selected?.id === tenderId && view === 'detail' ? text : `${tenderId}: ${text}`;
+		return isOpen(tenderId) ? text : `${tenderId}: ${text}`;
 	}
 
 	/** Run a lifecycle operation on the selected request, then reload it and the list. */
@@ -417,7 +425,7 @@
 		try {
 			const res = await run(name, args);
 			actionMsg = about(tenderId, outcome(res, message(res)));
-			if (selected?.id === tenderId && view === 'detail') await loadDetail(tenderId);
+			if (isOpen(tenderId)) await loadDetail(tenderId);
 			await loadTenders();
 		} catch (e: any) {
 			actionError = about(tenderId, e?.message ?? String(e));
@@ -491,7 +499,7 @@
 			bidAmount = '';
 			bidDescription = '';
 			bidTechnical = '';
-			if (selected?.id === tenderId && view === 'detail') await loadDetail(tenderId);
+			if (isOpen(tenderId)) await loadDetail(tenderId);
 		} catch (e: any) {
 			actionError = about(tenderId, e?.message ?? String(e));
 		} finally {

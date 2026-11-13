@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user back to a request they left.
 - The reply of a request that was left while it was read (its refusal too) is dropped, so its error does not show on the
   list of requests.
+- Opening a request clears what the last one said (its message and its error); a late reply lands after that and names its request.
 - What an action or a bid answers is about its own request: when that is not the one open, the message names it
   (`T-5: Lot 2 awarded to B-3 — contract C-11 signed`), instead of reading as a message about the open request.
 - The real-realm specs refuse a blank screenshot by a capture of the extension's own element (floor 40 KB: the pages are

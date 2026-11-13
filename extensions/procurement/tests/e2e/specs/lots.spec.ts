@@ -168,6 +168,23 @@ test('a late reply to an action does not take the user back to the request they 
   await expect(page.getByText('T-5: Lot 2 awarded to B-3 — contract C-11 signed')).toBeVisible();
 });
 
+test('what an action said about the request open is gone when another request is opened', async ({ page }) => {
+  const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
+  scenario = realm(MANAGER, tender(), {
+    tender_list: TENDERS([tender(), second]),
+    tender_get: { byArgs: [{ when: { tender: 'T-5' }, reply: { ok: true, tender: tender() } }, { reply: { ok: true, tender: second } }] },
+    tender_award: { ok: true, winner: 'B-3', score: 80, contract: 'C-11', justification: '' },
+  });
+  await page.goto(`${url}/extensions/procurement`);
+  await page.getByRole('row').filter({ hasText: 'T-5' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByTestId('lot-award').getByRole('button', { name: 'Award this lot' }).click();
+  await expect(page.getByText('Lot 2 awarded to B-3 — contract C-11 signed')).toBeVisible();
+  await page.getByRole('button', { name: 'All requests' }).click();
+  await page.getByRole('row').filter({ hasText: 'T-7' }).getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Street lights' })).toBeVisible();
+  await expect(page.getByText('Lot 2 awarded to B-3')).toHaveCount(0);
+});
+
 test('a late bid says which request it was made on, not that it was made on the one open', async ({ page }) => {
   const open = PLAIN_TENDER('open');
   const second = tender('evaluation', { id: 'T-7', title: 'Street lights', lots: [], bids: [] });
