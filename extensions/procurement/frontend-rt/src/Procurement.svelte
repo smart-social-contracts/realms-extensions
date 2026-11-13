@@ -301,6 +301,11 @@
 		decryptedBids = {};
 		const [res, log] = await Promise.all([read('tender_get', { tender: tenderId }), read('events', { count: 500 })]);
 		if (mine !== detailSeq) return;
+		if (view !== 'detail') {
+			// The request was left while it was read: its reply, a refusal too, belongs to no page now.
+			busy = false;
+			return;
+		}
 		// A request the realm did not give has no bids to show: nothing is offered on it.
 		detailReady = Boolean(res?.tender);
 		if (res?.tender) {
@@ -407,7 +412,7 @@
 		try {
 			const res = await run(name, args);
 			actionMsg = outcome(res, message(res));
-			await loadDetail(tenderId);
+			if (selected?.id === tenderId && view === 'detail') await loadDetail(tenderId);
 			await loadTenders();
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
@@ -481,7 +486,7 @@
 			bidAmount = '';
 			bidDescription = '';
 			bidTechnical = '';
-			await loadDetail(tenderId);
+			if (selected?.id === tenderId && view === 'detail') await loadDetail(tenderId);
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
 		} finally {

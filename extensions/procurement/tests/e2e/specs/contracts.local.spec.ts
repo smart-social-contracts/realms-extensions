@@ -19,15 +19,18 @@ const SLOW = { timeout: 120_000 };
 /**
  * The viewport as it is: the page is a 100 %-high frame around the realm, so a full-page capture resizes it and captures
  * nothing (a blank image, which three of the screenshots once were) while the content scrolls inside the frame.
- * A capture too small to hold a page of text is refused instead of kept.
+ * The floor is on the area of the extension, not the whole viewport, whose sidebar alone weighs more than the floor: a capture
+ * of that area under 20 KB is blank (ours are 92 to 216 KB as whole viewports, a white image a few KB) and fails the spec.
  */
-const BLANK_BELOW = 20_000; // bytes: our screenshots of a page of text are 60 to 130 KB, a white one a few KB
+const BLANK_BELOW = 20_000; // bytes
+const EXTENSION_AREA = { x: 257, y: 61, width: 1023, height: 1739 };
 
 async function shot(page: Page, name: string) {
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(800);
-  const picture = await page.screenshot({ path: join(OUT, `local-${name}.png`) });
-  expect(picture.length, `the screenshot ${name} is blank`).toBeGreaterThan(BLANK_BELOW);
+  await page.screenshot({ path: join(OUT, `local-${name}.png`) });
+  const area = await page.screenshot({ clip: EXTENSION_AREA });
+  expect(area.length, `the screenshot ${name} is blank`).toBeGreaterThan(BLANK_BELOW);
 }
 
 async function contractsTab(ext: FrameLocator) {
