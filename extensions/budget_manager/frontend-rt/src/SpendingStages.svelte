@@ -66,14 +66,14 @@
 </script>
 
 {#snippet cells(s: Stages, owedAmount: number = 0)}
-	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.planned)}</td>
-	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.reserved)}</td>
-	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">{fmt(s.committed)}</td>
+	<td class="py-2 pr-3 text-right tabular-nums whitespace-nowrap text-gray-700">{fmt(s.planned)}</td>
+	<td class="py-2 pr-3 text-right tabular-nums whitespace-nowrap text-gray-700">{fmt(s.reserved)}</td>
+	<td class="py-2 pr-3 text-right tabular-nums whitespace-nowrap text-gray-700">{fmt(s.committed)}</td>
 	<td class="py-2 pr-3 text-right tabular-nums text-gray-700">
-		{fmt(s.actual)}
+		<span class="whitespace-nowrap">{fmt(s.actual)}</span>
 		{#if owedAmount > 0}<div class="text-xs font-normal text-gray-400" data-testid="owed">{t('stage_owed', { amount: fmt(owedAmount) })}</div>{/if}
 	</td>
-	<td class="py-2 text-right tabular-nums font-medium text-gray-900">{fmt(s.available)}</td>
+	<td class="py-2 text-right tabular-nums whitespace-nowrap font-medium text-gray-900">{fmt(s.available)}</td>
 {/snippet}
 
 {#snippet figures(s: Stages, owedAmount: number = 0)}
@@ -146,51 +146,53 @@
 			</section>
 		</div>
 	{:else}
-		<table class="w-full text-sm" data-testid="stages-table">
-			<thead>
-				<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
-					<th scope="col" class="py-2 pr-3">{t('col_category')}</th>
-					<th scope="col" class="py-2 pr-3 w-48"><span class="sr-only">{t('stages_legend')}</span></th>
-					<th scope="col" class="py-2 pr-3 text-right">{t('stage_planned')}</th>
-					<th scope="col" class="py-2 pr-3 text-right">{t('stage_reserved')}</th>
-					<th scope="col" class="py-2 pr-3 text-right">{t('stage_committed')}</th>
-					<th scope="col" class="py-2 pr-3 text-right">{t('stage_actual')}</th>
-					<th scope="col" class="py-2 text-right">{t('stage_available')}</th>
-				</tr>
-			</thead>
-			{#each funds as f (f.fund)}
-				<tbody class="divide-y divide-gray-100" data-fund={f.fund}>
-					<tr class="bg-gray-50">
-						<th scope="rowgroup" colspan="7" class="py-2 pr-3 text-left font-semibold text-gray-900">{f.fund}</th>
+		<div class="overflow-x-auto">
+			<table class="w-full text-sm" data-testid="stages-table">
+				<thead>
+					<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
+						<th scope="col" class="py-2 pr-3">{t('col_category')}</th>
+						<th scope="col" class="py-2 pr-3 w-32"><span class="sr-only">{t('stages_legend')}</span></th>
+						<th scope="col" class="py-2 pr-3 text-right">{t('stage_planned')}</th>
+						<th scope="col" class="py-2 pr-3 text-right">{t('stage_reserved')}</th>
+						<th scope="col" class="py-2 pr-3 text-right">{t('stage_committed')}</th>
+						<th scope="col" class="py-2 pr-3 text-right">{t('stage_actual')}</th>
+						<th scope="col" class="py-2 text-right">{t('stage_available')}</th>
 					</tr>
-					{#each f.lines as line (line.id)}
-						<tr
-							class={focused?.id === line.id ? 'bg-amber-50' : ''}
-							data-line={line.id}
-							aria-current={focused?.id === line.id ? 'true' : undefined}
-						>
-							<td class="py-2 pr-3 text-gray-600">
-								<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400">{' · '}{t('stages_extended')}</span>{/if}
-							</td>
-							<td class="py-2 pr-3"><StageBar stages={line} label={barLabel(line)} /></td>
-							{@render cells(line, owedOn(line))}
+				</thead>
+				{#each funds as f (f.fund)}
+					<tbody class="divide-y divide-gray-100" data-fund={f.fund}>
+						<tr class="bg-gray-50">
+							<th scope="rowgroup" colspan="7" class="py-2 pr-3 text-left font-semibold text-gray-900">{f.fund}</th>
 						</tr>
-					{/each}
-					<tr class="font-medium border-t border-gray-200" data-total={f.fund}>
-						<td class="py-2 pr-3 text-gray-900">{t('stages_fund_total', { fund: f.fund })}</td>
-						<td class="py-2 pr-3"><StageBar stages={f.totals} label={barLabel(f.totals)} /></td>
-						{@render cells(f.totals)}
+						{#each f.lines as line (line.id)}
+							<tr
+								class={focused?.id === line.id ? 'bg-amber-50' : ''}
+								data-line={line.id}
+								aria-current={focused?.id === line.id ? 'true' : undefined}
+							>
+								<td class="py-2 pr-3 text-gray-600">
+									<span class="capitalize">{words(line.category)}</span>{#if line.status === 'extended'}<span class="text-xs text-gray-400">{' · '}{t('stages_extended')}</span>{/if}
+								</td>
+								<td class="py-2 pr-3"><StageBar stages={line} label={barLabel(line)} /></td>
+								{@render cells(line, owedOn(line))}
+							</tr>
+						{/each}
+						<tr class="font-medium border-t border-gray-200" data-total={f.fund}>
+							<td class="py-2 pr-3 text-gray-900">{t('stages_fund_total', { fund: f.fund })}</td>
+							<td class="py-2 pr-3"><StageBar stages={f.totals} label={barLabel(f.totals)} /></td>
+							{@render cells(f.totals)}
+						</tr>
+					</tbody>
+				{/each}
+				<tfoot>
+					<tr class="font-semibold border-t border-gray-200" data-total="budget">
+						<td class="py-2 pr-3 text-gray-900">{t('stages_budget_total')}</td>
+						<td class="py-2 pr-3"><StageBar stages={budget} label={barLabel(budget)} /></td>
+						{@render cells(budget)}
 					</tr>
-				</tbody>
-			{/each}
-			<tfoot>
-				<tr class="font-semibold border-t border-gray-200" data-total="budget">
-					<td class="py-2 pr-3 text-gray-900">{t('stages_budget_total')}</td>
-					<td class="py-2 pr-3"><StageBar stages={budget} label={barLabel(budget)} /></td>
-					{@render cells(budget)}
-				</tr>
-			</tfoot>
-		</table>
+				</tfoot>
+			</table>
+		</div>
 	{/if}
 
 	{#if pending.length > 0}

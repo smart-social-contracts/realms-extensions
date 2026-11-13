@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { openExtension, realmCall } from '../../../../_shared/testing/e2e/local-realm';
@@ -12,13 +12,25 @@ const ZONE = 'Europe/Madrid'; // the seed sets the realm's time zone
 const money = (raw: number, symbol = 'REALM') => `${(raw / 100).toLocaleString('en-US', { maximumFractionDigits: 4 })} ${symbol}`;
 const day = (epoch: number) => new Date(epoch * 1000).toLocaleDateString('sv-SE', { timeZone: ZONE });
 
-test.use({ viewport: { width: 1280, height: 1200 } });
+// The host's sidebar has no transition under reduced motion: it is open or closed, never half way. The shots are of the
+// viewport, never `fullPage`: that resizes the page for the capture, and the host's sidebar reacts to the resize.
+test.use({ viewport: { width: 1280, height: 1200 }, reducedMotion: 'reduce' });
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
 
+/**
+ * The host's desktop sidebar is hidden until the page has initialised, then opens by a transition of its width (w-0 to
+ * w-64, 200 ms) that moves the extension with it: wait for its open width, so that a screenshot is of the settled page.
+ */
+async function settled(realm: FrameLocator) {
+  const sidebar = realm.locator('aside.lg\\:flex');
+  await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width), { timeout: 30_000 }).toBe(256);
+}
+
 async function open(page: Page) {
-  const { ext, close } = await openExtension(page, 'budget_manager');
+  const { ext, realm, close } = await openExtension(page, 'budget_manager');
   await expect(ext.getByRole('button', { name: 'Budgets' })).toBeVisible({ timeout: 120_000 });
+  await settled(realm);
   return { ext, close };
 }
 
@@ -32,7 +44,12 @@ test('the spending stages of each expense line, the totals of each fund and of t
     const stages = ext.getByTestId('stages');
     // What is owed and not yet paid is part of a line's actual money: scheduled payments are charged when they are recognised.
     const scheduled = realmCall('transfer_list', { status: 'scheduled' }).transfers;
-    const owedOn = (b: any) => scheduled.filter((t: any) => t.budget === b.id).reduce((total: number, t: any) => total + t.amount, 0);
+    const slot = (b: any) => `${b.fund}:${b.period}:${b.category}`; // the versions of a line share it, as the page counts them
+    const lineOf = new Map(budgets.map((b: any) => [b.id, b]));
+    const owedOn = (b: any) =>
+      scheduled
+        .filter((t: any) => lineOf.has(t.budget) && slot(lineOf.get(t.budget)) === slot(b))
+        .reduce((total: number, t: any) => total + t.amount, 0);
     const actualText = (b: any) => (owedOn(b) ? `${money(b.actual)} of which owed, not yet paid: ${money(owedOn(b))}` : money(b.actual));
     const figures = (b: any) => [money(b.planned), money(b.reserved), money(b.committed), actualText(b), money(b.planned - b.reserved - b.committed - b.actual)];
     for (const line of adopted) {
@@ -54,7 +71,7 @@ test('the spending stages of each expense line, the totals of each fund and of t
     await expect(pending).toHaveCount(budgets.filter((b: any) => ['draft', 'proposed'].includes(b.status)).length);
     await expect(pending.filter({ hasText: 'street lighting' })).toContainText('Draft');
     await expect(pending.filter({ hasText: 'schools' })).toContainText('Proposed');
-    await page.screenshot({ path: join(OUT, 'real-stages.png'), fullPage: true });
+    await page.screenshot({ path: join(OUT, 'real-stages.png') });
   } finally {
     await close();
   }
@@ -86,12 +103,12 @@ test('the scheduled payments: due days, the overdue one marked, the cancelled on
     for (const t of cancelled) {
       await expect(payments.locator(`[data-payment="${t.id}"]`).getByRole('cell').nth(5)).toHaveText('Cancelled, unpaid');
     }
-    await page.screenshot({ path: join(OUT, 'real-payments.png'), fullPage: true });
+    await page.screenshot({ path: join(OUT, 'real-payments.png') });
 
     const overdue = scheduled.filter((t: any) => t.due_at < now);
     await payments.getByRole('button', { name: 'Overdue' }).click();
     await expect(payments.locator('[data-payment]')).toHaveCount(overdue.length);
-    await page.screenshot({ path: join(OUT, 'real-payments-overdue.png'), fullPage: true });
+    await page.screenshot({ path: join(OUT, 'real-payments-overdue.png') });
     await payments.getByRole('button', { name: 'Due this month' }).click();
     const month = (epoch: number) => day(epoch).slice(0, 7);
     await expect(payments.locator('[data-payment]')).toHaveCount(scheduled.filter((t: any) => month(t.due_at) === month(now)).length);
@@ -120,22 +137,23 @@ test('the sweep rules and the sweeps of the quarters, with the capital\'s bookin
       await expect(row.getByRole('cell').nth(5)).toContainText('Booked as T-');
       await expect(row.getByRole('cell').nth(5).getByRole('listitem')).toHaveText([`cash: debit ${money(s.amount)}`, `sweep: credit ${money(s.amount)}`]);
     }
-    await page.screenshot({ path: join(OUT, 'real-sweeps.png'), fullPage: true });
+    await page.screenshot({ path: join(OUT, 'real-sweeps.png') });
   } finally {
     await close();
   }
 });
 
 test('a plain member reads the stages and the sweep rules, not the payments or the books of the sweeps', async ({ page }) => {
-  const { ext, close } = await openExtension(page, 'budget_manager', { asMember: true });
+  const { ext, realm, close } = await openExtension(page, 'budget_manager', { asMember: true });
   try {
     await expect(ext.getByTestId('stages')).toBeVisible({ timeout: 120_000 });
+    await settled(realm);
     await expect(ext.getByTestId('stages').getByTestId('unadopted')).toHaveCount(0);
     await expect(ext.getByRole('button', { name: 'Scheduled payments' })).toHaveCount(0);
     await ext.getByRole('button', { name: 'Quarter sweeps' }).click();
     await expect(ext.getByTestId('rules')).toBeVisible();
     await expect(ext.getByText('Only those who may read the treasury see the sweeps.')).toBeVisible();
-    await page.screenshot({ path: join(OUT, 'real-member.png'), fullPage: true });
+    await page.screenshot({ path: join(OUT, 'real-member.png') });
   } finally {
     await close();
   }
