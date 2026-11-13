@@ -12,9 +12,10 @@ const ZONE = 'Europe/Madrid'; // the seed sets the realm's time zone
 const money = (raw: number, symbol = 'REALM') => `${(raw / 100).toLocaleString('en-US', { maximumFractionDigits: 4 })} ${symbol}`;
 const day = (epoch: number) => new Date(epoch * 1000).toLocaleDateString('sv-SE', { timeZone: ZONE });
 
-// The host's sidebar has no transition under reduced motion: it is open or closed, never half way. The shots are of the
-// viewport, never `fullPage`: that resizes the page for the capture, and the host's sidebar reacts to the resize.
-test.use({ viewport: { width: 1280, height: 1200 }, reducedMotion: 'reduce' });
+// The host's sidebar has no transition under reduced motion: it is open or closed, never half way (`reducedMotion` is a
+// context option, not a test option, in Playwright 1.52). The shots are of the viewport, never `fullPage`: that resizes the
+// page for the capture, and the host's sidebar reacts to the resize.
+test.use({ viewport: { width: 1280, height: 1200 }, contextOptions: { reducedMotion: 'reduce' } });
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
 
@@ -23,6 +24,8 @@ test.beforeAll(() => mkdirSync(OUT, { recursive: true }));
  * w-64, 200 ms) that moves the extension with it: wait for its open width, so that a screenshot is of the settled page.
  */
 async function settled(realm: FrameLocator) {
+  // Reduced motion really is on in the realm's frame: an option Playwright does not know is ignored without a word.
+  expect(await realm.locator('body').evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
   const sidebar = realm.locator('aside.lg\\:flex');
   await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width), { timeout: 30_000 }).toBe(256);
 }
