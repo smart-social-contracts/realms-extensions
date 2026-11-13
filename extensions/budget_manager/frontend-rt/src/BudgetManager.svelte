@@ -15,7 +15,7 @@
 	import { ONE, formatPercent, toRatio } from '../../../_shared/frontend/units';
 	import { loadExtensionI18n, t } from './lib/i18n';
 	import { formatMoney } from './money.ts';
-	import type { Payment } from './payments.ts';
+	import { owedOnLines, type Payment } from './payments.ts';
 	import { isPending, type BudgetLine } from './stages.ts';
 	import { roleIn, type BookedEntry, type Sweep, type SweepRule } from './sweeps.ts';
 
@@ -111,6 +111,7 @@
 	let sweepEntries: BookedEntry[] = $state.raw([]);
 	let sweepBookings = $state(false);
 	let tabError = $state('');
+	const owedOnLinesNow = $derived(payments ? owedOnLines(payments, lineById) : {});
 	let shownLine: BudgetLine | null = $state.raw(null);
 	let sweepRules: SweepRule[] = $state.raw([]);
 	let role: 'capital' | 'quarter' | null = $state(null);
@@ -249,6 +250,8 @@
 		shownLine = null;
 		try {
 			if (tab === 'scheduled' && payments === null) await loadPayments();
+			// The stages say how much of each line's actual money is owed and unpaid, for those who read the treasury.
+			if (tab === 'budgets' && payments === null && hasLedger) await optional(loadPayments);
 			if (tab === 'sweeps' && sweeps === null && hasLedger) await loadSweeps();
 		} catch (e: any) {
 			tabError = e?.message || String(e);
@@ -952,7 +955,7 @@
 				{/if}
 			</div>
 			<div class={cn(panelClass, 'mt-4')}>
-				<SpendingStages period={selectedPeriod} lines={stageLines} pending={pendingLines} {fmt} {narrow} focus={shownLine} />
+				<SpendingStages period={selectedPeriod} lines={stageLines} pending={pendingLines} {fmt} {narrow} focus={shownLine} owed={owedOnLinesNow} />
 			</div>
 		{:else if activeTab === 'scheduled'}
 			<div class={panelClass}>

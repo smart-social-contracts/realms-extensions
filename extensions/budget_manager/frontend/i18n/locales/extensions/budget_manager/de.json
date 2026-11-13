@@ -19,7 +19,7 @@
   "stage_actual": "Ist",
   "stage_available": "Verfügbar",
   "stages_title": "Ausgabenstufen — {period}",
-  "stages_hint": "Jeder Ausgabenposten vom Geplanten bis zum noch Verfügbaren: reserviert für eine noch nicht eingegangene Verpflichtung, gegenüber Dritten verpflichtet und noch nicht belastet, und Ist (belastet).",
+  "stages_hint": "Jeder Ausgabenposten vom Geplanten bis zum noch Verfügbaren: reserviert für eine noch nicht eingegangene Verpflichtung, gegenüber Dritten verpflichtet und noch nicht belastet, und Ist: belastet, also die anerkannten Verpflichtungen, einschließlich geschuldeter und noch nicht bezahlter Zahlungen.",
   "stages_legend": "Stufen des Geldes",
   "stages_bar": "{planned} geplant: {actual} belastet, {committed} verpflichtet, {reserved} reserviert, {available} verfügbar",
   "stages_fund_total": "Summe {fund}",
@@ -72,5 +72,6 @@
   "entry_debit": "{category}: Soll {amount}",
   "entry_credit": "{category}: Haben {amount}",
   "money_base_units": "{amount} {symbol} (kleinste Einheiten)",
-  "stages_line_gone": "Dieser Posten gehört nicht mehr zu den geltenden: Ein späterer Haushalt hat ihn geändert, oder sein Zeitraum ist abgeschlossen."
+  "stages_line_gone": "Dieser Posten gehört nicht mehr zu den geltenden: Ein späterer Haushalt hat ihn geändert, oder sein Zeitraum ist abgeschlossen.",
+  "stage_owed": "davon geschuldet, noch nicht bezahlt: {amount}"
 }

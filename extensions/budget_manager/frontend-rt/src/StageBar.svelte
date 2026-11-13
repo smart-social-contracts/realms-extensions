@@ -17,7 +17,7 @@
 	let { stages, label }: { stages: Stages; label: string } = $props();
 </script>
 
-<div class="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100" role="img" aria-label={label}>
+<div class="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100" style="min-width: 6rem" role="img" aria-label={label}>
 	{#each bar(stages) as part (part.stage)}
 		{#if part.percent > 0}
 			<div class={STAGE_COLORS[part.stage]} style="width: {part.percent}%" data-stage={part.stage}></div>

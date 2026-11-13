@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { dayInZone } from './days.ts';
-import { isOverdue, listed, owed, partyName, type Payment } from './payments.ts';
+import { isOverdue, listed, owed, owedOnLines, partyName, type Payment } from './payments.ts';
+import type { BudgetLine } from './stages.ts';
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 const MADRID = 'Europe/Madrid';
@@ -85,6 +86,45 @@ describe('what is owed', () => {
 			payment('T-4', { amount: 9_999, status: 'cancelled' }),
 		]);
 		assert.deepEqual(total, { REALM: 1_500, ckBTC: 7 });
+	});
+});
+
+describe('what is owed on a budget line', () => {
+	const line = (id: string, over: Partial<BudgetLine> = {}): BudgetLine => ({
+		id,
+		fund: 'ROADS',
+		period: 'FY2026',
+		category: 'capital',
+		kind: 'expense',
+		status: 'adopted',
+		planned: 1_000,
+		reserved: 0,
+		committed: 0,
+		actual: 0,
+		...over,
+	});
+	// B-5 is a version of the capital line that a later budget amended into B-1: the realm keeps their slot.
+	const lines = { 'B-1': line('B-1'), 'B-5': line('B-5', { status: 'amended' }), 'B-2': line('B-2', { category: 'upkeep' }) };
+
+	it('adds up the owed payments charged to it, and to the versions it was amended from', () => {
+		const total = owedOnLines(
+			[payment('T-1', { budget: 'B-1', amount: 300 }), payment('T-2', { budget: 'B-5', amount: 200 }), payment('T-3', { budget: 'B-2', amount: 50 })],
+			lines,
+		);
+		assert.deepEqual(total, { 'ROADS:FY2026:capital': 500, 'ROADS:FY2026:upkeep': 50 });
+	});
+
+	it('leaves out what is not owed, and what no line the realm lists is charged', () => {
+		const total = owedOnLines(
+			[
+				payment('T-1', { budget: 'B-1', amount: 300, status: 'cancelled' }),
+				payment('T-2', { budget: null, amount: 200 }),
+				payment('T-3', { budget: 'B-404', amount: 50 }),
+			],
+			lines,
+		);
+		assert.deepEqual(total, {});
+		assert.deepEqual(owedOnLines([], lines), {});
 	});
 });
 

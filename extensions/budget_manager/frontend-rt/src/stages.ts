@@ -26,6 +26,11 @@ export interface Stages {
 
 export type StageName = 'actual' | 'committed' | 'reserved' | 'available';
 
+/** What the realm calls a budget line across its versions: a later budget amends a line and the amended one keeps the slot. */
+export function slotOf(line: Pick<BudgetLine, 'fund' | 'period' | 'category'>): string {
+	return `${line.fund}:${line.period}:${line.category}`;
+}
+
 // The lines that cap spending, as the realm reads them: adopted ones and ones extended from the period before.
 const IN_FORCE = ['adopted', 'extended'];
 // Lines still being made: nothing can be reserved, committed or charged to them yet.

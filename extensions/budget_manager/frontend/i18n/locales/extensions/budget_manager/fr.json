@@ -19,7 +19,7 @@
   "stage_actual": "Réalisé",
   "stage_available": "Disponible",
   "stages_title": "Étapes de la dépense — {period}",
-  "stages_hint": "Chaque ligne de dépense, de ce qui est prévu à ce qui reste disponible : réservé pour une dépense pas encore engagée, engagé envers un tiers et pas encore imputé, et réalisé (imputé).",
+  "stages_hint": "Chaque ligne de dépense, de ce qui est prévu à ce qui reste disponible : réservé pour une dépense pas encore engagée, engagé envers un tiers et pas encore imputé, et réalisé : imputé, c'est-à-dire les obligations reconnues, y compris les paiements dus et pas encore payés.",
   "stages_legend": "Étapes de l'argent",
   "stages_bar": "{planned} prévus : {actual} imputés, {committed} engagés, {reserved} réservés, {available} disponibles",
   "stages_fund_total": "Total {fund}",
@@ -72,5 +72,6 @@
   "entry_debit": "{category} : débit {amount}",
   "entry_credit": "{category} : crédit {amount}",
   "money_base_units": "{amount} {symbol} (plus petites unités)",
-  "stages_line_gone": "Cette ligne ne fait plus partie des lignes en vigueur : un budget ultérieur l'a modifiée, ou sa période est close."
+  "stages_line_gone": "Cette ligne ne fait plus partie des lignes en vigueur : un budget ultérieur l'a modifiée, ou sa période est close.",
+  "stage_owed": "dont dû, pas encore payé : {amount}"
 }
