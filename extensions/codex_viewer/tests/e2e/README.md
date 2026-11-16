@@ -1,7 +1,13 @@
 # Browser tests of the codex page
 
 - `npm test`: the built bundle (`npm run build` in `frontend-rt`) on a page that plays the realm, with the replies the
-  canister gives. No realm needed.
+  canister gives. No realm needed. Three spec files: `legislation.spec.ts` (the Legislation tab), `source.spec.ts`
+  (reading a chapter's text), `layers.spec.ts` (the layer stack, the domain tree, the inherited checkbox, and the
+  published source of a layer the realm does not run).
+
+  A spec must never reach the network. The page reads the published source of an uninstalled layer over HTTPS, so
+  every spec routes `raw.githubusercontent.com`: `layers.spec.ts` serves a release of its own and checks the digests,
+  the others answer 404 (which the page shows as *source unavailable*, not as an error).
 - `npm run test:local`: the page, and the install proposal of `voting` (`../../../voting/tests/e2e`), on a real local realm
   under the realm frontend's own content security policy.
 

@@ -78,8 +78,9 @@ function layered(texts: Record<string, any> = TEXTS, delay: Record<string, numbe
 }
 
 const lines = (page: Page) => page.locator('.monaco-editor .view-lines');
-const names = (page: Page) => page.locator('.codex-item-name');
-const file = (page: Page, name: string) => page.locator('.codex-item', { hasText: name });
+const names = (page: Page) => page.locator('.domain-main .codex-item-name');
+/** 1.5.0 lists a domain per row; the file it opens is the chapter of the deepest layer that defines it. */
+const file = (page: Page, domain: string) => page.locator('.domain-main', { hasText: domain });
 
 /** Every `legislation_chapter` the page asked for, in order. */
 const chaptersRead = (page: Page) =>
@@ -88,6 +89,8 @@ const chaptersRead = (page: Page) =>
   );
 
 async function openSource(page: Page) {
+  // No layer above these is installed; the tests here are about the realm's own chapters, so nothing is fetched.
+  await page.route(/raw\.githubusercontent\.com/, (route) => route.fulfill({ status: 404, body: '' }));
   await page.goto(`${url}/extensions/codex_viewer`);
   await page.getByRole('tab', { name: 'Source' }).click();
 }
@@ -95,7 +98,7 @@ async function openSource(page: Page) {
 test('lists one file per chapter, in layer order, and opens the first one', async ({ page }) => {
   scenario = layered();
   await openSource(page);
-  await expect(names(page)).toHaveText(['eu/es/calendar.json', 'eu/es/procedure.py', 'eu/es/vc/tax.py']);
+  await expect(names(page)).toHaveText(['calendar (dates)', 'procedure', 'tax']);
   await expect(page.locator('.editor-title')).toHaveText('eu/es/calendar.json');
   await expect(page.locator('.badge-lang')).toHaveText('json');
   await expect(lines(page)).toContainText('holidays', { timeout: 30000 });
@@ -107,13 +110,13 @@ test('lists one file per chapter, in layer order, and opens the first one', asyn
 test("shows a chapter's own text, read by its own checksum", async ({ page }) => {
   scenario = layered();
   await openSource(page);
-  await file(page, 'eu/es/procedure.py').click();
+  await file(page, 'procedure').click();
   await expect(page.locator('.badge-lang')).toHaveText('python');
   await expect(lines(page)).toContainText('PROCEDURE_TEXT', { timeout: 30000 });
   await expect(lines(page)).not.toContainText('TAX_TEXT');
   expect(await chaptersRead(page)).toContain('sha256:bb');
 
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'tax').click();
   await expect(lines(page)).toContainText('TAX_TEXT', { timeout: 30000 });
   expect(await chaptersRead(page)).toContain('sha256:cc');
 });
@@ -121,12 +124,12 @@ test("shows a chapter's own text, read by its own checksum", async ({ page }) =>
 test('names the file the realm holds no text for, and asks again when it is chosen again', async ({ page }) => {
   scenario = layered({ ...TEXTS, 'sha256:cc': { ok: false, error: 'NotFound: ChapterSource sha256:cc' } });
   await openSource(page);
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'tax').click();
   await expect(page.locator('.monaco-loading')).toHaveText('The realm has no text stored for eu/es/vc/tax.py.');
 
-  await file(page, 'eu/es/procedure.py').click();
+  await file(page, 'procedure').click();
   await expect(lines(page)).toContainText('PROCEDURE_TEXT', { timeout: 30000 });
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'tax').click();
   await expect(page.locator('.monaco-loading')).toBeVisible();
   // A failed read is not cached as if it were the chapter's text.
   expect((await chaptersRead(page)).filter((sum) => sum === 'sha256:cc').length).toBe(2);
@@ -136,8 +139,8 @@ test('a slow read does not overwrite the file chosen after it', async ({ page })
   scenario = layered(TEXTS, { 'sha256:bb': 1200 });
   await openSource(page);
   await expect(lines(page)).toContainText('holidays', { timeout: 30000 });
-  await file(page, 'eu/es/procedure.py').click();
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'procedure').click();
+  await file(page, 'tax').click();
   await expect(lines(page)).toContainText('TAX_TEXT', { timeout: 30000 });
   await page.waitForTimeout(2000);
   await expect(page.locator('.editor-title')).toHaveText('eu/es/vc/tax.py');
@@ -147,6 +150,7 @@ test('a slow read does not overwrite the file chosen after it', async ({ page })
 
 test('a deep link opens the chapter it names', async ({ page }) => {
   scenario = layered();
+  await page.route(/raw\.githubusercontent\.com/, (route) => route.fulfill({ status: 404, body: '' }));
   await page.goto(`${url}/extensions/codex_viewer?codex=eu%2Fes%2Fvc%2Ftax`);
   await page.getByRole('tab', { name: 'Source' }).click();
   await expect(page.locator('.editor-title')).toHaveText('eu/es/vc/tax.py');
