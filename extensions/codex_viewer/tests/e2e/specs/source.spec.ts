@@ -78,8 +78,9 @@ function layered(texts: Record<string, any> = TEXTS, delay: Record<string, numbe
 }
 
 const lines = (page: Page) => page.locator('.monaco-editor .view-lines');
-const names = (page: Page) => page.locator('.codex-item-name');
-const file = (page: Page, name: string) => page.locator('.codex-item', { hasText: name });
+const names = (page: Page) => page.locator('.domain-main .codex-item-name');
+/** 1.5.0 lists a domain per row; the file it opens is the chapter of the deepest layer that defines it. */
+const file = (page: Page, domain: string) => page.locator('.domain-main', { hasText: domain });
 
 /** Every `legislation_chapter` the page asked for, in order. */
 const chaptersRead = (page: Page) =>
@@ -88,6 +89,8 @@ const chaptersRead = (page: Page) =>
   );
 
 async function openSource(page: Page) {
+  // No layer above these is installed; the tests here are about the realm's own chapters, so nothing is fetched.
+  await page.route(/raw\.githubusercontent\.com/, (route) => route.fulfill({ status: 404, body: '' }));
   await page.goto(`${url}/extensions/codex_viewer`);
   await page.getByRole('tab', { name: 'Source' }).click();
 }
@@ -95,25 +98,25 @@ async function openSource(page: Page) {
 test('lists one file per chapter, in layer order, and opens the first one', async ({ page }) => {
   scenario = layered();
   await openSource(page);
-  await expect(names(page)).toHaveText(['eu/es/calendar.json', 'eu/es/procedure.py', 'eu/es/vc/tax.py']);
+  await expect(names(page)).toHaveText(['calendar (dates)', 'procedure', 'tax']);
   await expect(page.locator('.editor-title')).toHaveText('eu/es/calendar.json');
   await expect(page.locator('.badge-lang')).toHaveText('json');
   await expect(lines(page)).toContainText('holidays', { timeout: 30000 });
-  // The page reads that one chapter and no other. It reads it more than once: a hidden viewer is mounted before
-  // `codex_status` answers, which predates 1.4.0 and costs one extra query per visit.
-  expect(new Set(await chaptersRead(page))).toEqual(new Set(['sha256:ca']));
+  // The page reads that one chapter, once. Until 1.5.1 a viewer was mounted before `codex_status` answered and
+  // then thrown away, so the first chapter was read twice on every visit.
+  expect(await chaptersRead(page)).toEqual(['sha256:ca']);
 });
 
 test("shows a chapter's own text, read by its own checksum", async ({ page }) => {
   scenario = layered();
   await openSource(page);
-  await file(page, 'eu/es/procedure.py').click();
+  await file(page, 'procedure').click();
   await expect(page.locator('.badge-lang')).toHaveText('python');
   await expect(lines(page)).toContainText('PROCEDURE_TEXT', { timeout: 30000 });
   await expect(lines(page)).not.toContainText('TAX_TEXT');
   expect(await chaptersRead(page)).toContain('sha256:bb');
 
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'tax').click();
   await expect(lines(page)).toContainText('TAX_TEXT', { timeout: 30000 });
   expect(await chaptersRead(page)).toContain('sha256:cc');
 });
@@ -121,12 +124,12 @@ test("shows a chapter's own text, read by its own checksum", async ({ page }) =>
 test('names the file the realm holds no text for, and asks again when it is chosen again', async ({ page }) => {
   scenario = layered({ ...TEXTS, 'sha256:cc': { ok: false, error: 'NotFound: ChapterSource sha256:cc' } });
   await openSource(page);
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'tax').click();
   await expect(page.locator('.monaco-loading')).toHaveText('The realm has no text stored for eu/es/vc/tax.py.');
 
-  await file(page, 'eu/es/procedure.py').click();
+  await file(page, 'procedure').click();
   await expect(lines(page)).toContainText('PROCEDURE_TEXT', { timeout: 30000 });
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'tax').click();
   await expect(page.locator('.monaco-loading')).toBeVisible();
   // A failed read is not cached as if it were the chapter's text.
   expect((await chaptersRead(page)).filter((sum) => sum === 'sha256:cc').length).toBe(2);
@@ -136,8 +139,8 @@ test('a slow read does not overwrite the file chosen after it', async ({ page })
   scenario = layered(TEXTS, { 'sha256:bb': 1200 });
   await openSource(page);
   await expect(lines(page)).toContainText('holidays', { timeout: 30000 });
-  await file(page, 'eu/es/procedure.py').click();
-  await file(page, 'eu/es/vc/tax.py').click();
+  await file(page, 'procedure').click();
+  await file(page, 'tax').click();
   await expect(lines(page)).toContainText('TAX_TEXT', { timeout: 30000 });
   await page.waitForTimeout(2000);
   await expect(page.locator('.editor-title')).toHaveText('eu/es/vc/tax.py');
@@ -147,6 +150,7 @@ test('a slow read does not overwrite the file chosen after it', async ({ page })
 
 test('a deep link opens the chapter it names', async ({ page }) => {
   scenario = layered();
+  await page.route(/raw\.githubusercontent\.com/, (route) => route.fulfill({ status: 404, body: '' }));
   await page.goto(`${url}/extensions/codex_viewer?codex=eu%2Fes%2Fvc%2Ftax`);
   await page.getByRole('tab', { name: 'Source' }).click();
   await expect(page.locator('.editor-title')).toHaveText('eu/es/vc/tax.py');
@@ -186,4 +190,38 @@ test('a legacy codex is still read from the file registry, with no chapter read 
   await expect(lines(page)).toContainText('LEGACY_HOOKS', { timeout: 30000 });
   expect(fetched).toContain('/ext/agora/1.2.0/backend/hooks.py');
   expect(await chaptersRead(page)).toEqual([]);
+});
+
+test('a legacy codex opens its first codex when the link names one the realm does not have', async ({ page }) => {
+  // N2 of the #113 re-review. A link to a layered chapter on a realm since reverted to a legacy codex, a stale link
+  // or a mistyped one: nothing arrives later on this path, so an unmatched link must not hold the page empty.
+  await page.route(/aaaaa-aa\.localhost/, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const headers = { 'access-control-allow-origin': '*' };
+    if (path.endsWith('/backend/hooks.py')) return route.fulfill({ body: 'LEGACY_HOOKS = 3\n', headers });
+    if (path.endsWith('/manifest.json')) return route.fulfill({ body: '{"name":"Agora","description":"d"}', headers });
+    return route.fulfill({ status: 404, body: '' });
+  });
+  scenario = {
+    locale: 'en',
+    config: { fileRegistryCanisterId: 'aaaaa-aa' },
+    replies: {
+      codex_status: status({
+        codex: { id: 'agora@1.2.0', version: '1.2.0', status: 'active', installed_at: 300, previous: '' },
+        history: [
+          { id: 'agora@1.2.0', version: '1.2.0', status: 'active', installed_at: 300 },
+          { id: 'agora@1.1.0', version: '1.1.0', status: 'inactive', installed_at: 200 },
+        ],
+        sync_sources: [],
+      }),
+      me: ME(MEMBER),
+      realm_info: INFO('Europe/Madrid'),
+      codex_views: { ok: true, views: {} },
+    },
+  };
+  await page.goto(`${url}/extensions/codex_viewer?codex=eu%2Fes%2Ftax`);
+  const tab = page.getByRole('tab', { name: 'Source' });
+  if (await tab.count()) await tab.click();
+  await expect(page.locator('.editor-title')).toHaveText('Agora', { timeout: 30000 });
+  await expect(lines(page)).toContainText('LEGACY_HOOKS', { timeout: 30000 });
 });

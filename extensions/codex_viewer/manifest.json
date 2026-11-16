@@ -1,7 +1,7 @@
 {
   "name": "codex_viewer",
-  "version": "1.4.0",
-  "description": "Browse the automation scripts installed in your realm, read their source, copy code or links, and ask the assistant to explain a script or a selected passage.",
+  "version": "1.5.2",
+  "description": "Browse the legislation your realm runs, layer by layer: the stack it inherits from, each domain's chapter and what it builds on, their source, and the published source of a layer above that this realm does not run. Copy code or links, and ask the assistant to explain a chapter or a passage.",
   "author": "Realms Team",
   "categories": [
     "governance"

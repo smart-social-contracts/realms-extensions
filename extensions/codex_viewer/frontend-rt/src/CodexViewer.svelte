@@ -9,6 +9,26 @@
 		type HistoryRow,
 		type SourceEntry,
 	} from './source';
+	import {
+		ancestry,
+		domainLabel,
+		heldChapters,
+		inheritsAnything,
+		ownLayer,
+		stackOf,
+		treeFor,
+		type DomainChapter,
+		type DomainRow,
+		type Layer,
+	} from './layers';
+	import {
+		codicesFrom,
+		publishedChapter,
+		publishedRelease,
+		releaseChapters,
+		type PublishedRelease,
+	} from './published';
+	import { chapterFile, chapterLanguage } from './source';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -17,6 +37,12 @@
 	/** A file of the list, once its text has been read. */
 	interface Codex extends SourceEntry {
 		code?: string;
+		/** A chapter of the tree: which layer publishes it, which domain it defines, and where its text is kept. */
+		layer?: string;
+		domain?: string;
+		held?: 'realm' | 'published';
+		/** A published chapter's release, which pins its commit and its digest. */
+		release?: PublishedRelease;
 	}
 
 	const MONACO_THEME = 'vs';
@@ -61,7 +87,25 @@
 	}
 
 	let codexes = $state<Codex[]>([]);
+	/** The codex in force, kept so that the stack and the tree can be built from it. */
+	let activeCodex = $state<unknown>(null);
+	let stack = $state<Layer[]>([]);
+	/** The layer of the stack being looked at: the deepest by default, which is what governs here. */
+	let selectedLayer = $state('');
+	/** Whether the tree keeps what the chosen layer inherits, or only the chapters that layer itself publishes. */
+	let inherited = $state(true);
+	/** The domains whose chain of earlier layers is unfolded. */
+	let openDomains = $state<string[]>([]);
+	/** A layer the realm does not run, once its published release has been read; null while it is being read. */
+	const publishedByLayer = new Map<string, PublishedRelease | null>();
+	let publishedChapters = $state<Codex[]>([]);
+	/** Layers whose published source could not be read: shown in the stack, not as an error. */
+	let publishedUnreachable = $state<string[]>([]);
+	/** A chapter that was fetched and did not match the digest its release pins. That is an error, and it is shown. */
+	let publishedError = $state('');
 	let loading = $state(true);
+	/** The `?codex=` of the link the page was opened with, until a chapter of that id is found. */
+	let wantedCodex = $state('');
 	let unavailable = $state(false);
 	let searchTerm = $state('');
 	let selectedCodex = $state<Codex | null>(null);
@@ -89,6 +133,22 @@
 					);
 				})
 			: codexes,
+	);
+
+	/** Everything the tree can show: what the realm holds, and what the layers above publish. */
+	let allChapters = $derived([...codexes, ...publishedChapters] as DomainChapter[]);
+	let tree = $derived(
+		isLayered(activeCodex) && selectedLayer ? treeFor(allChapters, selectedLayer, inherited, stack) : [],
+	);
+	let visibleTree = $derived(
+		searchTerm.trim()
+			? tree.filter((row) => row.domain.toLowerCase().includes(searchTerm.trim().toLowerCase()))
+			: tree,
+	);
+	let canInherit = $derived(inheritsAnything(selectedLayer, stack));
+	/** Where a layer the realm does not run is read from, named so that the stack can say whose text it shows. */
+	let publishedFrom = $derived(
+		ctx.config?.codices === false ? '' : `${codicesFrom(ctx.config).repo}@${codicesFrom(ctx.config).ref}`,
 	);
 
 	let editorCode = $derived(selectedCodex?.code ?? '');
@@ -145,11 +205,70 @@
 		return typeof reply?.text === 'string' ? reply.text : null;
 	}
 
+	/** The published text of a chapter of a layer the realm does not run, checked against the digest it is pinned by. */
+	async function publishedSource(codex: Codex): Promise<string | null> {
+		if (!codex.release || !codex.layer || !codex.domain) return null;
+		try {
+			return await publishedChapter(codex.layer, codex.domain, codex.release, codicesFrom(ctx.config));
+		} catch (e: any) {
+			publishedError = `${codex.id}: ${e?.message ?? e}`;
+			console.warn(`published ${codex.id}:`, e);
+			return null;
+		}
+	}
+
 	/** The text of one file of the list, by where its kind keeps it. */
 	async function sourceOf(codex: Codex): Promise<string | null> {
-		return codex.kind === 'chapter'
-			? await chapterSource(codex)
-			: await registryFile(codex, 'backend/hooks.py');
+		if (codex.kind !== 'chapter') return await registryFile(codex, 'backend/hooks.py');
+		return codex.held === 'published' ? await publishedSource(codex) : await chapterSource(codex);
+	}
+
+	/**
+	 * The chapters a layer publishes, for a layer the realm does not run. The release pins each chapter's commit and
+	 * its digest; `published.ts` checks the digest before any text is shown. Nothing here is what governs this realm,
+	 * and every entry it makes is marked `published` so the page can say so.
+	 */
+	async function loadPublished(layer: string) {
+		if (publishedByLayer.has(layer)) return;
+		// A host that does not want the page reaching outside the realm sets `codices: false`. Nothing can then be
+		// read of a layer the realm does not run, which is what the stack says: not that it is there to be read.
+		if (ctx.config?.codices === false) {
+			publishedUnreachable = [...new Set([...publishedUnreachable, layer])];
+			return;
+		}
+		publishedByLayer.set(layer, null);
+		try {
+			const release = await publishedRelease(layer, codicesFrom(ctx.config));
+			publishedByLayer.set(layer, release);
+			if (!release) return;
+			const made: Codex[] = Object.keys(releaseChapters(release)).map((domain) => ({
+				id: `${layer}/${domain}`,
+				name: chapterFile(`${layer}/${domain}`),
+				kind: 'chapter' as const,
+				language: chapterLanguage(`${layer}/${domain}`),
+				layer,
+				domain,
+				held: 'published' as const,
+				version: release.version,
+				release,
+			}));
+			publishedChapters = [...publishedChapters.filter((c) => c.layer !== layer), ...made];
+		} catch (e: any) {
+			// Being out of reach is not an error: the realm's own legislation is unaffected, and the stack says so.
+			publishedUnreachable = [...new Set([...publishedUnreachable, layer])];
+			console.warn(`published source of ${layer}:`, e);
+		}
+	}
+
+	/**
+	 * Every layer at or above the one chosen that the realm does not run; their text comes from where they publish.
+	 * What is above comes from the stack, so a sibling sync source counts (`layers.ts`).
+	 */
+	async function loadPublishedFor(layer: string) {
+		const at = stack.findIndex((entry) => entry.id === layer);
+		const wanted = inherited ? (at < 0 ? ancestry(layer) : stack.slice(0, at + 1).map((e) => e.id)) : [layer];
+		const missing = stack.filter((entry) => !entry.installed && wanted.includes(entry.id));
+		await Promise.all(missing.map((entry) => loadPublished(entry.id)));
 	}
 
 	/** Name and description from each package's manifest.json; best effort, the list works without them. */
@@ -200,6 +319,9 @@
 
 	function buildShareUrl(codexId: string, range?: LineRange | null): string {
 		const params = new URLSearchParams({ codex: codexId });
+		// The view is part of the link: the same URL opens the same layer, read the same way.
+		if (selectedLayer) params.set('layer', selectedLayer);
+		if (selectedLayer && !inherited) params.set('inherited', '0');
 		if (range) {
 			params.set(
 				'lines',
@@ -241,8 +363,8 @@
 		});
 	}
 
-	function syncUrlFromState(codex: Codex, selection: SelectionInfo | null) {
-		if (typeof window === 'undefined') return;
+	function syncUrlFromState(codex: Codex | null, selection: SelectionInfo | null) {
+		if (typeof window === 'undefined' || !codex) return;
 		const codexId = getCodexId(codex);
 		const range = selection
 			? { startLine: selection.startLine, endLine: selection.endLine }
@@ -270,22 +392,47 @@
 		}
 	}
 
-	async function applyUrlState() {
+	/** The view the link asks for: which layer, read which way, which lines, and which chapter (`wantedCodex`). */
+	function readUrlState() {
 		if (typeof window === 'undefined') return;
 		const params = new URLSearchParams(window.location.search);
-		const codexParam = params.get('codex');
-		const linesParam = params.get('lines');
+		const layerParam = params.get('layer');
+		if (layerParam && stack.some((entry) => entry.id === layerParam)) selectedLayer = layerParam;
+		// At the top of the stack there is nothing to inherit, and the checkbox is disabled: the link cannot leave
+		// it unchecked over a tree that is the whole layer anyway.
+		if (params.get('inherited') === '0' && inheritsAnything(selectedLayer, stack)) inherited = false;
 		pendingExplainOnLoad = params.get('explain') === '1';
-		initialRange = parseLinesParam(linesParam);
+		initialRange = parseLinesParam(params.get('lines'));
+		wantedCodex = params.get('codex') ?? '';
+	}
 
-		if (!codexParam || codexes.length === 0) return;
-
+	/**
+	 * Open the chapter the link names, if it is among the chapters known by now. A published layer's chapters arrive
+	 * after the realm's own, so a link to one of them resolves on the second call, once `allChapters` holds it: until
+	 * then `wantedCodex` stays set, and matching against the realm's chapters alone would open a different layer's
+	 * chapter of the same domain.
+	 */
+	async function openWantedCodex(): Promise<boolean> {
+		if (!wantedCodex) return false;
+		const want = wantedCodex;
+		const all = allChapters as Codex[];
 		const match =
-			codexes.find((c) => getCodexId(c) === codexParam) ??
-			codexes.find((c) => c.package === codexParam && c.status === 'active') ??
-			codexes.find((c) => c.name === codexParam);
-		if (match) {
-			await selectCodex(match, { skipUrlSync: true });
+			all.find((c) => getCodexId(c) === want) ??
+			all.find((c) => c.package === want && c.status === 'active') ??
+			all.find((c) => c.name === want);
+		if (!match) return false;
+		wantedCodex = '';
+		await selectCodex(match, { skipUrlSync: true });
+		return true;
+	}
+
+	/** Read the published layers of the layer chosen, and then open what the link wanted of them. */
+	async function settlePublished() {
+		await loadPublishedFor(selectedLayer);
+		await openWantedCodex();
+		if (!selectedCodex) {
+			const first = tree[0]?.runs;
+			if (first) await selectCodex(first as Codex);
 		}
 	}
 
@@ -311,11 +458,32 @@
 				rows.push(...((status.history ?? []) as HistoryRow[]));
 				from = typeof status.next === 'number' ? status.next : null;
 			}
-			codexes = sourceEntries(active, rows);
-			void enrichFromManifests(codexes);
-			await applyUrlState();
-			if (!selectedCodex && codexes.length > 0) {
-				await selectCodex(codexes[0]);
+			activeCodex = active;
+			if (isLayered(active)) {
+				stack = stackOf(active);
+				codexes = heldChapters(active) as Codex[];
+				// The realm's own layer is the one that governs here: that is what the tab opens on.
+				selectedLayer = ownLayer(active) || (stack.length ? stack[stack.length - 1].id : '');
+				readUrlState();
+				// Not awaited. The realm holds its own legislation and it is ready now; a published layer comes from
+				// outside the realm, and a host that never answers must not keep the realm's own chapters off the
+				// page. The request is bounded as well, but the tree does not wait for it either way.
+				void settlePublished();
+				await openWantedCodex();
+			} else {
+				stack = [];
+				selectedLayer = '';
+				codexes = sourceEntries(active, rows);
+				void enrichFromManifests(codexes);
+				readUrlState();
+				// Nothing arrives later on this path: every codex is known now. A link naming one the realm does not
+				// have is spent, and the fallback below opens the first codex rather than leaving the page empty.
+				if (!(await openWantedCodex())) wantedCodex = '';
+			}
+			// A link to a published chapter is still pending: `settlePublished` opens it, or falls back to the tree.
+			if (!selectedCodex && !wantedCodex) {
+				const first = isLayered(active) ? tree[0]?.runs : codexes[0];
+				if (first) await selectCodex(first as Codex);
 			}
 		} finally {
 			loading = false;
@@ -337,6 +505,12 @@
 		}
 
 		detailLoading = true;
+		// A pick of the reader's own ends the link's claim. The held tree shows before the published layers are in,
+		// so they can choose a chapter first; opening the link's chapter over it afterwards would leave the editor
+		// showing one chapter and the address bar naming another.
+		if (!opts.skipUrlSync) wantedCodex = '';
+		// The banner belongs to the chapter it names, and that chapter is no longer the one being read.
+		publishedError = '';
 		if (!opts.preserveRange) {
 			currentSelection = null;
 			if (!opts.skipUrlSync) initialRange = null;
@@ -362,6 +536,28 @@
 		if (!pendingExplainOnLoad || !aiAssistantEnabled) return;
 		pendingExplainOnLoad = false;
 		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
+	}
+
+	/** Look at another layer of the stack: what it inherits is read where it is published, if the realm lacks it. */
+	async function chooseLayer(layer: string) {
+		selectedLayer = layer;
+		if (!inheritsAnything(layer, stack)) inherited = true;
+		publishedError = '';
+		await loadPublishedFor(layer);
+		syncUrlFromState(selectedCodex, currentSelection);
+	}
+
+	async function toggleInherited(on: boolean) {
+		inherited = on;
+		publishedError = '';
+		await loadPublishedFor(selectedLayer);
+		syncUrlFromState(selectedCodex, currentSelection);
+	}
+
+	function toggleDomain(domain: string) {
+		openDomains = openDomains.includes(domain)
+			? openDomains.filter((d) => d !== domain)
+			: [...openDomains, domain];
 	}
 
 	function isSelected(codex: Codex): boolean {
@@ -514,16 +710,126 @@
 				/>
 			</div>
 
+			{#if stack.length}
+				<div class="layer-stack" data-testid="layer-stack">
+					<div class="layer-stack-title">Layers</div>
+					{#each stack as layer (layer.id)}
+						<button
+							type="button"
+							class="layer-item"
+							class:selected={selectedLayer === layer.id}
+							class:not-installed={!layer.installed}
+							onclick={() => chooseLayer(layer.id)}
+							style={`padding-left: ${8 + layer.depth * 10}px`}
+							title={layer.installed
+								? `${layer.id}: this realm runs this layer`
+								: publishedFrom
+									? `${layer.id}: published, not installed on this realm. Its text is read from ` +
+										`${publishedFrom} and checked against the digest that release pins; no realm vouches for it`
+									: `${layer.id}: not installed on this realm, and its published source is turned off here`}
+						>
+							<span class="layer-name">{layer.name}</span>
+							{#if layer.installed}
+								<span class="layer-mark runs">runs here</span>
+							{:else if publishedUnreachable.includes(layer.id)}
+								<span class="layer-mark unreachable">source unavailable</span>
+							{:else}
+								<span class="layer-mark published">published</span>
+							{/if}
+							{#if layer.version}<span class="layer-version">v{layer.version}</span>{/if}
+						</button>
+					{/each}
+					<label class="layer-inherited" title={canInherit
+						? 'Off: only the chapters this layer itself publishes'
+						: 'The outermost layer inherits nothing'}>
+						<input
+							type="checkbox"
+							checked={inherited}
+							disabled={!canInherit}
+							onchange={(e) => toggleInherited(e.currentTarget.checked)}
+						/>
+						<span>Include inherited legislation</span>
+					</label>
+				</div>
+			{/if}
+
 			<div class="stats">
-				{codexes.length} total
-				{#if searchTerm && filteredCodexes.length !== codexes.length}
-					· {filteredCodexes.length} matching
+				{#if stack.length}
+					{visibleTree.length}
+					{visibleTree.length === 1 ? 'domain' : 'domains'}
+					{#if !inherited}· this layer alone{/if}
+				{:else}
+					{codexes.length} total
+					{#if searchTerm && filteredCodexes.length !== codexes.length}
+						· {filteredCodexes.length} matching
+					{/if}
 				{/if}
 			</div>
+
+			{#if publishedError}
+				<div class="published-error" data-testid="published-error">
+					{publishedError}
+				</div>
+			{/if}
 
 			<div class="codex-list">
 				{#if loading}
 					<div class="list-loading">Loading codexes…</div>
+				{:else if stack.length}
+					{#if visibleTree.length === 0}
+						<div class="list-empty">
+							{searchTerm ? 'No domains match your search' : 'This layer publishes no chapters.'}
+						</div>
+					{:else}
+						{#each visibleTree as row (row.domain)}
+							<div class="domain" class:open={openDomains.includes(row.domain)}>
+								<div class="domain-row">
+									{#if row.builds_on.length}
+										<button
+											type="button"
+											class="domain-fold"
+											aria-expanded={openDomains.includes(row.domain)}
+											aria-label={`What ${row.domain} builds on`}
+											onclick={() => toggleDomain(row.domain)}
+										>
+											{openDomains.includes(row.domain) ? '▾' : '▸'}
+										</button>
+									{:else}
+										<span class="domain-fold empty"></span>
+									{/if}
+									<button
+										class="codex-item domain-main"
+										class:selected={isSelected(row.runs as Codex)}
+										onclick={() => selectCodex(row.runs as Codex)}
+									>
+										<span class="codex-item-name">{domainLabel(row.domain)}</span>
+										<span class="domain-layer">{(row.runs as Codex).layer}</span>
+										{#if (row.runs as Codex).held === 'published'}
+											<span class="domain-mark published">published</span>
+										{/if}
+									</button>
+								</div>
+								{#if openDomains.includes(row.domain)}
+									<div class="domain-chain">
+										<div class="domain-chain-title">builds on</div>
+										{#each row.builds_on as earlier (earlier.id)}
+											<button
+												class="codex-item chain-item"
+												class:selected={isSelected(earlier as Codex)}
+												onclick={() => selectCodex(earlier as Codex)}
+											>
+												<span class="codex-item-name">{earlier.name}</span>
+												<span class="domain-layer">{earlier.layer}</span>
+												{#if earlier.held === 'published'}
+													<span class="domain-mark published">published</span>
+												{/if}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						{/each}
+					{/if}
 				{:else if filteredCodexes.length === 0}
 					<div class="list-empty">
 						{#if unavailable}
@@ -885,6 +1191,118 @@
 		background: #eef2ff;
 		box-shadow: inset 3px 0 0 #6366f1;
 	}
+
+	.layer-stack {
+		padding: 10px 12px;
+		border-bottom: 1px solid #e5e7eb;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.layer-stack-title {
+		font-size: 0.6875rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #6b7280;
+		margin-bottom: 4px;
+	}
+
+	.layer-item {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 100%;
+		padding: 5px 8px;
+		border: 1px solid transparent;
+		border-radius: 6px;
+		background: none;
+		cursor: pointer;
+		text-align: left;
+		font: inherit;
+		color: #111827;
+	}
+
+	.layer-item:hover { background: #f3f4f6; }
+
+	.layer-item.selected {
+		background: #eef2ff;
+		border-color: #c7d2fe;
+		font-weight: 600;
+	}
+
+	.layer-item.not-installed .layer-name { color: #6b7280; }
+
+	.layer-name { font-size: 0.8125rem; }
+
+	.layer-mark {
+		font-size: 0.625rem;
+		padding: 1px 5px;
+		border-radius: 999px;
+		font-weight: 500;
+	}
+
+	.layer-mark.runs { background: #dcfce7; color: #166534; }
+	.layer-mark.published { background: #f3f4f6; color: #4b5563; }
+	.layer-mark.unreachable { background: #fef3c7; color: #92400e; }
+	.layer-version { font-size: 0.6875rem; color: #6b7280; margin-left: auto; }
+
+	.layer-inherited {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 8px;
+		font-size: 0.75rem;
+		color: #374151;
+		cursor: pointer;
+	}
+
+	.layer-inherited input:disabled + span { color: #9ca3af; }
+
+	.published-error {
+		margin: 0 12px 8px;
+		padding: 6px 8px;
+		border-radius: 6px;
+		background: #fef2f2;
+		color: #991b1b;
+		font-size: 0.75rem;
+	}
+
+	.domain-row { display: flex; align-items: stretch; }
+
+	.domain-fold {
+		width: 20px;
+		border: none;
+		background: none;
+		cursor: pointer;
+		color: #6b7280;
+		font-size: 0.6875rem;
+		padding: 0;
+	}
+
+	.domain-fold.empty { cursor: default; }
+	.domain-main { flex: 1; }
+	.domain-layer { font-size: 0.6875rem; color: #6b7280; }
+
+	.domain-mark.published {
+		font-size: 0.625rem;
+		padding: 1px 5px;
+		border-radius: 999px;
+		background: #f3f4f6;
+		color: #4b5563;
+	}
+
+	.domain-chain { padding: 2px 0 6px 20px; }
+
+	.domain-chain-title {
+		font-size: 0.625rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #9ca3af;
+		padding: 2px 10px;
+	}
+
+	.chain-item { opacity: 0.85; }
 
 	.codex-item-name {
 		font-size: 0.875rem;

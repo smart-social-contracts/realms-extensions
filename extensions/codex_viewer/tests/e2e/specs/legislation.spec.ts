@@ -19,6 +19,26 @@ test.beforeAll(async () => {
 });
 test.afterAll(() => close());
 
+/**
+ * A spec never reaches the network (tests/e2e/README.md). Nothing on the Legislation tab reads a published layer:
+ * nobody is looking at one there, and a realm's page view should not send its visitor to GitHub. Every request to
+ * it is refused here and counted, so that a spec fails rather than quietly going out.
+ */
+let reachedGitHub: string[] = [];
+/** Set by the one test that opens the Source tab, where reading a layer above is the point. */
+let sourceTabOpened = false;
+test.beforeEach(async ({ page }) => {
+  reachedGitHub = [];
+  sourceTabOpened = false;
+  await page.route(/raw\.githubusercontent\.com/, (route) => {
+    reachedGitHub.push(route.request().url());
+    return route.fulfill({ status: 404, body: '', headers: { 'access-control-allow-origin': '*' } });
+  });
+});
+test.afterEach(() => {
+  if (!sourceTabOpened) expect(reachedGitHub, 'the Legislation page reached GitHub').toEqual([]);
+});
+
 const ADMIN = ['all'];
 const MEMBER = ['proposal.create', 'self.join'];
 const IT_SEAT = ['codex.revert_fast', 'proposal.create'];
@@ -263,6 +283,7 @@ test('a realm that follows another, with no codex of its own yet, has the page',
 
 test('the source of the codices is one tab away', async ({ page }) => {
   scenario = realm(MEMBER);
+  sourceTabOpened = true;
   await page.goto(`${url}/extensions/codex_viewer`);
   await page.getByRole('tab', { name: 'Source' }).click();
   await expect(page.getByRole('heading', { name: 'Codex Viewer' })).toBeVisible();

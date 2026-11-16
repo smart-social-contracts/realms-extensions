@@ -1,6 +1,7 @@
 {
   "tab_legislation": "Legislation",
   "tab_source": "Source",
+  "loading": "Loading…",
   "local_time": "{time} (local)",
   "in_force": "Legislation in force",
   "healthy": "Healthy",
