@@ -10,7 +10,10 @@
  *
  *  - a layer's `releases.json` pins every chapter of a release by `sha256`, and each release names the `commit` it was
  *    cut from, so a chapter is fetched at an immutable commit and checked against that digest before it is shown;
- *  - a digest that does not match is an error, never a silent fallback.
+ *  - a digest that does not match is an error, never a silent fallback;
+ *  - the commit and the domain names a release gives have to be a commit and domain ids, by the realm's own rules
+ *    (`is_commit` in `legislation_layout.py`, `domain_id` in `codex.py`), so that "an immutable commit" is true of
+ *    what is fetched: a release that fails either is treated as unpublished rather than fetched from.
  *
  * The ref that `releases.json` itself is read from is the one thing not pinned, so it is configuration, not a constant
  * buried here: `ctx.config.codices` overrides `CODICES`. `legislation/` is not on the codices repository's `main`
@@ -32,6 +35,9 @@ export interface Codices {
 	root: string;
 }
 
+/** How long a request for a published file is given before it is abandoned, as `registryFile` bounds its own. */
+export const CODICES_TIMEOUT_MS = 10_000;
+
 export const CODICES: Codices = {
 	base: 'https://raw.githubusercontent.com',
 	repo: 'smart-social-contracts/realms-codices',
@@ -50,6 +56,18 @@ export interface PublishedRelease {
 	notes?: Record<string, string>;
 }
 
+const HEX = /^[0-9a-f]{40}$/;
+/** A git commit as the realm's `is_commit` defines it: 40 hex digits, so that no name, option or path passes. */
+export function isCommit(value: unknown): boolean {
+	return typeof value === 'string' && HEX.test(value);
+}
+
+const DOMAIN = /^[a-z][a-z0-9_]*$/;
+/** A domain id as the realm's `domain_id` defines it: lowercase letters, digits and `_`, starting with a letter. */
+export function isDomain(value: unknown): boolean {
+	return typeof value === 'string' && DOMAIN.test(value);
+}
+
 export function releasesUrl(layer: string, where: Codices = CODICES): string {
 	return `${where.base}/${where.repo}/${where.ref}/${where.root}/${layer}/releases.json`;
 }
@@ -65,26 +83,50 @@ export function chapterUrl(layer: string, domain: string, commit: string, where:
  * and effective dates are not monotonic, so the last entry is the newest release, never the greatest date.
  */
 export function newestRelease(releases: PublishedRelease[]): PublishedRelease | null {
-	return Array.isArray(releases) && releases.length ? releases[releases.length - 1] : null;
+	if (!Array.isArray(releases) || !releases.length) return null;
+	const release = releases[releases.length - 1];
+	// Everything else rests on the commit being a commit: it is what makes the fetch immutable and the digest worth
+	// checking. A release that does not name one publishes nothing readable.
+	return release && isCommit(release.commit) ? release : null;
 }
 
 /** The chapters of a release, by domain, with the digest that pins each: the calendar is a chapter named `calendar`. */
 export function releaseChapters(release: PublishedRelease): Record<string, string> {
-	return { ...(release.chapters ?? {}), ...(release.calendar ? { calendar: release.calendar } : {}) };
+	const all = { ...(release.chapters ?? {}), ...(release.calendar ? { calendar: release.calendar } : {}) };
+	// A domain name becomes a path segment, so only a real domain id is kept: `../../other/repo/main/x` is not one.
+	return Object.fromEntries(Object.entries(all).filter(([domain]) => isDomain(domain)));
 }
 
 /** `sha256:<hex>` of some bytes, the way a chapter's digest is written. */
-export async function digestOf(text: string): Promise<string> {
-	const bytes = new TextEncoder().encode(text);
+export async function digestBytes(bytes: ArrayBuffer | Uint8Array): Promise<string> {
 	const sum = await crypto.subtle.digest('SHA-256', bytes);
 	const hex = [...new Uint8Array(sum)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 	return `sha256:${hex}`;
 }
 
+/** `sha256:<hex>` of a string's UTF-8 bytes. */
+export async function digestOf(text: string): Promise<string> {
+	return await digestBytes(new TextEncoder().encode(text));
+}
+
+/**
+ * A published file's bytes. Bounded: a host that never answers must not leave the page waiting on it, so the request
+ * is abandoned after `CODICES_TIMEOUT_MS` the way `registryFile` abandons its own.
+ */
+async function bytes(url: string): Promise<ArrayBuffer> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), CODICES_TIMEOUT_MS);
+	try {
+		const reply = await fetch(url, { headers: { accept: 'text/plain' }, signal: controller.signal });
+		if (!reply.ok) throw new Error(`${reply.status} for ${url}`);
+		return await reply.arrayBuffer();
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function body(url: string): Promise<string> {
-	const reply = await fetch(url, { headers: { accept: 'text/plain' } });
-	if (!reply.ok) throw new Error(`${reply.status} for ${url}`);
-	return await reply.text();
+	return new TextDecoder().decode(await bytes(url));
 }
 
 /** What a layer publishes: its newest release and the digest of each of its chapters. */
@@ -104,10 +146,12 @@ export async function publishedChapter(
 ): Promise<string> {
 	const want = releaseChapters(release)[domain];
 	if (!want) throw new Error(`${layer} ${release.version} publishes no ${domain}`);
-	const text = await body(chapterUrl(layer, domain, release.commit, where));
-	const got = await digestOf(text);
-	if (got !== want) throw new Error(`${layer}/${domain}: ${got} is not the published ${want}`);
-	return text;
+	// The digest is of the file's bytes at the release's commit (`legislation_layout.py`), so the bytes are what is
+	// hashed: decoding first drops a byte-order mark and replaces anything invalid, and would hash something else.
+	const raw = await bytes(chapterUrl(layer, domain, release.commit, where));
+	const got = await digestBytes(raw);
+	if (got !== want) throw new Error(`${got} is not the published ${want}`);
+	return new TextDecoder().decode(raw);
 }
 
 /** The configured source, from the host's `ctx.config.codices`, falling back to `CODICES` field by field. */

@@ -1,6 +1,7 @@
 {
   "tab_legislation": "Gesetzgebung",
   "tab_source": "Quelltext",
+  "loading": "Wird geladen…",
   "local_time": "{time} (Ortszeit)",
   "in_force": "Geltende Gesetzgebung",
   "healthy": "Gesund",

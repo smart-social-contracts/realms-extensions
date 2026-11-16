@@ -28,6 +28,11 @@ export interface Layer {
 	id: string;
 	/** Its last segment, what the stack shows: `es`. The outermost layer shows its whole id. */
 	name: string;
+	/**
+	 * How deep the layer sits, in segments from the outermost: `eu` is 0 and `eu/es` is 1. Two sync sources can be
+	 * siblings, so this is not the layer's position in the stack, and it is what the stack indents by.
+	 */
+	depth: number;
 	/** Whether the realm runs this layer: its chapters are held by the realm and pinned by their checksums. */
 	installed: boolean;
 	/** The version the realm runs, when it runs one. A realm's own layer has none (`paths.py`). */
@@ -67,23 +72,45 @@ export function domainOf(chapter: string, layer: string): string {
 }
 
 /**
- * The stack to show for a codex: the ancestry of its deepest layer, so that a layer the realm does not run is still
- * a place you can look. Each is marked with whether the realm runs it.
+ * The stack to show for a codex: the layers the realm runs, in the realm's own path order, with each layer's
+ * ancestors that the realm does not run shown just above it, so that a layer above is still a place you can look.
+ *
+ * The order is the codex's `layers`, not a reading of the ids. realms-gos builds it as the relays in order and the
+ * realm's own layer last (`paths.py`), and layered-codex.md §3.3 is explicit that a source id does not place a layer
+ * in the path: València syncs from the Valencian Community *and* from EMSHI, which are siblings, and neither is an
+ * ancestor of the other. Ordering by how many segments an id has would drop one of them, and with it the realm's own.
  */
 export function stackOf(codex: unknown): Layer[] {
 	if (!isLayered(codex)) return [];
-	const running = (codex as LayeredCodex).layers ?? [];
-	const deepest = [...running].sort((a, b) => ancestry(b).length - ancestry(a).length)[0] ?? '';
+	const running = ((codex as LayeredCodex).layers ?? []).filter(Boolean);
 	const versions = new Map<string, string>();
 	for (const entry of Object.values((codex as LayeredCodex).chapters ?? {})) {
 		if (entry.version) versions.set(entry.source, entry.version);
 	}
-	return ancestry(deepest).map((id, at, all) => ({
+	const ids: string[] = [];
+	const placed = new Set<string>();
+	for (const id of running) {
+		// The layer's own ancestors first, so one the realm does not run sits above the layers under it.
+		for (const parent of ancestry(id)) {
+			if (placed.has(parent)) continue;
+			placed.add(parent);
+			ids.push(parent);
+		}
+	}
+	return ids.map((id, at) => ({
 		id,
-		name: at === 0 ? id : id.slice(all[at - 1].length + 1),
+		name: at === 0 ? id : id.slice(id.lastIndexOf('/') + 1),
+		depth: ancestry(id).length - 1,
 		installed: running.includes(id),
 		version: versions.get(id) || undefined,
 	}));
+}
+
+/** The realm's own layer: the last of a codex's `layers` (`paths.py`), which is the one that governs here. */
+export function ownLayer(codex: unknown): string {
+	if (!isLayered(codex)) return '';
+	const running = ((codex as LayeredCodex).layers ?? []).filter(Boolean);
+	return running.length ? running[running.length - 1] : '';
 }
 
 /** The chapters the realm holds, as the tree's entries: pinned by the checksum `codex_status` gives for each. */
@@ -108,13 +135,23 @@ export function heldChapters(codex: unknown): DomainChapter[] {
 /**
  * The tree for a layer of the stack.
  *
- * `chapters` is everything known, the realm's and the published ones together. `inherited` keeps the whole stack down
- * to `layer`; without it only `layer`'s own chapters are kept. Domains are ordered by name, and within a domain the
- * deepest layer runs.
+ * `chapters` is everything known, the realm's and the published ones together, and `stack` is the stack they sit in.
+ * `inherited` keeps every layer from the outermost down to `layer`; without it only `layer`'s own chapters are kept.
+ * Domains are ordered by name, and within a domain the layer furthest down the stack runs.
+ *
+ * What counts as "above" comes from the stack, never from the ids: a sibling sync source is above the layers under
+ * it in the path even though its id is not their prefix.
  */
-export function treeFor(chapters: DomainChapter[], layer: string, inherited: boolean): DomainRow[] {
-	const path = ancestry(layer);
-	const depth = new Map(path.map((id, at) => [id, at]));
+export function treeFor(
+	chapters: DomainChapter[],
+	layer: string,
+	inherited: boolean,
+	stack: Layer[],
+): DomainRow[] {
+	const order = stack.map((entry) => entry.id);
+	const at = order.indexOf(layer);
+	const path = at < 0 ? ancestry(layer) : order.slice(0, at + 1);
+	const depth = new Map(path.map((id, i) => [id, i]));
 	const kept = chapters.filter((entry) => (inherited ? depth.has(entry.layer) : entry.layer === layer));
 	const byDomain = new Map<string, DomainChapter[]>();
 	for (const entry of kept) {
@@ -128,9 +165,10 @@ export function treeFor(chapters: DomainChapter[], layer: string, inherited: boo
 		});
 }
 
-/** Whether the checkbox can do anything: the outermost layer inherits nothing. */
-export function inheritsAnything(layer: string): boolean {
-	return ancestry(layer).length > 1;
+/** Whether the checkbox can do anything: the layer at the top of the stack inherits nothing. */
+export function inheritsAnything(layer: string, stack: Layer[] = []): boolean {
+	const at = stack.findIndex((entry) => entry.id === layer);
+	return at < 0 ? ancestry(layer).length > 1 : at > 0;
 }
 
 /** What a domain row shows as its own name: a calendar is not legislation of a domain, it is the layer's calendar. */

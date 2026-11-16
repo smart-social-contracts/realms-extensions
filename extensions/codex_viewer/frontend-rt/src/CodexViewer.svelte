@@ -14,6 +14,7 @@
 		domainLabel,
 		heldChapters,
 		inheritsAnything,
+		ownLayer,
 		stackOf,
 		treeFor,
 		type DomainChapter,
@@ -103,6 +104,8 @@
 	/** A chapter that was fetched and did not match the digest its release pins. That is an error, and it is shown. */
 	let publishedError = $state('');
 	let loading = $state(true);
+	/** The `?codex=` of the link the page was opened with, until a chapter of that id is found. */
+	let wantedCodex = $state('');
 	let unavailable = $state(false);
 	let searchTerm = $state('');
 	let selectedCodex = $state<Codex | null>(null);
@@ -135,14 +138,18 @@
 	/** Everything the tree can show: what the realm holds, and what the layers above publish. */
 	let allChapters = $derived([...codexes, ...publishedChapters] as DomainChapter[]);
 	let tree = $derived(
-		isLayered(activeCodex) && selectedLayer ? treeFor(allChapters, selectedLayer, inherited) : [],
+		isLayered(activeCodex) && selectedLayer ? treeFor(allChapters, selectedLayer, inherited, stack) : [],
 	);
 	let visibleTree = $derived(
 		searchTerm.trim()
 			? tree.filter((row) => row.domain.toLowerCase().includes(searchTerm.trim().toLowerCase()))
 			: tree,
 	);
-	let canInherit = $derived(inheritsAnything(selectedLayer));
+	let canInherit = $derived(inheritsAnything(selectedLayer, stack));
+	/** Where a layer the realm does not run is read from, named so that the stack can say whose text it shows. */
+	let publishedFrom = $derived(
+		ctx.config?.codices === false ? '' : `${codicesFrom(ctx.config).repo}@${codicesFrom(ctx.config).ref}`,
+	);
 
 	let editorCode = $derived(selectedCodex?.code ?? '');
 
@@ -223,8 +230,12 @@
 	 */
 	async function loadPublished(layer: string) {
 		if (publishedByLayer.has(layer)) return;
-		// A host that does not want the page reaching outside the realm sets `codices: false`.
-		if (ctx.config?.codices === false) return;
+		// A host that does not want the page reaching outside the realm sets `codices: false`. Nothing can then be
+		// read of a layer the realm does not run, which is what the stack says: not that it is there to be read.
+		if (ctx.config?.codices === false) {
+			publishedUnreachable = [...new Set([...publishedUnreachable, layer])];
+			return;
+		}
 		publishedByLayer.set(layer, null);
 		try {
 			const release = await publishedRelease(layer, codicesFrom(ctx.config));
@@ -249,9 +260,13 @@
 		}
 	}
 
-	/** Every layer at or above the one chosen that the realm does not run; their text comes from where they publish. */
+	/**
+	 * Every layer at or above the one chosen that the realm does not run; their text comes from where they publish.
+	 * What is above comes from the stack, so a sibling sync source counts (`layers.ts`).
+	 */
 	async function loadPublishedFor(layer: string) {
-		const wanted = inherited ? ancestry(layer) : [layer];
+		const at = stack.findIndex((entry) => entry.id === layer);
+		const wanted = inherited ? (at < 0 ? ancestry(layer) : stack.slice(0, at + 1).map((e) => e.id)) : [layer];
 		const missing = stack.filter((entry) => !entry.installed && wanted.includes(entry.id));
 		await Promise.all(missing.map((entry) => loadPublished(entry.id)));
 	}
@@ -377,25 +392,47 @@
 		}
 	}
 
-	async function applyUrlState() {
+	/** The view the link asks for: which layer, read which way, which lines, and which chapter (`wantedCodex`). */
+	function readUrlState() {
 		if (typeof window === 'undefined') return;
 		const params = new URLSearchParams(window.location.search);
-		const codexParam = params.get('codex');
-		const linesParam = params.get('lines');
 		const layerParam = params.get('layer');
 		if (layerParam && stack.some((entry) => entry.id === layerParam)) selectedLayer = layerParam;
-		if (params.get('inherited') === '0') inherited = false;
+		// At the top of the stack there is nothing to inherit, and the checkbox is disabled: the link cannot leave
+		// it unchecked over a tree that is the whole layer anyway.
+		if (params.get('inherited') === '0' && inheritsAnything(selectedLayer, stack)) inherited = false;
 		pendingExplainOnLoad = params.get('explain') === '1';
-		initialRange = parseLinesParam(linesParam);
+		initialRange = parseLinesParam(params.get('lines'));
+		wantedCodex = params.get('codex') ?? '';
+	}
 
-		if (!codexParam || codexes.length === 0) return;
-
+	/**
+	 * Open the chapter the link names, if it is among the chapters known by now. A published layer's chapters arrive
+	 * after the realm's own, so a link to one of them resolves on the second call, once `allChapters` holds it: until
+	 * then `wantedCodex` stays set, and matching against the realm's chapters alone would open a different layer's
+	 * chapter of the same domain.
+	 */
+	async function openWantedCodex(): Promise<boolean> {
+		if (!wantedCodex) return false;
+		const want = wantedCodex;
+		const all = allChapters as Codex[];
 		const match =
-			codexes.find((c) => getCodexId(c) === codexParam) ??
-			codexes.find((c) => c.package === codexParam && c.status === 'active') ??
-			codexes.find((c) => c.name === codexParam);
-		if (match) {
-			await selectCodex(match, { skipUrlSync: true });
+			all.find((c) => getCodexId(c) === want) ??
+			all.find((c) => c.package === want && c.status === 'active') ??
+			all.find((c) => c.name === want);
+		if (!match) return false;
+		wantedCodex = '';
+		await selectCodex(match, { skipUrlSync: true });
+		return true;
+	}
+
+	/** Read the published layers of the layer chosen, and then open what the link wanted of them. */
+	async function settlePublished() {
+		await loadPublishedFor(selectedLayer);
+		await openWantedCodex();
+		if (!selectedCodex) {
+			const first = tree[0]?.runs;
+			if (first) await selectCodex(first as Codex);
 		}
 	}
 
@@ -425,18 +462,24 @@
 			if (isLayered(active)) {
 				stack = stackOf(active);
 				codexes = heldChapters(active) as Codex[];
-				// The deepest layer is the one that governs here: that is what the tab opens on.
-				selectedLayer = stack.length ? stack[stack.length - 1].id : '';
-				await applyUrlState();
-				await loadPublishedFor(selectedLayer);
+				// The realm's own layer is the one that governs here: that is what the tab opens on.
+				selectedLayer = ownLayer(active) || (stack.length ? stack[stack.length - 1].id : '');
+				readUrlState();
+				// Not awaited. The realm holds its own legislation and it is ready now; a published layer comes from
+				// outside the realm, and a host that never answers must not keep the realm's own chapters off the
+				// page. The request is bounded as well, but the tree does not wait for it either way.
+				void settlePublished();
+				await openWantedCodex();
 			} else {
 				stack = [];
 				selectedLayer = '';
 				codexes = sourceEntries(active, rows);
 				void enrichFromManifests(codexes);
-				await applyUrlState();
+				readUrlState();
+				await openWantedCodex();
 			}
-			if (!selectedCodex) {
+			// A link to a published chapter is still pending: `settlePublished` opens it, or falls back to the tree.
+			if (!selectedCodex && !wantedCodex) {
 				const first = isLayered(active) ? tree[0]?.runs : codexes[0];
 				if (first) await selectCodex(first as Codex);
 			}
@@ -460,6 +503,8 @@
 		}
 
 		detailLoading = true;
+		// The banner belongs to the chapter it names, and that chapter is no longer the one being read.
+		publishedError = '';
 		if (!opts.preserveRange) {
 			currentSelection = null;
 			if (!opts.skipUrlSync) initialRange = null;
@@ -490,7 +535,7 @@
 	/** Look at another layer of the stack: what it inherits is read where it is published, if the realm lacks it. */
 	async function chooseLayer(layer: string) {
 		selectedLayer = layer;
-		if (!inheritsAnything(layer)) inherited = true;
+		if (!inheritsAnything(layer, stack)) inherited = true;
 		publishedError = '';
 		await loadPublishedFor(layer);
 		syncUrlFromState(selectedCodex, currentSelection);
@@ -669,9 +714,13 @@
 							class:selected={selectedLayer === layer.id}
 							class:not-installed={!layer.installed}
 							onclick={() => chooseLayer(layer.id)}
+							style={`padding-left: ${8 + layer.depth * 10}px`}
 							title={layer.installed
 								? `${layer.id}: this realm runs this layer`
-								: `${layer.id}: published, not installed on this realm`}
+								: publishedFrom
+									? `${layer.id}: published, not installed on this realm. Its text is read from ` +
+										`${publishedFrom} and checked against the digest that release pins; no realm vouches for it`
+									: `${layer.id}: not installed on this realm, and its published source is turned off here`}
 						>
 							<span class="layer-name">{layer.name}</span>
 							{#if layer.installed}
@@ -1167,12 +1216,6 @@
 		font: inherit;
 		color: #111827;
 	}
-
-	/* Each layer sits one step in from the one above it, so the stack reads as a stack. */
-	.layer-item:nth-child(3) { padding-left: 18px; }
-	.layer-item:nth-child(4) { padding-left: 28px; }
-	.layer-item:nth-child(5) { padding-left: 38px; }
-	.layer-item:nth-child(n + 6) { padding-left: 48px; }
 
 	.layer-item:hover { background: #f3f4f6; }
 

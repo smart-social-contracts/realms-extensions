@@ -1,6 +1,7 @@
 {
   "tab_legislation": "Législation",
   "tab_source": "Code source",
+  "loading": "Chargement…",
   "local_time": "{time} (heure locale)",
   "in_force": "Législation en vigueur",
   "healthy": "Sain",

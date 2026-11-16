@@ -218,3 +218,67 @@ test('the published source being unreachable says so and leaves the realm readab
   );
   await expect(page.getByTestId('published-error')).toHaveCount(0);
 });
+
+test('a published source that never answers still shows the legislation the realm holds', async ({ page }) => {
+  // B1 of the #113 review. A 404 was already covered; a request that never completes is the case that matters,
+  // because that is what a network silently dropping raw.githubusercontent.com does, and `eu` is not installed
+  // here. The realm's own chapters must not wait for it.
+  scenario = realm();
+  const held: Promise<void>[] = [];
+  await page.route(/raw\.githubusercontent\.com/, () => {
+    // Never fulfilled, never aborted: the page is left waiting, as a blackholed host leaves it.
+    held.push(new Promise<void>(() => {}));
+  });
+  await openSource(page);
+  // Under the published fetch's own 10 s bound: waiting for that fetch at all is the fault, not waiting for ever.
+  await expect(domains(page)).toHaveText(['calendar (dates)', 'data_protection', 'procedure', 'tax'], {
+    timeout: 6000,
+  });
+  await expect(page.locator('.list-loading')).toHaveCount(0);
+  await page.locator('.domain-main', { hasText: 'tax' }).click();
+  await expect(lines(page)).toContainText('ES_TAX', { timeout: 30000 });
+  expect(held.length).toBeGreaterThan(0);
+});
+
+test('a link to a published chapter opens that chapter, not another layer of the same domain', async ({ page }) => {
+  // B3 of the #113 review. This is the link the page itself writes once a published chapter is chosen, and
+  // `data_protection` is a domain both layers define: resolving it before `eu` is loaded opens Spain's.
+  scenario = realm();
+  await servePublished(page);
+  await openSource(page, '?codex=eu%2Fdata_protection&layer=eu%2Fes');
+  await expect(page.locator('.editor-title')).toHaveText('eu/data_protection.py', { timeout: 30000 });
+  await expect(lines(page)).toContainText('EU_DATA_PROTECTION', { timeout: 30000 });
+});
+
+test('a sibling sync source and the realm keep their own places in the stack', async ({ page }) => {
+  // B2 of the #113 review, on the built page: EMSHI and the realm's own layer have the same number of segments.
+  scenario = realm();
+  scenario.replies.codex_status = status({
+    codex: {
+      ...CODEX,
+      layers: ['eu/es', 'eu/es/vc', 'eu/es/vc/emshi', 'eu/es/vc/46250-valencia'],
+      chapters: {
+        ...CODEX.chapters,
+        'eu/es/vc/emshi/water': chapter('eu/es/vc/emshi', '1.0.0', 'sha256:emshi-water'),
+        'eu/es/vc/46250-valencia/tax': chapter('eu/es/vc/46250-valencia', '', 'sha256:own-tax'),
+      },
+    },
+    history: [{ id: CODEX.id, status: 'active', installed_at: 1 }],
+  });
+  scenario.replies.legislation_chapter = byArgs('chapter', {
+    ...Object.fromEntries(Object.entries(HELD).map(([sum, text]) => [sum, { ok: true, text }])),
+    'sha256:emshi-water': { ok: true, text: 'EMSHI_WATER = 1\n' },
+    'sha256:own-tax': { ok: true, text: 'OWN_TAX = 1\n' },
+  });
+  await servePublished(page);
+  await openSource(page);
+  await expect(layers(page)).toHaveText(['eu', 'es', 'vc', 'emshi', '46250-valencia']);
+  // The realm's own layer is the one the tab opens on, and its own tax is what governs there.
+  await expect(page.locator('.layer-item.selected .layer-name')).toHaveText('46250-valencia');
+  await expect(domains(page)).toHaveText(['calendar (dates)', 'data_protection', 'procedure', 'tax', 'water']);
+  await page.locator('.domain-main', { hasText: 'tax' }).click();
+  await expect(lines(page)).toContainText('OWN_TAX', { timeout: 30000 });
+  // EMSHI is above the realm in the path, so its water is inherited here even though its id is not a prefix.
+  await page.locator('.domain-main', { hasText: 'water' }).click();
+  await expect(lines(page)).toContainText('EMSHI_WATER', { timeout: 30000 });
+});

@@ -8,6 +8,10 @@
   A spec must never reach the network. The page reads the published source of an uninstalled layer over HTTPS, so
   every spec routes `raw.githubusercontent.com`: `layers.spec.ts` serves a release of its own and checks the digests,
   the others answer 404 (which the page shows as *source unavailable*, not as an error).
+
+  `legislation.spec.ts` also *counts* what reaches that route and fails if anything did, because nothing on the
+  Legislation tab should read a published layer: a realm's page view must not send its visitor to GitHub. The one
+  test there that opens the Source tab sets `sourceTabOpened` to say so.
 - `npm run test:local`: the page, and the install proposal of `voting` (`../../../voting/tests/e2e`), on a real local realm
   under the realm frontend's own content security policy.
 

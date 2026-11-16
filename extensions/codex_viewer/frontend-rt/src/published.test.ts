@@ -4,7 +4,10 @@ import {
 	CODICES,
 	chapterUrl,
 	codicesFrom,
+	digestBytes,
 	digestOf,
+	isCommit,
+	isDomain,
 	newestRelease,
 	publishedChapter,
 	releaseChapters,
@@ -77,9 +80,15 @@ describe('which release a layer shows', () => {
 describe('what is shown is what was published', () => {
 	const TEXT = 'TAX = 1\n';
 
-	/** The fetch of one URL, so the digest is the only thing under test. */
-	function fetching(body: string, ok = true) {
-		return async () => ({ ok, status: ok ? 200 : 404, text: async () => body }) as any;
+	/** The fetch of one URL, serving bytes the way the host does, so the digest is the only thing under test. */
+	function fetching(body: string | Uint8Array, ok = true) {
+		const raw = typeof body === 'string' ? new TextEncoder().encode(body) : body;
+		return async () => ({
+			ok,
+			status: ok ? 200 : 404,
+			arrayBuffer: async () => raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength),
+			text: async () => new TextDecoder().decode(raw),
+		}) as any;
 	}
 
 	it('gives the text when its digest is the one the release pins', async () => {
@@ -113,11 +122,44 @@ describe('what is shown is what was published', () => {
 		let asked = false;
 		globalThis.fetch = (async () => {
 			asked = true;
-			return { ok: true, status: 200, text: async () => '' } as any;
+			return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) } as any;
 		}) as any;
 		try {
 			await assert.rejects(() => publishedChapter('eu/es', 'nothing', release()), /publishes no nothing/);
 			assert.equal(asked, false);
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
+	it('hashes the bytes it was served, not what decoding them makes', async () => {
+		// A file that opens with a UTF-8 byte-order mark. `reply.text()` drops it, so hashing the decoded string
+		// would refuse a file whose bytes are exactly the ones the release pins.
+		const raw = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(TEXT)]);
+		const sum = await digestBytes(raw);
+		assert.notEqual(sum, await digestOf(TEXT));
+		const original = globalThis.fetch;
+		globalThis.fetch = fetching(raw);
+		try {
+			// Accepted, where hashing the decoded string would have refused it; the mark itself is not shown,
+			// because decoding drops it, which is what the editor wants.
+			const text = await publishedChapter('eu/es', 'tax', release({ chapters: { tax: sum } }));
+			assert.equal(text, TEXT);
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
+	it('gives the request a signal, so a host that never answers is abandoned', async () => {
+		const original = globalThis.fetch;
+		let signal: unknown = null;
+		globalThis.fetch = (async (_url: string, init: any) => {
+			signal = init?.signal;
+			return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) } as any;
+		}) as any;
+		try {
+			await publishedChapter('eu/es', 'tax', release({ chapters: { tax: await digestOf('') } }));
+			assert.ok(signal instanceof AbortSignal, 'the fetch is given an AbortSignal');
 		} finally {
 			globalThis.fetch = original;
 		}
@@ -128,6 +170,40 @@ describe('what is shown is what was published', () => {
 		assert.equal(
 			await digestOf(''),
 			'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+		);
+	});
+});
+
+describe('what a release has to say to be read from', () => {
+	it('takes a commit to be the 40 hex digits the realm takes, and nothing else', () => {
+		assert.equal(isCommit('b47a994d1111111111111111111111111111eeee'), true);
+		assert.equal(isCommit('main'), false);
+		assert.equal(isCommit('../../evil-owner/evil-repo/main'), false);
+		assert.equal(isCommit('B47A994D1111111111111111111111111111EEEE'), false);
+		assert.equal(isCommit('b47a994d'), false);
+		assert.equal(isCommit(undefined), false);
+	});
+
+	it('publishes nothing from a release whose commit is not a commit', () => {
+		// The commit is what makes the fetch immutable. Without one there is nothing worth checking a digest against.
+		assert.equal(newestRelease([release({ commit: 'main' })]), null);
+		assert.equal(newestRelease([release({ commit: '../../evil-owner/evil-repo/main' })]), null);
+		assert.equal(newestRelease([release()])?.version, '2.6.0');
+	});
+
+	it('takes a domain to be the domain id the realm takes, and keeps only those', () => {
+		assert.equal(isDomain('data_protection'), true);
+		assert.equal(isDomain('tax'), true);
+		assert.equal(isDomain('../../../../../other/repo/main/x'), false);
+		assert.equal(isDomain('Tax'), false);
+		assert.equal(isDomain('2tax'), false);
+		assert.deepEqual(
+			Object.keys(
+				releaseChapters(
+					release({ chapters: { tax: 'sha256:a', '../../../other/repo/main/x': 'sha256:b' } }),
+				),
+			),
+			['tax', 'calendar'],
 		);
 	});
 });
