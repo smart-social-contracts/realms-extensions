@@ -57,7 +57,10 @@ const CODEX = {
   previous: '', installed_at: 1_800_000_000, activates_at: null, proposal: 'P-12',
 };
 
-function realm(config: Record<string, unknown> = {}): Scenario {
+function realm(config: Record<string, unknown> = {}, texts?: Record<string, any>): Scenario {
+  const held = texts ?? Object.fromEntries(
+    Object.entries(HELD).map(([sum, text]) => [sum, { ok: true, text }]),
+  );
   return {
     locale: 'en',
     config,
@@ -66,9 +69,7 @@ function realm(config: Record<string, unknown> = {}): Scenario {
       me: ME(['proposal.create']),
       realm_info: INFO('Europe/Madrid'),
       codex_views: VIEWS,
-      legislation_chapter: byArgs('chapter', Object.fromEntries(
-        Object.entries(HELD).map(([sum, text]) => [sum, { ok: true, text }]),
-      )),
+      legislation_chapter: byArgs('chapter', held),
     },
   };
 }
@@ -80,8 +81,9 @@ const EU_TEXT = 'class Tax:\n    @rule(legislation="Directive 2006/112/EC Art. 9
 const EU_COMMIT = 'b47a994d0000000000000000000000000000beef';
 
 /** Serve `eu`'s published source, as the page reads it over https. */
-async function servePublished(page: Page) {
-  await page.route(/raw\.githubusercontent\.com/, (route) => {
+async function servePublished(page: Page, delayMs = 0) {
+  await page.route(/raw\.githubusercontent\.com/, async (route) => {
+    if (delayMs) await new Promise((done) => setTimeout(done, delayMs));
     const path = new URL(route.request().url()).pathname;
     const headers = { 'access-control-allow-origin': '*' };
     if (path.endsWith('/legislation/eu/releases.json')) {
@@ -101,6 +103,11 @@ async function servePublished(page: Page) {
 const lines = (page: Page) => page.locator('.monaco-editor .view-lines');
 const domain = (page: Page, name: string) => page.locator('.domain-main', { hasText: name });
 const explain = (page: Page) => page.locator('.btn-explain');
+/** One layer of the stack, by the name it shows (`es` for `eu/es`: `stackOf` names a layer by its last segment). */
+const layer = (page: Page, name: string) =>
+  page.locator('.layer-item').filter({ has: page.locator('.layer-name', { hasText: new RegExp(`^${name}$`) }) });
+const prompts = async (page: Page) =>
+  (await dispatched(page)).filter((action: any) => action.type === 'assistant.prompt');
 
 /** Every action the extension asked the host for, in order. */
 const dispatched = (page: Page) => page.evaluate(() => (window as any).dispatched);
@@ -198,17 +205,104 @@ test('a calendar is asked about its dates, not about what it forbids', async ({ 
   expect(prompt.context.languageId).toBe('json');
 });
 
-test('an explain link asks as soon as the chapter is open, without a click', async ({ page }) => {
+test('an explain link puts the question in, and does not send it', async ({ page }) => {
+  // A link is not a gesture. The portal honours `autoSend` whenever the browser reports a live click — including a
+  // click of the reader's own, a few milliseconds earlier, on something else — so the load path never asks for it.
   scenario = realm();
   await openSource(page, '?codex=eu/es/vc/tax&explain=1');
   await expect(lines(page)).toContainText('return 10', { timeout: 30000 });
 
-  await expect
-    .poll(async () => (await dispatched(page)).filter((a: any) => a.type === 'assistant.prompt').length)
-    .toBe(1);
-  const [prompt] = (await dispatched(page)).filter((action: any) => action.type === 'assistant.prompt');
-  expect(prompt.autoSend).toBe(true);
+  await expect.poll(async () => (await prompts(page)).length).toBe(1);
+  const [prompt] = await prompts(page);
+  expect(prompt.autoSend).toBe(false);
   expect(prompt.context.text).toBe(VC_TAX);
+
+  // The button is what sends: the same question, now on a gesture of the reader's.
+  await explain(page).click();
+  const sent = await prompts(page);
+  expect(sent).toHaveLength(2);
+  expect(sent[1].autoSend).toBe(true);
+  expect(sent[1].message).toBe(prompt.message);
+});
+
+test('an explain link names the lines it names', async ({ page }) => {
+  // The lines are the reader's question, and Monaco has not reported them as a selection yet when the link opens.
+  scenario = realm();
+  await openSource(page, '?codex=eu/es/tax&lines=2-3&explain=1');
+  await expect(lines(page)).toContainText('return 21', { timeout: 30000 });
+
+  await expect.poll(async () => (await prompts(page)).length).toBe(1);
+  const [prompt] = await prompts(page);
+  expect(prompt.autoSend).toBe(false);
+  expect(prompt.message).toContain('Explain lines 2-3 of eu/es/tax.py');
+  expect(prompt.context.range).toEqual({ startLine: 2, endLine: 3 });
+  expect(prompt.context.text).toBe(ES_TAX.split('\n').slice(1).join('\n'));
+  expect(prompt.context.text).not.toContain('class Tax');
+});
+
+test('a chapter the reader picks while an explain link is still opening is not explained', async ({ page }) => {
+  // The claim of `?explain=1` is the link's chapter and nothing else. `eu` is published, not installed, so the
+  // link's chapter arrives only once GitHub answers — and the reader does not wait.
+  scenario = realm();
+  await servePublished(page, 2500);
+  await page.goto(`${url}/extensions/codex_viewer?codex=eu/tax&explain=1`);
+  await page.getByRole('tab', { name: 'Source' }).click();
+  await domain(page, 'tax').click();
+  await expect(lines(page)).toContainText('return 10', { timeout: 30000 });
+
+  // Long enough for the published chapter to arrive: the link is spent, and nothing was asked on their click.
+  await page.waitForTimeout(4000);
+  expect(await prompts(page)).toHaveLength(0);
+});
+
+test('an explain link that names no chapter of this realm explains nothing', async ({ page }) => {
+  // A stale or mistyped link: the page falls back to the first chapter, which the link never named.
+  scenario = realm();
+  await openSource(page, '?codex=eu/es/nothing&explain=1');
+  await expect(lines(page)).toContainText('holidays', { timeout: 30000 });
+
+  await page.waitForTimeout(1000);
+  expect(await prompts(page)).toHaveLength(0);
+});
+
+test("the standing is the realm's, not that of the layer being looked at", async ({ page }) => {
+  // Looking at `eu/es`, its tax chapter is the deepest in view — but `eu/es/vc/tax.py` is what the realm runs.
+  scenario = realm();
+  await openSource(page);
+  await layer(page, 'es').click();
+  await domain(page, 'tax').click();
+  await expect(lines(page)).toContainText('return 21', { timeout: 30000 });
+
+  await explain(page).click();
+
+  const [prompt] = await prompts(page);
+  expect(prompt.message).toBe(
+    'Explain eu/es/tax.py (layer eu/es, what eu/es/vc/tax.py builds on; cites Ley 58/2003 Art. 8): ' +
+      'what it allows, what it forbids, and why.',
+  );
+  expect(prompt.message).not.toContain('runs here');
+});
+
+test('a chapter the realm cannot read is still pointed at by its digest', async ({ page }) => {
+  // The text could not be read, so the question carries no excerpt — but the digest is how the assistant reads
+  // the whole chapter from the realm, so it still goes up.
+  scenario = realm({}, {
+    'sha256:vc-tax': { ok: false, error: 'NotFound: ChapterSource sha256:vc-tax' },
+    'sha256:es-cal': { ok: true, text: HELD['sha256:es-cal'] },
+  });
+  await openSource(page);
+  await domain(page, 'tax').click();
+  await expect(page.locator('.editor-title')).toHaveText('eu/es/vc/tax.py');
+
+  await explain(page).click();
+
+  const [prompt] = await prompts(page);
+  expect(prompt.message).toBe(
+    'Explain eu/es/vc/tax.py (layer eu/es/vc, runs here): what it allows, what it forbids, and why.',
+  );
+  expect(prompt.context.text).toBeUndefined();
+  expect(prompt.context.checksum).toBe('sha256:vc-tax');
+  expect(prompt.context.held).toBe('realm');
 });
 
 test("a chapter of a layer the realm does not run is referenced where it is published", async ({ page }) => {
@@ -244,4 +338,56 @@ test('there is no button where the realm has no assistant', async ({ page }) => 
 
   await expect(explain(page)).toHaveCount(0);
   expect((await dispatched(page)).filter((a: any) => a.type === 'assistant.prompt')).toHaveLength(0);
+});
+
+test('an earlier codex the realm no longer runs is not said to run here', async ({ page }) => {
+  // A realm on a codex of the earlier kind: two versions of one package, one active. Both carry the same display
+  // name, so the question names the version, and the standing comes from the history's own status.
+  await page.route(/aaaaa-aa\.localhost/, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const headers = { 'access-control-allow-origin': '*' };
+    if (path.endsWith('/backend/hooks.py')) return route.fulfill({ body: `HOOKS = "${path}"\n`, headers });
+    if (path.endsWith('/manifest.json')) return route.fulfill({ body: '{"name":"Agora","description":"d"}', headers });
+    return route.fulfill({ status: 404, body: '' });
+  });
+  scenario = {
+    locale: 'en',
+    config: { fileRegistryCanisterId: 'aaaaa-aa' },
+    replies: {
+      codex_status: status({
+        codex: { id: 'agora@1.2.0', version: '1.2.0', status: 'active', installed_at: 300, previous: '' },
+        history: [
+          { id: 'agora@1.2.0', version: '1.2.0', status: 'active', installed_at: 300 },
+          { id: 'agora@1.1.0', version: '1.1.0', status: 'inactive', installed_at: 200 },
+        ],
+        sync_sources: [],
+      }),
+      me: ME(['proposal.create']),
+      realm_info: INFO('Europe/Madrid'),
+      codex_views: { ok: true, views: {} },
+    },
+  };
+  await page.goto(`${url}/extensions/codex_viewer`);
+  const tab = page.getByRole('tab', { name: 'Source' });
+  if (await tab.count()) await tab.click();
+  await expect(lines(page)).toContainText('1.2.0', { timeout: 30000 });
+
+  // The one the realm runs.
+  await explain(page).click();
+  expect((await prompts(page))[0].message).toBe(
+    'Explain agora@1.2.0 (runs here): what it allows, what it forbids, and why.',
+  );
+
+  // And the earlier one, which it does not.
+  await page.locator('.codex-item').nth(1).click();
+  await expect(lines(page)).toContainText('1.1.0', { timeout: 30000 });
+  await explain(page).click();
+
+  const prompt = (await prompts(page))[1];
+  expect(prompt.message).toBe(
+    'Explain agora@1.1.0 (an earlier codex this realm no longer runs): what it allows, what it forbids, and why.',
+  );
+  expect(prompt.message).not.toContain('runs here');
+  expect(prompt.message).not.toMatch(/overrid/i);
+  expect(prompt.context.label).toBe('agora@1.1.0');
 });

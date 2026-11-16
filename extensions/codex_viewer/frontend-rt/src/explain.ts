@@ -17,10 +17,20 @@ export type Standing =
 	/** The realm runs a deeper chapter that builds on this one. */
 	| 'builds_on'
 	/** It belongs to a layer this realm does not run; it is read where that layer publishes it. */
-	| 'not_run';
+	| 'not_run'
+	/** A codex of the earlier kind that the realm installed once and does not run now. */
+	| 'earlier';
 
 /** How many citations the question names before it stops: a question, not a bibliography. */
 export const MOST_CITATIONS = 3;
+
+/**
+ * How much of one citation the question carries. A citation is written in the chapter
+ * (`legislation="Ley 58/2003 Art. 8"`), so its length is the chapter author's to choose; the question is the
+ * user's own voice in the assistant's input, and the portal cuts the whole message at 2,000 characters. Without
+ * a cap here one long citation would push the question's own ending out.
+ */
+export const MOST_CITATION_CHARS = 80;
 
 /**
  * The legislation a chapter cites, from the `legislation="…"` arguments of its rules, in the order they appear and
@@ -29,11 +39,17 @@ export const MOST_CITATIONS = 3;
 export function citedLegislation(code: string, most: number = MOST_CITATIONS): string[] {
 	const cited: string[] = [];
 	for (const match of String(code || '').matchAll(/legislation\s*=\s*(['"])(.*?)\1/g)) {
-		const text = match[2].trim();
+		const text = shorten(match[2].trim());
 		if (text && !cited.includes(text)) cited.push(text);
 		if (cited.length >= most) break;
 	}
 	return cited;
+}
+
+/** One citation, as the question carries it: one line, and no longer than `MOST_CITATION_CHARS`. */
+function shorten(citation: string): string {
+	const line = citation.replace(/\s+/g, ' ').trim();
+	return line.length > MOST_CITATION_CHARS ? `${line.slice(0, MOST_CITATION_CHARS - 1)}…` : line;
 }
 
 /** What the question says about where the chapter stands. `runsFile` is the chapter that builds on this one. */
@@ -42,6 +58,7 @@ function standingText(standing: Standing, runsFile?: string): string {
 		return runsFile ? `what ${runsFile} builds on` : 'what a deeper chapter builds on';
 	}
 	if (standing === 'not_run') return 'a layer this realm does not run';
+	if (standing === 'earlier') return 'an earlier codex this realm no longer runs';
 	return 'runs here';
 }
 

@@ -142,6 +142,14 @@
 	let tree = $derived(
 		isLayered(activeCodex) && selectedLayer ? treeFor(allChapters, selectedLayer, inherited, stack) : [],
 	);
+	/**
+	 * The realm's own tree: every domain, and which chapter of it the realm runs. `tree` is the tree of the layer
+	 * being *looked at*, which is not the same thing — from layer `eu/es` of a realm that also runs `eu/es/vc`,
+	 * `eu/es/tax.py` is the deepest chapter in view, while `eu/es/vc/tax.py` is what the realm runs.
+	 */
+	let realmTree = $derived(
+		isLayered(activeCodex) ? treeFor(allChapters, ownLayer(activeCodex), true, stack) : [],
+	);
 	let visibleTree = $derived(
 		searchTerm.trim()
 			? tree.filter((row) => row.domain.toLowerCase().includes(searchTerm.trim().toLowerCase()))
@@ -424,7 +432,7 @@
 			all.find((c) => c.name === want);
 		if (!match) return false;
 		wantedCodex = '';
-		await selectCodex(match, { skipUrlSync: true });
+		await selectCodex(match, { skipUrlSync: true, fromLink: true });
 		return true;
 	}
 
@@ -494,8 +502,12 @@
 
 	async function selectCodex(
 		codex: Codex,
-		opts: { skipUrlSync?: boolean; preserveRange?: boolean } = {},
+		opts: { skipUrlSync?: boolean; preserveRange?: boolean; fromLink?: boolean } = {},
 	) {
+		// `?explain=1` belongs to the chapter the link names and to nothing else. A pick of the reader's own ends
+		// its claim, exactly as it ends the link's (see `wantedCodex` below), so no question is ever dispatched
+		// inside a click of theirs; and a link that matched nothing explains nothing.
+		if (!opts.fromLink) pendingExplainOnLoad = false;
 		if (selectedCodex && getCodexId(selectedCodex) === getCodexId(codex) && selectedCodex.code != null) {
 			if (!opts.preserveRange) {
 				currentSelection = null;
@@ -534,16 +546,39 @@
 		maybeTriggerExplainOnLoad();
 	}
 
+	/**
+	 * `?explain=1`: the link's chapter is open, so the question goes up — but it does not send itself. A link is
+	 * not a gesture, and the portal would honour `autoSend` while any click of the reader's is still live. The
+	 * question lands in the assistant's input, and the Explain button is what sends it.
+	 */
 	function maybeTriggerExplainOnLoad() {
 		if (!pendingExplainOnLoad || !aiAssistantEnabled || !selectedCodex) return;
 		pendingExplainOnLoad = false;
-		dispatchExplain(selectedCodex, currentSelection);
+		dispatchExplain(selectedCodex, selectionFor(selectedCodex), { autoSend: false });
+	}
+
+	/**
+	 * The passage the question is about: what is selected in the editor, or else the lines a `lines=` link names,
+	 * which Monaco has not reported as a selection yet when the link is still opening the chapter.
+	 */
+	function selectionFor(codex: Codex): SelectionInfo | null {
+		if (currentSelection?.text?.trim()) return currentSelection;
+		const code = codex.code ?? '';
+		if (!initialRange || !code) return currentSelection;
+		const lines = code.split('\n');
+		const startLine = Math.max(1, Math.min(initialRange.startLine, lines.length));
+		const endLine = Math.max(startLine, Math.min(initialRange.endLine, lines.length));
+		return { text: lines.slice(startLine - 1, endLine).join('\n'), startLine, endLine };
 	}
 
 	/** Where the chapter stands in the stack, and the chapter that builds on it when it is not the one that runs. */
 	function standingOf(codex: Codex): { standing: Standing; runsFile?: string } {
 		if (codex.held === 'published') return { standing: 'not_run' };
-		const row = codex.domain ? tree.find((entry) => entry.domain === codex.domain) : undefined;
+		// A codex of the earlier kind is not in any layer: the history says whether the realm still runs it.
+		if (codex.kind === 'package') {
+			return { standing: codex.status === 'active' ? 'runs' : 'earlier' };
+		}
+		const row = codex.domain ? realmTree.find((entry) => entry.domain === codex.domain) : undefined;
 		if (row && getCodexId(row.runs) !== getCodexId(codex)) {
 			return { standing: 'builds_on', runsFile: row.runs.name };
 		}
@@ -558,8 +593,30 @@
 		const code = codex.code ?? '';
 		const selected = selection?.text?.trim() ? selection : null;
 		const text = selected ? selected.text : code;
-		if (!text.trim()) return null;
-		const file = codex.name || getCodexId(codex);
+		// An earlier codex and its successor carry the same display name, so a package is named by its id.
+		const file = (codex.kind === 'package' ? getCodexId(codex) : codex.name) || getCodexId(codex);
+		const reference = chapterReference(codex);
+		if (!text.trim()) {
+			// The text could not be read. A chapter the realm pins can still be named by its digest, which is
+			// what the assistant reads the whole of it by; a codex with no digest has nothing to point at.
+			if (!reference.checksum) return null;
+			const { standing, runsFile } = standingOf(codex);
+			return {
+				message: explainQuestion({
+					file,
+					layer: codex.layer ?? '',
+					standing,
+					runsFile,
+					language: codex.language,
+				}),
+				context: {
+					languageId: codex.language,
+					label: file,
+					uri: buildFocusUri(getCodexId(codex), null),
+					...reference,
+				},
+			};
+		}
 		const totalLines = code ? code.split('\n').length : undefined;
 		const range = selected
 			? { startLine: selected.startLine, endLine: selected.endLine }
@@ -587,7 +644,7 @@
 				totalLines,
 				// Where the whole chapter is read, and how to tell it is the right text: the realm pins a chapter by
 				// its digest, and a published layer's release pins its own at the commit it was cut from.
-				...chapterReference(codex),
+				...reference,
 			},
 		};
 	}
@@ -613,11 +670,18 @@
 		return codex.checksum ? { checksum: codex.checksum, held: 'realm' } : {};
 	}
 
-	/** One click, one question: the button is an explicit request, and it is sent at once. */
-	function dispatchExplain(codex: Codex, selection: SelectionInfo | null) {
+	/**
+	 * Ask the question. The button is one click, one question, sent at once (`autoSend`); a link that asks on load
+	 * is not a gesture and only fills the input.
+	 */
+	function dispatchExplain(
+		codex: Codex,
+		selection: SelectionInfo | null,
+		opts: { autoSend?: boolean } = {},
+	) {
 		ctx.host?.dispatch?.({
 			type: 'assistant.prompt',
-			autoSend: true,
+			autoSend: opts.autoSend !== false,
 			...(explainPrompt(codex, selection) ?? {}),
 		});
 	}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { citedLegislation, explainQuestion, MOST_CITATIONS } from './explain.ts';
+import { citedLegislation, explainQuestion, MOST_CITATION_CHARS, MOST_CITATIONS } from './explain.ts';
 
 describe('citedLegislation', () => {
 	it('reads the legislation a chapter cites, in order and without repeats', () => {
@@ -14,6 +14,28 @@ describe('citedLegislation', () => {
 		].join('\n');
 
 		assert.deepEqual(citedLegislation(code), ['GDPR Art. 5', 'GDPR Art. 6']);
+	});
+
+	it("cuts a citation long enough to push the question's own words out", () => {
+		// The citation is written in the chapter, so its length is the chapter author's; the question is the
+		// reader's voice, and the portal cuts the whole message at 2,000 characters.
+		const long = 'Ley ' + 'muy largo '.repeat(500);
+		const [cited] = citedLegislation(`@rule(legislation="${long}")`);
+
+		assert.equal(cited.length, MOST_CITATION_CHARS);
+		assert.ok(cited.endsWith('…'));
+		assert.ok(long.startsWith(cited.slice(0, -1)));
+
+		const question = explainQuestion({ file: 'eu/es/tax.py', layer: 'eu/es', standing: 'runs', legislation: [cited] });
+		assert.ok(question.length < 300);
+		assert.match(question, /what it allows, what it forbids, and why\.$/);
+	});
+
+	it('writes a citation on one line, whatever spacing it was written with', () => {
+		// A citation cannot hold a newline: the `legislation="…"` match stops at one, so it is never found at all.
+		// Runs of spaces and tabs can be in one, and the question is one line of the reader's own voice.
+		assert.deepEqual(citedLegislation('@rule(legislation="Ley 7/1985,\t  Art. 25")'), ['Ley 7/1985, Art. 25']);
+		assert.deepEqual(citedLegislation('@rule(legislation="Ley 7/1985,\n   Art. 25")'), []);
 	});
 
 	it('stops at the few it names', () => {
@@ -100,6 +122,17 @@ describe('explainQuestion', () => {
 
 		assert.match(question, /what dates it sets and what they are for/);
 		assert.doesNotMatch(question, /forbids/);
+	});
+
+	it('says of a codex of the earlier kind that the realm no longer runs it', () => {
+		const question = explainQuestion({ file: 'agora@1.1.0', layer: '', standing: 'earlier' });
+
+		assert.equal(
+			question,
+			'Explain agora@1.1.0 (an earlier codex this realm no longer runs): what it allows, what it forbids, and why.',
+		);
+		assert.doesNotMatch(question, /runs here/);
+		assert.doesNotMatch(question, /overrid/i);
 	});
 
 	it('leaves out a layer a codex of the earlier kind does not have', () => {
