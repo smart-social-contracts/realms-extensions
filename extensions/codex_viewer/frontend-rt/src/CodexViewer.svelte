@@ -22,6 +22,7 @@
 		type Layer,
 	} from './layers';
 	import {
+		chapterUrl,
 		codicesFrom,
 		publishedChapter,
 		publishedRelease,
@@ -29,6 +30,7 @@
 		type PublishedRelease,
 	} from './published';
 	import { chapterFile, chapterLanguage } from './source';
+	import { citedLegislation, explainQuestion, type Standing } from './explain';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -533,9 +535,91 @@
 	}
 
 	function maybeTriggerExplainOnLoad() {
-		if (!pendingExplainOnLoad || !aiAssistantEnabled) return;
+		if (!pendingExplainOnLoad || !aiAssistantEnabled || !selectedCodex) return;
 		pendingExplainOnLoad = false;
-		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
+		dispatchExplain(selectedCodex, currentSelection);
+	}
+
+	/** Where the chapter stands in the stack, and the chapter that builds on it when it is not the one that runs. */
+	function standingOf(codex: Codex): { standing: Standing; runsFile?: string } {
+		if (codex.held === 'published') return { standing: 'not_run' };
+		const row = codex.domain ? tree.find((entry) => entry.domain === codex.domain) : undefined;
+		if (row && getCodexId(row.runs) !== getCodexId(codex)) {
+			return { standing: 'builds_on', runsFile: row.runs.name };
+		}
+		return { standing: 'runs' };
+	}
+
+	/**
+	 * The question to ask about what is on screen, and the text it is about: the passage selected, or else the whole
+	 * chapter. The host caps the text, so a long chapter is cut there, not here.
+	 */
+	function explainPrompt(codex: Codex, selection: SelectionInfo | null) {
+		const code = codex.code ?? '';
+		const selected = selection?.text?.trim() ? selection : null;
+		const text = selected ? selected.text : code;
+		if (!text.trim()) return null;
+		const file = codex.name || getCodexId(codex);
+		const totalLines = code ? code.split('\n').length : undefined;
+		const range = selected
+			? { startLine: selected.startLine, endLine: selected.endLine }
+			: totalLines
+				? { startLine: 1, endLine: totalLines }
+				: null;
+		const { standing, runsFile } = standingOf(codex);
+		return {
+			message: explainQuestion({
+				file,
+				layer: codex.layer ?? '',
+				standing,
+				runsFile,
+				legislation: citedLegislation(code),
+				// The whole chapter is named by its file, not by "lines 1 to its end".
+				range: selected ? range : null,
+				language: codex.language,
+			}),
+			context: {
+				text,
+				languageId: codex.language,
+				label: file,
+				uri: buildFocusUri(getCodexId(codex), range),
+				range: range ?? undefined,
+				totalLines,
+				// Where the whole chapter is read, and how to tell it is the right text: the realm pins a chapter by
+				// its digest, and a published layer's release pins its own at the commit it was cut from.
+				...chapterReference(codex),
+			},
+		};
+	}
+
+	/**
+	 * Where the whole of a chapter can be read, beyond the text that fits in one prompt: its digest, who holds it,
+	 * and — for a layer the realm does not run — the file at the commit its release was cut from, which never
+	 * changes. The realm's own `legislation_chapter` read is keyed by the digest, so the digest is both the address
+	 * and the proof.
+	 */
+	function chapterReference(codex: Codex): { checksum?: string; held?: 'realm' | 'published'; url?: string } {
+		if (codex.held === 'published') {
+			const release = codex.release;
+			const digest = release && codex.domain ? releaseChapters(release)[codex.domain] : undefined;
+			return {
+				held: 'published',
+				...(digest ? { checksum: digest } : {}),
+				...(release && codex.layer && codex.domain
+					? { url: chapterUrl(codex.layer, codex.domain, release.commit, codicesFrom(ctx.config)) }
+					: {}),
+			};
+		}
+		return codex.checksum ? { checksum: codex.checksum, held: 'realm' } : {};
+	}
+
+	/** One click, one question: the button is an explicit request, and it is sent at once. */
+	function dispatchExplain(codex: Codex, selection: SelectionInfo | null) {
+		ctx.host?.dispatch?.({
+			type: 'assistant.prompt',
+			autoSend: true,
+			...(explainPrompt(codex, selection) ?? {}),
+		});
 	}
 
 	/** Look at another layer of the stack: what it inherits is read where it is published, if the realm lacks it. */
@@ -601,7 +685,7 @@
 
 	function explainWithAI() {
 		if (!selectedCodex || !aiAssistantEnabled) return;
-		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
+		dispatchExplain(selectedCodex, currentSelection);
 	}
 
 	function toggleSidebar() {

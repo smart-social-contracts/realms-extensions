@@ -140,6 +140,9 @@ function page(scenario: Scenario): string {
   window.asked = [];
   window.notices = [];
   window.navigated = [];
+  // What the extension asked the host to do (ctx.host.dispatch) and the focus it published.
+  window.dispatched = [];
+  window.focused = [];
   // A copy, so that what was asked stays what it was: a caller may hand the same object to its next call.
   const copy = (value) => { try { return JSON.parse(JSON.stringify(value ?? {})); } catch (e) { return value; } };
   const answer = async (name, args) => {
@@ -153,6 +156,7 @@ function page(scenario: Scenario): string {
     }
     return reply === undefined ? { ok: false, error: name + ' is not open to you' } : reply;
   };
+  let focus = null;
   mount(document.getElementById('root'), {
     read: answer,
     run: answer,
@@ -160,6 +164,14 @@ function page(scenario: Scenario): string {
     locale: store(scenario.locale),
     notify: (level, message) => window.notices.push([level, message]),
     navigate: async (path) => window.navigated.push(path),
+    // The realm host: it records what it is asked for, as the realm page's own
+    // host-bridge does before it sends anything to the portal.
+    host: {
+      focus: { subscribe(run) { run(focus); return () => {}; } },
+      setFocus: (next) => { focus = next; window.focused.push(copy(next)); },
+      dispatch: (action) => window.dispatched.push(copy(action)),
+      pendingPrompt: store(null),
+    },
   });
 </script></body></html>`;
 }
