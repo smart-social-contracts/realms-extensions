@@ -19,7 +19,7 @@ export type Standing =
 	/** It belongs to a layer this realm does not run; it is read where that layer publishes it. */
 	| 'not_run'
 	/** A codex of the earlier kind that the realm installed once and does not run now. */
-	| 'earlier';
+	| 'no_longer_run';
 
 /** How many citations the question names before it stops: a question, not a bibliography. */
 export const MOST_CITATIONS = 3;
@@ -46,10 +46,19 @@ export function citedLegislation(code: string, most: number = MOST_CITATIONS): s
 	return cited;
 }
 
-/** One citation, as the question carries it: one line, and no longer than `MOST_CITATION_CHARS`. */
+/**
+ * One citation, as the question carries it: one line, and no longer than `MOST_CITATION_CHARS`.
+ *
+ * The cut counts characters the way a reader does — by code point — so it can never end in half of a surrogate
+ * pair. A lone surrogate would travel to the assistant's backend inside the question, and some
+ * OpenAI-compatible backends refuse a request that holds one.
+ */
 function shorten(citation: string): string {
 	const line = citation.replace(/\s+/g, ' ').trim();
-	return line.length > MOST_CITATION_CHARS ? `${line.slice(0, MOST_CITATION_CHARS - 1)}…` : line;
+	const points = Array.from(line);
+	return points.length > MOST_CITATION_CHARS
+		? `${points.slice(0, MOST_CITATION_CHARS - 1).join('')}…`
+		: line;
 }
 
 /** What the question says about where the chapter stands. `runsFile` is the chapter that builds on this one. */
@@ -58,7 +67,9 @@ function standingText(standing: Standing, runsFile?: string): string {
 		return runsFile ? `what ${runsFile} builds on` : 'what a deeper chapter builds on';
 	}
 	if (standing === 'not_run') return 'a layer this realm does not run';
-	if (standing === 'earlier') return 'an earlier codex this realm no longer runs';
+	// Not "an earlier codex": a reverted one is usually the newer version (realms-gos api/codex.py gives a
+	// package row `active`, `inactive` or `reverted`), and "earlier" would read as "older".
+	if (standing === 'no_longer_run') return 'a codex this realm no longer runs';
 	return 'runs here';
 }
 
@@ -76,6 +87,11 @@ export interface ExplainQuestion {
 	range?: { startLine: number; endLine: number } | null;
 	/** A calendar is dates, not rules, so it is not asked what it allows. */
 	language?: 'python' | 'json';
+	/**
+	 * The text could not be shown because what was served for it was not the text its release pins. The question
+	 * says so: the assistant is not given it, and must not take the silence for "there is nothing to say".
+	 */
+	unverified?: boolean;
 }
 
 /**
@@ -102,5 +118,8 @@ export function explainQuestion(q: ExplainQuestion): string {
 				? 'what they allow, what they forbid, and why'
 				: 'what it allows, what it forbids, and why';
 
-	return `Explain ${lines} (${about.join('; ')}): ${asked}.`;
+	const question = `Explain ${lines} (${about.join('; ')}): ${asked}.`;
+	return q.unverified
+		? `${question} The text published for it did not match the digest its release pins, so it is not here.`
+		: question;
 }

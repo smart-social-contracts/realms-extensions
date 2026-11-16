@@ -225,6 +225,76 @@ test('an explain link puts the question in, and does not send it', async ({ page
   expect(sent[1].message).toBe(prompt.message);
 });
 
+test('an explain link asks once, and a tab switch does not ask again', async ({ page }) => {
+  // The Legislation tab unmounts the viewer, so coming back to Source mounts a new one and reads the URL again.
+  // `explain=1` is taken out of the address the first time it is read, so nothing can arm it a second time — and
+  // in the portal a second question would replace whatever the reader had typed.
+  scenario = realm();
+  await openSource(page, '?codex=eu/es/vc/tax&explain=1');
+  await expect(lines(page)).toContainText('return 10', { timeout: 30000 });
+  await expect.poll(async () => (await prompts(page)).length).toBe(1);
+  expect(page.url()).not.toContain('explain=1');
+  expect(page.url()).toContain('codex=eu%2Fes%2Fvc%2Ftax');
+
+  await page.getByRole('tab', { name: 'Legislation' }).click();
+  await page.getByRole('tab', { name: 'Source' }).click();
+  await expect(lines(page)).toContainText('return 10', { timeout: 30000 });
+
+  await page.waitForTimeout(1000);
+  expect(await prompts(page)).toHaveLength(1);
+});
+
+test("looking at another layer ends an explain link's claim", async ({ page }) => {
+  // Looking somewhere else is the reader taking over, as picking a chapter is.
+  // The link names a chapter of `eu`, which is published and not installed, and the view it asks for is `eu`.
+  // The reader goes to the realm's own layer instead — which inherits `eu`, so the link's chapter does arrive.
+  scenario = realm();
+  await servePublished(page, 2500);
+  await page.goto(`${url}/extensions/codex_viewer?codex=eu/tax&layer=eu&explain=1`);
+  await page.getByRole('tab', { name: 'Source' }).click();
+  await layer(page, 'vc').click();
+
+  await page.waitForTimeout(5000);
+  expect(await prompts(page)).toHaveLength(0);
+});
+
+test('a published chapter whose text failed its check is not cited', async ({ page }) => {
+  // The release pins a digest, and what GitHub served is not it. Neither the digest nor the URL is worth
+  // citing: the first stands for text nobody can get, the second for text that failed its check.
+  scenario = realm();
+  await page.route(/raw\.githubusercontent\.com/, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const headers = { 'access-control-allow-origin': '*' };
+    if (path.endsWith('/legislation/eu/releases.json')) {
+      return route.fulfill({
+        body: JSON.stringify([
+          { version: '1.0.1', published: '2026-10-01', effective_from: '2027-01-01', commit: EU_COMMIT,
+            chapters: { tax: sha256(EU_TEXT) } },
+        ]),
+        headers,
+      });
+    }
+    // Not the text the release pins.
+    if (path.endsWith(`/${EU_COMMIT}/legislation/eu/tax.py`)) {
+      return route.fulfill({ body: 'TAMPERED = 1\n', headers });
+    }
+    return route.fulfill({ status: 404, body: '', headers });
+  });
+  await page.goto(`${url}/extensions/codex_viewer`);
+  await page.getByRole('tab', { name: 'Source' }).click();
+  await layer(page, 'eu').click();
+  await page.locator('.domain-main', { hasText: 'tax' }).click();
+  await expect(page.getByTestId('published-error')).toContainText('is not the published', { timeout: 30000 });
+
+  await explain(page).click();
+
+  const [prompt] = await prompts(page);
+  expect(prompt.message).toContain('Explain eu/tax.py (layer eu, a layer this realm does not run');
+  expect(prompt.message).toContain('did not match the digest its release pins');
+  // Nothing is cited: no digest, no URL, and of course no text.
+  expect(prompt.context).toBeUndefined();
+});
+
 test('an explain link names the lines it names', async ({ page }) => {
   // The lines are the reader's question, and Monaco has not reported them as a selection yet when the link opens.
   scenario = realm();
@@ -385,7 +455,7 @@ test('an earlier codex the realm no longer runs is not said to run here', async 
 
   const prompt = (await prompts(page))[1];
   expect(prompt.message).toBe(
-    'Explain agora@1.1.0 (an earlier codex this realm no longer runs): what it allows, what it forbids, and why.',
+    'Explain agora@1.1.0 (a codex this realm no longer runs): what it allows, what it forbids, and why.',
   );
   expect(prompt.message).not.toContain('runs here');
   expect(prompt.message).not.toMatch(/overrid/i);

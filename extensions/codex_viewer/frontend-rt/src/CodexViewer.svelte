@@ -414,6 +414,23 @@
 		pendingExplainOnLoad = params.get('explain') === '1';
 		initialRange = parseLinesParam(params.get('lines'));
 		wantedCodex = params.get('codex') ?? '';
+		// `explain=1` is served once and then gone from the address. The flag lives on in memory for the link's own
+		// chapter; leaving the parameter in the URL would arm it again on every remount — the Legislation/Source tab
+		// switch unmounts this component — and on a back or forward to that address, so the question would be
+		// dispatched again inside a click that asked for something else.
+		if (pendingExplainOnLoad) dropExplainParam(params);
+	}
+
+	/** Take `explain` out of the address, keeping everything else, without adding a history entry. */
+	function dropExplainParam(params: URLSearchParams) {
+		if (typeof window === 'undefined' || !window.history?.replaceState) return;
+		params.delete('explain');
+		const query = params.toString();
+		window.history.replaceState(
+			window.history.state,
+			'',
+			`${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+		);
 	}
 
 	/**
@@ -576,7 +593,7 @@
 		if (codex.held === 'published') return { standing: 'not_run' };
 		// A codex of the earlier kind is not in any layer: the history says whether the realm still runs it.
 		if (codex.kind === 'package') {
-			return { standing: codex.status === 'active' ? 'runs' : 'earlier' };
+			return { standing: codex.status === 'active' ? 'runs' : 'no_longer_run' };
 		}
 		const row = codex.domain ? realmTree.find((entry) => entry.domain === codex.domain) : undefined;
 		if (row && getCodexId(row.runs) !== getCodexId(codex)) {
@@ -597,9 +614,11 @@
 		const file = (codex.kind === 'package' ? getCodexId(codex) : codex.name) || getCodexId(codex);
 		const reference = chapterReference(codex);
 		if (!text.trim()) {
-			// The text could not be read. A chapter the realm pins can still be named by its digest, which is
-			// what the assistant reads the whole of it by; a codex with no digest has nothing to point at.
-			if (!reference.checksum) return null;
+			// The text could not be read. A chapter the realm pins can still be named by its digest, which is what
+			// the assistant reads the whole of it by; a published one whose text failed its check is named by
+			// nothing, and the question says why rather than going up bare.
+			const unverified = failedItsCheck(codex);
+			if (!reference.checksum && !unverified) return null;
 			const { standing, runsFile } = standingOf(codex);
 			return {
 				message: explainQuestion({
@@ -608,13 +627,18 @@
 					standing,
 					runsFile,
 					language: codex.language,
+					unverified,
 				}),
-				context: {
-					languageId: codex.language,
-					label: file,
-					uri: buildFocusUri(getCodexId(codex), null),
-					...reference,
-				},
+				...(reference.checksum
+					? {
+							context: {
+								languageId: codex.language,
+								label: file,
+								uri: buildFocusUri(getCodexId(codex), null),
+								...reference,
+							},
+						}
+					: {}),
 			};
 		}
 		const totalLines = code ? code.split('\n').length : undefined;
@@ -657,6 +681,9 @@
 	 */
 	function chapterReference(codex: Codex): { checksum?: string; held?: 'realm' | 'published'; url?: string } {
 		if (codex.held === 'published') {
+			// The text served under that URL was not the text the release pins. Nothing here is worth citing: the
+			// digest would stand for text the assistant cannot get, and the URL for text that failed its check.
+			if (failedItsCheck(codex)) return {};
 			const release = codex.release;
 			const digest = release && codex.domain ? releaseChapters(release)[codex.domain] : undefined;
 			return {
@@ -668,6 +695,11 @@
 			};
 		}
 		return codex.checksum ? { checksum: codex.checksum, held: 'realm' } : {};
+	}
+
+	/** Whether the published text read for this chapter was not the text its release pins (`published.ts`). */
+	function failedItsCheck(codex: Codex): boolean {
+		return publishedError.startsWith(`${getCodexId(codex)}: `) && publishedError.includes('is not the published');
 	}
 
 	/**
@@ -688,6 +720,10 @@
 
 	/** Look at another layer of the stack: what it inherits is read where it is published, if the realm lacks it. */
 	async function chooseLayer(layer: string) {
+		// Looking somewhere else is the reader taking over, as picking a chapter is: the link's chapter is not
+		// opened over what they asked for, and `?explain=1` explains nothing.
+		wantedCodex = '';
+		pendingExplainOnLoad = false;
 		selectedLayer = layer;
 		if (!inheritsAnything(layer, stack)) inherited = true;
 		publishedError = '';
@@ -749,6 +785,8 @@
 
 	function explainWithAI() {
 		if (!selectedCodex || !aiAssistantEnabled) return;
+		// Asked by hand: the link has nothing left to ask, and must not refill the input after this answer.
+		pendingExplainOnLoad = false;
 		dispatchExplain(selectedCodex, currentSelection);
 	}
 

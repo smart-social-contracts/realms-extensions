@@ -31,6 +31,16 @@ describe('citedLegislation', () => {
 		assert.match(question, /what it allows, what it forbids, and why\.$/);
 	});
 
+	it('never cuts a citation in the middle of a character', () => {
+		// Cut by code point: half of a surrogate pair would travel to the assistant's backend inside the question,
+		// and some OpenAI-compatible backends refuse a request that holds a lone surrogate.
+		const [cited] = citedLegislation(`@rule(legislation="${'L'.repeat(78)}𝔸 and more")`);
+
+		assert.equal(Array.from(cited).length, MOST_CITATION_CHARS);
+		assert.ok(cited.endsWith('…'));
+		assert.ok(cited.isWellFormed());
+	});
+
 	it('writes a citation on one line, whatever spacing it was written with', () => {
 		// A citation cannot hold a newline: the `legislation="…"` match stops at one, so it is never found at all.
 		// Runs of spaces and tabs can be in one, and the question is one line of the reader's own voice.
@@ -125,14 +135,27 @@ describe('explainQuestion', () => {
 	});
 
 	it('says of a codex of the earlier kind that the realm no longer runs it', () => {
-		const question = explainQuestion({ file: 'agora@1.1.0', layer: '', standing: 'earlier' });
+		// Not "an earlier codex": a reverted row is usually the newer version, and the realm does not run it either.
+		const question = explainQuestion({ file: 'agora@1.1.0', layer: '', standing: 'no_longer_run' });
 
 		assert.equal(
 			question,
-			'Explain agora@1.1.0 (an earlier codex this realm no longer runs): what it allows, what it forbids, and why.',
+			'Explain agora@1.1.0 (a codex this realm no longer runs): what it allows, what it forbids, and why.',
 		);
 		assert.doesNotMatch(question, /runs here/);
 		assert.doesNotMatch(question, /overrid/i);
+	});
+
+	it('says when the text is not there because it failed its check', () => {
+		const question = explainQuestion({
+			file: 'eu/tax.py',
+			layer: 'eu',
+			standing: 'not_run',
+			unverified: true,
+		});
+
+		assert.match(question, /^Explain eu\/tax\.py \(layer eu, a layer this realm does not run\): /);
+		assert.match(question, /did not match the digest its release pins, so it is not here\.$/);
 	});
 
 	it('leaves out a layer a codex of the earlier kind does not have', () => {
