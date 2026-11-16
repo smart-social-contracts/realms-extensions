@@ -2,33 +2,24 @@
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy } from 'svelte';
 	import MonacoPane, { type LineRange, type SelectionInfo } from './MonacoPane.svelte';
+	import { isLayered } from './legislation';
+	import {
+		emptyState,
+		sourceEntries,
+		type HistoryRow,
+		type SourceEntry,
+	} from './source';
 
 	let { ctx }: { ctx: any } = $props();
 
 	let aiAssistantEnabled = $derived(ctx.config?.aiAssistantEnabled !== false);
 
-	interface Codex {
-		/** The realm's codex key, `<package>@<version>`. */
-		id: string;
-		/** The package id in the file registry (namespace `ext/<package>/<version>`). */
-		package: string;
-		name: string;
-		description?: string;
+	/** A file of the list, once its text has been read. */
+	interface Codex extends SourceEntry {
 		code?: string;
-		version?: string;
-		status?: string;
-		installed_at?: number | null;
-	}
-
-	interface HistoryRow {
-		id?: string;
-		version?: string;
-		status?: string;
-		installed_at?: number | null;
 	}
 
 	const MONACO_THEME = 'vs';
-	const MONACO_LANGUAGE = 'python';
 	const EXTENSION_ID = 'codex_viewer';
 	const SIDEBAR_COLLAPSED_KEY = 'codex-viewer-sidebar-collapsed';
 	const WORD_WRAP_KEY = 'codex-viewer-word-wrap';
@@ -144,25 +135,27 @@
 		}
 	}
 
-	function toCodex(row: HistoryRow): Codex | null {
-		const id = String(row.id ?? '');
-		if (!id) return null;
-		const at = id.lastIndexOf('@');
-		const pkg = at > 0 ? id.slice(0, at) : id;
-		return {
-			id,
-			package: pkg,
-			name: pkg,
-			version: row.version || (at > 0 ? id.slice(at + 1) : undefined),
-			status: row.status,
-			installed_at: row.installed_at ?? null,
-		};
+	/**
+	 * A chapter's text as the realm holds it. `legislation_chapter` is a public read (api/links.py): the checksum
+	 * pins the text, so it is as public as the legislation it holds.
+	 */
+	async function chapterSource(codex: Codex): Promise<string | null> {
+		if (!codex.checksum) return null;
+		const reply = await read('legislation_chapter', { chapter: codex.checksum });
+		return typeof reply?.text === 'string' ? reply.text : null;
+	}
+
+	/** The text of one file of the list, by where its kind keeps it. */
+	async function sourceOf(codex: Codex): Promise<string | null> {
+		return codex.kind === 'chapter'
+			? await chapterSource(codex)
+			: await registryFile(codex, 'backend/hooks.py');
 	}
 
 	/** Name and description from each package's manifest.json; best effort, the list works without them. */
 	async function enrichFromManifests(list: Codex[]) {
 		await Promise.all(
-			list.map(async (codex) => {
+			list.filter((c) => c.kind === 'package').map(async (codex) => {
 				const text = await registryFile(codex, 'manifest.json');
 				if (!text) return;
 				try {
@@ -237,7 +230,7 @@
 			snapshot:
 				selection?.text?.trim()
 					? {
-							languageId: MONACO_LANGUAGE,
+							languageId: codex.language,
 							range: {
 								startLine: selection.startLine,
 								endLine: selection.endLine,
@@ -301,6 +294,7 @@
 		unavailable = false;
 		try {
 			const rows: HistoryRow[] = [];
+			let active: unknown = null;
 			let from: number | null = 1;
 			for (let i = 0; from && i < MAX_HISTORY_PAGES; i++) {
 				const status = await read('codex_status', { from, count: 100 });
@@ -308,20 +302,19 @@
 					unavailable = i === 0;
 					break;
 				}
+				if (i === 0) {
+					active = status.codex ?? null;
+					// A layered codex is its own file list; the history's earlier codices hold no file to read.
+					if (isLayered(active)) {
+						rows.length = 0;
+						break;
+					}
+					if (status.codex) rows.push(status.codex as HistoryRow);
+				}
 				rows.push(...((status.history ?? []) as HistoryRow[]));
-				if (i === 0 && status.codex) rows.push(status.codex as HistoryRow);
 				from = typeof status.next === 'number' ? status.next : null;
 			}
-			const byId = new Map<string, Codex>();
-			for (const row of rows) {
-				const codex = toCodex(row);
-				if (codex && !byId.has(codex.id)) byId.set(codex.id, codex);
-			}
-			codexes = [...byId.values()].sort(
-				(a, b) =>
-					Number(b.status === 'active') - Number(a.status === 'active') ||
-					Number(b.installed_at ?? 0) - Number(a.installed_at ?? 0),
-			);
+			codexes = sourceEntries(active, rows);
 			void enrichFromManifests(codexes);
 			await applyUrlState();
 			if (!selectedCodex && codexes.length > 0) {
@@ -353,10 +346,11 @@
 		}
 		selectedCodex = codex;
 
-		let code = sourceCache.get(codex.id);
+		const cacheKey = codex.checksum ?? codex.id;
+		let code = sourceCache.get(cacheKey);
 		if (code === undefined) {
-			code = (await registryFile(codex, 'backend/hooks.py')) ?? '';
-			if (code) sourceCache.set(codex.id, code);
+			code = (await sourceOf(codex)) ?? '';
+			if (code) sourceCache.set(cacheKey, code);
 		}
 		if (selectedCodex?.id !== codex.id) return;
 		const current: Codex = { ...selectedCodex, code };
@@ -564,7 +558,7 @@
 				<div class="editor-toolbar">
 					<div class="toolbar-title-row">
 						<h2 class="editor-title">{selectedCodex.name || getCodexId(selectedCodex)}</h2>
-						<span class="badge badge-lang">{MONACO_LANGUAGE}</span>
+						<span class="badge badge-lang">{selectedCodex.language}</span>
 						{#if selectedCodex.version}
 							<span class="badge badge-version">v{selectedCodex.version}</span>
 						{/if}
@@ -703,7 +697,7 @@
 						{#key getCodexId(selectedCodex)}
 							<MonacoPane
 								code={editorCode}
-								language={MONACO_LANGUAGE}
+								language={selectedCodex.language}
 								theme={MONACO_THEME}
 								readOnly={true}
 								initialRange={initialRange}
@@ -714,9 +708,7 @@
 						{/key}
 					{:else}
 						<div class="monaco-loading">
-							{registryId
-								? 'No code available for this codex.'
-								: 'Codex source is not available in this view.'}
+							{emptyState(selectedCodex, !!registryId)}
 						</div>
 					{/if}
 				</div>
