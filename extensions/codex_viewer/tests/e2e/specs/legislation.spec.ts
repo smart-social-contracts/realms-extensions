@@ -20,10 +20,9 @@ test.beforeAll(async () => {
 test.afterAll(() => close());
 
 /**
- * A spec never reaches the network (tests/e2e/README.md). The Legislation page mounts a hidden Source viewer to
- * prime its own list, and that viewer must not fetch a published layer: nobody is reading one there, and a realm's
- * page view should not send its visitor to GitHub. Every request to it is refused here and counted, so that a spec
- * fails rather than quietly going out.
+ * A spec never reaches the network (tests/e2e/README.md). Nothing on the Legislation tab reads a published layer:
+ * nobody is looking at one there, and a realm's page view should not send its visitor to GitHub. Every request to
+ * it is refused here and counted, so that a spec fails rather than quietly going out.
  */
 let reachedGitHub: string[] = [];
 /** Set by the one test that opens the Source tab, where reading a layer above is the point. */

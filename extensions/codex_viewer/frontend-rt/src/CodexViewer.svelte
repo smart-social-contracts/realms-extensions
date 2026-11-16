@@ -476,7 +476,9 @@
 				codexes = sourceEntries(active, rows);
 				void enrichFromManifests(codexes);
 				readUrlState();
-				await openWantedCodex();
+				// Nothing arrives later on this path: every codex is known now. A link naming one the realm does not
+				// have is spent, and the fallback below opens the first codex rather than leaving the page empty.
+				if (!(await openWantedCodex())) wantedCodex = '';
 			}
 			// A link to a published chapter is still pending: `settlePublished` opens it, or falls back to the tree.
 			if (!selectedCodex && !wantedCodex) {
@@ -503,6 +505,10 @@
 		}
 
 		detailLoading = true;
+		// A pick of the reader's own ends the link's claim. The held tree shows before the published layers are in,
+		// so they can choose a chapter first; opening the link's chapter over it afterwards would leave the editor
+		// showing one chapter and the address bar naming another.
+		if (!opts.skipUrlSync) wantedCodex = '';
 		// The banner belongs to the chapter it names, and that chapter is no longer the one being read.
 		publishedError = '';
 		if (!opts.preserveRange) {

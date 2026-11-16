@@ -157,6 +157,10 @@ test('text whose digest is not the published one is refused, not shown', async (
   // Nothing of the text reaches the page: there is no editor to hold it.
   await expect(page.locator('.codex-editor-pane')).not.toContainText('EU_TAMPERED');
   await expect(lines(page)).toHaveCount(0);
+  // The banner belongs to the chapter it names: reading another one puts it away.
+  await page.locator('.domain-main', { hasText: 'tax' }).click();
+  await expect(lines(page)).toContainText('ES_TAX', { timeout: 30000 });
+  await expect(page.getByTestId('published-error')).toHaveCount(0);
 });
 
 test('choosing the layer above shows what it publishes, and nothing of the realm', async ({ page }) => {
@@ -281,4 +285,97 @@ test('a sibling sync source and the realm keep their own places in the stack', a
   // EMSHI is above the realm in the path, so its water is inherited here even though its id is not a prefix.
   await page.locator('.domain-main', { hasText: 'water' }).click();
   await expect(lines(page)).toContainText('EMSHI_WATER', { timeout: 30000 });
+});
+
+test('a chapter the reader picks is not taken from them when the published layer arrives', async ({ page }) => {
+  // N1 of the #113 re-review. The held tree shows before GitHub answers, so a reader can choose first. The link's
+  // chapter must not then open over theirs: it opens without touching the URL, so the editor and the address bar
+  // would name different chapters and the link they copied would share neither.
+  scenario = realm();
+  await page.route(/raw\.githubusercontent\.com/, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const headers = { 'access-control-allow-origin': '*' };
+    await new Promise((wait) => setTimeout(wait, 3000));
+    if (path.endsWith('/legislation/eu/releases.json')) return route.fulfill({ body: euReleases(), headers });
+    if (path.endsWith(`/${EU_COMMIT}/legislation/eu/data_protection.py`)) {
+      return route.fulfill({ body: EU_TEXT, headers });
+    }
+    return route.fulfill({ status: 404, body: '', headers });
+  });
+  await openSource(page, '?codex=eu%2Fdata_protection&layer=eu%2Fes');
+  await page.locator('.domain-main', { hasText: 'tax' }).click();
+  await expect(lines(page)).toContainText('ES_TAX', { timeout: 30000 });
+  // Well past the 3 s the published layer takes.
+  await page.waitForTimeout(5000);
+  await expect(page.locator('.editor-title')).toHaveText('eu/es/tax.py');
+  expect(new URL(page.url()).searchParams.get('codex')).toBe('eu/es/tax');
+});
+
+test('an uninstalled layer above that is nobody’s ancestor is still read', async ({ page }) => {
+  // The stack says what is above, so a layer that no running id has as a prefix is fetched like any other. Reading
+  // the path out of the chosen layer's id instead would leave `eu/fr` out and its chapter off the tree.
+  scenario = realm();
+  scenario.replies.codex_status = status({
+    codex: { ...CODEX, layers: ['eu/es', 'eu/fr/vc', 'eu/es/own'] },
+    history: [{ id: CODEX.id, status: 'active', installed_at: 1 }],
+  });
+  const FR = 'FR_HOUSING = 1\n';
+  const FR_COMMIT = 'c58b115e1111111111111111111111111111dead';
+  await page.route(/raw\.githubusercontent\.com/, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const headers = { 'access-control-allow-origin': '*' };
+    if (path.endsWith('/legislation/eu/releases.json')) return route.fulfill({ body: euReleases(), headers });
+    if (path.endsWith(`/${EU_COMMIT}/legislation/eu/data_protection.py`)) {
+      return route.fulfill({ body: EU_TEXT, headers });
+    }
+    if (path.endsWith('/legislation/eu/fr/releases.json')) {
+      return route.fulfill({
+        body: JSON.stringify([{
+          version: '1.0.0', published: '2026-05-01', effective_from: '2027-01-01',
+          commit: FR_COMMIT, chapters: { housing: sha256(FR) },
+        }]),
+        headers,
+      });
+    }
+    if (path.endsWith(`/${FR_COMMIT}/legislation/eu/fr/housing.py`)) return route.fulfill({ body: FR, headers });
+    return route.fulfill({ status: 404, body: '', headers });
+  });
+  await openSource(page);
+  await expect(layers(page)).toHaveText(['eu', 'es', 'fr', 'vc', 'own']);
+  await expect(domains(page)).toContainText(['housing']);
+  await page.locator('.domain-main', { hasText: 'housing' }).click();
+  await expect(lines(page)).toContainText('FR_HOUSING', { timeout: 30000 });
+});
+
+test('the stack indents by how deep a layer sits, not by its place in the list', async ({ page }) => {
+  scenario = realm();
+  scenario.replies.codex_status = status({
+    codex: {
+      ...CODEX,
+      layers: ['eu/es', 'eu/es/vc', 'eu/es/vc/emshi', 'eu/es/vc/46250-valencia'],
+      chapters: {
+        ...CODEX.chapters,
+        'eu/es/vc/emshi/water': chapter('eu/es/vc/emshi', '1.0.0', 'sha256:emshi-water'),
+      },
+    },
+    history: [{ id: CODEX.id, status: 'active', installed_at: 1 }],
+  });
+  await servePublished(page);
+  await openSource(page);
+  const pads = await page.locator('.layer-item').evaluateAll((items) =>
+    items.map((item) => getComputedStyle(item as HTMLElement).paddingLeft),
+  );
+  // eu, es, vc, then the two siblings at the same depth.
+  expect(pads).toEqual(['8px', '18px', '28px', '38px', '38px']);
+});
+
+test('a link cannot leave the checkbox off at the top of the stack', async ({ page }) => {
+  // `eu` inherits nothing, so the checkbox is disabled; `inherited=0` would leave it disabled and unchecked over a
+  // tree that is the whole layer anyway.
+  scenario = realm();
+  await servePublished(page);
+  await openSource(page, '?layer=eu&inherited=0');
+  await expect(page.locator('.layer-item.selected .layer-name')).toHaveText('eu');
+  await expect(page.locator('.layer-inherited input')).toBeChecked();
+  await expect(page.locator('.layer-inherited input')).toBeDisabled();
 });

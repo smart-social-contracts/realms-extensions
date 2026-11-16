@@ -79,6 +79,35 @@ describe('where a layer sits', () => {
 		assert.equal(domainOf('eu/es/tax', 'eu/fr'), 'eu/es/tax');
 	});
 
+	it('a layer inherits whenever something sits above it in the stack, whatever its id looks like', () => {
+		// A realm whose own layer id has one segment and syncs from `eu/es`. By the ids alone `mm1` looks outermost
+		// and would inherit nothing, which would disable the checkbox over a tree that does inherit Spain's chapters.
+		const flat = stackOf({ ...VALENCIA, layers: ['eu/es', 'mm1'] } as LayeredCodex);
+		assert.deepEqual(flat.map((layer) => [layer.id, layer.depth]), [
+			['eu', 0],
+			['eu/es', 1],
+			['mm1', 0],
+		]);
+		assert.equal(inheritsAnything('mm1', flat), true);
+		assert.equal(ancestry('mm1').length > 1, false, 'the id alone would say it inherits nothing');
+	});
+
+	it('keeps a running layer where `layers` puts it, even when another id is its prefix', () => {
+		// `_chain` takes the path in record order (paths.py), and §3.3 says an id does not place a layer. Reading
+		// the order out of the ids would make vc deeper than es here, and say vc's chapter governs.
+		const odd = stackOf({ ...VALENCIA, layers: ['eu/es/vc', 'eu/es', 'eu/es/vc/46250-valencia'] } as LayeredCodex);
+		assert.deepEqual(odd.map((layer) => layer.id), [
+			'eu',
+			'eu/es/vc',
+			'eu/es',
+			'eu/es/vc/46250-valencia',
+		]);
+		const held = heldChapters({ ...VALENCIA, layers: odd.map((l) => l.id) } as LayeredCodex) as DomainChapter[];
+		const tax = treeFor(held, 'eu/es/vc/46250-valencia', true, odd).find((row) => row.domain === 'tax');
+		assert.equal(tax?.runs.layer, 'eu/es/vc/46250-valencia');
+		assert.deepEqual(tax?.builds_on.map((e) => e.layer), ['eu/es', 'eu/es/vc']);
+	});
+
 	it('only the layer at the top of the stack inherits nothing', () => {
 		const stack = stackOf(VALENCIA);
 		assert.equal(inheritsAnything('eu', stack), false);

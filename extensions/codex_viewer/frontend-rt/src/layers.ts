@@ -90,9 +90,12 @@ export function stackOf(codex: unknown): Layer[] {
 	const ids: string[] = [];
 	const placed = new Set<string>();
 	for (const id of running) {
-		// The layer's own ancestors first, so one the realm does not run sits above the layers under it.
+		if (placed.has(id)) continue;
+		// Only the ancestors the realm does not run are inserted here, each just above the layer that named it. A
+		// layer the realm *does* run keeps the place `layers` gives it, even where another layer's id is its prefix:
+		// `_chain` takes the path in record order (paths.py), so the ids must not be allowed to reorder it.
 		for (const parent of ancestry(id)) {
-			if (placed.has(parent)) continue;
+			if (placed.has(parent) || (parent !== id && running.includes(parent))) continue;
 			placed.add(parent);
 			ids.push(parent);
 		}
