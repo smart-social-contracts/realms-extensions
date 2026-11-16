@@ -305,10 +305,7 @@
 				if (i === 0) {
 					active = status.codex ?? null;
 					// A layered codex is its own file list; the history's earlier codices hold no file to read.
-					if (isLayered(active)) {
-						rows.length = 0;
-						break;
-					}
+					if (isLayered(active)) break;
 					if (status.codex) rows.push(status.codex as HistoryRow);
 				}
 				rows.push(...((status.history ?? []) as HistoryRow[]));

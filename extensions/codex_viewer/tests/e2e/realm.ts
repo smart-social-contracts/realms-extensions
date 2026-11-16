@@ -105,8 +105,20 @@ export const INFO = (timezone: string, official?: string) => ({
 
 export interface Scenario {
   locale: string;
-  /** The replies by operation name; a function-like `{ byArgs }` is not needed: the realm is asked each once. */
+  /** What the host hands the extension as `ctx.config`, such as `fileRegistryCanisterId`. */
+  config?: Record<string, unknown>;
+  /**
+   * The replies by operation name. An operation asked more than once, with different arguments, answers through
+   * `{ byArgs: { field, replies, delay } }`: the value of `args[field]` picks the reply, and `delay` holds it back
+   * that many milliseconds. The Source tab reads one chapter per file, so it asks `legislation_chapter` once per
+   * file, each with a different checksum.
+   */
   replies: Record<string, any>;
+}
+
+/** A reply chosen by one of the call's arguments, optionally made slow: for an operation asked more than once. */
+export function byArgs(field: string, replies: Record<string, any>, delay: Record<string, number> = {}) {
+  return { byArgs: { field, replies, delay } };
 }
 
 export { NOW, SECONDS, SPAIN };
@@ -128,14 +140,23 @@ function page(scenario: Scenario): string {
   window.asked = [];
   window.notices = [];
   window.navigated = [];
-  const answer = (name, args) => {
-    window.asked.push([name, args]);
-    const reply = scenario.replies[name];
-    return Promise.resolve(reply === undefined ? { ok: false, error: name + ' is not open to you' } : reply);
+  // A copy, so that what was asked stays what it was: a caller may hand the same object to its next call.
+  const copy = (value) => { try { return JSON.parse(JSON.stringify(value ?? {})); } catch (e) { return value; } };
+  const answer = async (name, args) => {
+    window.asked.push([name, copy(args)]);
+    let reply = scenario.replies[name];
+    if (reply && reply.byArgs) {
+      const key = (args || {})[reply.byArgs.field];
+      const wait = (reply.byArgs.delay || {})[key] || 0;
+      if (wait) await new Promise((done) => setTimeout(done, wait));
+      reply = reply.byArgs.replies[key];
+    }
+    return reply === undefined ? { ok: false, error: name + ' is not open to you' } : reply;
   };
   mount(document.getElementById('root'), {
     read: answer,
     run: answer,
+    config: scenario.config || {},
     locale: store(scenario.locale),
     notify: (level, message) => window.notices.push([level, message]),
     navigate: async (path) => window.navigated.push(path),
