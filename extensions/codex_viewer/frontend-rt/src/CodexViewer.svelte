@@ -24,6 +24,7 @@
 	import {
 		chapterUrl,
 		codicesFrom,
+		DigestMismatch,
 		publishedChapter,
 		publishedRelease,
 		releaseChapters,
@@ -105,6 +106,12 @@
 	let publishedUnreachable = $state<string[]>([]);
 	/** A chapter that was fetched and did not match the digest its release pins. That is an error, and it is shown. */
 	let publishedError = $state('');
+	/**
+	 * The chapters whose published text did not match its digest, until a fetch of it does. Kept apart from the
+	 * banner: the banner is cleared when the reader looks at another layer, while the chapter it was about can stay
+	 * open, and that chapter must still not be cited.
+	 */
+	const failedCheck = new Set<string>();
 	let loading = $state(true);
 	/** The `?codex=` of the link the page was opened with, until a chapter of that id is found. */
 	let wantedCodex = $state('');
@@ -219,8 +226,11 @@
 	async function publishedSource(codex: Codex): Promise<string | null> {
 		if (!codex.release || !codex.layer || !codex.domain) return null;
 		try {
-			return await publishedChapter(codex.layer, codex.domain, codex.release, codicesFrom(ctx.config));
+			const text = await publishedChapter(codex.layer, codex.domain, codex.release, codicesFrom(ctx.config));
+			failedCheck.delete(getCodexId(codex));
+			return text;
 		} catch (e: any) {
+			if (e instanceof DigestMismatch) failedCheck.add(getCodexId(codex));
 			publishedError = `${codex.id}: ${e?.message ?? e}`;
 			console.warn(`published ${codex.id}:`, e);
 			return null;
@@ -699,7 +709,7 @@
 
 	/** Whether the published text read for this chapter was not the text its release pins (`published.ts`). */
 	function failedItsCheck(codex: Codex): boolean {
-		return publishedError.startsWith(`${getCodexId(codex)}: `) && publishedError.includes('is not the published');
+		return failedCheck.has(getCodexId(codex));
 	}
 
 	/**

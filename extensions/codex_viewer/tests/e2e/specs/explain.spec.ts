@@ -80,8 +80,8 @@ const sha256 = (text: string) => `sha256:${createHash('sha256').update(text, 'ut
 const EU_TEXT = 'class Tax:\n    @rule(legislation="Directive 2006/112/EC Art. 97")\n    def floor(self): return 15\n';
 const EU_COMMIT = 'b47a994d0000000000000000000000000000beef';
 
-/** Serve `eu`'s published source, as the page reads it over https. */
-async function servePublished(page: Page, delayMs = 0) {
+/** Serve `eu`'s published source, as the page reads it over https; `served()` is the text GitHub hands back. */
+async function servePublished(page: Page, delayMs = 0, served: () => string = () => EU_TEXT) {
   await page.route(/raw\.githubusercontent\.com/, async (route) => {
     if (delayMs) await new Promise((done) => setTimeout(done, delayMs));
     const path = new URL(route.request().url()).pathname;
@@ -95,10 +95,13 @@ async function servePublished(page: Page, delayMs = 0) {
         headers,
       });
     }
-    if (path.endsWith(`/${EU_COMMIT}/legislation/eu/tax.py`)) return route.fulfill({ body: EU_TEXT, headers });
+    if (path.endsWith(`/${EU_COMMIT}/legislation/eu/tax.py`)) return route.fulfill({ body: served(), headers });
     return route.fulfill({ status: 404, body: '', headers });
   });
 }
+
+/** Not the text the release pins. */
+const TAMPERED = 'TAMPERED = 1\n';
 
 const lines = (page: Page) => page.locator('.monaco-editor .view-lines');
 const domain = (page: Page, name: string) => page.locator('.domain-main', { hasText: name });
@@ -262,24 +265,7 @@ test('a published chapter whose text failed its check is not cited', async ({ pa
   // The release pins a digest, and what GitHub served is not it. Neither the digest nor the URL is worth
   // citing: the first stands for text nobody can get, the second for text that failed its check.
   scenario = realm();
-  await page.route(/raw\.githubusercontent\.com/, (route) => {
-    const path = new URL(route.request().url()).pathname;
-    const headers = { 'access-control-allow-origin': '*' };
-    if (path.endsWith('/legislation/eu/releases.json')) {
-      return route.fulfill({
-        body: JSON.stringify([
-          { version: '1.0.1', published: '2026-10-01', effective_from: '2027-01-01', commit: EU_COMMIT,
-            chapters: { tax: sha256(EU_TEXT) } },
-        ]),
-        headers,
-      });
-    }
-    // Not the text the release pins.
-    if (path.endsWith(`/${EU_COMMIT}/legislation/eu/tax.py`)) {
-      return route.fulfill({ body: 'TAMPERED = 1\n', headers });
-    }
-    return route.fulfill({ status: 404, body: '', headers });
-  });
+  await servePublished(page, 0, () => TAMPERED);
   await page.goto(`${url}/extensions/codex_viewer`);
   await page.getByRole('tab', { name: 'Source' }).click();
   await layer(page, 'eu').click();
@@ -293,6 +279,50 @@ test('a published chapter whose text failed its check is not cited', async ({ pa
   expect(prompt.message).toContain('did not match the digest its release pins');
   // Nothing is cited: no digest, no URL, and of course no text.
   expect(prompt.context).toBeUndefined();
+});
+
+test('a chapter that failed its check is still not cited once the reader looks at another layer', async ({ page }) => {
+  // Looking at another layer clears the banner, and leaves the chapter open: what failed is the chapter, not the banner.
+  scenario = realm();
+  await servePublished(page, 0, () => TAMPERED);
+  await page.goto(`${url}/extensions/codex_viewer?codex=eu/tax&layer=eu`);
+  await page.getByRole('tab', { name: 'Source' }).click();
+  await expect(page.getByTestId('published-error')).toContainText('is not the published', { timeout: 30000 });
+
+  await layer(page, 'es').click();
+  await expect(page.getByTestId('published-error')).toHaveCount(0);
+  await expect(page.locator('.editor-title')).toHaveText('eu/tax.py');
+  await explain(page).click();
+
+  const [prompt] = await prompts(page);
+  expect(prompt.message).toContain('did not match the digest its release pins');
+  expect(prompt.context).toBeUndefined();
+});
+
+test('a chapter whose text passes its check when read again is cited again', async ({ page }) => {
+  // A failed check is about the text that was served, not a mark on the chapter for the rest of the visit.
+  scenario = realm();
+  let served = TAMPERED;
+  await servePublished(page, 0, () => served);
+  await page.goto(`${url}/extensions/codex_viewer?codex=eu/tax&layer=eu`);
+  await page.getByRole('tab', { name: 'Source' }).click();
+  await expect(page.getByTestId('published-error')).toContainText('is not the published', { timeout: 30000 });
+
+  // Another chapter and back: that reads the chapter again (picking the open one again does not).
+  served = EU_TEXT;
+  await layer(page, 'es').click();
+  await domain(page, 'tax').click();
+  await expect(lines(page)).toContainText('return 21', { timeout: 30000 });
+  await layer(page, 'eu').click();
+  await domain(page, 'tax').click();
+  await expect(lines(page)).toContainText('return 15', { timeout: 30000 });
+  await explain(page).click();
+
+  const [prompt] = await prompts(page);
+  expect(prompt.message).not.toContain('did not match');
+  expect(prompt.context.held).toBe('published');
+  expect(prompt.context.checksum).toBe(sha256(EU_TEXT));
+  expect(prompt.context.url).toContain(`/${EU_COMMIT}/legislation/eu/tax.py`);
 });
 
 test('an explain link names the lines it names', async ({ page }) => {

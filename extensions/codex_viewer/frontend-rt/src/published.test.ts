@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
 	CODICES,
+	DigestMismatch,
 	chapterUrl,
 	codicesFrom,
 	digestBytes,
@@ -110,7 +111,7 @@ describe('what is shown is what was published', () => {
 			const sum = await digestOf(TEXT);
 			await assert.rejects(
 				() => publishedChapter('eu/es', 'tax', release({ chapters: { tax: sum } })),
-				/is not the published/,
+				(e: unknown) => e instanceof DigestMismatch && /is not the published/.test(e.message),
 			);
 		} finally {
 			globalThis.fetch = original;
