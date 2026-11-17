@@ -1,0 +1,40 @@
+name: Import Export Test
+
+on:
+  push:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/import_export/**'
+      - 'extensions/_shared/frontend/**'
+      - '.github/workflows/import_export-test.yml'
+  pull_request:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/import_export/**'
+      - 'extensions/_shared/frontend/**'
+      - '.github/workflows/import_export-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      working-directory: extensions/import_export/frontend-rt
+      run: npm install --no-audit --no-fund --silent
+
+    - name: Unit tests
+      working-directory: extensions/import_export/frontend-rt
+      run: npm test
+
+    - name: Build
+      working-directory: extensions/import_export/frontend-rt
+      run: npm run build

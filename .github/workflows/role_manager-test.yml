@@ -1,0 +1,38 @@
+name: Role Manager Test
+
+on:
+  push:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/role_manager/**'
+      - 'extensions/_shared/frontend/**'
+      - 'extensions/_shared/frontend-rt/**'
+      - '.github/workflows/role_manager-test.yml'
+  pull_request:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/role_manager/**'
+      - 'extensions/_shared/frontend/**'
+      - 'extensions/_shared/frontend-rt/**'
+      - '.github/workflows/role_manager-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      working-directory: extensions/role_manager/frontend-rt
+      run: npm install --no-audit --no-fund --silent
+
+    - name: Build
+      working-directory: extensions/role_manager/frontend-rt
+      run: npm run build

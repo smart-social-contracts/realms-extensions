@@ -47,6 +47,20 @@ export function decimalEventId(raw: string): string {
 	return String(Math.floor(Date.now() / 1000));
 }
 
+/** This realm's RariMe event id: the first 31 bytes of sha256(canister id), below the proof field modulus. */
+export async function realmEventId(canisterId: string): Promise<string> {
+	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canisterId)));
+	return BigInt('0x' + Array.from(digest.slice(0, 31), (b) => b.toString(16).padStart(2, '0')).join('')).toString();
+}
+
+export function verificationStatusUrl(userId: string): string {
+	return `${RARIMO_API_BASE}${VERIFICATION_STATUS_PATH}/${encodeURIComponent(userId)}`;
+}
+
+export function testModeVerification(userId: string) {
+	return { data: { id: userId, type: 'verification', attributes: { status: 'verified', test_mode: true } } };
+}
+
 export function rarimeAppUrl(proofParamsUrl: string): string {
 	return `https://app.rarime.com/external?type=proof-request&proof_params_url=${encodeURIComponent(proofParamsUrl)}`;
 }
@@ -209,11 +223,6 @@ export function verifiedHeading(alreadyVerifiedOnLoad: boolean): string {
 		: 'Passport Verified Successfully!';
 }
 
-export function interpretIdentityStatus(result: unknown): { verified: boolean } {
-	const rec = asRecord(result);
-	return { verified: rec?.verified === true };
-}
-
 export function interpretVerificationStatus(result: unknown): CheckOutcome {
 	const rec = asRecord(result);
 	if (!rec) return 'pending';
@@ -262,12 +271,9 @@ export async function requestVerificationStatus(userId: string): Promise<unknown
 	if (!userId) {
 		throw new Error('Sign in to check verification status');
 	}
-	const response = await fetch(
-		`${RARIMO_API_BASE}${VERIFICATION_STATUS_PATH}/${encodeURIComponent(userId)}`,
-		{
-			headers: { Accept: 'application/vnd.api+json, application/json' },
-		},
-	);
+	const response = await fetch(verificationStatusUrl(userId), {
+		headers: { Accept: 'application/vnd.api+json, application/json' },
+	});
 	const raw = await response.text();
 	let parsed: unknown;
 	try {

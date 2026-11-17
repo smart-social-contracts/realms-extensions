@@ -29,48 +29,40 @@
 		return t(`tab_${tabKey}`);
 	}
 
-	interface MemberSummary {
-		principal: string;
+	/** The realm's public user card (user_list / user_get). */
+	interface MemberCard {
+		id: string;
 		nickname: string;
 		avatar: string;
-		human_name: string;
+		home_quarter: string;
+		status: string;
 		profiles: string[];
-		has_member: boolean;
-		identity_verification: string;
-		tax_compliance: string;
-		is_active: boolean;
 	}
 
-	interface NotificationItem {
+	interface SentNotification {
 		id: string;
-		topic: string;
 		title: string;
 		message: string;
-		sender: string;
 		timestamp_ms: number;
-		read: boolean;
 	}
 
-	let members = $state<MemberSummary[]>([]);
+	type Reply = { ok?: boolean; error?: unknown; [key: string]: unknown };
+
+	let members = $state<MemberCard[]>([]);
 	let loadingList = $state(true);
 	let listError = $state('');
 	let search = $state('');
-	let statusFilter = $state<'all' | 'active' | 'inactive' | 'verified' | 'unverified'>('all');
+	let statusFilter = $state<'all' | 'active' | 'inactive'>('all');
 
 	let selected = $state<string | null>(null);
-	let profile = $state<any>(null);
+	let profile = $state<MemberCard | null>(null);
 	let loadingProfile = $state(false);
 	let profileError = $state('');
 	let tab = $state<'profile' | 'status' | 'messages'>('profile');
 
-	// Shared private data (consent-based decryption)
-	let sharedData = $state<Record<string, string> | null>(null);
-	let sharedState = $state<'idle' | 'loading' | 'no_access' | 'ready' | 'error'>('idle');
-	let sharedError = $state('');
-
-	// Notifications
-	let notifications = $state<NotificationItem[]>([]);
-	let loadingNotifs = $state(false);
+	// The realm keeps no history of what was sent to another member that we may read; show this session's.
+	let sentByMember = $state<Record<string, SentNotification[]>>({});
+	const notifications = $derived(selected ? (sentByMember[selected] ?? []) : []);
 	let notifTitle = $state('');
 	let notifMessage = $state('');
 	let sending = $state(false);
@@ -80,27 +72,51 @@
 		members.filter((m) => {
 			const q = search.trim().toLowerCase();
 			const matchesSearch =
-				!q ||
-				m.principal.toLowerCase().includes(q) ||
-				m.nickname.toLowerCase().includes(q) ||
-				m.human_name.toLowerCase().includes(q);
+				!q || m.id.toLowerCase().includes(q) || m.nickname.toLowerCase().includes(q);
 			let matchesStatus = true;
-			if (statusFilter === 'active') matchesStatus = m.is_active;
-			else if (statusFilter === 'inactive') matchesStatus = !m.is_active;
-			else if (statusFilter === 'verified') matchesStatus = m.identity_verification === 'verified';
-			else if (statusFilter === 'unverified') matchesStatus = m.identity_verification !== 'verified';
+			if (statusFilter === 'active') matchesStatus = m.status === 'active';
+			else if (statusFilter === 'inactive') matchesStatus = m.status !== 'active';
 			return matchesSearch && matchesStatus;
 		})
 	);
+
+	/** A declared realm operation: its reply, or an Error carrying the realm's message. */
+	async function op<T = Reply>(name: string, args: Record<string, unknown> = {}, read = true): Promise<T> {
+		const reply = (await (read ? ctx.read(name, args) : ctx.run(name, args))) as Reply;
+		if (!reply?.ok) throw new Error(String(reply?.error ?? `${name} did not answer`));
+		return reply as T;
+	}
+
+	function asCard(raw: any): MemberCard {
+		return {
+			id: String(raw?.id ?? ''),
+			nickname: String(raw?.nickname ?? ''),
+			avatar: String(raw?.avatar ?? ''),
+			home_quarter: String(raw?.home_quarter ?? ''),
+			status: String(raw?.status ?? ''),
+			profiles: Array.isArray(raw?.profiles) ? raw.profiles.map(String) : []
+		};
+	}
+
+	function reason(e: unknown): string {
+		return String((e as { message?: unknown })?.message ?? e);
+	}
 
 	async function loadMembers() {
 		loadingList = true;
 		listError = '';
 		try {
-			const res: any = await ctx.callSync('list_members');
-			members = res?.data?.members ?? [];
-		} catch (e: any) {
-			listError = String(e?.message ?? e);
+			const all: MemberCard[] = [];
+			let from: number | null = 1;
+			for (let pages = 0; from != null && pages < 20; pages++) {
+				const res: { users?: unknown[]; next?: number | null } = await op('user_list', { from, count: 500 });
+				all.push(...(res.users ?? []).map(asCard).filter((m) => m.id));
+				from = res.next ?? null;
+			}
+			members = all;
+		} catch (e) {
+			members = [];
+			listError = reason(e);
 		} finally {
 			loadingList = false;
 		}
@@ -111,100 +127,59 @@
 		tab = 'profile';
 		profile = null;
 		profileError = '';
-		sharedData = null;
-		sharedState = 'idle';
+		sendResult = '';
 		loadingProfile = true;
 		try {
-			const res: any = await ctx.callSync('get_member_profile', { principal });
-			if (res?.success === false) throw new Error(res.error || 'Failed to load profile');
-			profile = res?.data ?? null;
-			void loadSharedData();
-			void loadNotifications();
-		} catch (e: any) {
-			profileError = String(e?.message ?? e);
+			const res: { user?: unknown } = await op('user_get', { user: principal });
+			profile = asCard(res.user);
+		} catch (e) {
+			profileError = reason(e);
 		} finally {
 			loadingProfile = false;
 		}
 	}
 
-	async function loadSharedData() {
-		if (!profile) return;
-		const ciphertext: string = profile.private_data_ciphertext || '';
-		if (!ciphertext) {
-			sharedState = 'no_access';
-			return;
-		}
-		sharedState = 'loading';
-		sharedError = '';
-		try {
-			const env: any = await ctx.callSync('get_member_private_data_envelope', {
-				principal: profile.principal
-			});
-			if (!env?.success) throw new Error(env?.error || 'envelope lookup failed');
-			if (!env.has_access || !env.wrapped_dek) {
-				sharedState = 'no_access';
-				return;
-			}
-			const decrypted = await ctx.crypto.decryptWithEnvelope(env.wrapped_dek, ciphertext);
-			if (decrypted) {
-				sharedData = decrypted;
-				sharedState = 'ready';
-			} else {
-				sharedState = 'error';
-				sharedError = 'Could not decrypt shared data with your key.';
-			}
-		} catch (e: any) {
-			sharedState = 'error';
-			sharedError = String(e?.message ?? e);
-		}
-	}
-
-	async function loadNotifications() {
-		if (!selected) return;
-		loadingNotifs = true;
-		try {
-			const res: any = await ctx.callSync('get_member_notifications', { principal: selected });
-			notifications = res?.data?.notifications ?? [];
-		} catch {
-			notifications = [];
-		} finally {
-			loadingNotifs = false;
-		}
-	}
-
 	async function sendNotification() {
-		if (!selected || !notifTitle.trim() || !notifMessage.trim()) return;
+		const to = selected;
+		const title = notifTitle.trim();
+		const message = notifMessage.trim();
+		if (!to || !title || !message) return;
 		sending = true;
 		sendResult = '';
 		try {
-			const res: any = await ctx.callSync('send_member_notification', {
-				principal: selected,
-				title: notifTitle.trim(),
-				message: notifMessage.trim()
-			});
-			if (res?.success === false) throw new Error(res.error || 'send failed');
-			sendResult = 'Sent.';
+			const res: { notification?: unknown } = await op(
+				'notification_send',
+				{ recipient: `User:${to}`, title, body: message, topic: 'admin', href: '/notifications' },
+				false
+			);
+			const sent: SentNotification = {
+				id: String(res.notification ?? `${Date.now()}`),
+				title,
+				message,
+				timestamp_ms: Date.now()
+			};
+			sentByMember = { ...sentByMember, [to]: [sent, ...(sentByMember[to] ?? [])] };
+			sendResult = t('notification_sent');
 			notifTitle = '';
 			notifMessage = '';
-			await loadNotifications();
-		} catch (e: any) {
-			sendResult = `Error: ${String(e?.message ?? e)}`;
+		} catch (e) {
+			sendResult = t('send_failed', { reason: reason(e) });
 		} finally {
 			sending = false;
 		}
 	}
 
-	function initials(m: { nickname: string; human_name: string; principal: string }): string {
-		const base = m.human_name || m.nickname || m.principal;
+	function initials(m: { nickname: string; id: string }): string {
+		const base = m.nickname || m.id;
 		return base.slice(0, 2).toUpperCase();
 	}
 
 	function badgeColor(value: string): string {
-		if (value === 'verified' || value === 'compliant' || value === 'eligible')
+		if (value === 'active')
 			return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-		if (value === 'pending')
+		if (value === 'suspended')
 			return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
-		if (value === 'suspended' || value === 'revoked')
+		if (value === 'banned')
 			return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
 		return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
 	}
@@ -254,27 +229,26 @@
 					<option value="all">{t('filter_all')}</option>
 					<option value="active">{t('filter_active')}</option>
 					<option value="inactive">{t('filter_inactive')}</option>
-					<option value="verified">{t('filter_verified')}</option>
-					<option value="unverified">{t('filter_unverified')}</option>
 				</select>
 			</div>
 
 			{#if loadingList}
 				<p class="text-sm text-gray-500">{t('loading_members')}</p>
 			{:else if listError}
-				<p class="text-sm text-red-600">{listError}</p>
+				<p class="text-sm text-gray-600 dark:text-gray-300">{t('members_unavailable')}</p>
+				<p class="text-xs text-gray-400 break-words">{listError}</p>
 			{:else if filtered.length === 0}
 				<p class="text-sm text-gray-500">{t('no_members_match')}</p>
 			{:else}
 				<ul class="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
-					{#each filtered as m (m.principal)}
+					{#each filtered as m (m.id)}
 						<li>
 							<button
 								class="w-full text-left flex items-center gap-3 rounded-lg px-3 py-2 transition-colors {selected ===
-								m.principal
+								m.id
 									? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800'
 									: 'hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent'}"
-								onclick={() => selectMember(m.principal)}
+								onclick={() => selectMember(m.id)}
 							>
 								<span
 									class="flex-shrink-0 w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 flex items-center justify-center text-xs font-semibold"
@@ -283,12 +257,12 @@
 								</span>
 								<span class="min-w-0 flex-1">
 									<span class="block truncate text-sm font-medium text-gray-900 dark:text-white">
-										{m.nickname || m.human_name || 'Unnamed'}
+										{m.nickname || 'Unnamed'}
 									</span>
-									<span class="block truncate text-xs font-mono text-gray-400">{m.principal}</span>
+									<span class="block truncate text-xs font-mono text-gray-400">{m.id}</span>
 								</span>
 								<span class="flex-shrink-0 flex flex-col items-end gap-1">
-									{#if m.is_active}
+									{#if m.status === 'active'}
 										<span class="w-2 h-2 rounded-full bg-green-500" title="Active"></span>
 									{:else}
 										<span class="w-2 h-2 rounded-full bg-gray-400" title="Inactive"></span>
@@ -312,7 +286,8 @@
 			{:else if loadingProfile}
 				<p class="text-sm text-gray-500">{t('loading_profile')}</p>
 			{:else if profileError}
-				<p class="text-sm text-red-600">{profileError}</p>
+				<p class="text-sm text-gray-600 dark:text-gray-300">{t('profile_unavailable')}</p>
+				<p class="text-xs text-gray-400 break-words">{profileError}</p>
 			{:else if profile}
 				<div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
 					<!-- Tabs -->
@@ -335,10 +310,10 @@
 								<div class="sm:col-span-2">
 									<dt class="text-gray-500 dark:text-gray-400">Principal</dt>
 									<dd class="flex items-center gap-2 font-mono break-all text-gray-900 dark:text-white">
-										{profile.principal}
+										{profile.id}
 										<button
 											class="text-xs text-blue-600 hover:underline"
-											onclick={() => copy(profile.principal)}>copy</button
+											onclick={() => copy(profile?.id ?? '')}>copy</button
 										>
 									</dd>
 								</div>
@@ -347,100 +322,54 @@
 									<dd class="text-gray-900 dark:text-white">{profile.nickname || '—'}</dd>
 								</div>
 								<div>
-									<dt class="text-gray-500 dark:text-gray-400">Name</dt>
-									<dd class="text-gray-900 dark:text-white">{profile.human?.name || '—'}</dd>
-								</div>
-								<div>
-									<dt class="text-gray-500 dark:text-gray-400">Date of birth</dt>
-									<dd class="text-gray-900 dark:text-white">{profile.human?.date_of_birth || '—'}</dd>
-								</div>
-								<div>
 									<dt class="text-gray-500 dark:text-gray-400">Home quarter</dt>
 									<dd class="text-gray-900 dark:text-white">{profile.home_quarter || '—'}</dd>
 								</div>
 								<div class="sm:col-span-2">
 									<dt class="text-gray-500 dark:text-gray-400">Profiles</dt>
 									<dd class="flex flex-wrap gap-1 mt-1">
-										{#each profile.profiles ?? [] as p}
+										{#each profile.profiles as p}
 											<span class="px-2 py-0.5 rounded text-xs {badgeColor('')}">{p}</span>
 										{:else}
 											<span class="text-gray-400">—</span>
 										{/each}
 									</dd>
 								</div>
-								<div class="sm:col-span-2">
-									<dt class="text-gray-500 dark:text-gray-400">Verified identities</dt>
-									<dd class="flex flex-wrap gap-1 mt-1">
-										{#each profile.identities ?? [] as id}
-											<span
-												class="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-												>{id.type}</span
-											>
-										{:else}
-											<span class="text-gray-400">None</span>
-										{/each}
-									</dd>
-								</div>
 							</dl>
 
-							<!-- Shared private data -->
+							<!-- Private data: the realm hands another member's ciphertext to nobody but them. -->
 							<div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
 								<div class="flex items-center justify-between mb-2">
 									<h4 class="text-sm font-semibold text-gray-900 dark:text-white">
 										Private data
 									</h4>
-									{#if sharedState === 'ready'}
-										<span
-											class="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-											>Shared with you</span
-										>
-									{/if}
 								</div>
-								{#if sharedState === 'loading'}
-									<p class="text-sm text-gray-500">Decrypting…</p>
-								{:else if sharedState === 'ready' && sharedData}
-									<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-										{#each Object.entries(sharedData) as [k, v]}
-											<div>
-												<dt class="text-gray-500 dark:text-gray-400 capitalize">{k.replace(/_/g, ' ')}</dt>
-												<dd class="text-gray-900 dark:text-white break-words">{v || '—'}</dd>
-											</div>
-										{/each}
-									</dl>
-								{:else if sharedState === 'no_access'}
-									<div
-										class="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
-									>
-										<p class="text-sm text-gray-600 dark:text-gray-300">
-											This member's private data is end-to-end encrypted and has not been shared with
-											you. Ask the member to enable data sharing with administrators.
-										</p>
-									</div>
-								{:else if sharedState === 'error'}
-									<p class="text-sm text-red-600">{sharedError}</p>
-								{/if}
+								<div
+									class="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700"
+								>
+									<p class="text-sm text-gray-600 dark:text-gray-300">{t('private_data_unavailable')}</p>
+								</div>
 							</div>
 						{:else if tab === 'status'}
-							{#if profile.member}
+							{#if profile.status}
 								<div
-									class="mb-4 p-3 rounded-lg {profile.member.is_active
+									class="mb-4 p-3 rounded-lg {profile.status === 'active'
 										? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
 										: 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700'}"
 								>
-									<p class="text-sm font-medium {profile.member.is_active ? 'text-green-800 dark:text-green-200' : 'text-gray-600 dark:text-gray-300'}">
-										{profile.member.is_active ? t('active_member') : t('inactive_member')}
+									<p class="text-sm font-medium {profile.status === 'active' ? 'text-green-800 dark:text-green-200' : 'text-gray-600 dark:text-gray-300'}">
+										{profile.status === 'active' ? t('active_member') : t('inactive_member')}
 									</p>
 								</div>
 								<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-									{#each [['Identity verification', profile.member.identity_verification], ['Tax compliance', profile.member.tax_compliance], ['Residence permit', profile.member.residence_permit], ['Voting eligibility', profile.member.voting_eligibility], ['Public benefits', profile.member.public_benefits_eligibility]] as [label, value]}
-										<div>
-											<dt class="text-gray-500 dark:text-gray-400">{label}</dt>
-											<dd class="mt-1">
-												<span class="px-2 py-0.5 rounded text-xs {badgeColor(value)}">{value || '—'}</span>
-											</dd>
-										</div>
-									{/each}
+									<div>
+										<dt class="text-gray-500 dark:text-gray-400">{t('membership_status')}</dt>
+										<dd class="mt-1">
+											<span class="px-2 py-0.5 rounded text-xs {badgeColor(profile.status)}">{profile.status}</span>
+										</dd>
+									</div>
 								</dl>
+								<p class="mt-4 text-xs text-gray-500 dark:text-gray-400">{t('status_details_unavailable')}</p>
 							{:else}
 								<p class="text-sm text-gray-500">{t('not_member')}</p>
 							{/if}
@@ -471,9 +400,8 @@
 								</div>
 							</div>
 
-							{#if loadingNotifs}
-								<p class="text-sm text-gray-500">{t('loading_messages')}</p>
-							{:else if notifications.length === 0}
+							<p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{t('messages_history_note')}</p>
+							{#if notifications.length === 0}
 								<p class="text-sm text-gray-500">{t('no_messages')}</p>
 							{:else}
 								<ul class="space-y-2">

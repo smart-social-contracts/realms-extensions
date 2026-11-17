@@ -1,54 +1,83 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy } from 'svelte';
-	import MonacoPane from './MonacoPane.svelte';
+	import { get } from 'svelte/store';
 	import FederalVotes from './FederalVotes.svelte';
+	import LegislationChange from './LegislationChange.svelte';
+	import { releaseChangeOf } from './legislationChange';
+	import LinkPicker from './LinkPicker.svelte';
+	import ProposalLinks from './ProposalLinks.svelte';
+	import TagPicker from './TagPicker.svelte';
 	import {
 		isNarrowViewport,
 		persistSessionFlag,
 		readSessionFlag,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import {
+		UTC,
+		formatUtc,
+		formatWithUtc,
+		isKnownZone,
+		resolveLocalTime,
+		type LocalTime,
+	} from '../../../_shared/frontend/realm-time';
 	import { loadExtensionI18n, t } from './lib/i18n';
+	import { displayId, type Link, type Replaceable } from './links';
+	import { MAX_TAGS, knownTags, searchTagged, tagsOf } from './tags';
+	import {
+		VOTES_PAGE,
+		approvalBar,
+		approvalLabel,
+		castingNote,
+		castingVoteMatters,
+		endedText,
+		firstVoteOf,
+		isVetoed,
+		myVote,
+		requirementText,
+		secondVoteText,
+		vetoHoldersMissing,
+		votingRule,
+		waitingText,
+		type VoteState,
+	} from './votes';
 
 	let { ctx }: { ctx: any } = $props();
-
-	let i18nTick = $state(0);
 
 	$effect(() => {
 		const localeStore = ctx?.locale;
 		if (!localeStore?.subscribe) {
-			void loadExtensionI18n('en').then(() => {
-				i18nTick++;
-			});
+			void loadExtensionI18n('en');
 			return;
 		}
 		const unsub = localeStore.subscribe((loc: string | null | undefined) => {
-			void loadExtensionI18n(loc || 'en').then(() => {
-				i18nTick++;
-			});
+			locale = loc || 'en';
+			void loadExtensionI18n(locale);
 		});
 		return unsub;
 	});
 
 	const EXTENSION_ID = 'voting';
 
+	// The language the member reads the page in: a change list's summary is shown in it when it has one.
+	let locale = $state('en');
+
 	type View = 'list' | 'form' | 'detail' | 'federal';
-	type ProposalType = 'transaction' | 'upgrade' | 'poll' | 'code_execution';
-	type UpgradeTarget = 'codex' | 'extension' | 'core';
+	type ProposalType = 'transaction' | 'upgrade' | 'poll' | 'operation';
+	type FormProposalType = Exclude<ProposalType, 'operation'>;
+	type UpgradeTarget = 'codex' | 'extension';
 
 	function buildProposalTypeOptions(): { value: ProposalType | ''; label: string }[] {
-		void i18nTick;
 		return [
 			{ value: '', label: t('filter_all_types') },
 			{ value: 'transaction', label: t('type_transaction') },
 			{ value: 'upgrade', label: t('type_upgrade') },
 			{ value: 'poll', label: t('type_poll') },
-			{ value: 'code_execution', label: t('type_code_execution') },
+			{ value: 'operation', label: 'Other operation' },
 		];
 	}
 
-	function buildFormTypeOptions(): { value: ProposalType; label: string; subtitle: string }[] {
-		void i18nTick;
+	function buildFormTypeOptions(): { value: FormProposalType; label: string; subtitle: string }[] {
 		return [
 			{
 				value: 'transaction',
@@ -64,11 +93,6 @@
 				value: 'poll',
 				label: t('type_poll'),
 				subtitle: t('form_subtitle_poll'),
-			},
-			{
-				value: 'code_execution',
-				label: t('type_code_execution'),
-				subtitle: t('form_subtitle_code_execution'),
 			},
 		];
 	}
@@ -106,32 +130,28 @@
 	}
 
 	function resolveProposalId(slug: string): string {
-		if (/^prop_/i.test(slug)) return slug;
-		if (/^\d+$/.test(slug)) {
-			const num = parseInt(slug, 10);
-			const padded = `prop_${String(num).padStart(3, '0')}`;
-			const hit = proposals.find(
-				(p) => p.entity_id === num || p.id === padded || p.id === slug,
-			);
-			if (hit?.id) return hit.id;
-			return padded;
-		}
-		return slug;
+		const s = String(slug || '').trim();
+		const legacy = s.match(/^prop_(\d+)$/i);
+		if (legacy) return `P-${parseInt(legacy[1], 10)}`;
+		if (/^\d+$/.test(s)) return `P-${parseInt(s, 10)}`;
+		const slim = s.match(/^p-(\d+)$/i);
+		if (slim) return `P-${slim[1]}`;
+		return s;
+	}
+
+	function proposalNumber(proposal: any): number | null {
+		const match = String(proposal?.id ?? '').match(/^P-(\d+)$/i);
+		return match ? parseInt(match[1], 10) : null;
 	}
 
 	function proposalLinkSlug(proposal: any): string {
-		const entityId = Number(proposal?.entity_id);
-		if (Number.isFinite(entityId) && entityId > 0) return String(entityId);
-		const match = String(proposal?.id ?? '').match(/^prop_(\d+)$/i);
-		if (match) return String(parseInt(match[1], 10));
-		return String(proposal?.id ?? '');
+		const n = proposalNumber(proposal);
+		return n != null ? String(n) : String(proposal?.id ?? '');
 	}
 
 	function proposalDisplayId(proposal: any): string {
-		const entityId = Number(proposal?.entity_id);
-		if (Number.isFinite(entityId) && entityId > 0) return `#${entityId}`;
-		const match = String(proposal?.id ?? '').match(/^prop_(\d+)$/i);
-		if (match) return `#${parseInt(match[1], 10)}`;
+		const n = proposalNumber(proposal);
+		if (n != null) return `#${n}`;
 		const id = String(proposal?.id ?? '').trim();
 		return id || '—';
 	}
@@ -143,22 +163,58 @@
 	let listLoading = $state(!initialProposalId);
 	let listLoadingMore = $state(false);
 	let listHasMore = $state(false);
-	let listNextFromId = $state(1);
+	let listNext: number | null = $state(null);
+	// With a tag filter the realm reads rows and keeps the tagged ones: how many it has read through for the list, and
+	// whether the last search stopped at its limit with less than a page found.
+	let listSearched = $state(0);
+	let listCapped = $state(false);
+	let listUnavailable = $state(false);
 	let orgFilter = $state('');
 	let statusFilter = $state('');
 	let typeFilter = $state('');
+	let tagFilter: string[] = $state([]);
+	let filtering = $derived(!!(orgFilter || statusFilter || typeFilter || tagFilter.length));
 	let sortBy = $state('newest');
+	// How each vote is drawn; the member's own is filled.
+	const VOTE_CHOICES = [
+		{
+			id: 'yes',
+			label: 'vote_yes',
+			idle: 'border-green-300 text-green-700 hover:bg-green-50',
+			chosen: 'border-transparent bg-green-600 text-white hover:bg-green-700',
+			spinner: 'border-green-400',
+			icon: 'M5 13l4 4L19 7',
+		},
+		{
+			id: 'no',
+			label: 'vote_no',
+			idle: 'border-red-300 text-red-700 hover:bg-red-50',
+			chosen: 'border-transparent bg-red-600 text-white hover:bg-red-700',
+			spinner: 'border-red-400',
+			icon: 'M6 18L18 6M6 6l12 12',
+		},
+		{
+			id: 'abstain',
+			label: 'vote_abstain',
+			idle: 'border-gray-300 text-gray-600 hover:bg-gray-50',
+			chosen: 'border-transparent bg-gray-600 text-white hover:bg-gray-700',
+			spinner: 'border-gray-400',
+			icon: 'M20 12H4',
+		},
+	];
 	const FILTERS_KEY = 'voting-filters-open';
 	let filtersOpen = $state(readSessionFlag(FILTERS_KEY) ?? !isNarrowViewport());
 	let orgOptions: string[] = $state([]);
 	const STATUS_OPTIONS = [
+		'draft',
 		'voting',
-		'pending_vote',
-		'approved',
-		'executed',
+		'accepted',
+		'execution_scheduled',
 		'rejected',
+		'executed',
 		'failed',
-		'no_quorum',
+		'expired',
+		'withdrawn',
 	];
 	const SORT_OPTIONS = [
 		{ value: 'newest', label: 'Most recent' },
@@ -168,41 +224,44 @@
 	];
 	const LIST_FETCH_SIZE = 30;
 	let error = $state('');
-	let accessDeniedOp = $state('');
 	let view: View = $state(initialProposalId ? 'detail' : 'list');
 
 	let formTitle = $state('');
 	let formDescription = $state('');
-	let formProposalType = $state<ProposalType>('poll');
+	let formProposalType = $state<FormProposalType>('poll');
 	let formOrgScope = $state('');
+	let formFund = $state('');
 	let formToken = $state('');
 	let formToPrincipal = $state('');
 	let formAmount = $state('');
 	let formUpgradeTarget = $state<UpgradeTarget>('extension');
 	let formPackageId = $state('');
 	let formVersion = $state('');
-	let formActionId = $state('');
-	let formCoreDecision = $state<'approve' | 'reject'>('approve');
-	let formSource = $state('');
-	let formSourceUrl = $state('');
-	let formRequestedPermissions = $state<string[]>([]);
-	let codeFetching = $state(false);
-	let submitContext: { baton_configured?: boolean; registry_canister_id?: string } | null = $state(null);
-	let bridgeVerbs: string[] = $state([]);
-	let vaultTokens: { name: string; symbol: string; decimals: number }[] = $state([]);
-	let vaultBalance: string | null = $state(null);
+	let formEffectiveAt = $state('');
+	let formLinks: Link[] = $state([]);
+	let formTags: string[] = $state([]);
+	// The realm's official time zone: "takes effect at" is entered and shown in it.
+	let realmZone = $state(UTC);
+	let withdrawnProposals: Replaceable[] = $state([]);
+	let effectiveAt: LocalTime | null = $derived(formEffectiveAt ? resolveLocalTime(formEffectiveAt, realmZone) : null);
+	let treasuryFunds: Record<string, Record<string, number>> = $state({});
+	let vaultTokens: { symbol: string; decimals: number }[] = $state([]);
+	let fundIds = $derived(Object.keys(treasuryFunds).sort());
+	let vaultBalance = $derived.by(() => {
+		const raw = treasuryFunds[formFund]?.[formToken];
+		return raw == null ? null : String(raw);
+	});
 	let submitting = $state(false);
 	let submitMsg = $state('');
 
 	let selectedProposal: any = $state(null);
 	let detailLoading = $state(!!initialProposalId);
-	let codeContent = $state('');
-	let codeChecksum = $state('');
-	let codeLoading = $state(false);
-	let codeError = $state('');
 	let votingInProgress = $state('');
+	let stopConfirm = $state(false);
+	let stopping = $state(false);
+	let stopMessage = $state('');
+	let stopFiled = $state('');
 
-	let votingSettings: { voting_window_seconds: number; voting_window_days: number } | null = $state(null);
 	let linkCopied = $state(false);
 
 	let nowMs = $state(Date.now());
@@ -213,7 +272,7 @@
 
 	function isProposalEnded(proposal: any, now = Date.now()): boolean {
 		const status = (proposal?.status || '').toLowerCase();
-		const endedStatuses = ['executed', 'rejected', 'failed', 'no_quorum', 'approved'];
+		const endedStatuses = ['accepted', 'executed', 'rejected', 'failed', 'expired', 'withdrawn'];
 		if (endedStatuses.includes(status)) return true;
 		if (status === 'voting' && proposal.voting_deadline) {
 			const epoch = parseEpochSeconds(proposal.voting_deadline);
@@ -225,18 +284,19 @@
 	function proposalSortKey(proposal: any): number {
 		const created = parseEpochSeconds(proposal?.created_at);
 		if (created != null && created > 0) return created;
-		const entityId = Number(proposal?.entity_id);
-		if (Number.isFinite(entityId) && entityId > 0) return entityId;
-		const id = String(proposal?.id ?? proposal?._id ?? '');
-		const propMatch = id.match(/^prop_(\d+)$/i);
-		if (propMatch) return Number(propMatch[1]);
-		const numeric = parseInt(id, 10);
-		if (Number.isFinite(numeric) && numeric > 0) return numeric;
-		return 0;
+		return proposalNumber(proposal) ?? 0;
 	}
 
+	let filteredProposals = $derived(
+		proposals.filter(
+			(p) =>
+				(!orgFilter || p.org_scope === orgFilter) &&
+				(!typeFilter || getProposalType(p) === typeFilter),
+		),
+	);
+
 	let sortedProposals = $derived(
-		[...proposals].sort((a, b) => {
+		[...filteredProposals].sort((a, b) => {
 			switch (sortBy) {
 				case 'oldest':
 					return proposalSortKey(a) - proposalSortKey(b);
@@ -265,41 +325,83 @@
 	let selectedProposalAction = $derived(
 		selectedProposal ? parseProposalAction(selectedProposal) : {},
 	);
-	let selectedProposalPermissions = $derived(
-		selectedProposal ? parseProposalPermissions(selectedProposal) : [],
-	);
-	let formSubtitle = $derived.by(() => {
-		void i18nTick;
-		return t(`form_subtitle_${formProposalType}`);
-	});
-	let showCoreUpgrade = $derived(!!submitContext?.baton_configured);
+	let formSubtitle = $derived(t(`form_subtitle_${formProposalType}`));
 
-	function parseProposalMetadata(proposal: any): Record<string, any> {
-		try {
-			const meta = proposal?.metadata;
-			if (typeof meta === 'string') return JSON.parse(meta);
-			return meta && typeof meta === 'object' ? meta : {};
-		} catch {
-			return {};
-		}
-	}
+	const UPGRADE_OPS: Record<string, UpgradeTarget> = {
+		codex_install: 'codex',
+		extension_install: 'extension',
+	};
 
 	function getProposalType(proposal: any): string {
-		const direct = String(proposal?.proposal_type || '').trim();
-		if (direct) return direct;
-		return String(parseProposalMetadata(proposal).proposal_type || '').trim();
+		if (!proposal?.enriched) return '';
+		const op = String(proposal.action?.op || '');
+		if (!op) return 'poll';
+		if (op === 'transfer_create') return 'transaction';
+		if (UPGRADE_OPS[op]) return 'upgrade';
+		return 'operation';
 	}
 
 	function parseProposalAction(proposal: any): Record<string, any> {
-		const meta = parseProposalMetadata(proposal);
-		const action = meta.action;
-		return action && typeof action === 'object' ? action : {};
+		const action = proposal?.action;
+		if (!action || typeof action !== 'object') return {};
+		const args = action.args && typeof action.args === 'object' ? action.args : {};
+		const op = String(action.op || '');
+		if (op === 'transfer_create') {
+			return { op, fund: args.fund, token: args.symbol, amount: args.amount, to_principal: args.to };
+		}
+		// The branches the realm takes, in its order and by the presence of the keys, as core.change_list.names_release does: an
+		// action that names a release (`source` and no `manifest` key, whatever the manifest would be) runs as one, whatever
+		// change list it carries beside it (the realm refuses the shape now; a proposal stored before still runs as the release).
+		if (op === 'codex_install' && 'source' in args && !('manifest' in args)) {
+			return { op, target: 'codex', release: { source: String(args.source), version: String(args.version ?? '') } };
+		}
+		if (op === 'codex_install' && 'checksum' in args) {
+			return { op, target: 'codex', change_list: { url: String(args.url ?? ''), checksum: String(args.checksum) } };
+		}
+		if (UPGRADE_OPS[op]) {
+			return { op, target: UPGRADE_OPS[op], package_id: args.codex ?? args.extension, version: args.version };
+		}
+		return { op, args };
 	}
 
-	function parseProposalPermissions(proposal: any): string[] {
-		const meta = parseProposalMetadata(proposal);
-		const perms = meta.requested_permissions;
-		return Array.isArray(perms) ? perms.map(String) : [];
+	/** A slim Proposal row (from proposal_list or proposal_get) in the shape the UI renders. */
+	function normalizeProposal(row: any, detail: any = null, myChoice = ''): any {
+		const p = detail?.proposal ?? row ?? {};
+		const tally = detail?.tally ?? p.tally ?? {};
+		const department = String(p.department ?? '');
+		const orgScope = department && department !== rootDepartment ? department : '';
+		return {
+			id: String(p.id ?? row?.id ?? ''),
+			title: String(p.title ?? ''),
+			description: String(p.description ?? ''),
+			proposer: String(p.proposer ?? ''),
+			status: String(p.status ?? ''),
+			created_at: Number(p.opens_at) || null,
+			voting_deadline: Number(p.deadline) || null,
+			effective_at: Number(p.effective_at) || null,
+			votes: {
+				yes: Number(tally.yes) || 0,
+				no: Number(tally.no) || 0,
+				abstain: Number(tally.abstain) || 0,
+			},
+			eligible: detail ? Number(detail.eligible) || 0 : null,
+			// The rule stored when it was filed; null for a proposal that records none, or one not read in full.
+			rule: detail ? votingRule(p, !!orgScope) : null,
+			// The count of the first vote, when a tie put the proposal to this second vote.
+			first_vote: firstVoteOf(p),
+			casting_choice: '',
+			veto_holders_missing: vetoHoldersMissing(p.tally?.veto, detail?.votes),
+			vetoed: isVetoed(p.tally?.veto, detail?.votes),
+			org_scope: orgScope,
+			action: p.action ?? null,
+			// How the release an install proposal names stands against the one the realm runs (realms-gos §11.6).
+			release_change: releaseChangeOf(detail?.release_change),
+			links: Array.isArray(p.links) ? p.links : [],
+			tags: tagsOf(p),
+			replaced_by: String(p.replaced_by ?? ''),
+			my_vote: myChoice,
+			enriched: !!detail,
+		};
 	}
 
 	function proposalTypeLabel(type: string): string {
@@ -315,19 +417,10 @@
 				return 'bg-purple-100 text-purple-800';
 			case 'poll':
 				return 'bg-sky-100 text-sky-800';
-			case 'code_execution':
+			case 'operation':
 				return 'bg-amber-100 text-amber-800';
 			default:
 				return 'bg-gray-100 text-gray-700';
-		}
-	}
-
-	function isValidUrl(s: string): boolean {
-		try {
-			new URL(s);
-			return true;
-		} catch {
-			return false;
 		}
 	}
 
@@ -350,75 +443,43 @@
 		});
 	}
 
-	async function vaultSyncCall(fn: string, args: Record<string, any> = {}) {
-		const raw = await ctx.backend.extension_sync_call('vault', fn, JSON.stringify(args));
-		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		const inner = envelope?.response ?? envelope;
-		return typeof inner === 'string' ? JSON.parse(inner) : inner;
-	}
-
-	async function loadSubmitContext() {
+	/** A realm read operation's reply, or null when it fails or is not available to the caller. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
 		try {
-			const res = await callSync('get_submit_context');
-			if (res?.success && res.data) submitContext = res.data;
-			else submitContext = res?.data ?? null;
+			const reply = await ctx.read(name, args);
+			return reply?.ok ? reply : null;
 		} catch {
-			submitContext = null;
+			return null;
 		}
 	}
 
-	async function loadBridgeVerbs() {
+	/** A realm operation that changes state; never throws, refusals come back as ``{ ok: false, error }``. */
+	async function run(name: string, args: Record<string, unknown> = {}): Promise<any> {
 		try {
-			const res = await callSync('get_bridge_verbs');
-			const verbs = res?.data?.verbs ?? res?.verbs;
-			bridgeVerbs = Array.isArray(verbs) ? verbs.map(String) : [];
-		} catch {
-			bridgeVerbs = [];
+			const reply = await ctx.run(name, args);
+			return reply ?? { ok: false, error: `${name} returned no reply` };
+		} catch (e: any) {
+			return { ok: false, error: e?.message ?? String(e) };
 		}
 	}
 
-	async function loadVaultTokens() {
-		try {
-			const res = await vaultSyncCall('get_active_tokens', {});
-			const tokens = res?.data?.ActiveTokens ?? res?.ActiveTokens ?? [];
-			vaultTokens = (Array.isArray(tokens) ? tokens : []).map((t: any) => ({
-				name: String(t.name || t.symbol || ''),
-				symbol: String(t.symbol || t.name || ''),
-				decimals: Number(t.decimals) || 8,
-			})).filter((t) => t.name);
-			if (!formToken && vaultTokens.length) formToken = vaultTokens[0].name;
-		} catch {
-			vaultTokens = [];
-		}
-	}
-
-	async function loadVaultBalanceForToken(token: string) {
-		if (!token) {
-			vaultBalance = null;
-			return;
-		}
-		try {
-			const res = await vaultSyncCall('get_vault_balance', { token });
-			const bal = res?.data?.Balance ?? res?.Balance;
-			if (bal?.amount != null) vaultBalance = String(bal.amount);
-			else vaultBalance = null;
-		} catch {
-			vaultBalance = null;
-		}
-	}
-
-	function togglePermission(verb: string) {
-		if (formRequestedPermissions.includes(verb)) {
-			formRequestedPermissions = formRequestedPermissions.filter((v) => v !== verb);
-		} else {
-			formRequestedPermissions = [...formRequestedPermissions, verb];
-		}
+	async function loadTreasury() {
+		const res = await read('treasury_view', { count: 500 });
+		const funds = res?.funds && typeof res.funds === 'object' ? res.funds : {};
+		treasuryFunds = funds;
+		vaultTokens = (Array.isArray(res?.tokens) ? res.tokens : [])
+			.map((tok: any) => ({
+				symbol: String(tok?.id ?? ''),
+				decimals: Number.isFinite(Number(tok?.decimals)) ? Number(tok.decimals) : 8,
+			}))
+			.filter((tok: { symbol: string }) => tok.symbol);
+		if (!formFund || !(formFund in funds)) formFund = Object.keys(funds).sort()[0] ?? '';
+		if (!formToken && vaultTokens.length) formToken = vaultTokens[0].symbol;
 	}
 
 	async function openSubmitForm() {
 		view = 'form';
-		await Promise.all([loadSubmitContext(), loadBridgeVerbs(), loadOrgOptions(), loadVaultTokens()]);
-		if (formToken) await loadVaultBalanceForToken(formToken);
+		await Promise.all([loadOrgOptions(), loadTreasury(), loadWithdrawn()]);
 	}
 
 	function resetFormFields() {
@@ -426,48 +487,58 @@
 		formDescription = '';
 		formProposalType = 'poll';
 		formOrgScope = '';
-		formToken = vaultTokens[0]?.name ?? '';
+		formFund = fundIds[0] ?? '';
+		formToken = vaultTokens[0]?.symbol ?? '';
 		formToPrincipal = '';
 		formAmount = '';
 		formUpgradeTarget = 'extension';
 		formPackageId = '';
 		formVersion = '';
-		formActionId = '';
-		formCoreDecision = 'approve';
-		formSource = '';
-		formSourceUrl = '';
-		formRequestedPermissions = [];
-		vaultBalance = null;
+		formEffectiveAt = '';
+		formLinks = [];
+		formTags = [];
 	}
 
-	async function fetchRemoteCode() {
-		const url = formSourceUrl.trim();
-		if (!url || !isValidUrl(url)) {
-			error = 'Please enter a valid code URL';
-			return;
+	function myPrincipal(): string {
+		return (ctx.principal ? get(ctx.principal) : '') || '';
+	}
+
+	/** The realm's official time zone; UTC until it sets one (or when the browser does not know the zone). */
+	async function loadRealmZone() {
+		const zone = (await read('realm_info'))?.realm?.timezone;
+		realmZone = typeof zone === 'string' && isKnownZone(zone) ? zone : UTC;
+	}
+
+	/** Every withdrawn proposal, among which the member's own can be replaced. */
+	async function loadWithdrawn() {
+		const found: Replaceable[] = [];
+		let from: number | null = 1;
+		while (from != null) {
+			const res = await read('proposal_list', { status: 'withdrawn', from, count: 100 });
+			if (!res) break;
+			found.push(...(Array.isArray(res.proposals) ? res.proposals : []));
+			from = res.next != null && Number.isFinite(Number(res.next)) ? Number(res.next) : null;
 		}
-		codeFetching = true;
-		error = '';
-		accessDeniedOp = '';
-		try {
-			const res = await callAsync('fetch_proposal_code_remote', { code_url: url });
-			if (res?.success) {
-				formSource = res.data?.code ?? '';
-			} else {
-				error = res?.error || 'Failed to fetch code';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			codeFetching = false;
+		const details = await Promise.all(
+			found.filter((p) => p.proposer === myPrincipal()).map((p) => read('proposal_get', { proposal: p.id, count: 1 })),
+		);
+		withdrawnProposals = details
+			.filter((d) => d?.proposal)
+			.map((d) => ({ ...d.proposal, replaced_by: String(d.proposal.replaced_by ?? '') }));
+	}
+
+	/** A proposal the member is linking to, or null when the realm has none. */
+	async function findProposal(id: string): Promise<{ id: string; title: string } | null> {
+		const res = await read('proposal_get', { proposal: id, count: 1 });
+		return res?.proposal ? { id, title: String(res.proposal.title ?? '') } : null;
+	}
+
+	function effectiveAtProblem(time: LocalTime): string {
+		if (time.kind === 'gap') return t('effective_at_gap', { zone: realmZone });
+		if (time.kind === 'twice') {
+			return t('effective_at_twice', { zone: realmZone, first: formatUtc(time.first), second: formatUtc(time.second) });
 		}
+		return t('effective_at_invalid');
 	}
 
 	function buildSubmitArgs(): Record<string, any> | null {
@@ -478,129 +549,121 @@
 			return null;
 		}
 
-		const args: Record<string, any> = {
-			title,
-			description,
-			proposal_type: formProposalType,
-		};
+		const args: Record<string, any> = { title, description };
 		const orgScope = formOrgScope.trim();
-		if (orgScope) args.org_scope = orgScope;
+		if (orgScope) args.department = orgScope;
 
-		if (formProposalType === 'poll') {
-			args.action = {};
-			return args;
+		if (formLinks.length) args.links = formLinks;
+		if (formTags.length) args.tags = formTags;
+		if (formProposalType === 'poll') return args;
+
+		if (effectiveAt) {
+			if (effectiveAt.kind !== 'ok') {
+				error = effectiveAtProblem(effectiveAt);
+				return null;
+			}
+			if (effectiveAt.epoch * 1000 <= Date.now()) {
+				error = t('effective_at_past');
+				return null;
+			}
+			args.effective_at = effectiveAt.epoch;
 		}
 
 		if (formProposalType === 'transaction') {
+			const fund = formFund.trim();
 			const token = formToken.trim();
 			const toPrincipal = formToPrincipal.trim();
 			const amount = formAmount.trim();
-			if (!token || !toPrincipal) {
-				error = 'Token and recipient principal are required';
+			if (!fund || !token || !toPrincipal) {
+				error = 'Fund, token and recipient are required';
 				return null;
 			}
 			if (!isValidBaseAmount(amount)) {
 				error = 'Amount must be a positive decimal string of ledger base units';
 				return null;
 			}
-			args.action = { token, to_principal: toPrincipal, amount };
-			return args;
-		}
-
-		if (formProposalType === 'upgrade') {
-			if (formUpgradeTarget === 'core') {
-				const actionId = formActionId.trim();
-				if (!actionId) {
-					error = 'Orchestration action ID is required';
-					return null;
-				}
-				args.action = {
-					target: 'core',
-					action_id: actionId,
-					decision: formCoreDecision,
-				};
-				return args;
-			}
-			const packageId = formPackageId.trim();
-			const version = formVersion.trim();
-			if (!packageId) {
-				error = 'Package ID is required';
-				return null;
-			}
-			if (!isPinnedSemver(version)) {
-				error = 'Version must be a pinned semver (not empty or "latest")';
-				return null;
-			}
-			const registryId = String(submitContext?.registry_canister_id || '').trim();
 			args.action = {
-				target: formUpgradeTarget,
-				package_id: packageId,
-				version,
-				...(registryId ? { registry_canister_id: registryId } : {}),
+				op: 'transfer_create',
+				args: { fund, to: toPrincipal, amount, symbol: token },
 			};
 			return args;
 		}
 
-		const source = formSource.trim();
-		const sourceUrl = formSourceUrl.trim();
-		if (!source && !sourceUrl) {
-			error = 'Paste code or provide a URL to fetch';
+		const packageId = formPackageId.trim();
+		const version = formVersion.trim();
+		if (!packageId) {
+			error = 'Package ID is required';
 			return null;
 		}
-		args.action = {};
-		if (source) args.source = source;
-		if (sourceUrl) args.source_url = sourceUrl;
-		args.requested_permissions = [...formRequestedPermissions];
+		if (!isPinnedSemver(version)) {
+			error = 'Version must be a pinned semver (not empty or "latest")';
+			return null;
+		}
+		args.action =
+			formUpgradeTarget === 'codex'
+				? { op: 'codex_install', args: { codex: packageId, version } }
+				: { op: 'extension_install', args: { extension: packageId, version } };
 		return args;
 	}
 
 	function isFormValid(): boolean {
 		if (!formTitle.trim() || !formDescription.trim()) return false;
+		if (formProposalType !== 'poll' && effectiveAt && effectiveAt.kind !== 'ok') return false;
 		if (formProposalType === 'transaction') {
-			return !!(formToken.trim() && formToPrincipal.trim() && isValidBaseAmount(formAmount));
+			return !!(
+				formFund.trim() &&
+				formToken.trim() &&
+				formToPrincipal.trim() &&
+				isValidBaseAmount(formAmount)
+			);
 		}
 		if (formProposalType === 'upgrade') {
-			if (formUpgradeTarget === 'core') return !!formActionId.trim();
 			return !!(formPackageId.trim() && isPinnedSemver(formVersion));
-		}
-		if (formProposalType === 'code_execution') {
-			return !!(formSource.trim() || (formSourceUrl.trim() && isValidUrl(formSourceUrl.trim())));
 		}
 		return true;
 	}
 
-	async function callSync(fn: string, args: Record<string, any> = {}) {
-		const raw = await ctx.callSync(fn, args);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
+	async function fetchProposalDetail(proposalId: string, row: any = null): Promise<any | null> {
+		const detail = await read('proposal_get', { proposal: proposalId, count: VOTES_PAGE });
+		if (!detail) return row ? normalizeProposal(row) : null;
+		const proposal = normalizeProposal(row, detail, await myVote(read, proposalId, detail, myPrincipal()));
+		// A tie at the threshold goes to the casting member's yes: only then is what they voted read, like the member's own.
+		if (castingVoteMatters(proposal.rule, proposal.votes, proposal.first_vote)) {
+			proposal.casting_choice = await myVote(read, proposalId, detail, proposal.rule.castingVote);
+		}
+		return proposal;
 	}
 
-	async function callAsync(fn: string, args: Record<string, any> = {}) {
-		const raw = await ctx.callAsync(fn, args);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
-	}
+	// Each load of the list starts a generation. A reply that comes back after a newer load began (the filter changed, the list was
+	// refreshed) belongs to a list that is gone: it is dropped, and a tag search for it stops making calls.
+	let listGeneration = 0;
 
-	async function fetchProposalsPage(fromId: number) {
-		const args: Record<string, any> = { from_id: fromId, page_size: LIST_FETCH_SIZE };
-		if (orgFilter) args.org_scope = orgFilter;
+	async function fetchProposalsPage(from: number | null, generation: number) {
+		const args: Record<string, any> = { from: from ?? 1, count: LIST_FETCH_SIZE };
 		if (statusFilter) args.status = statusFilter;
-		if (typeFilter) args.proposal_type = typeFilter;
-		const res = await callSync('get_proposals', args);
-		if (res?.success) {
-			const batch = res.data?.proposals ?? res.data ?? [];
-			return {
-				proposals: Array.isArray(batch) ? batch : [],
-				hasMore: !!res.data?.has_more,
-				nextFromId: res.data?.next_from_id ?? null,
-			};
-		}
-		if (res?.data) {
-			const batch = Array.isArray(res.data) ? res.data : res.data.proposals ?? [];
-			return { proposals: batch, hasMore: false, nextFromId: null };
-		}
-		if (Array.isArray(res)) {
-			return { proposals: res, hasMore: false, nextFromId: null };
-		}
-		throw new Error(res?.error || 'Failed to load proposals');
+		// The realm keeps only the tagged rows of each page it reads, so a tag filter is a search over several pages.
+		const res = tagFilter.length
+			? await searchTagged(read, {
+					tags: tagFilter,
+					status: statusFilter,
+					from: args.from,
+					want: LIST_FETCH_SIZE,
+					stale: () => generation !== listGeneration,
+				})
+			: await read('proposal_list', args);
+		if (!res) return null;
+		const rows: any[] = Array.isArray(res.proposals) ? res.proposals : [];
+		const batch = await Promise.all(
+			rows.filter((r) => r?.id).map((r) => fetchProposalDetail(String(r.id), r)),
+		);
+		const next = Number(res.next);
+		return {
+			proposals: batch.filter(Boolean),
+			hasMore: res.next != null && Number.isFinite(next),
+			next: res.next != null && Number.isFinite(next) ? next : null,
+			searched: Number(res.searched) || 0,
+			capped: !!res.capped,
+		};
 	}
 
 	function mergeProposals(existing: any[], batch: any[]) {
@@ -628,44 +691,44 @@
 	async function loadProposals(opts: { reset?: boolean; background?: boolean } = {}) {
 		const reset = opts.reset !== false;
 		const background = opts.background === true;
+		const generation = ++listGeneration;
+		listLoadingMore = false;
 		if (reset && !background) {
 			listLoading = true;
-			listNextFromId = 1;
+			listNext = null;
 		}
 		error = '';
-		accessDeniedOp = '';
 		try {
-			const page = await fetchProposalsPage(1);
-			proposals = page.proposals;
+			if (!rootDepartment) await loadOrgOptions();
+			const page = await fetchProposalsPage(1, generation);
+			if (generation !== listGeneration) return;
+			listUnavailable = !page;
+			proposals = page?.proposals ?? [];
 			currentPage = 1;
-			listHasMore = page.hasMore;
-			listNextFromId = page.nextFromId ?? 1;
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			listHasMore = page?.hasMore ?? false;
+			listNext = page?.next ?? null;
+			listSearched = page?.searched ?? 0;
+			listCapped = page?.capped ?? false;
 		} finally {
-			if (!background) {
-				listLoading = false;
-			}
+			if (generation === listGeneration) listLoading = false;
 		}
 	}
 
+	let rootDepartment = $state('');
+	let orgOptionsLoaded = false;
+
 	async function loadOrgOptions() {
-		try {
-			const res = await callSync('get_org_scopes');
-			const names = res?.data?.org_scopes;
-			if (Array.isArray(names) && names.length) {
-				orgOptions = names;
-				return;
-			}
-		} catch {
-			// fall through to deriving from loaded proposals
+		if (orgOptionsLoaded) return;
+		const res = await read('department_list', { count: 500 });
+		const departments: any[] = Array.isArray(res?.departments) ? res.departments : [];
+		if (res) orgOptionsLoaded = true;
+		rootDepartment = String(departments.find((d) => d?.is_root)?.id ?? '');
+		const names = departments
+			.filter((d) => d?.id && !d.is_root)
+			.map((d) => String(d.id));
+		if (names.length) {
+			orgOptions = names.sort();
+			return;
 		}
 		const seen = new Set<string>();
 		for (const p of proposals) {
@@ -679,20 +742,32 @@
 		loadProposals();
 	}
 
+	/** A tag was clicked: the list of the proposals that carry it, from wherever the tag is shown. */
+	function showTagged(tag: string) {
+		tagFilter = [tag];
+		if (view === 'detail') goBackToList();
+		onFilterChange();
+	}
+
 	async function loadMoreProposals() {
 		if (listLoadingMore || !listHasMore) return;
 		listLoadingMore = true;
 		error = '';
+		const generation = listGeneration;
 		try {
-			const fromId = listNextFromId || 1;
-			const page = await fetchProposalsPage(fromId);
+			const page = await fetchProposalsPage(listNext, generation);
+			if (generation !== listGeneration) return;
+			if (!page) {
+				listHasMore = false;
+				return;
+			}
 			proposals = mergeProposals(proposals, page.proposals);
 			listHasMore = page.hasMore;
-			listNextFromId = page.nextFromId ?? fromId;
-		} catch (e: any) {
-			error = e?.message ?? String(e);
+			listNext = page.next;
+			listSearched += page.searched;
+			listCapped = page.capped;
 		} finally {
-			listLoadingMore = false;
+			if (generation === listGeneration) listLoadingMore = false;
 		}
 	}
 
@@ -802,24 +877,18 @@
 		try {
 			let proposal: any =
 				proposals.find((p) => p.id === proposalId) ??
-				proposals.find((p) => String(p._id) === proposalId) ??
 				proposals.find((p) => proposalLinkSlug(p) === proposalSlug);
 			if (!proposal) {
 				selectedProposal = null;
-				const res = await callSync('get_proposal', { proposal_id: proposalId });
-				if (res?.success && res.data) proposal = res.data;
-				else if (res?.id) proposal = res;
+				proposal = await fetchProposalDetail(proposalId);
 			}
 			if (proposal) {
 				upsertProposal(proposal);
 				await viewProposal(proposal, opts);
 			} else {
-				error = `Proposal "${proposalSlug}" not found`;
+				error = `Proposal "${proposalSlug}" was not found.`;
 				goBackToList({ skipUrlSync: true });
 			}
-		} catch (e: any) {
-			error = e?.message ?? String(e);
-			goBackToList({ skipUrlSync: true });
 		} finally {
 			detailLoading = false;
 		}
@@ -846,67 +915,67 @@
 	async function viewProposal(proposal: any, opts?: { skipUrlSync?: boolean }) {
 		selectedProposal = proposal;
 		view = 'detail';
-		codeContent = '';
-		codeChecksum = '';
-		codeError = '';
+		stopConfirm = false;
+		stopMessage = '';
+		stopFiled = '';
 		if (!opts?.skipUrlSync && proposal?.id) {
 			syncProposalUrl(proposal, { replace: false });
 		}
 		publishProposalFocus(proposal);
-		if (getProposalType(proposal) === 'code_execution') {
-			await fetchCode(proposal);
-		}
-	}
-
-	async function fetchCode(proposal: any) {
-		codeLoading = true;
-		codeError = '';
-		try {
-			const res = await callSync('fetch_proposal_code', { proposal_id: proposal.id });
-			if (res?.success) {
-				const data = res.data ?? {};
-				codeContent = data.code ?? '';
-				codeChecksum = data.checksum ?? '';
-			} else {
-				codeContent = '';
-				codeError = res?.error || 'Failed to fetch code';
+		if (!proposal?.enriched && proposal?.id) {
+			const fresh = await fetchProposalDetail(proposal.id, proposal);
+			if (fresh?.enriched) {
+				upsertProposal(fresh);
+				if (selectedProposal?.id === fresh.id) selectedProposal = fresh;
 			}
-		} catch (e: any) {
-			codeContent = '';
-			codeError = e?.message || String(e);
-		} finally {
-			codeLoading = false;
 		}
 	}
 
 	async function castVote(proposalId: string, vote: string) {
 		votingInProgress = proposalId + vote;
 		error = '';
-		accessDeniedOp = '';
 		try {
-			const voter = ctx.principal || 'anonymous';
-			const res = await callSync('cast_vote', { proposal_id: proposalId, vote, voter });
-			if (res?.success) {
-				if (selectedProposal?.id === proposalId) {
-					const detail = await callSync('get_proposal', { proposal_id: proposalId });
-					if (detail?.success) selectedProposal = detail.data ?? detail;
-					else selectedProposal = detail?.data ?? selectedProposal;
+			const res = await run('proposal_vote', { proposal: proposalId, choice: vote });
+			if (res?.ok) {
+				const fresh = await fetchProposalDetail(proposalId);
+				if (fresh) {
+					upsertProposal(fresh);
+					if (selectedProposal?.id === proposalId) selectedProposal = fresh;
 				}
-				await loadProposals();
 			} else {
-				error = res?.error || 'Failed to cast vote';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
+				error = res?.error || 'Your vote was not recorded.';
 			}
 		} finally {
 			votingInProgress = '';
+		}
+	}
+
+	/** Stop a proposal waiting for its time to take effect: at once, or by a vote when its department's policy needs one. */
+	async function stopProposal(proposalId: string) {
+		stopping = true;
+		error = '';
+		stopMessage = '';
+		stopFiled = '';
+		try {
+			const res = await run('proposal_stop', { proposal: proposalId });
+			if (!res?.ok) {
+				error = res?.error || t('stop_failed');
+				return;
+			}
+			if (res.requires_vote) {
+				stopFiled = String(res.proposal);
+				stopMessage = t('stop_filed', { id: displayId(stopFiled) });
+			} else {
+				stopMessage = t('stop_done', { id: displayId(proposalId) });
+			}
+			const fresh = await fetchProposalDetail(proposalId);
+			if (fresh) {
+				upsertProposal(fresh);
+				if (selectedProposal?.id === proposalId) selectedProposal = fresh;
+			}
+		} finally {
+			stopping = false;
+			stopConfirm = false;
 		}
 	}
 
@@ -915,12 +984,13 @@
 		if (!args) return;
 		submitting = true;
 		error = '';
-		accessDeniedOp = '';
 		submitMsg = '';
 		try {
-			const res = await callAsync('submit_proposal', args);
-			if (res?.success) {
-				submitMsg = 'Proposal submitted successfully!';
+			const res = await run('proposal_create', args);
+			if (res?.ok) {
+				submitMsg = res.proposal
+					? `Proposal ${res.proposal} submitted — voting is open.`
+					: 'Proposal submitted successfully!';
 				resetFormFields();
 				await loadProposals();
 				setTimeout(() => {
@@ -928,16 +998,7 @@
 					view = 'list';
 				}, 1500);
 			} else {
-				error = res?.error || 'Failed to submit proposal';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
+				error = res?.error || 'The proposal was not submitted.';
 			}
 		} finally {
 			submitting = false;
@@ -947,7 +1008,6 @@
 	function cancelForm() {
 		resetFormFields();
 		error = '';
-		accessDeniedOp = '';
 		submitMsg = '';
 		view = 'list';
 	}
@@ -956,16 +1016,17 @@
 		if (!s) return 'bg-gray-100 text-gray-700';
 		const sl = s.toLowerCase();
 		if (sl === 'voting') return 'bg-emerald-100 text-emerald-700';
-		if (sl === 'pending_review' || sl === 'pending_vote') return 'bg-amber-100 text-amber-700';
-		if (sl === 'accepted' || sl === 'executed' || sl === 'passed') return 'bg-green-100 text-green-700';
-		if (sl === 'executing') return 'bg-purple-100 text-purple-700';
+		if (sl === 'draft') return 'bg-amber-100 text-amber-700';
+		if (sl === 'accepted' || sl === 'executed') return 'bg-green-100 text-green-700';
+		if (sl === 'execution_scheduled') return 'bg-sky-100 text-sky-700';
 		if (sl === 'rejected' || sl === 'failed') return 'bg-red-100 text-red-700';
 		return 'bg-gray-100 text-gray-700';
 	}
 
 	function statusLabel(s: string): string {
 		if (!s) return 'Unknown';
-		return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+		const words = s.replace(/_/g, ' ');
+		return words.charAt(0).toUpperCase() + words.slice(1);
 	}
 
 	function formatDate(value: any): string {
@@ -1018,80 +1079,64 @@
 		return `${secs}s left`;
 	}
 
-	function formatDuration(seconds: number): string {
-		if (!Number.isFinite(seconds) || seconds <= 0) return 'unknown';
-		if (seconds >= 86400) {
-			const days = seconds / 86400;
-			return Number.isInteger(days) ? `${days} days` : `${days.toFixed(2)} days`;
-		}
-		if (seconds >= 3600) return `${Math.round(seconds / 3600)} hours`;
-		if (seconds >= 60) return `${Math.round(seconds / 60)} minutes`;
-		return `${Math.round(seconds)} seconds`;
-	}
-
-	function parseOrgPolicy(proposal: any): { m: number; n: number } | null {
-		const match = (proposal?.description || '').match(/policy (\d+)\/(\d+)/);
-		if (!match) return null;
-		return { m: parseInt(match[1], 10), n: parseInt(match[2], 10) };
-	}
-
 	function isVotingDeadlinePassed(proposal: any, now = Date.now()): boolean {
 		const status = (proposal?.status || '').toLowerCase();
-		if (status !== 'voting' && status !== 'pending_vote') return false;
+		if (status !== 'voting') return false;
 		const epoch = parseEpochSeconds(proposal.voting_deadline);
 		return epoch != null && epoch * 1000 <= now;
 	}
 
 	function isVotingOpen(proposal: any, now = Date.now()): boolean {
 		const status = (proposal?.status || '').toLowerCase();
-		return (status === 'voting' || status === 'pending_vote') && !isVotingDeadlinePassed(proposal, now);
+		return status === 'voting' && !isVotingDeadlinePassed(proposal, now);
 	}
 
 	function getVotingClosedReason(proposal: any, now = Date.now()): string {
 		const status = (proposal?.status || '').toLowerCase();
-		if (status !== 'voting' && status !== 'pending_vote') {
+		if (status !== 'voting') {
 			return `Closed — ${statusLabel(proposal.status)}`;
 		}
 		if (!isVotingDeadlinePassed(proposal, now)) return '';
-
-		const tally = voteTally(proposal);
-		const policy = parseOrgPolicy(proposal);
-		const endedAt = formatDateTime(proposal.voting_deadline);
-
-		if (policy && tally.yes < policy.m) {
-			return `Voting period ended ${endedAt} — needs ${policy.m} approvals, ${tally.yes} received. Awaiting finalization.`;
-		}
-		if (policy && tally.yes >= policy.m) {
-			return `Voting period ended ${endedAt} — policy satisfied (${tally.yes}/${policy.m} approvals). Awaiting finalization.`;
-		}
-		return `Voting period ended ${endedAt}. Awaiting finalization.`;
+		return endedText(t, voteState(proposal), formatDateTime(proposal.voting_deadline));
 	}
 
 	function formatVotingStatusLabel(proposal: any, now = Date.now()): string {
+		// No deadline (a voting window of 0): the vote closes once its outcome is certain.
+		if ((proposal?.status || '').toLowerCase() === 'voting' && !proposal.voting_deadline) return 'Open until decided';
 		if (isVotingDeadlinePassed(proposal, now)) {
 			return getVotingClosedReason(proposal, now);
 		}
 		return formatTimeRemaining(proposal.voting_deadline, now);
 	}
 
-	function approvalRequirementLabel(proposal: any): string {
-		const policy = parseOrgPolicy(proposal);
-		if (policy) return `${policy.m}/${policy.n} department approvals`;
-		if (proposal?.required_threshold != null) {
-			return `${(proposal.required_threshold * 100).toFixed(0)}% yes of decisive votes`;
-		}
-		return 'Approval threshold not set';
+	/** A proposal's vote as the rule stored with it reads it. */
+	function voteState(proposal: any): VoteState {
+		const { yes, no, abstain } = voteTally(proposal);
+		return {
+			department: !!proposal.org_scope,
+			rule: proposal.rule,
+			eligible: proposal.eligible,
+			votes: { yes, no, abstain },
+			vetoed: proposal.vetoed,
+			castingChoice: proposal.casting_choice,
+			firstVote: proposal.first_vote,
+			// A first vote that tied expires the proposal when it ended after the time the proposal takes effect.
+			expiresIfTied: !!proposal.effective_at && !!proposal.voting_deadline && proposal.voting_deadline > proposal.effective_at,
+		};
 	}
 
-	async function loadVotingSettings() {
-		try {
-			const res = await callSync('get_voting_settings');
-			if (res?.success && res.data) {
-				votingSettings = res.data;
-			}
-		} catch {
-			votingSettings = null;
-		}
+	/** Why an open vote is still open, or '' when it waits for nothing known. */
+	function waitingFor(proposal: any): string {
+		return waitingText(t, {
+			...voteState(proposal),
+			deadline: !!proposal.voting_deadline,
+			vetoHoldersMissing: proposal.veto_holders_missing,
+		});
+	}
+
+	/** Who holds a proposal's casting vote, as the screen names a member. */
+	function castingMember(proposal: any): string {
+		return truncatePrincipal(proposal.rule?.castingVote ?? '');
 	}
 
 	async function copyProposalLink(proposal: any) {
@@ -1123,17 +1168,19 @@
 			nowMs = Date.now();
 		}, 1000);
 		const proposalSlug = parseProposalIdFromUrl();
-		if (proposalSlug) {
-			void openProposalById(proposalSlug, { skipUrlSync: true });
-		} else {
-			void loadProposals();
-		}
-		void loadOrgOptions();
-		void loadVotingSettings();
+		void loadRealmZone();
+		void loadOrgOptions().then(() => {
+			if (proposalSlug) {
+				void openProposalById(proposalSlug, { skipUrlSync: true });
+			} else {
+				void loadProposals();
+			}
+		});
 		window.addEventListener('popstate', handlePopState);
 	});
 
 	onDestroy(() => {
+		listGeneration++; // a tag search still running for the list of this page stops making calls
 		clearInterval(countdownTimer);
 		window.removeEventListener('popstate', handlePopState);
 		clearProposalFocus();
@@ -1185,35 +1232,61 @@
 	}
 </style>
 
+{#snippet voteButtons(proposal: any, compact: boolean)}
+	<div class="flex {compact ? 'gap-1' : 'gap-2 pt-2'}">
+		{#each VOTE_CHOICES as choice (choice.id)}
+			{@const chosen = proposal.my_vote === choice.id}
+			<button
+				type="button"
+				onclick={() => castVote(proposal.id, choice.id)}
+				disabled={!!votingInProgress}
+				aria-pressed={chosen}
+				data-vote={choice.id}
+				class="flex-1 inline-flex items-center justify-center border font-medium disabled:opacity-50 transition-colors {compact
+					? 'py-1.5 rounded text-xs'
+					: 'gap-1.5 px-3 py-2 rounded-lg text-sm'} {chosen ? choice.chosen : choice.idle}"
+			>
+				{#if !compact}
+					{#if votingInProgress === proposal.id + choice.id}
+						<div class="w-3.5 h-3.5 border-2 {choice.spinner} border-t-transparent rounded-full animate-spin"></div>
+					{:else}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={choice.icon}/></svg>
+					{/if}
+				{/if}
+				{t(choice.label)}
+			</button>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet myVoteLine(proposal: any, open: boolean)}
+	{#if proposal.my_vote}
+		<p class="text-xs text-gray-600" data-testid="my-vote">
+			<span class="font-semibold">{t('you_voted', { choice: t(`vote_${proposal.my_vote}`) })}</span>
+			{open ? t('vote_can_change') : t('vote_is_final')}
+		</p>
+	{/if}
+{/snippet}
+
 <div class="voting-page w-full px-3 pt-4 sm:px-6 sm:pt-8 max-w-none">
-	{#key i18nTick}
 	<!-- Header -->
 	<div class="mb-6">
 		<h1 class="text-3xl font-bold text-gray-900 mb-1">{t('page_title')}</h1>
 		<p class="text-gray-500 text-sm">{extensionDescription}</p>
-		{#if votingSettings}
-			<p class="text-xs text-gray-400 mt-2">
-				Voting window: {formatDuration(votingSettings.voting_window_seconds)}.
-				Change it in
-				<button
-					type="button"
-					onclick={() => ctx.navigate?.('/extensions/realm_settings')}
-					class="text-indigo-600 hover:text-indigo-800 underline"
-				>
-					Realm Settings → Governance
-				</button>.
-			</p>
-		{/if}
+		<p class="text-xs text-gray-400 mt-2">
+			The voting window, threshold and quorum are set in
+			<button
+				type="button"
+				onclick={() => ctx.navigate?.('/extensions/realm_settings')}
+				class="text-indigo-600 hover:text-indigo-800 underline"
+			>
+				Realm Settings → Governance
+			</button>.
+		</p>
 	</div>
 
 	<!-- Error / Success banners -->
-	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
-	{:else if error}
+	{#if error}
 		<div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
 			<svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
 			<span>{error}</span>
@@ -1264,12 +1337,34 @@
 						</span>
 					{/if}
 				</div>
+				{#if selectedProposal.tags.length}
+					<div class="flex flex-wrap items-center gap-1.5 mb-2" data-testid="proposal-tags">
+						<span class="text-sm text-gray-500">{t('tags_title')}:</span>
+						{#each selectedProposal.tags as tag (tag)}
+							<button
+								type="button"
+								onclick={() => showTagged(tag)}
+								class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+								title={t('tags_show_tagged', { tag })}
+								data-testid="detail-tag"
+							>{tag}</button>
+						{/each}
+					</div>
+				{/if}
 				<div class="flex flex-wrap gap-4 text-sm text-gray-500">
 					<span>ID: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{proposalDisplayId(selectedProposal)}</code></span>
 					<span>Proposer: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{truncatePrincipal(selectedProposal.proposer)}</code></span>
 					<span>Created: {formatDateTime(selectedProposal.created_at)}</span>
 					{#if selectedProposal.voting_deadline}
 						<span>Deadline: {formatDateTime(selectedProposal.voting_deadline)}</span>
+					{/if}
+					{#if selectedProposal.effective_at}
+						<span>
+							{t('takes_effect')}: {formatWithUtc(selectedProposal.effective_at, realmZone)}
+							{#if selectedProposal.status === 'execution_scheduled'}
+								<span class="text-sky-700">({formatTimeRemaining(selectedProposal.effective_at, nowMs) || 'any moment now'})</span>
+							{/if}
+						</span>
 					{/if}
 					<span class="font-mono text-xs break-all">Link: {buildProposalUrl(selectedProposal)}</span>
 					<button
@@ -1281,6 +1376,54 @@
 					</button>
 				</div>
 			</div>
+
+			{#if stopMessage}
+				<div class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 flex flex-wrap items-center gap-2" role="status" data-testid="stop-message">
+					<span>{stopMessage}</span>
+					{#if stopFiled}
+						<button type="button" onclick={() => openProposalById(stopFiled)} class="underline text-green-800">{t('stop_view_filed', { id: displayId(stopFiled) })}</button>
+					{/if}
+				</div>
+			{/if}
+
+			<!-- Once a stop proposal is filed, another would only repeat it. -->
+			{#if selectedProposal.status === 'execution_scheduled' && !stopFiled}
+				<div class="rounded-lg border border-gray-200 bg-white p-5" data-testid="stop-card">
+					<h3 class="text-base font-semibold text-gray-900 mb-2">{t('stop_title')}</h3>
+					<p class="text-sm text-gray-600 mb-3">{t('stop_explain')}</p>
+					{#if stopConfirm}
+						<div class="flex flex-wrap items-center gap-2">
+							<button
+								type="button"
+								onclick={() => stopProposal(selectedProposal.id)}
+								disabled={stopping}
+								class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+							>
+								{#if stopping}
+									<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+								{/if}
+								{t('stop_confirm')}
+							</button>
+							<button
+								type="button"
+								onclick={() => (stopConfirm = false)}
+								disabled={stopping}
+								class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+							>
+								{t('cancel')}
+							</button>
+						</div>
+					{:else}
+						<button
+							type="button"
+							onclick={() => (stopConfirm = true)}
+							class="px-4 py-2 rounded-lg border border-red-300 text-sm font-medium text-red-700 hover:bg-red-50"
+						>
+							{t('stop_button')}
+						</button>
+					{/if}
+				</div>
+			{/if}
 
 			<!-- Description -->
 			<div class="rounded-lg border border-gray-200 bg-white p-5">
@@ -1294,7 +1437,7 @@
 				<div class="rounded-lg border border-gray-200 bg-white p-5">
 					<div class="flex flex-wrap items-start justify-between gap-3 mb-3">
 						<h3 class="text-base font-semibold text-gray-900">Voting Results</h3>
-						{#if selectedProposal.status === 'voting' || selectedProposal.status === 'pending_vote'}
+						{#if selectedProposal.status === 'voting'}
 							{#if selectedProposal.voting_deadline}
 								<span class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium max-w-md {isVotingDeadlinePassed(selectedProposal, nowMs) ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}">
 									<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -1305,6 +1448,11 @@
 							{/if}
 						{/if}
 					</div>
+					{#if selectedProposal.first_vote}
+						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3" data-testid="second-vote-line">
+							{secondVoteText(t, selectedProposal.first_vote)}
+						</p>
+					{/if}
 					<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
 						<div class="text-center">
 							<div class="text-2xl font-bold text-green-600">{tally.yes}</div>
@@ -1328,81 +1476,81 @@
 						</div>
 					</div>
 
-					{#if tally.total > 0}
+					{#if tally.total > 0 || selectedProposal.enriched}
+						{@const requirement = requirementText(t, selectedProposal.rule, castingMember(selectedProposal), !!selectedProposal.first_vote)}
+						{@const casting = castingNote(t, voteState(selectedProposal), castingMember(selectedProposal))}
 						<div class="mb-4">
-							<div class="flex justify-between text-xs text-gray-500 mb-1">
-								<span>Approval (yes / decisive votes)</span>
-								<span>{votePercent(tally.yes, Math.max(tally.yes + tally.no, 1))}</span>
-							</div>
-							<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex">
-								<div
-									class="bg-green-500 h-2.5 transition-all duration-300"
-									style="width: {tally.total > 0 ? (tally.yes / tally.total) * 100 : 0}%"
-								></div>
-								<div
-									class="bg-red-500 h-2.5 transition-all duration-300"
-									style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"
-								></div>
-								<div
-									class="bg-gray-400 h-2.5 transition-all duration-300"
-									style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
-								></div>
-							</div>
-							{#if selectedProposal.required_threshold || parseOrgPolicy(selectedProposal)}
-								<div class="text-xs text-gray-400 mt-1">Requirement: {approvalRequirementLabel(selectedProposal)}</div>
+							{#if tally.total > 0}
+								{@const bar = selectedProposal.rule ? approvalBar(selectedProposal.rule, tally, selectedProposal.eligible) : null}
+								<!-- With a stored rule the bar measures what the rule measures, with the threshold marked on it; without one it keeps yes among yes and no. -->
+								{#if bar}
+									<div class="flex justify-between text-xs text-gray-500 mb-1">
+										<span data-testid="approval-label">{approvalLabel(t, selectedProposal.rule)}</span>
+										<span data-testid="approval-figure">{t('approval_figure', { yes: tally.yes, basis: bar.basis })}</span>
+									</div>
+									<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex" style="position: relative">
+										<div
+											class="bg-green-500 h-2.5 transition-all duration-300"
+											style="width: {bar.fill * 100}%"
+											data-testid="approval-fill"
+										></div>
+										<div
+											style="position: absolute; top: 0; bottom: 0; width: 2px; background: var(--color-gray-900, #111827); left: calc({bar.mark * 100}% - {bar.mark * 2}px)"
+											data-testid="threshold-mark"
+										></div>
+									</div>
+								{:else}
+									<div class="flex justify-between text-xs text-gray-500 mb-1">
+										<span>Approval (yes / decisive votes)</span>
+										<span>{votePercent(tally.yes, Math.max(tally.yes + tally.no, 1))}</span>
+									</div>
+									<div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden flex">
+										<div
+											class="bg-green-500 h-2.5 transition-all duration-300"
+											style="width: {tally.total > 0 ? (tally.yes / tally.total) * 100 : 0}%"
+										></div>
+										<div
+											class="bg-red-500 h-2.5 transition-all duration-300"
+											style="width: {tally.total > 0 ? (tally.no / tally.total) * 100 : 0}%"
+										></div>
+										<div
+											class="bg-gray-400 h-2.5 transition-all duration-300"
+											style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"
+										></div>
+									</div>
+								{/if}
+							{/if}
+							{#if selectedProposal.enriched}
+								<div class="text-xs text-gray-400 mt-1" data-testid="requirement-line">{requirement}</div>
+								{#if casting}
+									<div class="text-xs text-gray-400 mt-1" data-testid="casting-note">{casting}</div>
+								{/if}
 							{/if}
 						</div>
 					{/if}
-
+					{#if selectedProposal.eligible}
+						<p class="text-xs text-gray-400 mb-2">Eligible voters: {selectedProposal.eligible}</p>
+					{/if}
 					{#if isVotingOpen(selectedProposal, nowMs)}
-						<div class="flex gap-2 pt-2">
-							<button
-								onclick={() => castVote(selectedProposal.id, 'yes')}
-								disabled={!!votingInProgress}
-								class="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-green-300 text-green-700 text-sm font-medium hover:bg-green-50 disabled:opacity-50 transition-colors"
-							>
-								{#if votingInProgress === selectedProposal.id + 'yes'}
-									<div class="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin"></div>
-								{:else}
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-								{/if}
-								{t('vote_yes')}
-							</button>
-							<button
-								onclick={() => castVote(selectedProposal.id, 'no')}
-								disabled={!!votingInProgress}
-								class="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-red-300 text-red-700 text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
-							>
-								{#if votingInProgress === selectedProposal.id + 'no'}
-									<div class="w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
-								{:else}
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-								{/if}
-								{t('vote_no')}
-							</button>
-							<button
-								onclick={() => castVote(selectedProposal.id, 'abstain')}
-								disabled={!!votingInProgress}
-								class="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
-							>
-								{#if votingInProgress === selectedProposal.id + 'abstain'}
-									<div class="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-								{:else}
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
-								{/if}
-								{t('vote_abstain')}
-							</button>
-						</div>
-					{:else if selectedProposal.status === 'voting' || selectedProposal.status === 'pending_vote'}
-						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+						{@const waiting = waitingFor(selectedProposal)}
+						{#if waiting}
+							<p class="text-xs text-gray-600 mb-2" data-testid="waiting-line">{waiting}</p>
+						{/if}
+					{/if}
+
+					{@render myVoteLine(selectedProposal, isVotingOpen(selectedProposal, nowMs))}
+					{#if isVotingOpen(selectedProposal, nowMs)}
+						{@render voteButtons(selectedProposal, false)}
+					{:else if selectedProposal.status === 'voting'}
+						<p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2" data-testid="ended-line">
 							{getVotingClosedReason(selectedProposal, nowMs)}
 						</p>
 					{/if}
 				</div>
 			{/if}
 
-			<!-- Action summary (non code_execution) -->
-			{#if selectedProposalType && selectedProposalType !== 'code_execution'}
+			<!-- Action summary -->
+			{#if selectedProposalType}
 				<div class="rounded-lg border border-gray-200 bg-white p-5">
 					<h3 class="text-base font-semibold text-gray-900 mb-3">Proposal action</h3>
 					{#if selectedProposalType === 'poll'}
@@ -1410,113 +1558,70 @@
 					{:else if selectedProposalType === 'transaction'}
 						<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
 							<div>
+								<dt class="text-xs text-gray-500">Fund</dt>
+								<dd class="font-mono text-gray-900">{selectedProposalAction.fund || '—'}</dd>
+							</div>
+							<div>
 								<dt class="text-xs text-gray-500">Token</dt>
-								<dd class="font-medium text-gray-900">{selectedProposalAction.token || '—'}</dd>
+								<dd class="font-medium text-gray-900">{selectedProposalAction.token || 'Realm currency'}</dd>
 							</div>
 							<div>
 								<dt class="text-xs text-gray-500">Amount (base units)</dt>
-								<dd class="font-mono text-gray-900">{selectedProposalAction.amount || '—'}</dd>
+								<dd class="font-mono text-gray-900">{selectedProposalAction.amount ?? '—'}</dd>
 							</div>
 							<div class="sm:col-span-2">
 								<dt class="text-xs text-gray-500">Recipient</dt>
 								<dd class="font-mono text-xs break-all text-gray-900">{selectedProposalAction.to_principal || '—'}</dd>
 							</div>
 						</dl>
+					{:else if selectedProposalType === 'upgrade' && (selectedProposalAction.change_list || selectedProposalAction.release)}
+						{#key selectedProposal.id}
+							<LegislationChange
+								changeList={selectedProposalAction.change_list ?? null}
+								release={selectedProposalAction.release ?? null}
+								releaseChange={selectedProposal.release_change ?? null}
+								open={['voting', 'accepted', 'execution_scheduled'].includes(selectedProposal.status)}
+								{locale}
+								{read}
+							/>
+						{/key}
 					{:else if selectedProposalType === 'upgrade'}
 						<dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
 							<div>
 								<dt class="text-xs text-gray-500">Target</dt>
 								<dd class="font-medium text-gray-900">{proposalTypeLabel(selectedProposalAction.target || '')}</dd>
 							</div>
-							{#if selectedProposalAction.target === 'core'}
-								<div>
-									<dt class="text-xs text-gray-500">Action ID</dt>
-									<dd class="font-mono text-xs break-all text-gray-900">{selectedProposalAction.action_id || '—'}</dd>
-								</div>
-								<div>
-									<dt class="text-xs text-gray-500">Decision</dt>
-									<dd class="font-medium text-gray-900 capitalize">{selectedProposalAction.decision || '—'}</dd>
-								</div>
-							{:else}
-								<div>
-									<dt class="text-xs text-gray-500">Package</dt>
-									<dd class="font-mono text-gray-900">{selectedProposalAction.package_id || '—'}</dd>
-								</div>
-								<div>
-									<dt class="text-xs text-gray-500">Version</dt>
-									<dd class="font-mono text-gray-900">{selectedProposalAction.version || '—'}</dd>
-								</div>
-								{#if selectedProposalAction.registry_canister_id}
-									<div class="sm:col-span-2">
-										<dt class="text-xs text-gray-500">Registry</dt>
-										<dd class="font-mono text-xs break-all text-gray-700">{selectedProposalAction.registry_canister_id}</dd>
-									</div>
-								{/if}
-							{/if}
+							<div>
+								<dt class="text-xs text-gray-500">Package</dt>
+								<dd class="font-mono text-gray-900">{selectedProposalAction.package_id || '—'}</dd>
+							</div>
+							<div>
+								<dt class="text-xs text-gray-500">Version</dt>
+								<dd class="font-mono text-gray-900">{selectedProposalAction.version || '—'}</dd>
+							</div>
+						</dl>
+					{:else}
+						<dl class="grid grid-cols-1 gap-3 text-sm">
+							<div>
+								<dt class="text-xs text-gray-500">Operation</dt>
+								<dd class="font-mono text-gray-900">{selectedProposalAction.op || '—'}</dd>
+							</div>
+							<div>
+								<dt class="text-xs text-gray-500">Arguments</dt>
+								<dd><pre class="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto text-gray-700">{JSON.stringify(selectedProposalAction.args ?? {}, null, 2)}</pre></dd>
+							</div>
 						</dl>
 					{/if}
-				</div>
-			{/if}
-
-			{#if selectedProposalType === 'code_execution' && selectedProposalPermissions.length > 0}
-				<div class="rounded-lg border border-gray-200 bg-white p-5">
-					<h3 class="text-base font-semibold text-gray-900 mb-2">Requested permissions</h3>
-					<div class="flex flex-wrap gap-1.5">
-						{#each selectedProposalPermissions as perm}
-							<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 font-mono">{perm}</span>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			{#if selectedProposalType === 'code_execution'}
-			<!-- Proposal Code -->
-			<div class="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden flex flex-col min-h-[28rem]">
-				<div class="bg-gray-100 px-4 py-2.5 border-b flex items-center justify-between flex-wrap gap-2">
-					<div class="flex items-center gap-2">
-						<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-						<h3 class="font-semibold text-sm text-gray-800">Proposal Code</h3>
-					</div>
-					<div class="flex items-center gap-2">
-						{#if selectedProposalAction.source_url || selectedProposal.code_url}
-							<a href={selectedProposalAction.source_url || selectedProposal.code_url} target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-600 hover:underline">View source</a>
-						{/if}
-						<span class="bg-gray-200 text-gray-600 px-2 py-0.5 rounded text-xs font-mono">proposal.py</span>
-					</div>
-				</div>
-
-				<div class="flex-1 p-4 flex flex-col min-h-0">
-					{#if codeLoading}
-						<div class="flex items-center justify-center flex-1 py-8">
-							<svg class="animate-spin h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-							<span class="ml-3 text-gray-500 text-sm">Loading code…</span>
-						</div>
-					{:else if codeError}
-						<div class="text-sm text-red-600 mb-3">{codeError}</div>
-						<button onclick={() => fetchCode(selectedProposal)} class="text-sm px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">Retry</button>
-					{:else if codeContent}
-						<div class="voting-monaco-wrap rounded-lg overflow-hidden border border-gray-200 bg-white">
-							{#key codeChecksum}
-								<MonacoPane code={codeContent} language="python" readOnly={true} />
-							{/key}
-						</div>
-						{#if codeChecksum}
-							<div class="mt-3 pt-3 border-t border-gray-200 flex justify-between items-center text-xs text-gray-500">
-								<span>Checksum: <code class="bg-gray-100 px-1.5 py-0.5 rounded">{codeChecksum}</code></span>
-								<span>{codeContent.split('\n').length} lines</span>
-							</div>
-						{/if}
-					{:else}
-						<div class="text-center py-8 text-gray-400 text-sm flex-1 flex items-center justify-center">
-							No code available for this proposal.
-						</div>
+					{#if selectedProposal.status === 'executed' || selectedProposal.status === 'failed'}
+						<p class="text-xs text-gray-500 mt-3">Action {selectedProposal.status === 'executed' ? 'executed' : 'did not complete'}.</p>
 					{/if}
 				</div>
-			</div>
+			{/if}
 
-			<div class="text-xs text-gray-400 pb-4">
-				<span class="font-medium">Security note:</span> Approved code will be executed on the realm backend. Review carefully before voting.
-			</div>
+			{#if selectedProposal.enriched}
+				{#key selectedProposal.id}
+					<ProposalLinks proposal={selectedProposal} {read} onopen={(id) => openProposalById(id)} />
+				{/key}
 			{/if}
 		</div>
 		{/if}
@@ -1542,6 +1647,7 @@
 							<option value={opt.value}>{opt.label}</option>
 						{/each}
 					</select>
+					<p class="text-xs text-gray-400 mt-1">Code-execution and core-orchestration proposals are not offered on this realm.</p>
 				</div>
 
 				<div>
@@ -1588,11 +1694,27 @@
 				{#if formProposalType === 'transaction'}
 					<div class="space-y-3 rounded-lg border border-gray-200 p-4 bg-gray-50">
 						<div>
+							<label for="rt-fund" class="block text-sm font-medium text-gray-700 mb-1">Fund *</label>
+							<select
+								id="rt-fund"
+								bind:value={formFund}
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							>
+								{#if fundIds.length === 0}
+									<option value="">No funds available</option>
+								{:else}
+									{#each fundIds as fund}
+										<option value={fund}>{fund}</option>
+									{/each}
+								{/if}
+							</select>
+						</div>
+						<div>
 							<label for="rt-token" class="block text-sm font-medium text-gray-700 mb-1">Token *</label>
 							<select
 								id="rt-token"
 								bind:value={formToken}
-								onchange={() => loadVaultBalanceForToken(formToken)}
 								disabled={submitting}
 								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 							>
@@ -1600,7 +1722,7 @@
 									<option value="">No tokens available</option>
 								{:else}
 									{#each vaultTokens as token}
-										<option value={token.name}>{token.symbol || token.name}</option>
+										<option value={token.symbol}>{token.symbol}</option>
 									{/each}
 								{/if}
 							</select>
@@ -1617,10 +1739,10 @@
 								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 							/>
 							{#if vaultBalance != null}
-								{@const tokenMeta = vaultTokens.find((t) => t.name === formToken)}
+								{@const tokenMeta = vaultTokens.find((t) => t.symbol === formToken)}
 								<p class="text-xs text-gray-500 mt-1">
-									Vault balance: {formatTokenBalance(vaultBalance, tokenMeta?.decimals ?? 8)}
-									{tokenMeta?.symbol ?? formToken}
+									Fund balance: {formatTokenBalance(vaultBalance, tokenMeta?.decimals ?? 8)}
+									{formToken}
 								</p>
 							{/if}
 						</div>
@@ -1648,128 +1770,62 @@
 							>
 								<option value="codex">Codex</option>
 								<option value="extension">Extension</option>
-								{#if showCoreUpgrade}
-									<option value="core">Core orchestration</option>
-								{/if}
 							</select>
 						</div>
-						{#if formUpgradeTarget === 'core'}
-							<div>
-								<label for="rt-action-id" class="block text-sm font-medium text-gray-700 mb-1">Orchestration action ID *</label>
-								<input
-									id="rt-action-id"
-									type="text"
-									bind:value={formActionId}
-									disabled={submitting}
-									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-								/>
-							</div>
-							<div>
-								<label for="rt-decision" class="block text-sm font-medium text-gray-700 mb-1">Decision *</label>
-								<select
-									id="rt-decision"
-									bind:value={formCoreDecision}
-									disabled={submitting}
-									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-								>
-									<option value="approve">Approve</option>
-									<option value="reject">Reject</option>
-								</select>
-							</div>
-						{:else}
-							<div>
-								<label for="rt-package" class="block text-sm font-medium text-gray-700 mb-1">Package ID *</label>
-								<input
-									id="rt-package"
-									type="text"
-									bind:value={formPackageId}
-									placeholder="my_extension"
-									disabled={submitting}
-									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-								/>
-							</div>
-							<div>
-								<label for="rt-version" class="block text-sm font-medium text-gray-700 mb-1">Version (pinned semver) *</label>
-								<input
-									id="rt-version"
-									type="text"
-									bind:value={formVersion}
-									placeholder="1.2.3"
-									disabled={submitting}
-									class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-								/>
-							</div>
-							{#if submitContext?.registry_canister_id}
-								<p class="text-xs text-gray-500">Registry: <code class="bg-gray-100 px-1 rounded">{submitContext.registry_canister_id}</code></p>
-							{/if}
-						{/if}
-					</div>
-				{:else if formProposalType === 'code_execution'}
-					<div class="space-y-3">
 						<div>
-							<label for="rt-source-url" class="block text-sm font-medium text-gray-700 mb-1">Code URL (optional)</label>
-							<div class="flex gap-2">
-								<input
-									id="rt-source-url"
-									type="url"
-									bind:value={formSourceUrl}
-									placeholder="https://example.com/script.py"
-									disabled={submitting || codeFetching}
-									class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-								/>
-								<button
-									type="button"
-									onclick={fetchRemoteCode}
-									disabled={submitting || codeFetching || !formSourceUrl.trim()}
-									class="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-								>
-									{#if codeFetching}
-										<div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-									{:else}
-										Fetch
-									{/if}
-								</button>
-							</div>
-						</div>
-						<div>
-							<label for="rt-source" class="block text-sm font-medium text-gray-700 mb-1">Python source *</label>
-							<textarea
-								id="rt-source"
-								bind:value={formSource}
-								placeholder="# Paste proposal code here…"
-								rows="12"
+							<label for="rt-package" class="block text-sm font-medium text-gray-700 mb-1">Package ID *</label>
+							<input
+								id="rt-package"
+								type="text"
+								bind:value={formPackageId}
+								placeholder="my_extension"
 								disabled={submitting}
-								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-y"
-							></textarea>
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							/>
 						</div>
-						{#if bridgeVerbs.length > 0}
-							<div>
-								<label class="block text-sm font-medium text-gray-700 mb-2">Requested permissions</label>
-								<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-									{#each bridgeVerbs as verb}
-										<label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-											<input
-												type="checkbox"
-												checked={formRequestedPermissions.includes(verb)}
-												onchange={() => togglePermission(verb)}
-												disabled={submitting}
-												class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-											/>
-											<span class="font-mono text-xs">{verb}</span>
-										</label>
-									{/each}
-								</div>
-							</div>
-						{/if}
-						<div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
-							<h4 class="font-medium text-amber-800 text-sm mb-1">Security notice</h4>
-							<ul class="text-xs text-amber-700 space-y-0.5">
-								<li>• All proposals are publicly visible to realm members</li>
-								<li>• Approved code will be executed on the realm backend</li>
-							</ul>
+						<div>
+							<label for="rt-version" class="block text-sm font-medium text-gray-700 mb-1">Version (pinned semver) *</label>
+							<input
+								id="rt-version"
+								type="text"
+								bind:value={formVersion}
+								placeholder="1.2.3"
+								disabled={submitting}
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+							/>
 						</div>
 					</div>
 				{/if}
+
+				{#if formProposalType !== 'poll'}
+					<div>
+						<label for="rt-effective-at" class="block text-sm font-medium text-gray-700 mb-1">{t('effective_at_label', { zone: realmZone })}</label>
+						<input
+							id="rt-effective-at"
+							type="datetime-local"
+							bind:value={formEffectiveAt}
+							disabled={submitting}
+							class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+						/>
+						{#if effectiveAt?.kind === 'ok'}
+							<p class="text-xs text-gray-600 mt-1" data-testid="effective-at-utc">{t('effective_at_is', { utc: formatUtc(effectiveAt.epoch) })}</p>
+						{:else if effectiveAt}
+							<p class="text-xs text-red-600 mt-1" role="alert">{effectiveAtProblem(effectiveAt)}</p>
+						{/if}
+						<p class="text-xs text-gray-400 mt-1">{t('effective_at_hint', { zone: realmZone })}</p>
+					</div>
+				{/if}
+
+				<LinkPicker
+					bind:links={formLinks}
+					withdrawn={withdrawnProposals}
+					me={myPrincipal()}
+					suggestions={proposals.map((p) => ({ id: p.id, title: p.title }))}
+					find={findProposal}
+					disabled={submitting}
+				/>
+
+				<TagPicker bind:tags={formTags} suggestions={knownTags(proposals)} disabled={submitting} />
 
 				<div class="flex justify-end gap-3 pt-2">
 					<button
@@ -1866,7 +1922,7 @@
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
 					<span class="chrome-label">Filters</span>
 				</button>
-				{#if orgFilter || statusFilter || typeFilter}
+				{#if filtering}
 					<span class="text-xs text-gray-400">Filtered</span>
 				{/if}
 			</div>
@@ -1914,9 +1970,10 @@
 						<option value={opt.value}>{opt.label}</option>
 					{/each}
 				</select>
-				{#if orgFilter || statusFilter || typeFilter}
+				<TagPicker bind:tags={tagFilter} compact max={MAX_TAGS} suggestions={knownTags(proposals)} onchange={onFilterChange} />
+				{#if filtering}
 					<button
-						onclick={() => { orgFilter = ''; statusFilter = ''; typeFilter = ''; onFilterChange(); }}
+						onclick={() => { orgFilter = ''; statusFilter = ''; typeFilter = ''; tagFilter = []; onFilterChange(); }}
 						class="text-xs text-indigo-600 hover:text-indigo-800"
 					>
 						Clear filters
@@ -1931,10 +1988,23 @@
 					<svg class="animate-spin h-7 w-7 text-gray-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
 					<span class="ml-3 text-gray-500 text-sm">Loading proposals…</span>
 				</div>
-			{:else if !listLoading && proposals.length === 0}
+			{:else if !listLoading && sortedProposals.length === 0}
 				<div class="text-center py-12">
 					<svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-					{#if orgFilter || statusFilter || typeFilter}
+					{#if listUnavailable}
+						<p class="text-gray-500 text-sm">Proposals are not available to you right now.</p>
+						<p class="text-gray-400 text-xs mt-1">Try refreshing in a moment.</p>
+					{:else if listCapped && proposals.length === 0}
+						<p class="text-gray-500 text-sm" data-testid="tags-searched">{t('tags_none_searched', { count: listSearched })}</p>
+						<button
+							onclick={() => loadMoreProposals()}
+							disabled={listLoadingMore}
+							class="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+							data-testid="tags-search-further"
+						>
+							{t('tags_search_further')}
+						</button>
+					{:else if filtering}
 						<p class="text-gray-500 text-sm">{t('no_proposals_filtered')}</p>
 						<p class="text-gray-400 text-xs mt-1">Try clearing the filters.</p>
 					{:else}
@@ -1945,7 +2015,7 @@
 			{:else}
 			<div class="divide-y divide-gray-100">
 					{#each pagedProposals as proposal}
-						<div class="p-4 transition-colors {isProposalEnded(proposal, nowMs) ? 'opacity-55 bg-gray-50/80 hover:bg-gray-50/90' : 'hover:bg-gray-50'}">
+						<div data-proposal-id={proposal.id} class="p-4 transition-colors {isProposalEnded(proposal, nowMs) ? 'opacity-55 bg-gray-50/80 hover:bg-gray-50/90' : 'hover:bg-gray-50'}">
 							<div class="flex items-start justify-between mb-2">
 								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2 min-w-0">
@@ -1967,6 +2037,15 @@
 												{proposal.org_scope}
 											</span>
 										{/if}
+										{#each proposal.tags as tag (tag)}
+											<button
+												type="button"
+												onclick={() => showTagged(tag)}
+												class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+												title={t('tags_show_tagged', { tag })}
+												data-testid="card-tag"
+											>{tag}</button>
+										{/each}
 									</div>
 								</div>
 								<button
@@ -1981,10 +2060,19 @@
 								<code>{truncatePrincipal(proposal.proposer)}</code>
 								<span>{formatDate(proposal.created_at)}</span>
 							</div>
-							{#if proposal.status === 'voting' || proposal.status === 'pending_vote'}
+							{#if proposal.effective_at}
+								<p class="text-xs text-gray-500 mb-2">{t('takes_effect')}: {formatWithUtc(proposal.effective_at, realmZone)}</p>
+							{/if}
+							{#if proposal.my_vote}
+								<div class="mb-2">{@render myVoteLine(proposal, isVotingOpen(proposal, nowMs))}</div>
+							{/if}
+							{#if proposal.status === 'voting'}
 								{@const tally = voteTally(proposal)}
 								{@const votingOpen = isVotingOpen(proposal, nowMs)}
 								<div class="pt-2 border-t border-gray-100">
+									{#if proposal.first_vote}
+										<p class="text-xs text-amber-700 mb-2" data-testid="card-second-vote">{t('second_vote_short')}</p>
+									{/if}
 									<div class="flex justify-between items-center mb-2 gap-2">
 										<div class="flex gap-3 text-xs">
 											<span class="text-green-600">Y:{tally.yes} ({votePercent(tally.yes, tally.total)})</span>
@@ -2001,11 +2089,7 @@
 										<div class="bg-gray-400 h-1.5" style="width: {tally.total > 0 ? (tally.abstain / tally.total) * 100 : 0}%"></div>
 									</div>
 									{#if votingOpen}
-										<div class="flex gap-1">
-											<button onclick={() => castVote(proposal.id, 'yes')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-green-300 text-xs text-green-700 hover:bg-green-50 disabled:opacity-50">{t('vote_yes')}</button>
-											<button onclick={() => castVote(proposal.id, 'no')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">{t('vote_no')}</button>
-											<button onclick={() => castVote(proposal.id, 'abstain')} disabled={!!votingInProgress} class="flex-1 py-1.5 rounded border border-gray-300 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50">{t('vote_abstain')}</button>
-										</div>
+										{@render voteButtons(proposal, true)}
 									{/if}
 								</div>
 							{/if}
@@ -2042,7 +2126,10 @@
 				{/if}
 
 				{#if listHasMore}
-					<div class="flex justify-center px-5 py-4 border-t border-gray-200">
+					<div class="flex flex-col items-center gap-2 px-5 py-4 border-t border-gray-200">
+						{#if listCapped}
+							<p class="text-xs text-gray-500" data-testid="tags-searched">{t('tags_searched', { count: listSearched })}</p>
+						{/if}
 						<button
 							onclick={() => loadMoreProposals()}
 							disabled={listLoadingMore}
@@ -2051,6 +2138,8 @@
 							{#if listLoadingMore}
 								<div class="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
 								Loading more…
+							{:else if listCapped}
+								{t('tags_search_further')}
 							{:else}
 								Load more proposals
 							{/if}
@@ -2061,5 +2150,4 @@
 			{/if}
 		</div>
 	{/if}
-	{/key}
 </div>

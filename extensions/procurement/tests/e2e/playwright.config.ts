@@ -1,0 +1,21 @@
+import { defineConfig, devices } from '@playwright/test';
+
+/**
+ * The procurement browser tests need no realm: they mount the built bundle (`npm run build` in frontend-rt) on a page
+ * that plays the realm, with the replies the canister gives (tests/ggg/test_contract_reads.py and test_procurement.py of
+ * realms-gos hold the canister to those shapes).
+ */
+export default defineConfig({
+  testDir: './specs',
+  // The specs of a real local realm have their own config (playwright.local.config.ts).
+  testIgnore: '**/*.local.spec.ts',
+  // Playwright empties its output folder at each run: the screenshots the specs write to test-results/ stay.
+  outputDir: './test-results/.playwright',
+  timeout: 30 * 1000,
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  reporter: [['list']],
+  use: { screenshot: 'off', video: 'off' },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+});

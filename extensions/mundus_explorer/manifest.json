@@ -1,14 +1,9 @@
 {
   "name": "mundus_explorer",
-  "version": "1.0.0",
-  "runtime": "in_process",
+  "version": "1.1.0",
   "description": "Browse other realms on the network, see how large they are, and visit their sites to explore what they offer.",
   "author": "Smart Social Contracts",
   "permissions": [],
-  "functions": [
-    "get_mundus_realms",
-    "fetch_realms_from_registry"
-  ],
   "profiles": [
     "member",
     "admin",
@@ -29,7 +24,7 @@
   "icon": "world",
   "doc_url": "https://github.com/smart-social-contracts/realms-extensions/tree/main/extensions/mundus_explorer",
   "show_in_sidebar": true,
-  "entry_access": {
-    "default": "realm.data_view"
-  }
+  "operations": [
+    "realm_info"
+  ]
 }

@@ -1,0 +1,31 @@
+name: Procurement Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/procurement/**'
+      - 'extensions/_shared/frontend/**'
+      - '.github/workflows/procurement-test.yml'
+  pull_request:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/procurement/**'
+      - 'extensions/_shared/frontend/**'
+      - '.github/workflows/procurement-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Run tests
+      run: bash extensions/procurement/run_tests.sh

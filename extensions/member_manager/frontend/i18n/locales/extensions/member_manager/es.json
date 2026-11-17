@@ -21,5 +21,13 @@
   "no_messages": "Aún no hay mensajes.",
   "not_member": "Este usuario no es miembro del reino.",
   "active_member": "Miembro activo",
-  "inactive_member": "Miembro inactivo"
+  "inactive_member": "Miembro inactivo",
+  "members_unavailable": "La lista de miembros no está disponible para ti ahora mismo.",
+  "profile_unavailable": "El perfil de este miembro no está disponible ahora mismo.",
+  "private_data_unavailable": "Los datos privados de los miembros son suyos y no se muestran aquí.",
+  "membership_status": "Estado de membresía",
+  "status_details_unavailable": "Las comprobaciones de identidad, impuestos y elegibilidad no se muestran aquí.",
+  "messages_history_note": "Las notificaciones que envías aparecen en la bandeja del miembro; aquí solo se listan las enviadas en esta sesión.",
+  "notification_sent": "Enviada.",
+  "send_failed": "No enviada: {reason}"
 }

@@ -21,5 +21,13 @@
   "no_messages": "No messages yet.",
   "not_member": "This user is not a realm member.",
   "active_member": "Active member",
-  "inactive_member": "Inactive member"
+  "inactive_member": "Inactive member",
+  "members_unavailable": "The member list isn't available to you right now.",
+  "profile_unavailable": "This member's profile isn't available right now.",
+  "private_data_unavailable": "Members' private data stays with them and isn't shown here.",
+  "membership_status": "Membership status",
+  "status_details_unavailable": "Identity, tax and eligibility checks aren't shown here.",
+  "messages_history_note": "Notifications you send appear in the member's inbox; only those sent in this session are listed here.",
+  "notification_sent": "Sent.",
+  "send_failed": "Not sent: {reason}"
 }

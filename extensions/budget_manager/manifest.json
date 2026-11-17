@@ -1,29 +1,8 @@
 {
   "name": "budget_manager",
-  "version": "1.3.1",
-  "description": "See how revenue moves through your treasury, set how each period's income is split across funds, compare planned spending to actuals, and choose whether allocation runs automatically.",
+  "version": "2.2.1",
+  "description": "See how revenue moves through your treasury, set how each period's income is split across funds, compare planned spending to actuals and follow each line through its spending stages, see the payments the realm owes and the money its quarters sweep to the capital, and choose whether allocation runs automatically.",
   "author": "Smart Social Contracts",
-  "ggg_api_version": 1,
-  "functions": [
-    "get_treasury_overview",
-    "get_allocation_status",
-    "get_allocation_flows",
-    "get_epoch_timeline",
-    "get_budgets",
-    "set_allocation_rule",
-    "run_allocation",
-    "set_epoch_config",
-    "set_treasury_schedule"
-  ],
-  "capabilities": [
-    "treasury.overview",
-    "treasury.allocation_status",
-    "treasury.flows",
-    "treasury.budgets",
-    "treasury.timeline",
-    "treasury.action",
-    "treasury.disable_schedule"
-  ],
   "permissions": [],
   "profiles": [
     "member",
@@ -45,12 +24,22 @@
   "doc_url": null,
   "show_in_sidebar": true,
   "entry_access": {
-    "default": "realm.data_view",
-    "functions": {
-      "set_allocation_rule": "org.manage_budget",
-      "run_allocation": "org.manage_budget",
-      "set_epoch_config": "org.manage_budget",
-      "set_treasury_schedule": "org.manage_budget"
-    }
-  }
+    "default": "realm.data_view"
+  },
+  "operations": [
+    "budget_view",
+    "budget_list",
+    "ledger_view",
+    "transfer_list",
+    "sweep_list",
+    "treasury_view",
+    "quarter_directory",
+    "realm_info",
+    "me",
+    "department_list",
+    "department_get",
+    "allocation_rule_draft",
+    "allocation_rule_propose",
+    "treasury_configure"
+  ]
 }

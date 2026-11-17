@@ -1,14 +1,35 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import QuarterSweeps from './QuarterSweeps.svelte';
 	import Sankey from './Sankey.svelte';
+	import ScheduledPayments from './ScheduledPayments.svelte';
+	import SpendingStages from './SpendingStages.svelte';
 	import Timeline from './Timeline.svelte';
 	import {
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { applied, governorOf, voteGate } from '../../../_shared/frontend/governed';
+	import { UTC, isKnownZone } from '../../../_shared/frontend/realm-time';
+	import { ONE, formatPercent, toRatio } from '../../../_shared/frontend/units';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import { formatMoney } from './money.ts';
+	import { owedOnLines, type Payment } from './payments.ts';
+	import { isPending, type BudgetLine } from './stages.ts';
+	import { roleIn, type BookedEntry, type Sweep, type SweepRule } from './sweeps.ts';
 
 	let { ctx }: { ctx: any } = $props();
+
+	// Only the texts of the spending stages, the scheduled payments and the sweeps are translated; the older ones are English.
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
 
 	const cn = $derived(
 		ctx.theme?.cn ?? ((...classes: string[]) => classes.filter(Boolean).join(' ')),
@@ -23,49 +44,48 @@
 		console.warn('[extension]', level, message);
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	async function read(name: string, args: Record<string, unknown> = {}) {
+		const res = await ctx.read(name, args);
+		if (!res.ok) throw new Error(res.error);
+		return res;
 	}
 
-	// --- Vote confirmation (same flow as access_manager) ---
-	let voteConfirm: {
-		summary: string;
-		governedBy: string;
-		governedPolicy: string;
-		policyReason: string;
-		run: () => Promise<void>;
-	} | null = $state(null);
-	let voteConfirmBusy = $state(false);
-
-	async function callGated(
-		fn: string,
-		params: Record<string, unknown>,
-		handle: (res: any) => void | Promise<void>,
-	) {
-		const res = await callExt(fn, params);
-		if (res?.success && res.data?.requires_confirmation) {
-			voteConfirm = {
-				summary: res.data.summary || '',
-				governedBy: res.data.governed_by || '',
-				governedPolicy: res.data.governed_policy || res.data.policy || '',
-				policyReason: res.data.policy_reason || '',
-				run: async () => {
-					voteConfirmBusy = true;
-					try {
-						const confirmed = await callExt(fn, { ...params, confirm: true });
-						await handle(confirmed);
-						voteConfirm = null;
-					} catch (e: any) {
-						addToast(e?.message || 'Error', 'error');
-					} finally {
-						voteConfirmBusy = false;
-					}
-				},
-			};
-			return;
+	async function pages(name: string, args: Record<string, unknown>, key: string): Promise<any[]> {
+		const out: any[] = [];
+		let from: number | null = 1;
+		while (from) {
+			const res = await read(name, { ...args, from, count: 500 });
+			out.push(...res[key]);
+			from = res.next;
 		}
-		await handle(res);
+		return out;
 	}
+
+	/** Every page of ``budget_view`` for ``period`` (default: the one covering now): the funds of all pages, and the rest of the first page. */
+	async function budgetView(period = '') {
+		const args = period ? { period } : {};
+		const first = await read('budget_view', args);
+		const funds = [...first.funds];
+		for (let from = first.next; from; ) {
+			const page = await read('budget_view', { ...args, from });
+			funds.push(...page.funds);
+			from = page.next;
+		}
+		return { ...first, funds };
+	}
+
+	/** Every ledger entry of ``symbol``. */
+	async function ledgerEntries(symbol: string): Promise<any[]> {
+		return pages('ledger_view', { symbol }, 'entries');
+	}
+
+	// What the viewer may do; "all" stands for every permission.
+	let permissions: string[] = $state([]);
+	const can = (permission: string) =>
+		permissions.includes('all') || permissions.includes(permission);
+	const hasLedger = $derived(can('treasury.view'));
+
+	const { confirm: voteConfirm, busy: voteConfirmBusy, governed } = voteGate(addToast, 'Treasury');
 
 	// --- Data ---
 	let overview: any = $state.raw(null);
@@ -73,69 +93,281 @@
 	let status: any = $state.raw(null);
 	let budgets: any = $state.raw(null);
 	let timeline: any = $state.raw(null);
-	let timelineLoading = $state(false);
 	let loading = $state(true);
-	let periodLoading = $state(false);
 	let selectedPeriod = $state('');
+	let entries: any[] = [];
+	let budgetRows: any[] = [];
+	// What the spending stages, the scheduled payments and the sweeps read besides the budget view.
+	let budgetLines: BudgetLine[] = [];
+	let zone = $state(UTC);
+	let tokenDecimals: Record<string, number> = $state({});
+	let stageLines: BudgetLine[] = $state.raw([]);
+	let pendingLines: BudgetLine[] = $state.raw([]);
+	let lineById: Record<string, BudgetLine> = $state.raw({});
+	let now = $state(Math.floor(Date.now() / 1000));
+	// Read when their tab is opened: null until then.
+	let payments: Payment[] | null = $state.raw(null);
+	let sweeps: Sweep[] | null = $state.raw(null);
+	let sweepEntries: BookedEntry[] = $state.raw([]);
+	let sweepBookings = $state(false);
+	let tabError = $state('');
+	const owedOnLinesNow = $derived(payments ? owedOnLines(payments, lineById) : {});
+	let shownLine: BudgetLine | null = $state.raw(null);
+	let sweepRules: SweepRule[] = $state.raw([]);
+	let role: 'capital' | 'quarter' | null = $state(null);
+	let quarterNames: Record<string, string> = $state.raw({});
 
-	type Tab = 'flow' | 'timeline' | 'allocation' | 'budgets' | 'settings';
-	let activeTab: Tab = $state('flow');
+	type Tab = 'flow' | 'timeline' | 'allocation' | 'budgets' | 'scheduled' | 'sweeps' | 'settings';
+	let activeTab: Tab = $state('budgets');
 
 	const decimals = $derived(overview?.decimals ?? 8);
 	const currency = $derived(overview?.currency ?? '');
 
 	function fmt(raw: number): string {
-		const v = (raw ?? 0) / 10 ** decimals;
-		const s = v.toLocaleString(undefined, { maximumFractionDigits: 4 });
-		return `${s} ${currency}`;
+		return formatMoney(raw, decimals, currency);
+	}
+
+	/** ``raw`` of the token ``symbol``: the realm's currency, or one of the other tokens it holds. */
+	function fmtIn(raw: number, symbol: string): string {
+		const places = symbol === currency ? decimals : tokenDecimals[symbol];
+		// A token the realm does not list has no known decimals: its amount is said to be in the smallest unit.
+		return places === undefined ? t('money_base_units', { amount: raw, symbol }) : formatMoney(raw, places, symbol);
+	}
+
+	function isoDate(ts: number): string {
+		return new Date(ts * 1000).toISOString().slice(0, 10);
+	}
+
+	/** A read the older screens do not need: when the realm refuses it they go on without it. */
+	async function optional<T>(get: () => Promise<T>): Promise<T | null> {
+		try {
+			return await get();
+		} catch (e) {
+			console.warn('[budget_manager]', e);
+			return null;
+		}
 	}
 
 	async function loadOverview() {
-		const res = await callExt('get_treasury_overview');
-		if (!res?.success) {
-			addToast(res?.error || 'Failed to load treasury overview', 'error');
-			return;
+		let [view, me, departments, info, directory] = await Promise.all([
+			budgetView(selectedPeriod),
+			read('me'),
+			pages('department_list', {}, 'departments'),
+			optional(() => read('realm_info')),
+			optional(() => read('quarter_directory')),
+		]);
+		if (!selectedPeriod) {
+			// The view reads the budgets of one period: the one covering now, or else the latest.
+			selectedPeriod = view.period ?? view.periods.at(-1)?.id ?? '';
+			if (selectedPeriod && selectedPeriod !== view.period) view = await budgetView(selectedPeriod);
 		}
-		overview = res.data;
-		if (!selectedPeriod) selectedPeriod = res.data.current_period || '';
+		permissions = me.permissions;
+		const config = view.config;
+		const sourceCode = config.source_fund ?? 'ROOT';
+		const source = view.funds.find((f: any) => f.id === sourceCode);
+		const root = departments.find((d) => d.is_root).id;
+		const [ruleGovernor, settingsGovernor] = await Promise.all([
+			governorOf(read, source?.department || root),
+			governorOf(read, root),
+		]);
+		// The ledger is for those who may read it; everyone else sees the budgets and the rules.
+		entries = can('treasury.view') ? await ledgerEntries(view.currency) : [];
+		budgetRows = view.funds.flatMap((f: any) => f.budgets.map((b: any) => ({ ...b, fund: f.id })));
+		await loadAlongside(info, directory, config.sweep ?? []);
+		const periods = [...view.periods].sort((a: any, b: any) => a.starts_at - b.starts_at);
+		overview = {
+			currency: view.currency,
+			decimals: view.decimals,
+			source_fund: sourceCode,
+			source_exists: !!source,
+			epoch_length: config.epoch,
+			anchor_month: config.anchor_month,
+			periods,
+			rule: source?.rule
+				? {
+						id: source.rule.id,
+						rules: source.rule.rules,
+					}
+				: null,
+			drafts: view.rule_drafts.filter((r: any) => r.source_fund === sourceCode),
+			funds: view.funds
+				.map((f: any) => ({
+					code: f.id,
+					name: f.name,
+					department: f.department,
+					balance: f.balances[view.currency] ?? 0,
+					share: source?.rule?.rules.find((r: any) => r.fund === f.id)?.share ?? 0,
+				}))
+				.sort((a: any, b: any) => a.code.localeCompare(b.code)),
+			schedule_active: !!config.auto_allocate,
+			ruleGovernor,
+			settingsGovernor,
+		};
 		syncSettingsDraft();
 	}
 
-	async function loadPeriod() {
-		if (!selectedPeriod) return;
-		periodLoading = true;
+	/** The realm's time zone, what it is in a federation, and for those who read the treasury, its tokens and every budget line. */
+	async function loadAlongside(info: any, directory: any, rules: SweepRule[]) {
+		const timezone = info?.realm?.timezone;
+		zone = timezone && isKnownZone(timezone) ? timezone : UTC;
+		sweepRules = rules;
+		role = roleIn(directory) ?? (rules.length > 0 ? 'capital' : null);
+		quarterNames = Object.fromEntries((directory?.quarters ?? []).map((q: any) => [q.id, q.name]));
+		if (!hasLedger) return;
+		const [treasury, lines] = await Promise.all([
+			optional(() => read('treasury_view')),
+			optional(() => pages('budget_list', {}, 'budgets')),
+		]);
+		tokenDecimals = Object.fromEntries((treasury?.tokens ?? []).map((k: any) => [k.id, k.decimals]));
+		budgetLines = lines ?? [];
+		lineById = Object.fromEntries(budgetLines.map((line: BudgetLine) => [line.id, line]));
+	}
+
+	async function loadPayments() {
+		const [scheduled, cancelled] = await Promise.all(
+			['scheduled', 'cancelled'].map((status) => pages('transfer_list', { status }, 'transfers')),
+		);
+		now = Math.floor(Date.now() / 1000);
+		payments = [...scheduled, ...cancelled];
+	}
+
+	/** Every sweep, and the books' entries that book them: those of the realm's currency are read already. */
+	async function loadSweeps() {
+		const rows: Sweep[] = await pages('sweep_list', {}, 'sweeps');
+		const others = [...new Set(rows.map((sweep) => sweep.symbol))].filter((symbol) => symbol !== currency);
+		const more = await Promise.all(others.map(ledgerEntries));
+		const all = [...entries, ...more.flat()];
+		// A realm that does not name the sweep on its entries has no booking to show.
+		sweepBookings = all.some((entry) => 'sweep' in entry);
+		sweepEntries = all.filter((entry) => entry.sweep);
+		sweeps = rows;
+	}
+
+	/** Open a tab; a tab that reads more than the overview does reads it the first time, and says why it cannot. */
+	async function openTab(tab: Tab) {
+		activeTab = tab;
+		tabError = '';
+		shownLine = null;
 		try {
-			const [flowRes, statusRes, budgetRes] = await Promise.all([
-				callExt('get_allocation_flows', { period: selectedPeriod }),
-				callExt('get_allocation_status', { period: selectedPeriod }),
-				callExt('get_budgets', { period: selectedPeriod }),
-			]);
-			flows = flowRes?.success ? flowRes.data : null;
-			status = statusRes?.success ? statusRes.data : null;
-			budgets = budgetRes?.success ? budgetRes.data : null;
-			if (!flowRes?.success) addToast(flowRes?.error || 'Failed to load flows', 'error');
-		} finally {
-			periodLoading = false;
+			if (tab === 'scheduled' && payments === null) await loadPayments();
+			// The stages say how much of each line's actual money is owed and unpaid, for those who read the treasury.
+			if (tab === 'budgets' && payments === null && hasLedger) await optional(loadPayments);
+			if (tab === 'sweeps' && sweeps === null && hasLedger) await loadSweeps();
+		} catch (e: any) {
+			tabError = e?.message || String(e);
 		}
 	}
 
-	async function loadTimeline() {
-		timelineLoading = true;
-		try {
-			const res = await callExt('get_epoch_timeline', { before: 24, after: 24 });
-			if (res?.success) timeline = res.data;
-			else addToast(res?.error || 'Failed to load timeline', 'error');
-		} finally {
-			timelineLoading = false;
-		}
+	/** Point at the budget line a payment is charged to, among the stages of its period. */
+	async function showLine(line: BudgetLine) {
+		activeTab = 'budgets';
+		if (line.period !== selectedPeriod) await selectPeriod(line.period);
+		shownLine = line;
 	}
+
+	function sum(values: Record<string, number>): number {
+		return Object.values(values).reduce((s, v) => s + v, 0);
+	}
+
+	/** Revenue booked on the source fund in ``period``, and what payments into it allocated to other funds. */
+	function periodStatus(period: string) {
+		const source = overview.source_fund;
+		const booked = entries.filter((e) => e.period === period);
+		const payments = new Set(
+			booked.filter((e) => e.kind === 'revenue' && e.fund === source).map((e) => e.transaction),
+		);
+		const revenue_by_category: Record<string, number> = {};
+		const allocations_by_fund: Record<string, number> = {};
+		for (const e of booked) {
+			if (e.kind === 'revenue' && e.fund === source) {
+				revenue_by_category[e.category] = (revenue_by_category[e.category] ?? 0) + e.credit - e.debit;
+			} else if (e.kind === 'asset' && e.fund !== source && e.debit && payments.has(e.transaction)) {
+				allocations_by_fund[e.fund] = (allocations_by_fund[e.fund] ?? 0) + e.debit;
+			}
+		}
+		const pool = sum(revenue_by_category);
+		const allocated = sum(allocations_by_fund);
+		return { pool, allocated, unallocated: pool - allocated, revenue_by_category, allocations_by_fund, booked };
+	}
+
+	/** Sankey read model: revenue mix → pool → funds → spending. */
+	function periodFlows(s: ReturnType<typeof periodStatus>) {
+		const nodes: any[] = [];
+		const links: any[] = [];
+		for (const [category, amount] of Object.entries(s.revenue_by_category).sort()) {
+			if (amount <= 0) continue;
+			nodes.push({ id: `rev:${category}`, label: category.replace(/_/g, ' '), column: 0, value: amount });
+			links.push({ source: `rev:${category}`, target: 'pool', value: amount });
+		}
+		nodes.push({ id: 'pool', label: `${overview.source_fund} pool`, column: 1, value: s.pool });
+		for (const [code, amount] of Object.entries(s.allocations_by_fund).sort()) {
+			const label = overview.funds.find((f: any) => f.code === code)?.name || code;
+			nodes.push({ id: `fund:${code}`, label, column: 2, value: amount });
+			links.push({ source: 'pool', target: `fund:${code}`, value: amount });
+		}
+		if (s.unallocated > 0) {
+			nodes.push({ id: 'reserve', label: 'Unallocated reserve', column: 2, value: s.unallocated });
+			links.push({ source: 'pool', target: 'reserve', value: s.unallocated });
+		}
+		const spent: Record<string, number> = {};
+		for (const e of s.booked) {
+			const net = e.debit - e.credit;
+			if (e.kind !== 'expense' || !(e.fund in s.allocations_by_fund) || net <= 0) continue;
+			spent[`exp:${e.category}`] = (spent[`exp:${e.category}`] ?? 0) + net;
+			links.push({ source: `fund:${e.fund}`, target: `exp:${e.category}`, value: net });
+		}
+		for (const [key, total] of Object.entries(spent).sort()) {
+			nodes.push({ id: key, label: key.slice(4).replace(/_/g, ' '), column: 3, value: total });
+		}
+		return { nodes, links };
+	}
+
+	function loadPeriod() {
+		if (!selectedPeriod) return;
+		status = hasLedger ? periodStatus(selectedPeriod) : null;
+		flows = status ? periodFlows(status) : null;
+		budgets = {
+			budgets: budgetRows
+				.filter((b) => b.period === selectedPeriod)
+				.map((b) => ({ ...b, variance: b.actual - b.planned }))
+				.sort((a, b) => a.fund.localeCompare(b.fund)),
+		};
+		stageLines = budgetRows.filter((b) => b.period === selectedPeriod);
+		pendingLines = budgetLines.filter((b) => b.period === selectedPeriod && isPending(b));
+	}
+
+	function loadTimeline() {
+		if (!hasLedger) return;
+		const now = Date.now() / 1000;
+		timeline = {
+			now_ts: now,
+			epochs: overview.periods.map((p: any) => ({
+				id: p.id,
+				start_date: isoDate(p.starts_at),
+				end_date: isoDate(p.ends_at - 1),
+				start_ts: p.starts_at,
+				end_ts: p.ends_at,
+				status: p.status === 'open' && p.starts_at > now ? 'future' : p.status,
+				stored: true,
+				is_current: p.starts_at <= now && now < p.ends_at,
+				...periodStatus(p.id),
+			})),
+		};
+	}
+
+	let firstLoad = true;
 
 	async function loadAll() {
 		loading = true;
 		try {
-			await Promise.all([loadOverview(), loadTimeline()]);
-			await loadPeriod();
+			await loadOverview();
+			loadTimeline();
+			loadPeriod();
 			resetRuleDraft();
+			if (firstLoad && hasLedger) activeTab = 'flow';
+			firstLoad = false;
+		} catch (e: any) {
+			addToast(e?.message || 'Failed to load treasury overview', 'error');
 		} finally {
 			loading = false;
 		}
@@ -143,13 +375,16 @@
 
 	void loadAll();
 
-	function selectPeriod(id: string) {
+	/** Show ``id``; the realm lists the budgets of one period at a time, so they are read again. */
+	async function selectPeriod(id: string) {
 		selectedPeriod = id;
-		void loadPeriod();
-	}
-
-	async function onTimelineSelect(id: string) {
-		selectPeriod(id);
+		try {
+			const view = await budgetView(id);
+			budgetRows = view.funds.flatMap((f: any) => f.budgets.map((b: any) => ({ ...b, fund: f.id })));
+			loadPeriod();
+		} catch (e: any) {
+			addToast(e?.message || 'Failed to load the budgets', 'error');
+		}
 	}
 
 	// --- Allocation rule editor ---
@@ -159,9 +394,9 @@
 	}
 	let ruleRows: RuleRow[] = $state([]);
 	let ruleBusy = $state(false);
-	let allocateBusy = $state(false);
 
-	const ruleTotal = $derived(ruleRows.reduce((s, r) => s + (parseFloat(r.percent) || 0), 0));
+	/** The shares typed so far, added up, in hundred-millionths. */
+	const ruleTotal = $derived(ruleRows.reduce((s, r) => s + (toRatio(r.percent) ?? 0), 0));
 
 	const targetFunds = $derived(
 		(overview?.funds ?? []).filter((f: any) => f.code !== overview?.source_fund),
@@ -171,7 +406,7 @@
 		const current = overview?.rule?.rules ?? [];
 		ruleRows = current.map((r: any) => ({
 			fund: r.fund,
-			percent: String((r.percent_bp ?? 0) / 100),
+			percent: formatPercent(r.share),
 		}));
 		if (ruleRows.length === 0) ruleRows = [{ fund: '', percent: '' }];
 	}
@@ -184,69 +419,69 @@
 		ruleRows = ruleRows.filter((_, idx) => idx !== i);
 	}
 
+	async function adoptRule(rule: string) {
+		if (applied(await ctx.run('allocation_rule_propose', { rule }), addToast, 'Failed to adopt the rule')) {
+			addToast('Allocation rule adopted');
+			await loadAll();
+		}
+	}
+
+	/** Adopt a draft that is already on the realm, e.g. one a vote has passed. */
+	async function onAdoptDraft(draft: any) {
+		ruleBusy = true;
+		try {
+			await governed(overview.ruleGovernor, `Adopt allocation rule ${draft.id} (${describeRules(draft.rules)})`, () =>
+				adoptRule(draft.id),
+			);
+		} finally {
+			ruleBusy = false;
+		}
+	}
+
+	function describeRules(rules: { fund: string; share: number }[]): string {
+		return rules
+			.map(({ fund, share }) => `${fund}: ${formatPercent(share)}%`)
+			.join(', ');
+	}
+
 	async function saveRule() {
-		const rules = ruleRows
-			.filter((r) => r.fund && parseFloat(r.percent) > 0)
-			.map((r) => ({ fund: r.fund, percent_bp: Math.round(parseFloat(r.percent) * 100) }));
-		if (rules.length === 0) {
+		if (!overview.source_exists) {
+			addToast(`The source fund ${overview.source_fund} does not exist yet`, 'error');
+			return;
+		}
+		const lines = ruleRows.filter((r) => r.fund && Number(r.percent) > 0);
+		if (lines.length === 0) {
 			addToast('Add at least one fund with a percentage', 'error');
 			return;
 		}
-		if (ruleTotal > 100) {
+		if (lines.some((r) => toRatio(r.percent) === null)) {
+			addToast('Use percentages with at most six decimals', 'error');
+			return;
+		}
+		if (ruleTotal > ONE) {
 			addToast('Percentages exceed 100%', 'error');
 			return;
 		}
+		const rules = lines.map((r) => ({ fund: r.fund, share: toRatio(r.percent) }));
 		ruleBusy = true;
 		try {
-			await callGated('set_allocation_rule', { rules }, async (res) => {
-				if (!res?.success) {
-					addToast(res?.error || 'Failed to save rule', 'error');
-					return;
-				}
-				if (res.data?.applied === 'proposal') {
-					addToast(`Proposal ${res.data.proposal_id} created — a vote is required`);
-				} else {
-					addToast('Allocation rule adopted');
-					await loadAll();
-				}
+			await governed(overview.ruleGovernor, `Adopt treasury allocation rule (${describeRules(rules)})`, async () => {
+				// Under a voting policy drafting is voted on too; the draft it leaves is adopted from the list of drafts.
+				const drafted = await ctx.run('allocation_rule_draft', {
+					source_fund: overview.source_fund,
+					rules,
+				});
+				if (!applied(drafted, addToast, 'Failed to save rule', '; adopt the draft from the list once it passes')) return;
+				await adoptRule(drafted.rule);
 			});
 		} finally {
 			ruleBusy = false;
 		}
 	}
 
-	async function allocateNow() {
-		allocateBusy = true;
-		try {
-			await callGated('run_allocation', { period: selectedPeriod }, async (res) => {
-				if (!res?.success) {
-					addToast(res?.error || 'Allocation failed', 'error');
-					return;
-				}
-				if (res.data?.applied === 'proposal') {
-					addToast(`Proposal ${res.data.proposal_id} created — a vote is required`);
-				} else if (res.data?.allocated_now === 0) {
-					addToast(res.data?.message || 'Nothing left to allocate');
-				} else {
-					addToast(`Allocated ${fmt(res.data.allocated_now)} across ${res.data.allocations?.length ?? 0} fund(s)`);
-					await loadPeriod();
-				}
-			});
-		} finally {
-			allocateBusy = false;
-		}
-	}
-
 	// --- Settings ---
-	let testMode = $state(false);
-	ctx.realmInfo?.subscribe?.((info: { testMode?: boolean }) => {
-		testMode = !!info?.testMode;
-	});
-
 	let epochDraft = $state('monthly');
 	let anchorDraft = $state('1');
-	let epochMinutesDraft = $state('60');
-	let autoAllocateDraft = $state(true);
 	let epochBusy = $state(false);
 	let scheduleBusy = $state(false);
 
@@ -254,39 +489,24 @@
 		if (!overview) return;
 		epochDraft = overview.epoch_length || 'monthly';
 		anchorDraft = String(overview.anchor_month || 1);
-		epochMinutesDraft = String(overview.epoch_minutes || 60);
-		autoAllocateDraft = !!overview.auto_allocate;
+	}
+
+	async function configure(config: Record<string, unknown>, summary: string, done: string) {
+		await governed(overview.settingsGovernor, summary, async () => {
+			if (applied(await ctx.run('treasury_configure', { config }), addToast, 'Failed to change the treasury settings')) {
+				addToast(done);
+				await loadAll();
+			}
+		});
 	}
 
 	async function saveEpoch() {
 		epochBusy = true;
 		try {
-			const params: Record<string, unknown> = {
-				epoch_length: epochDraft,
-				anchor_month: parseInt(anchorDraft) || 1,
-			};
-			if (epochDraft === 'minutes') {
-				params.epoch_minutes = parseInt(epochMinutesDraft) || 0;
-			}
-			await callGated(
-				'set_epoch_config',
-				params,
-				async (res) => {
-					if (!res?.success) {
-						addToast(res?.error || 'Failed to change epoch', 'error');
-						return;
-					}
-					if (res.data?.applied === 'proposal') {
-						addToast(`Proposal ${res.data.proposal_id} created — a vote is required`);
-					} else {
-						const label =
-							epochDraft === 'minutes'
-								? `${epochMinutesDraft} minutes`
-								: epochDraft;
-						addToast(`Epoch length set to ${label}`);
-						await loadAll();
-					}
-				},
+			await configure(
+				{ epoch: epochDraft, anchor_month: parseInt(anchorDraft) || 1 },
+				`Set treasury epoch length to ${epochDraft}`,
+				`Epoch length set to ${epochDraft}`,
 			);
 		} finally {
 			epochBusy = false;
@@ -296,34 +516,32 @@
 	async function setSchedule(enabled: boolean) {
 		scheduleBusy = true;
 		try {
-			await callGated(
-				'set_treasury_schedule',
-				enabled ? { enabled: true, auto_allocate: autoAllocateDraft } : { enabled: false },
-				async (res) => {
-					if (!res?.success) {
-						addToast(res?.error || 'Failed to change schedule', 'error');
-						return;
-					}
-					if (res.data?.applied === 'proposal') {
-						addToast(`Proposal ${res.data.proposal_id} created — a vote is required`);
-					} else {
-						addToast(enabled ? 'Treasury schedule enabled' : 'Treasury schedule disabled');
-						await loadOverview();
-					}
-				},
+			await configure(
+				{ auto_allocate: enabled },
+				`${enabled ? 'Enable' : 'Disable'} automatic allocation`,
+				enabled ? 'Automatic allocation enabled' : 'Automatic allocation disabled',
 			);
 		} finally {
 			scheduleBusy = false;
 		}
 	}
 
-	const tabs: { id: Tab; label: string }[] = [
-		{ id: 'flow', label: 'Flow' },
-		{ id: 'timeline', label: 'Timeline' },
-		{ id: 'allocation', label: 'Allocation' },
-		{ id: 'budgets', label: 'Budgets' },
-		{ id: 'settings', label: 'Settings' },
-	];
+	// Flow, Timeline and the scheduled payments are drawn from the treasury, which only those who may read it see; the
+	// sweeps are for a realm that is a capital or a quarter.
+	const tabs: { id: Tab; label: string }[] = $derived(
+		[
+			{ id: 'flow' as Tab, label: 'Flow' },
+			{ id: 'timeline' as Tab, label: 'Timeline' },
+			{ id: 'allocation' as Tab, label: 'Allocation' },
+			{ id: 'budgets' as Tab, label: 'Budgets' },
+			{ id: 'scheduled' as Tab, label: t('tab_scheduled') },
+			{ id: 'sweeps' as Tab, label: t('tab_sweeps') },
+			{ id: 'settings' as Tab, label: 'Settings' },
+		].filter((tab) => {
+			if (tab.id === 'sweeps') return role !== null;
+			return hasLedger || !['flow', 'timeline', 'scheduled'].includes(tab.id);
+		}),
+	);
 
 	let narrow = $state(isNarrowViewport());
 	const unsubNarrow = subscribeNarrowViewport((value) => {
@@ -445,7 +663,7 @@
 			{#each tabs as tab (tab.id)}
 				<button
 					type="button"
-					onclick={() => (activeTab = tab.id)}
+					onclick={() => openTab(tab.id)}
 					class="chrome-tab {activeTab === tab.id ? 'is-on' : ''}"
 					title={tab.label}
 					aria-label={tab.label}
@@ -467,6 +685,14 @@
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
 						</svg>
+					{:else if tab.id === 'scheduled'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+						</svg>
+					{:else if tab.id === 'sweeps'}
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+						</svg>
 					{:else}
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -478,23 +704,15 @@
 			{/each}
 		</div>
 
-		{#if periodLoading && activeTab !== 'timeline'}
-			<div class="flex items-center justify-center py-12">
-				<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
-			</div>
-		{:else if activeTab === 'timeline'}
+		{#if activeTab === 'timeline'}
 			<div class={panelClass}>
-				{#if timelineLoading && !timeline}
-					<div class="flex items-center justify-center py-12">
-						<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
-					</div>
-				{:else if timeline}
+				{#if timeline?.epochs.length}
 					<Timeline
 						epochs={timeline.epochs ?? []}
 						nowTs={timeline.now_ts ?? 0}
 						selected={selectedPeriod}
 						format={fmt}
-						onselect={onTimelineSelect}
+						onselect={selectPeriod}
 					/>
 					{#if selectedPeriod && status}
 						<div class={cn('mt-4 pt-4 border-t border-gray-100 grid gap-3 text-sm', narrow ? 'grid-cols-1' : 'grid-cols-3')}>
@@ -527,12 +745,25 @@
 			</div>
 		{:else if activeTab === 'allocation'}
 			<div class={cn('grid gap-4', narrow ? 'grid-cols-1' : 'md:grid-cols-2')}>
-				<!-- Revenue mix -->
+				<!-- Funds and their share of the source fund's payments -->
 				<div class={panelClass}>
-					<h2 class="text-sm font-semibold text-gray-700 mb-3">
-						Revenue this epoch — {overview?.source_fund}
-					</h2>
+					<h2 class="text-sm font-semibold text-gray-700 mb-3">Funds</h2>
+					<ul class="divide-y divide-gray-100">
+						{#each overview?.funds ?? [] as f (f.code)}
+							<li class="flex justify-between gap-3 py-2 text-sm">
+								<span class="min-w-0 text-gray-600">
+									<span class="font-medium text-gray-900">{f.code}</span>
+									{#if f.department}<span class="text-xs text-gray-400"> · {f.department}</span>{/if}
+									{#if f.share}<span class="text-xs text-gray-400"> · {formatPercent(f.share)}% of {overview.source_fund}</span>{/if}
+								</span>
+								<span class="shrink-0 font-medium text-gray-900">{fmt(f.balance)}</span>
+							</li>
+						{/each}
+					</ul>
 					{#if status && Object.keys(status.revenue_by_category ?? {}).length > 0}
+						<h3 class="mt-4 mb-2 text-xs font-semibold text-gray-500">
+							Revenue in {selectedPeriod} — {overview?.source_fund}
+						</h3>
 						<ul class="divide-y divide-gray-100">
 							{#each Object.entries(status.revenue_by_category) as [category, amount] (category)}
 								<li class="flex justify-between py-2 text-sm">
@@ -541,21 +772,6 @@
 								</li>
 							{/each}
 						</ul>
-					{:else}
-						<p class="text-sm text-gray-400 py-4">No revenue recognized in this epoch yet.</p>
-					{/if}
-					<button
-						onclick={allocateNow}
-						disabled={allocateBusy || !overview?.rule}
-						class="mt-4 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
-					>
-						{#if allocateBusy}
-							<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-						{/if}
-						Allocate now
-					</button>
-					{#if !overview?.rule}
-						<p class="mt-2 text-xs text-amber-600">Adopt an allocation rule first.</p>
 					{/if}
 				</div>
 
@@ -585,7 +801,7 @@
 									type="number"
 									min="0"
 									max="100"
-									step="0.01"
+									step="any"
 									bind:value={row.percent}
 									placeholder="%"
 									class="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded-lg"
@@ -607,16 +823,16 @@
 						<span
 							class={cn(
 								'text-xs font-medium',
-								ruleTotal > 100 ? 'text-red-600' : 'text-gray-600',
+								ruleTotal > ONE ? 'text-red-600' : 'text-gray-600',
 							)}
 						>
-							total {ruleTotal.toFixed(2)}% — reserve {(100 - ruleTotal).toFixed(2)}%
+							total {formatPercent(ruleTotal)}% — reserve {formatPercent(Math.max(ONE - ruleTotal, 0))}%
 						</span>
 					</div>
 					<div class="flex gap-2 mt-4">
 						<button
 							onclick={saveRule}
-							disabled={ruleBusy || ruleTotal > 100}
+							disabled={ruleBusy || ruleTotal > ONE || !can('org.manage_budget')}
 							class="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
 						>
 							{#if ruleBusy}
@@ -632,9 +848,41 @@
 						</button>
 					</div>
 					<p class="mt-2 text-xs text-gray-400">
-						Governed by {overview?.governed_by} ({overview?.governed_policy}) — changes may
-						require a vote.
+						{#if can('org.manage_budget')}
+							Governed by {overview?.ruleGovernor.name} ({overview?.ruleGovernor.policy}) — changes may
+							require a vote.
+						{:else}
+							Only those who hold org.manage_budget can change the rule.
+						{/if}
 					</p>
+					{#if !overview?.ruleGovernor.direct}
+						<p class="mt-2 text-xs text-gray-400">
+							This realm votes on its allocation rule: a change takes two votes, one to draft the rule and
+							one to adopt it.
+						</p>
+					{/if}
+
+					{#if (overview?.drafts ?? []).length > 0}
+						<h3 class="mt-4 mb-2 text-xs font-semibold text-gray-500">Drafts</h3>
+						<ul class="divide-y divide-gray-100" aria-label="Rule drafts">
+							{#each overview.drafts as d (d.id)}
+								<li class="flex items-center justify-between gap-2 py-2 text-sm">
+									<span class="min-w-0 text-gray-600">
+										<span class="font-medium text-gray-900">{d.id}</span>
+										<span class="text-xs text-gray-400"> · {describeRules(d.rules)}</span>
+									</span>
+									<button
+										onclick={() => onAdoptDraft(d)}
+										disabled={ruleBusy || !can('org.manage_budget')}
+										aria-label="Adopt {d.id}"
+										class="shrink-0 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+									>
+										Adopt
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</div>
 			</div>
 		{:else if activeTab === 'budgets'}
@@ -650,7 +898,9 @@
 									<div class="flex items-start justify-between gap-2">
 										<div class="min-w-0">
 											<div class="font-medium text-gray-900">{b.fund}</div>
-											<div class="text-xs text-gray-500 capitalize">{b.category.replace(/_/g, ' ')}</div>
+											<div class="text-xs text-gray-500 capitalize">
+												{b.category.replace(/_/g, ' ')} · {b.kind}{b.status === 'extended' ? ' · extended' : ''}
+											</div>
 										</div>
 										<div
 											class={cn(
@@ -673,6 +923,7 @@
 								<tr class="text-left text-xs text-gray-500 border-b border-gray-200">
 									<th class="py-2 pr-3">Fund</th>
 									<th class="py-2 pr-3">Category</th>
+									<th class="py-2 pr-3">Kind</th>
 									<th class="py-2 pr-3 text-right">Planned</th>
 									<th class="py-2 pr-3 text-right">Actual</th>
 									<th class="py-2 text-right">Variance</th>
@@ -683,6 +934,7 @@
 									<tr>
 										<td class="py-2 pr-3 font-medium text-gray-900">{b.fund}</td>
 										<td class="py-2 pr-3 text-gray-600 capitalize">{b.category.replace(/_/g, ' ')}</td>
+										<td class="py-2 pr-3 text-gray-600 capitalize">{b.kind}{b.status === 'extended' ? ' (extended)' : ''}</td>
 										<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.planned)}</td>
 										<td class="py-2 pr-3 text-right text-gray-700">{fmt(b.actual)}</td>
 										<td
@@ -702,6 +954,44 @@
 					<p class="text-sm text-gray-400 py-4">No budgets recorded for this epoch.</p>
 				{/if}
 			</div>
+			<div class={cn(panelClass, 'mt-4')}>
+				<SpendingStages period={selectedPeriod} lines={stageLines} pending={pendingLines} {fmt} {narrow} focus={shownLine} owed={owedOnLinesNow} />
+			</div>
+		{:else if activeTab === 'scheduled'}
+			<div class={panelClass}>
+				{#if tabError}
+					<p class="py-4 text-sm text-red-600">{tabError}</p>
+				{:else if payments === null}
+					<div class="flex items-center justify-center py-12">
+						<div class="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+					</div>
+				{:else}
+					<ScheduledPayments {payments} lines={lineById} {zone} {now} {fmtIn} {narrow} onshowline={showLine} />
+				{/if}
+			</div>
+		{:else if activeTab === 'sweeps'}
+			<div class={panelClass}>
+				{#if tabError}
+					<p class="py-4 text-sm text-red-600">{tabError}</p>
+				{:else if hasLedger && sweeps === null}
+					<div class="flex items-center justify-center py-12">
+						<div class="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+					</div>
+				{:else if role}
+					<QuarterSweeps
+						{role}
+						rules={sweepRules}
+						sweeps={sweeps ?? []}
+						entries={sweepEntries}
+						bookings={sweepBookings}
+						names={quarterNames}
+						canRead={hasLedger}
+						{zone}
+						{fmtIn}
+						{narrow}
+					/>
+				{/if}
+			</div>
 		{:else if activeTab === 'settings'}
 			<div class={cn('grid gap-4', narrow ? 'grid-cols-1' : 'md:grid-cols-2')}>
 				<!-- Epoch config -->
@@ -719,23 +1009,7 @@
 						<option value="quarterly">Quarterly</option>
 						<option value="semiannual">Semiannual</option>
 						<option value="annual">Annual</option>
-						{#if testMode || overview?.test_mode}
-							<option value="minutes">Custom (minutes, test mode)</option>
-						{/if}
 					</select>
-					{#if epochDraft === 'minutes'}
-						<label class="block text-xs text-gray-500 mb-1" for="epoch-minutes">
-							Epoch length in minutes
-						</label>
-						<input
-							id="epoch-minutes"
-							type="number"
-							min="1"
-							max="10080"
-							bind:value={epochMinutesDraft}
-							class="w-32 px-2 py-1.5 text-sm border border-gray-300 rounded-lg mb-3"
-						/>
-					{/if}
 					{#if epochDraft === 'annual'}
 						<label class="block text-xs text-gray-500 mb-1" for="anchor-month">
 							Fiscal year starts in month
@@ -751,7 +1025,7 @@
 					{/if}
 					<button
 						onclick={saveEpoch}
-						disabled={epochBusy}
+						disabled={epochBusy || !can('treasury.manage')}
 						class="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
 					>
 						{#if epochBusy}
@@ -760,13 +1034,8 @@
 						Apply epoch config
 					</button>
 					<p class="mt-2 text-xs text-gray-400">
-						{#if epochDraft === 'minutes'}
-							Minute-based epochs roll automatically and are only available while test mode is
-							active.
-						{:else}
-							Epochs stay calendar-aligned; a length change takes effect when the current epoch
-							ends.
-						{/if}
+						Epochs stay calendar-aligned; a length change takes effect when the current epoch
+						ends.
 					</p>
 				</div>
 
@@ -776,6 +1045,12 @@
 					<div class="flex items-center justify-between py-2">
 						<div class="text-sm text-gray-600">
 							Daily sweep of unmatched deposits
+							<span class="ml-2 text-xs text-gray-400">not supported by this realm version</span>
+						</div>
+					</div>
+					<div class="flex items-center justify-between py-2">
+						<div class="text-sm text-gray-600">
+							Allocate each payment by the adopted rule
 							{#if overview?.schedule_active}
 								<span class={narrow ? 'ml-2 text-xs text-emerald-700' : 'ml-2 px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded-full'}>on</span>
 							{:else}
@@ -783,13 +1058,9 @@
 							{/if}
 						</div>
 					</div>
-					<label class="flex items-center gap-2 py-2 text-sm text-gray-600">
-						<input type="checkbox" bind:checked={autoAllocateDraft} class="rounded border-gray-300" />
-						Also allocate automatically when an epoch closes
-					</label>
 					<button
 						onclick={() => setSchedule(!overview?.schedule_active)}
-						disabled={scheduleBusy}
+						disabled={scheduleBusy || !can('treasury.manage')}
 						class={cn(
 							'mt-2 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg disabled:opacity-50',
 							overview?.schedule_active
@@ -808,8 +1079,12 @@
 						{overview?.schedule_active ? 'Disable' : 'Enable'}
 					</button>
 					<p class="mt-2 text-xs text-gray-400">
-						Governed by {overview?.governed_by} ({overview?.governed_policy}). Disabling is
-						always immediate.
+						{#if can('treasury.manage')}
+							Governed by {overview?.settingsGovernor.name} ({overview?.settingsGovernor.policy}) — changes may
+							require a vote.
+						{:else}
+							Only those who hold treasury.manage can change the treasury settings.
+						{/if}
 					</p>
 				</div>
 			</div>
@@ -817,32 +1092,32 @@
 	{/if}
 
 	<!-- Vote confirmation modal -->
-	{#if voteConfirm}
+	{#if $voteConfirm}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
 			<div class="w-full max-w-md bg-white rounded-xl shadow-xl p-5">
 				<h3 class="text-base font-semibold text-gray-900 mb-1">A vote is required</h3>
-				<p class="text-sm text-gray-600 mb-3">{voteConfirm.summary}</p>
+				<p class="text-sm text-gray-600 mb-3">{$voteConfirm.summary}</p>
 				<div class="p-3 bg-gray-50 rounded-lg text-xs text-gray-600 mb-4">
 					<p class="mb-1">
 						<span class="font-medium text-gray-700">Governed by:</span>
-						{voteConfirm.governedBy} ({voteConfirm.governedPolicy})
+						{$voteConfirm.governedBy} ({$voteConfirm.governedPolicy})
 					</p>
-					<p>{voteConfirm.policyReason}</p>
+					<p>{$voteConfirm.policyReason}</p>
 				</div>
 				<div class="flex gap-2 justify-end">
 					<button
-						onclick={() => (voteConfirm = null)}
-						disabled={voteConfirmBusy}
+						onclick={() => voteConfirm.set(null)}
+						disabled={$voteConfirmBusy}
 						class="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
 					>
 						Cancel
 					</button>
 					<button
-						onclick={() => voteConfirm?.run()}
-						disabled={voteConfirmBusy}
+						onclick={() => $voteConfirm?.run()}
+						disabled={$voteConfirmBusy}
 						class="inline-flex items-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
 					>
-						{#if voteConfirmBusy}
+						{#if $voteConfirmBusy}
 							<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
 						{/if}
 						Create proposal

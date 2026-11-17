@@ -1,8 +1,8 @@
 import { mount, unmount } from 'svelte';
-import CodexViewer from './CodexViewer.svelte';
+import CodexPage from './CodexPage.svelte';
 
 export default function mountExt(target: HTMLElement, ctx: Record<string, any>) {
-	const component = mount(CodexViewer, { target, props: { ctx } });
+	const component = mount(CodexPage, { target, props: { ctx } });
 	return {
 		unmount() {
 			try {

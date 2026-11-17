@@ -95,8 +95,7 @@ test.describe('Passport Verification Extension E2E Tests', () => {
     // This test validates the verified state structure.
     // Since we can't trigger real Rarimo verification in E2E,
     // we verify the page loads correctly and check for the idle state.
-    // The verified state is tested by the backend integration test
-    // (create_passport_identity + get_identity_status).
+    // The verified state is covered by the verificator unit tests.
     test.setTimeout(TIMEOUT);
 
     await expect(page.getByRole('heading', { name: 'Passport Verification' })).toBeVisible();

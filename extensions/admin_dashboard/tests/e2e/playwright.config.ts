@@ -7,6 +7,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './specs',
+  // The specs of the bundle on a canned realm and of a local realm have configurations of their own.
+  testIgnore: ['**/*.canned.spec.ts', '**/*.local.spec.ts'],
   
   /* Maximum time one test can run for */
   timeout: 30 * 1000,

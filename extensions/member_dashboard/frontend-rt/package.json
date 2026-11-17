@@ -10,7 +10,7 @@
     "test": "node --experimental-strip-types --test src/lib/helpers.test.ts"
   },
   "dependencies": {
-    "@realmsgos/extension-bridge": "^0.2.0",
+    "@realmsgos/extension-bridge": "^0.3.0-next.0",
     "@realmsgos/extension-ui": "^0.2.0"
   },
   "devDependencies": {

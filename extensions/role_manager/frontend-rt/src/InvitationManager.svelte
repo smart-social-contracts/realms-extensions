@@ -4,8 +4,9 @@
 		isNarrowViewport,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { call, readPages, refusedPermission } from './realm';
 
-	let { ctx }: { ctx: any } = $props();
+	let { ctx, profileNames = [] }: { ctx: any; profileNames?: string[] } = $props();
 
 	let narrow = $state(isNarrowViewport());
 	$effect(() => subscribeNarrowViewport((value) => { narrow = value; }));
@@ -19,18 +20,11 @@
 		max_uses: number;
 		revoked: boolean;
 		expires_at: string | null;
-		created_at?: string;
-	}
-
-	interface ProfileDef {
-		name: string;
-		allowed_to: string[];
 	}
 
 	// Generate form
 	let profile = $state('member');
-	let profiles: ProfileDef[] = $state([]);
-	let profilesLoading = $state(false);
+	let profiles = $derived(profileNames.map((name) => ({ name })));
 	let maxUses = $state(1);
 	let expiresInHours = $state(24);
 	let generating = $state(false);
@@ -44,14 +38,8 @@
 	// Codes list
 	let codes: RegistrationCode[] = $state([]);
 	let listLoading = $state(false);
+	let listNote = $state('');
 	let revokingHash: string | null = $state(null);
-
-	// Inhabitant join-link email (host notification queue)
-	let inhabitantEmails = $state('');
-	let sendingJoinLink = $state(false);
-	let joinLinkHref = $state('');
-	let joinLinkMessage = $state('');
-	let joinLinkError = $state('');
 
 	function addToast(message: string, type: 'success' | 'error' = 'success') {
 		const level = type === 'error' ? 'error' : 'success';
@@ -62,65 +50,6 @@
 		console.warn('[extension]', level, message);
 	}
 
-	function generateRandomCode(length: number): string {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		const values = crypto.getRandomValues(new Uint8Array(length));
-		return Array.from(values, v => chars[v % chars.length]).join('');
-	}
-
-	async function hashCode(code: string): Promise<string> {
-		const encoder = new TextEncoder();
-		const data = encoder.encode(code);
-		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-		const hashArray = Array.from(new Uint8Array(hashBuffer));
-		return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-	}
-
-	function parseExtensionEnvelope(raw: unknown) {
-		const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		return envelope?.response
-			? typeof envelope.response === 'string'
-				? JSON.parse(envelope.response)
-				: envelope.response
-			: envelope;
-	}
-
-	async function sendInhabitantJoinLink() {
-		joinLinkMessage = '';
-		joinLinkError = '';
-		joinLinkHref = '';
-		const emails = inhabitantEmails
-			.split(/[\n,;]+/)
-			.map((value) => value.trim())
-			.filter(Boolean);
-		if (emails.length === 0) {
-			joinLinkError = 'Enter one or more inhabitant email addresses.';
-			return;
-		}
-		sendingJoinLink = true;
-		try {
-			const raw = await ctx.backend.extension_sync_call(
-				'notifications',
-				'send_join_link',
-				JSON.stringify({ emails }),
-			);
-			const res = parseExtensionEnvelope(raw);
-			if (res?.success) {
-				const data = res.data || {};
-				const queued = data.queued ?? emails.length;
-				joinLinkHref = data.href || '';
-				joinLinkMessage = `Join link queued to ${queued} inhabitant${queued === 1 ? '' : 's'}.`;
-				addToast(joinLinkMessage);
-			} else {
-				joinLinkError = res?.error || 'Failed to queue join-link emails';
-			}
-		} catch (e: any) {
-			joinLinkError = e?.message || String(e);
-		} finally {
-			sendingJoinLink = false;
-		}
-	}
-
 	async function generateInvitation() {
 		generating = true;
 		generatedLink = null;
@@ -128,26 +57,23 @@
 		linkCopied = false;
 
 		try {
-			const code = generateRandomCode(16);
-			const codeHash = await hashCode(code);
-
-			await ctx.callSync('generate_registration_url', {
-				code_hash: codeHash,
+			const hours = Math.max(0, Math.trunc(Number(expiresInHours)) || 0);
+			const reply = await call(ctx, true, 'invite_create', {
 				profile,
-				max_uses: maxUses,
-				expires_in_hours: expiresInHours,
-				user_id: 'admin',
-				created_by: 'admin',
-				frontend_url: '',
+				max_uses: Math.max(1, Math.trunc(Number(maxUses)) || 1),
+				expires_in: hours * 3600,
 			});
+			const code = reply.ok ? String(reply.invite?.code ?? '') : '';
+			if (!code) {
+				addToast(`Could not create the invitation: ${reply.error || 'no code was returned'}`, 'error');
+				return;
+			}
 
-			const link = `${window.location.origin}/join?invite=${code}`;
+			const link = `${window.location.origin}/join?invite=${encodeURIComponent(code)}`;
 			generatedLink = link;
 			qrSvg = generateQrSvg(link);
 			addToast('Invitation code generated successfully');
 			await loadCodes();
-		} catch (e: any) {
-			addToast(`Failed to generate invitation: ${e?.message || String(e)}`, 'error');
 		} finally {
 			generating = false;
 		}
@@ -208,12 +134,28 @@
 	async function loadCodes() {
 		listLoading = true;
 		try {
-			const result = await ctx.callSync('get_registration_codes', { include_used: true });
-			const data = result?.data ?? result;
-			codes = Array.isArray(data) ? data : (data?.codes ?? []);
-		} catch (e: any) {
-			addToast(`Failed to load codes: ${e?.message || String(e)}`, 'error');
-			codes = [];
+			const res = await readPages(ctx, 'invite_list', 'invites');
+			const needed = refusedPermission(res.error, 'invite.manage');
+			listNote = needed
+				? `Viewing invitations requires the ${needed} permission.`
+				: res.error
+					? 'Invitations are unavailable right now.'
+					: '';
+			if (res.error) console.warn('invite_list:', res.error);
+			codes = res.rows
+				.filter((row) => row?.id)
+				.map((row) => {
+					const expires = Number(row.expires_at) || 0;
+					return {
+						code_hash: String(row.id),
+						profile: String(row.profile || 'member'),
+						uses_count: Number(row.uses) || 0,
+						max_uses: Number(row.max_uses) || 0,
+						revoked: !!row.revoked,
+						expires_at: expires ? new Date(expires * 1000).toISOString() : null,
+					};
+				})
+				.reverse();
 		} finally {
 			listLoading = false;
 		}
@@ -222,11 +164,13 @@
 	async function revokeCode(codeHash: string) {
 		revokingHash = codeHash;
 		try {
-			await ctx.callSync('revoke_registration_code', { code_hash: codeHash });
+			const reply = await call(ctx, true, 'invite_revoke', { invite: codeHash });
+			if (!reply.ok) {
+				addToast(`Could not revoke the invitation: ${reply.error || 'no answer'}`, 'error');
+				return;
+			}
 			addToast('Invitation revoked');
 			await loadCodes();
-		} catch (e: any) {
-			addToast(`Failed to revoke: ${e?.message || String(e)}`, 'error');
 		} finally {
 			revokingHash = null;
 		}
@@ -258,33 +202,14 @@
 			.join(' ');
 	}
 
-	async function loadProfiles() {
-		profilesLoading = true;
-		try {
-			const res = await ctx.callSync('get_available_profiles');
-			if (res?.success) {
-				profiles = res.data?.profiles ?? [];
-				if (profiles.length > 0) {
-					const hasMember = profiles.some((p) => p.name === 'member');
-					if (!profiles.some((p) => p.name === profile)) {
-						profile = hasMember ? 'member' : profiles[0].name;
-					}
-				}
-			} else {
-				profiles = [];
-				addToast('Failed to load profiles', 'error');
-			}
-		} catch (e: any) {
-			profiles = [];
-			addToast(`Failed to load profiles: ${e?.message || String(e)}`, 'error');
-		} finally {
-			profilesLoading = false;
+	$effect(() => {
+		if (profiles.length > 0 && !profiles.some((p) => p.name === profile)) {
+			profile = profiles.some((p) => p.name === 'member') ? 'member' : profiles[0].name;
 		}
-	}
+	});
 
 	$effect(() => {
 		loadCodes();
-		loadProfiles();
 	});
 </script>
 
@@ -292,41 +217,9 @@
 	<!-- Send join link to inhabitants -->
 	<div class="bg-white p-0 sm:p-6 sm:shadow-sm sm:rounded-lg sm:border sm:border-gray-200">
 		<h2 class="text-lg font-semibold text-gray-900 mb-1">Send join link to inhabitants</h2>
-		<p class="text-sm text-gray-500 mb-4">
-			Email the public realm join URL to inhabitants (citizens), including people who are not members yet.
-			This is not limited to civil servants.
+		<p class="text-sm text-gray-500">
+			Emailing the join link is not offered by this realm version. Generate an invitation below and share its link or QR code instead.
 		</p>
-		<label for="inv-inhabitant-emails" class="block text-sm font-medium text-gray-700 mb-1">
-			Inhabitant email addresses
-		</label>
-		<textarea
-			id="inv-inhabitant-emails"
-			bind:value={inhabitantEmails}
-			rows="4"
-			placeholder="one@example.com&#10;two@example.com"
-			class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-		></textarea>
-		<p class="mt-1 text-xs text-gray-500">Separate addresses with commas, semicolons, or new lines.</p>
-		<button
-			type="button"
-			onclick={sendInhabitantJoinLink}
-			disabled={sendingJoinLink || !inhabitantEmails.trim()}
-			class="mt-3 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
-		>
-			{sendingJoinLink ? 'Sending…' : 'Send link'}
-		</button>
-		{#if joinLinkMessage}
-			<p class="mt-2 text-sm text-green-700">{joinLinkMessage}</p>
-		{/if}
-		{#if joinLinkError}
-			<p class="mt-2 text-sm text-red-600">{joinLinkError}</p>
-		{/if}
-		{#if joinLinkHref}
-			<p class="mt-1 text-xs text-gray-600">
-				Queued path: <code class="font-mono">{joinLinkHref}</code>
-				(the mail worker prefixes the public realm URL).
-			</p>
-		{/if}
 	</div>
 
 	<!-- Generate New Invitation -->
@@ -339,7 +232,7 @@
 				<select
 					id="inv-profile"
 					bind:value={profile}
-					disabled={profilesLoading || profiles.length === 0}
+					disabled={profiles.length === 0}
 					class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
 				>
 					{#each profiles as p (p.name)}
@@ -373,7 +266,7 @@
 
 		<button
 			onclick={generateInvitation}
-			disabled={generating || profilesLoading || profiles.length === 0}
+			disabled={generating || profiles.length === 0}
 			class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium transition-colors"
 		>
 			{generating ? 'Generating…' : 'Generate Invitation'}
@@ -459,7 +352,7 @@
 			</div>
 		{:else if codes.length === 0}
 			<div class="text-center py-10">
-				<p class="text-gray-500">No invitation codes found.</p>
+				<p class="text-gray-500">{listNote || 'No invitation codes found.'}</p>
 			</div>
 		{:else if narrow}
 			<div class="divide-y divide-gray-200">

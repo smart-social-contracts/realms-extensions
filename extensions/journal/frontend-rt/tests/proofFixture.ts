@@ -1,0 +1,39 @@
+/**
+ * A signed issue as the unit tests make one: the text the canister signs, built from the issue, and a proof around it. It
+ * is not in src/: it names a canister, and realms-gos refuses an id in the source of an extension (a test fixture is exempt
+ * in tests/ and in *.test.ts).
+ */
+
+import type { Issue } from '../src/issue.ts';
+import { codeOf } from '../src/proof.ts';
+
+export const CANISTER = 'rrkah-fqaaa-aaaaa-aaaaq-cai';
+export const PUBLIC_KEY = 'ab'.repeat(32);
+export const DIGEST = 'cd'.repeat(32);
+export const CODE = codeOf(DIGEST)!; // ZXG4-3TON-ZXG4-3TON
+export const SIGNATURE = 'ef'.repeat(64);
+
+/** The text the canister signs for `issue`, with `over` replacing parts of it. It says `made_at`, as a document made now does;
+ * `{ made_at: undefined, signed_at: t }` is the text of one the release before signed as it made it. */
+export function canonicalOf(issue: Issue, over: Record<string, unknown> = {}): string {
+	return JSON.stringify({
+		v: 1,
+		kind: 'journal',
+		realm: CANISTER,
+		subject: issue.day,
+		body: { number: issue.number, timezone: issue.timezone, entries: issue.entries },
+		prev: null,
+		made_at: 1_790_000_000,
+		key: { algorithm: 'ed25519', name: 'key_1', path: 'realms:journal', public_key: PUBLIC_KEY },
+		...over,
+	});
+}
+
+/** `issue` as the realm serves it once signed: a batch of one, unless `proof` says otherwise. */
+export function signed(issue: Issue, proof: Record<string, unknown> = {}, over: Record<string, unknown> = {}): Issue {
+	return {
+		...issue,
+		status: 'signed',
+		proof: { canonical: canonicalOf(issue, over), digest: DIGEST, root: DIGEST, path: [], signature: SIGNATURE, code: CODE, ...proof },
+	};
+}

@@ -1,0 +1,240 @@
+/**
+ * An install proposal's change list (docs/codices/layered-codex.md §7) as the voting page shows it: read from the
+ * address the proposal pins, checked against its checksum, and compared with the codex the realm runs. No DOM: the
+ * tests run on node.
+ */
+
+export interface ChapterEntry {
+	/** `<source id>/<domain>`, or `<source id>/calendar`. */
+	chapter: string;
+	urls: string[];
+	/** `sha256:<64 hex digits>`, the form the realm stores a chapter under. */
+	sha256: string;
+	size: number | null;
+}
+
+export interface ReportRef {
+	url: string;
+	/** 64 hex digits. */
+	sha256: string;
+}
+
+export interface ChangeList {
+	realm: string;
+	replaces: string | null;
+	set: ChapterEntry[];
+	remove: string[];
+	release: { source: string; version: string } | null;
+	summary: Record<string, string>;
+	report: ReportRef | null;
+}
+
+export const MAX_CHANGE_LIST = 64 * 1024;
+export const MAX_CHAPTER = 256 * 1024;
+export const MAX_REPORT = 1024 * 1024;
+
+const HEX_64 = /^[0-9a-f]{64}$/;
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isHttps = (value: unknown): value is string => isText(value) && value.startsWith('https://');
+
+/**
+ * Refuses a JSON object that repeats a key, as the realm does (core/change_list.py): `JSON.parse` keeps the last
+ * value and a tool that kept the first would show voters something other than what the realm reads. `text` is JSON.
+ */
+function rejectRepeatedKeys(text: string): void {
+	const open: (Set<string> | null)[] = []; // the keys an open object has so far; null for an open array
+	let expectKey = false;
+	for (const [token] of text.matchAll(/"(?:[^"\\]|\\.)*"|[{}[\]:,]/g)) {
+		if (token === '{' || token === '[') {
+			open.push(token === '{' ? new Set() : null);
+			expectKey = token === '{';
+		} else if (token === '}' || token === ']') {
+			open.pop();
+			expectKey = false;
+		} else if (token === ',') {
+			expectKey = open[open.length - 1] instanceof Set;
+		} else if (token === ':') {
+			expectKey = false;
+		} else if (expectKey) {
+			const keys = open[open.length - 1] as Set<string>;
+			const name = JSON.parse(token);
+			if (keys.has(name)) throw new Error(`repeats the key ${name}`);
+			keys.add(name);
+			expectKey = false;
+		}
+	}
+}
+
+/**
+ * The change list in `text`. It shows what the realm will read, so it asks no more than the realm does of what it
+ * shows, and the `report`, which the realm never reads, is kept only when it is well formed.
+ */
+export function readChangeList(text: string): ChangeList {
+	const data = JSON.parse(text);
+	rejectRepeatedKeys(text);
+	if (!data || typeof data !== 'object' || data.kind !== 'realms-gos/legislation-change' || data.format !== 1) {
+		throw new Error('not a change list');
+	}
+	const entries: any[] = Array.isArray(data.set) ? data.set : [];
+	const report = data.report;
+	return {
+		realm: isText(data.realm) ? data.realm : '',
+		replaces: isText(data.replaces) ? data.replaces : null,
+		set: entries.map((entry) => ({
+			chapter: String(entry.chapter),
+			urls: [entry.url, ...(Array.isArray(entry.mirrors) ? entry.mirrors : [])].filter(isText),
+			sha256: `sha256:${entry.sha256}`,
+			size: typeof entry.size === 'number' ? entry.size : null,
+		})),
+		remove: Array.isArray(data.remove) ? data.remove.filter(isText) : [],
+		release: data.release && isText(data.release.source) && isText(data.release.version) ? data.release : null,
+		summary: data.summary && typeof data.summary === 'object' ? data.summary : {},
+		report: report && isHttps(report.url) && isText(report.sha256) && HEX_64.test(report.sha256) ? report : null,
+	};
+}
+
+/** The summary in the viewer's language (`es-ES` reads `es`), else English, else the first one given. */
+export function summaryFor(summary: Record<string, string>, locale: string): { language: string; text: string } | null {
+	const languages = Object.keys(summary);
+	const wanted = [locale, locale.split('-')[0], 'en'];
+	const language = wanted.find((tag) => tag in summary) ?? languages[0];
+	return language ? { language, text: summary[language] } : null;
+}
+
+/** How a chapter of the change list compares with the one the running codex has under the same id. */
+export type Difference = 'new' | 'changed' | 'same';
+
+export function differenceOf(entry: ChapterEntry, running: Record<string, { sha256: string }>): Difference {
+	const current = running[entry.chapter];
+	if (!current) return 'new';
+	return current.sha256 === entry.sha256 ? 'same' : 'changed';
+}
+
+/** What `codex_status` says of a sync source that matters to a release's install: the releases it could install. */
+export interface SyncSourceView {
+	installable?: { source: string; version: string; step_back?: boolean }[];
+}
+
+/**
+ * The release of layer `source` the realm runs now: the version its chapters carry, or '' when it runs none of that
+ * layer (or one of the earlier kind). A layer's chapters all carry one release (docs/codices/layered-codex.md §8).
+ */
+export function runningRelease(chapters: Record<string, { source?: string; version?: string }> | null | undefined, source: string): string {
+	for (const chapter of Object.values(chapters ?? {})) {
+		if (chapter.source === source && chapter.version) return chapter.version;
+	}
+	return '';
+}
+
+/**
+ * How the release a proposal installs stands against the one the realm runs of that layer, as `proposal_get` says it
+ * (`release_change`, §11.6): `order` is `older` (published strictly earlier: `step_back`), `newer`, `tied` or `unknown`
+ * (published together, or a time the realm does not know: a note, no mark), or `same` (the release it runs now).
+ */
+export interface ReleaseChange {
+	source: string;
+	version: string;
+	runs: string;
+	order: 'older' | 'newer' | 'tied' | 'unknown' | 'same';
+	step_back: boolean;
+}
+
+/** The `release_change` of a `proposal_get` reply, or null when it has none or not in this shape. */
+export function releaseChangeOf(raw: unknown): ReleaseChange | null {
+	const change = raw as Partial<ReleaseChange> | null | undefined;
+	const orders = ['older', 'newer', 'tied', 'unknown', 'same'];
+	if (!change || typeof change !== 'object') return null;
+	if (typeof change.source !== 'string' || typeof change.version !== 'string' || typeof change.runs !== 'string') return null;
+	if (typeof change.order !== 'string' || !orders.includes(change.order)) return null;
+	return { source: change.source, version: change.version, runs: change.runs, order: change.order, step_back: change.step_back === true };
+}
+
+/**
+ * Whether installing `release` takes the realm back, however it was filed: the one rule, for the page. Either is enough
+ * (the safer rule: a warning that is not needed costs a voter a line, one that is missing costs the vote its meaning): the
+ * realm says so of the proposal's own release in `release_change` (`change`: published strictly earlier than the one the
+ * realm runs), or a sync source marks that release `step_back` in the `installable` that `sources` carry (the only mark a
+ * realm sends before it compares a proposal's release). A step back must not read to a voter as a plain install.
+ */
+export function isStepBack(
+	sources: SyncSourceView[] | null | undefined,
+	release: { source: string; version: string },
+	change: ReleaseChange | null = null,
+): boolean {
+	if (change?.step_back === true) return true;
+	return (sources ?? []).some((source) =>
+		(source.installable ?? []).some((item) => item.step_back === true && item.source === release.source && item.version === release.version),
+	);
+}
+
+export type Fetched =
+	| { ok: true; text: string }
+	| { ok: false; reason: 'not_https' | 'unreachable' | 'too_large' | 'wrong_bytes' | 'not_text' };
+
+/** The bytes of `response`, or null once they pass `limit`: nothing the proposer points at is read without a bound. */
+async function readCapped(response: Response, limit: number): Promise<Uint8Array | null> {
+	const reader = response.body?.getReader();
+	if (!reader) {
+		const all = new Uint8Array(await response.arrayBuffer());
+		return all.length <= limit ? all : null;
+	}
+	const parts: Uint8Array[] = [];
+	let length = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		length += value.length;
+		if (length > limit) {
+			await reader.cancel();
+			return null;
+		}
+		parts.push(value);
+	}
+	const bytes = new Uint8Array(length);
+	let at = 0;
+	for (const part of parts) {
+		bytes.set(part, at);
+		at += part.length;
+	}
+	return bytes;
+}
+
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+	return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The text at `url` if it is at most `limit` bytes of UTF-8 whose SHA-256 is `sha256` (64 hex digits): a copy of what
+ * the proposal pins, whoever serves it. The address is the proposer's, but the realm's pages (the host's content
+ * security policy) decide which hosts a voter's browser contacts: any other is `unreachable` here.
+ */
+export async function fetchPinned(url: string, sha256: string, limit: number, fetcher: typeof fetch = fetch): Promise<Fetched> {
+	if (!isHttps(url)) return { ok: false, reason: 'not_https' };
+	let bytes: Uint8Array | null;
+	try {
+		const response = await fetcher(url);
+		if (!response.ok) return { ok: false, reason: 'unreachable' };
+		bytes = await readCapped(response, limit);
+	} catch {
+		return { ok: false, reason: 'unreachable' };
+	}
+	if (!bytes) return { ok: false, reason: 'too_large' };
+	if ((await sha256Hex(bytes)) !== sha256) return { ok: false, reason: 'wrong_bytes' };
+	try {
+		return { ok: true, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+	} catch {
+		return { ok: false, reason: 'not_text' };
+	}
+}
+
+/** The first address (the URL, then its mirrors) that serves the pinned bytes, as the realm tries them. */
+export async function fetchFirstPinned(urls: string[], sha256: string, limit: number, fetcher: typeof fetch = fetch): Promise<Fetched> {
+	let last: Fetched = { ok: false, reason: 'unreachable' };
+	for (const url of urls) {
+		last = await fetchPinned(url, sha256, limit, fetcher);
+		if (last.ok) return last;
+	}
+	return last;
+}

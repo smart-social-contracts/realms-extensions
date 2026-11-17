@@ -21,5 +21,13 @@
   "no_messages": "Encara no hi ha missatges.",
   "not_member": "Este usuari no és membre del regne.",
   "active_member": "Membre actiu",
-  "inactive_member": "Membre inactiu"
+  "inactive_member": "Membre inactiu",
+  "members_unavailable": "La llista de membres no està disponible per a tu ara mateix.",
+  "profile_unavailable": "El perfil d'este membre no està disponible ara mateix.",
+  "private_data_unavailable": "Les dades privades dels membres són seues i no es mostren ací.",
+  "membership_status": "Estat de membre",
+  "status_details_unavailable": "Les comprovacions d'identitat, impostos i elegibilitat no es mostren ací.",
+  "messages_history_note": "Les notificacions que envies apareixen a la safata del membre; ací només es llisten les enviades en esta sessió.",
+  "notification_sent": "Enviada.",
+  "send_failed": "No enviada: {reason}"
 }

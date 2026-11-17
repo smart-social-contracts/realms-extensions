@@ -53,7 +53,8 @@ jobs:
 
       - name: Voting UI test
         working-directory: extensions/voting/tests/e2e
-        run: npx playwright test
+        # The default config runs the canned-realm specs (voting-test.yml); the other *.local specs need a seeded realm.
+        run: npx playwright test -c playwright.local.config.ts specs/voting.local.spec.ts
 
       - name: Upload the report
         if: always()

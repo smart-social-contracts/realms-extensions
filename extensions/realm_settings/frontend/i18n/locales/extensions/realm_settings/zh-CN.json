@@ -23,5 +23,22 @@
   "primary_color": "主色",
   "preview": "预览",
   "save_settings": "保存设置",
-  "saving_settings": "保存中…"
+  "saving_settings": "保存中…",
+  "section_timezone": "时区",
+  "section_timezone_desc": "领域的官方时间。时刻（例如提案何时生效）按此时区输入和显示；领域以 UTC 保存，因此更改时区不会改动已保存的任何内容。",
+  "timezone": "时区",
+  "timezone_placeholder": "输入以搜索，例如 Europe/Madrid",
+  "timezone_now": "当前官方时间：{time}",
+  "timezone_preview": "在 {zone}，现在是 {time}。",
+  "timezone_applies_now": "保存后更改立即生效。",
+  "timezone_needs_vote": "更改由 {department} 管理（政策 {policy}）：保存会提交一项提案，提案通过后时区才会改变。",
+  "section_journal_signing": "官方公报签名",
+  "section_journal_signing_desc": "有人提出申请时，领域的 canister 会为其官方公报的某一期签名（仅签一次）并保存签名。每次签名都会消耗领域的 cycles（生产网络上约 260 亿）；领域也可以在每期当天结束时自动签名。",
+  "journal_signing": "何时为公报签名",
+  "journal_signing_on_request": "有人申请时（默认）",
+  "journal_signing_daily": "每天，当天结束时",
+  "journal_signing_on_request_note": "有人申请之前不产生费用，且每天至多一次签名。",
+  "journal_signing_daily_note": "每天一次签名：每年约 9.5 万亿 cycles。切换到此模式时，会一次性为上一个已签名日之后的所有日期签名：一年没有签名的话约需 12 次签名（约 0.3 万亿 cycles）。",
+  "journal_signing_applies_now": "保存后更改立即生效。",
+  "journal_signing_needs_vote": "更改由 {department} 管理（政策 {policy}）：保存会提交一项提案，提案通过后更改才会生效。"
 }

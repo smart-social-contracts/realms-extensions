@@ -1,10 +1,14 @@
 <script lang="ts">
+	import { opCaller, refusedPermission } from './ops';
+
+	type Action = { op: string; args: Record<string, unknown> };
+
 	let {
 		ctx,
 		open = false,
 		title = '',
 		description = '',
-		codeInline = '',
+		actions = [],
 		deniedOperation = '',
 		onclose = () => {},
 	}: {
@@ -12,63 +16,54 @@
 		open: boolean;
 		title: string;
 		description: string;
-		codeInline: string;
+		actions: Action[];
 		deniedOperation: string;
 		onclose: () => void;
 	} = $props();
 
+	const call = opCaller(ctx);
+
 	let submitting = $state(false);
 	let submitted = $state(false);
 	let error = $state('');
-	let accessDeniedOp = $state('');
+	let accessDeniedOp: string | null = $state(null);
 	let proposalId = $state('');
 
+	const actionsText = $derived(JSON.stringify(actions.length === 1 ? actions[0] : actions, null, 2));
+
+	/** One proposal per action: each is accepted (and replayed) on its own. */
 	async function submitProposal() {
 		submitting = true;
 		error = '';
-		accessDeniedOp = '';
-		try {
-			const raw = await ctx.backend.extension_async_call(
-				'voting',
-				'submit_proposal',
-				JSON.stringify({
-					title,
-					description,
-					proposal_type: 'code_execution',
-					source: codeInline,
-					requested_permissions: [],
-				}),
-			);
-			const envelope = typeof raw === 'string' ? JSON.parse(raw) : raw;
-			if (envelope?.success === false) {
-				error = envelope.response ?? 'Failed to submit proposal';
-				return;
+		accessDeniedOp = null;
+		const ids: string[] = [];
+		for (const [i, action] of actions.entries()) {
+			const res = await call(true, 'proposal_create', {
+				title: actions.length > 1 ? `${title} (${i + 1}/${actions.length})` : title,
+				description,
+				action,
+			});
+			if (res.ok && typeof res.proposal === 'string') {
+				ids.push(res.proposal);
+				continue;
 			}
-			const res = envelope?.response ? (typeof envelope.response === 'string' ? JSON.parse(envelope.response) : envelope.response) : envelope;
-			if (res?.success) {
-				submitted = true;
-				proposalId = res.data?.id || '';
-			} else {
-				error = res?.error || 'Failed to submit proposal';
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
-		} finally {
-			submitting = false;
+			const needs = refusedPermission(res);
+			if (needs !== null) accessDeniedOp = needs || 'proposal.create';
+			else error = res.error || 'The proposal was not filed';
+			break;
 		}
+		if (ids.length) {
+			proposalId = ids.join(', ');
+			submitted = accessDeniedOp === null && !error;
+			if (error) error = `${error} (already filed: ${proposalId})`;
+		}
+		submitting = false;
 	}
 
 	function handleClose() {
 		submitted = false;
 		error = '';
-		accessDeniedOp = '';
+		accessDeniedOp = null;
 		proposalId = '';
 		onclose();
 	}
@@ -100,7 +95,7 @@
 					</div>
 					<h3 class="text-xl font-bold text-gray-900 mb-2">Proposal Created</h3>
 					<p class="text-gray-600 mb-1">
-						Your proposal <strong>{proposalId}</strong> has been submitted and voting is now open.
+						Your proposal <strong>{proposalId}</strong> has been filed and voting is now open.
 					</p>
 					<p class="text-sm text-gray-500 mb-6">Realm members can now vote on this proposal in the Voting page.</p>
 					<div class="flex justify-center gap-3">
@@ -146,28 +141,23 @@
 							<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
 							</svg>
-							<span class="text-sm font-medium text-gray-700">Code to Execute</span>
+							<span class="text-sm font-medium text-gray-700">{actions.length === 1 ? 'Operation to run' : 'Operations to run'}</span>
 						</div>
 						<div class="bg-gray-900 rounded-lg overflow-hidden">
-							<pre class="p-4 overflow-x-auto text-sm"><code class="text-gray-100">{codeInline}</code></pre>
+							<pre class="p-4 overflow-x-auto text-sm"><code class="text-gray-100">{actionsText}</code></pre>
 						</div>
 					</div>
 
 					<div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
 						<p class="text-xs text-amber-800">
 							<strong>How it works:</strong> This will create a proposal visible to all realm members.
-							Once enough members vote "Yes" (meeting the threshold and quorum), the code above will be
-							executed automatically on the realm backend.
+							Once it is accepted, the operation above runs on the realm as you filed it.
 						</p>
 					</div>
 
-					{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
-	{:else if error}
+					{#if accessDeniedOp !== null}
+						<p class="text-sm text-gray-500">Filing proposals needs the {accessDeniedOp || 'proposal.create'} permission.</p>
+					{:else if error}
 						<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{error}</div>
 					{/if}
 				</div>

@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/**'
       - '.github/workflows/system_info-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/system_info/**'
       - 'extensions/_shared/**'

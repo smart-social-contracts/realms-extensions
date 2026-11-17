@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import InvitationManager from './InvitationManager.svelte';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -11,26 +12,43 @@
 	let error = $state('');
 	let accessDeniedOp = $state('');
 
+	/** The permission a refusal names ("user_list needs user.view"), or null when it is another failure. */
+	function deniedPermission(message: string): string | null {
+		const m = /^\S+ needs (\S+)$/.exec(message.trim());
+		if (m) return m[1];
+		return /sign in first/i.test(message) ? 'user.view' : null;
+	}
+
+	async function readReply(name: string, args: Record<string, unknown>): Promise<any> {
+		try {
+			return (await ctx.read(name, args)) ?? { ok: false, error: `${name} returned no reply` };
+		} catch (e: any) {
+			return { ok: false, error: e?.message ?? String(e) };
+		}
+	}
+
 	async function loadUserCount() {
 		loading = true;
 		error = '';
 		accessDeniedOp = '';
 		try {
-			const result = await ctx.callSync('get_user_count');
-			if (result?.success) {
-				userCount = result.data?.user_count ?? 0;
-			} else {
-				error = result?.error || 'Failed to load user count';
+			let total = 0;
+			let from: number | null = 1;
+			// user_list has no total: walk its pages (500 rows each) until ``next`` is null.
+			for (let pages = 0; from != null && pages < 1000; pages++) {
+				const reply = await readReply('user_list', { from, count: 500 });
+				if (!reply?.ok) {
+					const message = String(reply?.error ?? '');
+					const perm = deniedPermission(message);
+					userCount = null;
+					if (perm) accessDeniedOp = perm;
+					else error = message ? `Could not count users: ${message}` : 'Could not count users.';
+					return;
+				}
+				total += Array.isArray(reply.users) ? reply.users.length : 0;
+				from = typeof reply.next === 'number' ? reply.next : null;
 			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
-			}
+			userCount = total;
 		} finally {
 			loading = false;
 		}
@@ -60,11 +78,7 @@
 	</div>
 
 	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			<svelte:component this={ctx.ui.AccessDenied} operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500">You need additional permissions to view this page.</p>
-		{/if}
+		<AccessDenied operation={accessDeniedOp} />
 	{:else if error}
 		<div class="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg text-sm">
 			{error}
@@ -89,7 +103,7 @@
 							<span class="text-sm text-gray-400">Loading…</span>
 						</div>
 					{:else}
-						<div class="text-3xl font-bold text-gray-900 mt-1">{userCount ?? 0}</div>
+						<div class="text-3xl font-bold text-gray-900 mt-1">{userCount ?? '—'}</div>
 					{/if}
 				</div>
 			</div>

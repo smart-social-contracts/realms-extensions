@@ -1,10 +1,11 @@
 {
-  "name": "voting-e2e-tests",
+  "name": "@realms/voting-e2e",
   "version": "1.0.0",
-  "description": "UI tests of the voting extension, on a local realm (realms local start)",
+  "description": "Browser tests of the voting page: an install proposal and department votes that count the votes cast, on the built bundle with a canned realm",
   "private": true,
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:local": "playwright test -c playwright.local.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.52.0",

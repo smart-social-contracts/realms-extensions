@@ -1,27 +1,35 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { description as extensionDescription } from '../../manifest.json';
+	import ContractPage from './ContractPage.svelte';
+	import Contracts from './Contracts.svelte';
 	import LifecycleSteps, { type LifecycleStep } from './LifecycleSteps.svelte';
+	import { linkedRealms, money, type RealmFacts } from './contracts';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import { bidsOfLot, lotsOf, openLots, winningBid, type Lot, type LotInput } from './lots';
 	import {
 		isNarrowViewport,
 		persistSessionFlag,
 		readSessionFlag,
 		subscribeNarrowViewport,
 	} from '../../../_shared/frontend/mobile-chrome';
+	import { isKnownZone } from '../../../_shared/frontend/realm-time';
+	import { PERCENT, formatPercent } from '../../../_shared/frontend/units';
 
-	type View = 'list' | 'create' | 'detail';
+	type View = 'list' | 'create' | 'detail' | 'contracts' | 'contract';
 
 	interface RubricCriterion {
 		id: string;
 		label: string;
 		weight: number;
-		max_score: number;
 	}
 
 	interface BidPayload {
 		amount?: string;
 		description?: string;
 		technical?: string;
+		price?: number;
+		nonce?: string;
 	}
 
 	const LIFECYCLE_STEPS: LifecycleStep[] = [
@@ -43,102 +51,93 @@
 		{
 			status: 'evaluation',
 			label: 'Evaluation',
-			tip: 'Evaluators score bids. Vendors share decryption keys so evaluators can read bid contents.',
+			tip: 'Bids are unsealed and evaluators score each one on the rubric.',
 		},
 		{
-			status: 'award',
-			label: 'Award',
-			tip: 'The approver selects the winning bid based on scores and records the award.',
-		},
-		{
-			status: 'contract_execution',
+			status: 'contracted',
 			label: 'Contract',
-			tip: 'The contract is recorded and execution begins (vault integration pending).',
+			tip: 'The requester awards the best-scored bid (or justifies another) and a contract with the vendor is signed.',
 		},
 	];
 
-	const DEMO_ADVANCE_KEY = 'procurement_demo_advance';
+	const MAX_MARK = 10;
 	const LIFECYCLE_KEY = 'procurement-lifecycle-open';
-	const TEST_FLAGS_KEY = 'procurement-test-flags-open';
 
 	let { ctx }: { ctx: any } = $props();
 
 	let me = $state('');
 	ctx.principal?.subscribe?.((v: string) => (me = v || ''));
+	// The texts of the contract and lot screens are translated; the realm's locale may change while the page is open.
+	$effect(() => ctx.locale?.subscribe?.((next: string | null | undefined) => void loadExtensionI18n(next || 'en')));
 
-	let profiles = $state<string[]>([]);
-	ctx.userProfiles?.subscribe?.((v: string[]) => (profiles = v ?? []));
-
-	let testMode = $state(false);
-	ctx.realmInfo?.subscribe?.((info: { testMode?: boolean }) => {
-		testMode = !!info?.testMode;
-	});
-
-	let isAdmin = $derived(profiles.includes('admin'));
+	// The caller's permissions from `me`; null when unknown, and the realm then decides on each action.
+	let perms = $state<Set<string> | null>(null);
 	let hasCrypto = $derived(!!ctx.crypto?.encryptForRecipients);
 
 	let view: View = $state('list');
 	let loading = $state(true);
-	let error = $state('');
+	let notice = $state('');
 	let actionMsg = $state('');
 	let actionError = $state('');
 	let busy = $state(false);
-	let demoAdvanceEnabled = $state(false);
 	let narrow = $state(isNarrowViewport());
 	let lifecycleOpen = $state(readSessionFlag(LIFECYCLE_KEY) ?? !isNarrowViewport());
-	let testFlagsOpen = $state(readSessionFlag(TEST_FLAGS_KEY) === true);
 	let unsubNarrow = subscribeNarrowViewport((value) => {
 		narrow = value;
 	});
 
-	let rfps = $state<any[]>([]);
+	let tenders = $state<any[]>([]);
 	let selected = $state<any | null>(null);
 	let bids = $state<any[]>([]);
-	let transitions = $state<any[]>([]);
-	let scores = $state<any[]>([]);
+	// False from opening a request until its bids have been read: a count or a winner shown before that would be wrong.
+	let detailReady = $state(false);
+	let events = $state<any[] | null>(null);
 	let decryptedBids = $state<Record<string, BidPayload | null>>({});
+	let departments = $state<any[]>([]);
+	let organizations = $state<any[]>([]);
+	let facts = $state<RealmFacts>({ zone: 'UTC', currency: '', decimals: 0, tokens: {}, externals: [], realms: {} });
+	let contractId = $state('');
+	// The realm's zone, currency and decimals decide how a contract's days and amounts read: nothing shows them before they are known.
+	let contextReady = $state(false);
 
 	let formTitle = $state('');
 	let formDescription = $state('');
 	let formOpens = $state('');
 	let formCloses = $state('');
+	let formDepartment = $state('');
+	let formLots = $state<LotInput[]>([]);
 
+	let bidVendor = $state('');
 	let bidAmount = $state('');
 	let bidDescription = $state('');
 	let bidTechnical = $state('');
+	let bidLot = $state('');
 
 	let scoreInputs = $state<Record<string, Record<string, number>>>({});
 	let winningBidId = $state('');
+	let awardJustification = $state('');
+	// A tender with lots is awarded one lot at a time: the bid chosen, the justification and the reason for leaving it, by lot.
+	let lotWinners = $state<Record<string, string>>({});
+	let lotJustifications = $state<Record<string, string>>({});
+	let lotReasons = $state<Record<string, string>>({});
 
-	let isCreator = $derived(!!selected && selected.requester_id === me);
-	let canDemoAdvance = $derived(
-		testMode &&
-			demoAdvanceEnabled &&
-			isCreator &&
-			selected &&
-			selected.status !== 'contract_execution',
-	);
 	let detailStatus = $derived(selected?.status ?? 'draft');
+	let canManage = $derived(can('tender.manage'));
+	// Awarding a lot or leaving it unawarded is offered only to a caller known to hold the permission, once the bids are read.
+	let mayDecideLots = $derived(detailReady && perms !== null && can('tender.manage'));
+	// Unlike the actions above, a contract amendment is offered only to a caller known to hold its permission.
+	let mayAmend = $derived(perms !== null && can('contract.amend'));
+	let lots = $derived<Lot[]>(selected?.lots ?? []);
+	let onRequests = $derived(view === 'list' || view === 'create' || view === 'detail');
+	let biddingEnded = $derived(!!selected && (selected.closes_at || 0) * 1000 <= Date.now());
 
-	$effect(() => {
-		if (typeof sessionStorage !== 'undefined') {
-			demoAdvanceEnabled = sessionStorage.getItem(DEMO_ADVANCE_KEY) === '1';
-		}
-	});
-
-	function setDemoAdvanceEnabled(enabled: boolean) {
-		demoAdvanceEnabled = enabled;
-		persistSessionFlag(DEMO_ADVANCE_KEY, enabled);
+	function can(permission: string) {
+		return !perms || perms.has('all') || perms.has(permission);
 	}
 
 	function toggleLifecycle() {
 		lifecycleOpen = !lifecycleOpen;
 		persistSessionFlag(LIFECYCLE_KEY, lifecycleOpen);
-	}
-
-	function toggleTestFlags() {
-		testFlagsOpen = !testFlagsOpen;
-		persistSessionFlag(TEST_FLAGS_KEY, testFlagsOpen);
 	}
 
 	function shortPrincipal(p: string) {
@@ -166,12 +165,12 @@
 		return epochToLocalInput(Math.floor(Date.now() / 1000) + 7 * 86400);
 	}
 
-	function parseRubric(json: string): RubricCriterion[] {
-		try {
-			return JSON.parse(json || '[]');
-		} catch {
-			return [];
-		}
+	function rubricCriteria(rubric: Record<string, number> | undefined): RubricCriterion[] {
+		return Object.entries(rubric ?? {}).map(([id, weight]) => ({
+			id,
+			label: id.charAt(0).toUpperCase() + id.slice(1).replace(/_/g, ' '),
+			weight: Number(weight) || 0,
+		}));
 	}
 
 	function statusLabel(status: string) {
@@ -180,115 +179,225 @@
 			open: 'Open bidding',
 			closed: 'Closed',
 			evaluation: 'Evaluation',
-			award: 'Award',
-			contract_execution: 'Contract',
+			contracted: 'Contract',
+			cancelled: 'Cancelled',
 		};
-		return labels[status] ?? status;
+		return labels[status] ?? status ?? '';
 	}
 
-	function nextStageLabel(status: string) {
-		const next: Record<string, string> = {
-			draft: 'Open bidding',
-			open: 'Evaluation',
-			closed: 'Evaluation',
-			evaluation: 'Award',
-			award: 'Contract',
+	function opLabel(op: string) {
+		const labels: Record<string, string> = {
+			tender_create: 'Created',
+			tender_open: 'Opened for bidding',
+			tender_close: 'Bidding closed',
+			tender_cancel: 'Cancelled',
+			bid_submit: 'Sealed bid submitted',
+			bid_withdraw: 'Bid withdrawn',
+			bids_reveal: 'Bids revealed',
+			bid_score: 'Bid scored',
+			tender_award: 'Awarded',
 		};
-		return next[status] ?? 'Next stage';
+		return labels[op] ?? op;
 	}
 
-	async function callSync(fn: string, args: Record<string, unknown> = {}) {
-		const raw = await ctx.callSync(fn, args);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
-	}
-
-	async function loadRfps() {
-		loading = true;
-		error = '';
+	function parsePayloadRef(ref: string | undefined): { scope: string; ciphertext: string } | null {
 		try {
-			const res: any = await callSync('list_rfps');
-			if (!res?.success) throw new Error(res?.error || 'Failed to load requests');
-			rfps = res.rfps ?? [];
-		} catch (e: any) {
-			error = e?.message ?? String(e);
-		} finally {
-			loading = false;
+			const parsed = JSON.parse(ref || '');
+			return parsed?.scope && parsed?.ciphertext ? parsed : null;
+		} catch {
+			return null;
 		}
 	}
 
-	async function loadDetail(rfpId: string) {
+	function randomHex(bytes: number) {
+		return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+	}
+
+	async function sha256Hex(text: string) {
+		const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+		return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+	}
+
+	/** A realm read operation's reply, or null when it fails or is not available to the caller. */
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		try {
+			const reply = await ctx.read(name, args);
+			if (reply?.ok) return reply;
+			console.warn(`${name}:`, reply?.error);
+		} catch (e) {
+			console.warn(`${name} failed:`, e);
+		}
+		return null;
+	}
+
+	/** Run a realm operation that changes the realm; throws the realm's refusal. */
+	async function run(name: string, args: Record<string, unknown>): Promise<any> {
+		const reply = await ctx.run(name, args);
+		if (!reply?.ok) throw new Error(reply?.error || `${name} was refused`);
+		return reply;
+	}
+
+	/** A governed call may be filed as a proposal instead of taking effect now. */
+	function outcome(reply: any, message: string) {
+		return reply?.proposal ? `Submitted for approval as proposal ${reply.proposal}` : message;
+	}
+
+	async function loadContext() {
+		const [mine, depts, orgs, info, outside, budget, treasury] = await Promise.all([
+			read('me'),
+			read('department_list', { count: 500 }),
+			read('organization_list', { status: 'active', count: 500 }),
+			read('realm_info'),
+			read('external_list', { count: 500 }),
+			read('budget_view', { count: 1 }),
+			read('treasury_view', { count: 1 }),
+		]);
+		if (mine) perms = new Set(mine.permissions ?? []);
+		if (info?.realm) {
+			const zone = info.realm.official_timezone || info.realm.timezone;
+			facts = {
+				zone: isKnownZone(zone) ? zone : 'UTC',
+				// The budget page's currency and decimals (the token registry's); the realm's own when it is not readable.
+				currency: budget?.currency ?? info.realm.accounting_currency ?? '',
+				decimals: budget?.decimals ?? info.realm.accounting_currency_decimals ?? 0,
+				tokens: Object.fromEntries((treasury?.tokens ?? []).map((token: { id: string; decimals: number }) => [token.id, token.decimals])),
+				externals: outside?.externals ?? [],
+				realms: linkedRealms(info.sync_sources ?? []),
+			};
+		}
+		departments = depts?.departments ?? [];
+		organizations = orgs?.organizations ?? [];
+		formDepartment ||= (departments.find((d) => d.is_root) ?? departments[0])?.id ?? '';
+		bidVendor ||= organizations[0]?.id ?? '';
+		contextReady = true;
+	}
+
+	async function loadTenders() {
+		loading = true;
+		const all: any[] = [];
+		let from: number | null = 1;
+		let available = true;
+		for (let pages = 0; from != null && pages < 20; pages++) {
+			const res = await read('tender_list', { from, count: 500 });
+			if (!res) {
+				available = false;
+				break;
+			}
+			all.push(...(res.tenders ?? []));
+			from = res.next ?? null;
+		}
+		tenders = all;
+		notice = available ? '' : 'Requests are not available to you right now.';
+		loading = false;
+	}
+
+	// The newest loadDetail: a reply to an earlier one that comes late (a request opened, left, another opened) is dropped.
+	let detailSeq = 0;
+
+	async function loadDetail(tenderId: string) {
+		const mine = ++detailSeq;
 		busy = true;
 		actionError = '';
 		decryptedBids = {};
-		try {
-			const res: any = await callSync('get_rfp', { rfp_id: rfpId });
-			if (!res?.success) throw new Error(res?.error || 'Failed to load request');
-			selected = res.rfp;
-			transitions = res.rfp?.transitions ?? [];
-
-			const bres: any = await callSync('list_bids', { rfp_id: rfpId });
-			bids = bres?.success ? bres.bids ?? [] : [];
-
-			if (['evaluation', 'award', 'contract_execution'].includes(selected?.status)) {
-				const sres: any = await callSync('list_scores', { rfp_id: rfpId });
-				scores = sres?.success ? sres.scores ?? [] : [];
-				await decryptVisibleBids();
-			}
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
+		const [res, log] = await Promise.all([read('tender_get', { tender: tenderId }), read('events', { count: 500 })]);
+		if (mine !== detailSeq) return;
+		if (view !== 'detail') {
+			// The request was left while it was read: its reply, a refusal too, belongs to no page now.
 			busy = false;
+			return;
 		}
+		// A request the realm did not give has no bids to show: nothing is offered on it.
+		detailReady = Boolean(res?.tender);
+		if (res?.tender) {
+			selected = res.tender;
+			bids = res.tender.bids ?? [];
+		} else {
+			bids = [];
+			actionError = 'This request could not be opened.';
+		}
+		const bidIds = new Set(bids.map((b) => b.id));
+		events = log
+			? (log.events ?? []).filter(
+					(e: any) => e.args?.tender === tenderId || e.result?.tender === tenderId || bidIds.has(e.args?.bid),
+				)
+			: null;
+		busy = false;
+		if (['evaluation', 'contracted'].includes(selected?.status)) await decryptVisibleBids();
 	}
 
 	async function decryptVisibleBids() {
 		if (!ctx.crypto?.decryptScope) return;
 		for (const bid of bids) {
-			if (!bid.bid_id) continue;
+			const ref = parsePayloadRef(bid.payload_ref);
+			if (!ref) {
+				decryptedBids[bid.id] = null;
+				continue;
+			}
 			try {
-				const pres: any = await callSync('get_bid_payload', { bid_id: bid.bid_id });
-				if (!pres?.success || !pres.ciphertext) {
-					decryptedBids[bid.bid_id] = null;
-					continue;
-				}
-				const plain = await ctx.crypto.decryptScope<BidPayload>(pres.scope, pres.ciphertext);
-				decryptedBids[bid.bid_id] = plain;
+				decryptedBids[bid.id] = await ctx.crypto.decryptScope<BidPayload>(ref.scope, ref.ciphertext);
 			} catch {
-				decryptedBids[bid.bid_id] = null;
+				decryptedBids[bid.id] = null;
 			}
 		}
 	}
 
-	async function openDetail(rfp: any) {
-		selected = rfp;
+	async function openDetail(tender: any) {
+		selected = tender;
 		view = 'detail';
-		await loadDetail(rfp.rfp_id);
+		winningBidId = '';
+		awardJustification = '';
+		bidLot = '';
+		bids = [];
+		detailReady = false;
+		// What the last request said is not about this one; a late reply to it lands after this and names its request.
+		actionMsg = '';
+		actionError = '';
+		lotWinners = {};
+		lotJustifications = {};
+		lotReasons = {};
+		await loadDetail(tender.id);
 	}
 
-	async function createRfp() {
+	function openContract(id: string) {
+		contractId = id;
+		view = 'contract';
+		actionError = '';
+		actionMsg = '';
+	}
+
+	async function createTender() {
 		if (!formTitle.trim()) {
 			actionError = 'Title is required';
+			return;
+		}
+		if (!formDepartment) {
+			actionError = 'Choose the requesting department';
+			return;
+		}
+		const parts = lotsOf(formLots, facts.decimals);
+		if (parts.problem) {
+			actionError = t(`lot_problem_${parts.problem}`);
 			return;
 		}
 		busy = true;
 		actionError = '';
 		actionMsg = '';
-		const rubric = [
-			{ id: 'price', label: 'Price', weight: 0.5, max_score: 100 },
-			{ id: 'quality', label: 'Quality', weight: 0.5, max_score: 100 },
-		];
 		try {
-			const res: any = await callSync('create_rfp', {
+			const res = await run('tender_create', {
 				title: formTitle.trim(),
 				description: formDescription.trim(),
+				requester: formDepartment,
 				opens_at: localInputToEpoch(formOpens),
 				closes_at: localInputToEpoch(formCloses),
-				rubric_json: rubric,
+				rubric: { price: 50 * PERCENT, quality: 50 * PERCENT },
+				...(parts.lots.length ? { lots: parts.lots } : {}),
 			});
-			if (!res?.success) throw new Error(res?.error || 'Create failed');
-			actionMsg = `Created ${res.rfp?.rfp_id}`;
+			actionMsg = outcome(res, `Created ${res.tender}`);
+			formTitle = '';
+			formDescription = '';
+			formLots = [];
 			view = 'list';
-			await loadRfps();
+			await loadTenders();
 		} catch (e: any) {
 			actionError = e?.message ?? String(e);
 		} finally {
@@ -296,192 +405,135 @@
 		}
 	}
 
-	async function publishRfp() {
+	/** Whether `tenderId` is the request on the page now. */
+	function isOpen(tenderId: string) {
+		return selected?.id === tenderId && view === 'detail';
+	}
+
+	/** What an action says: the message lands on whatever page is open, so one about a request that is not open names it. */
+	function about(tenderId: string, text: string) {
+		return isOpen(tenderId) ? text : `${tenderId}: ${text}`;
+	}
+
+	/** Run a lifecycle operation on the selected request, then reload it and the list. */
+	async function act(name: string, args: Record<string, unknown>, message: (reply: any) => string) {
 		if (!selected) return;
+		const tenderId = selected.id;
 		busy = true;
 		actionError = '';
+		actionMsg = '';
 		try {
-			const res: any = await callSync('publish_rfp', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Publish failed');
-			actionMsg = 'Request For Proposal published for bidding';
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
+			const res = await run(name, args);
+			actionMsg = about(tenderId, outcome(res, message(res)));
+			if (isOpen(tenderId)) await loadDetail(tenderId);
+			await loadTenders();
 		} catch (e: any) {
-			actionError = e?.message ?? String(e);
+			actionError = about(tenderId, e?.message ?? String(e));
 		} finally {
 			busy = false;
 		}
 	}
 
-	async function closeRfp() {
-		if (!selected) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('close_rfp', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Close failed');
-			actionMsg = 'Bidding closed — bids marked for evaluation';
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
+	function publishTender() {
+		return act('tender_open', { tender: selected?.id }, () => 'Request For Proposal published for bidding');
 	}
 
-	async function demoAdvanceStage() {
-		if (!selected || !canDemoAdvance) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('demo_advance_rfp', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Demo advance failed');
-			actionMsg = `Advanced to ${statusLabel(res.rfp?.status ?? '')}`;
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
+	function closeTender() {
+		return act('tender_close', { tender: selected?.id }, () => 'Bidding closed — reveal the bids to start evaluation');
+	}
+
+	function revealBids() {
+		return act('bids_reveal', { tender: selected?.id }, (res) => `${res.revealed ?? 0} bid(s) revealed — evaluation started`);
+	}
+
+	/** Principals who can read bids on a request: the requesting department's head and seat holders. */
+	async function requesterStaff(department: string): Promise<string[]> {
+		const res = await read('department_get', { department });
+		if (!res) return [];
+		const holders = (res.positions ?? []).flatMap((p: any) => (p.holders ?? []).map((h: any) => h.user));
+		return [res.department?.head, ...holders].filter(Boolean);
 	}
 
 	async function submitBid() {
 		if (!selected || !hasCrypto) return;
+		const price = Math.round(Number(bidAmount.replace(/[^0-9.]/g, '')));
+		if (!bidVendor) {
+			actionError = 'Choose the organization you bid for';
+			return;
+		}
+		if (!bidAmount.trim() || !Number.isFinite(price)) {
+			actionError = 'Enter the quoted amount as a number';
+			return;
+		}
+		if (lots.length && !bidLot) {
+			actionError = t('bid_choose_lot');
+			return;
+		}
+		const tenderId = selected.id;
 		busy = true;
 		actionError = '';
+		actionMsg = '';
 		try {
-			const shell: any = await callSync('create_bid_shell', { rfp_id: selected.rfp_id });
-			if (!shell?.success) throw new Error(shell?.error || 'Could not create bid');
-
-			const payload = {
+			const nonce = randomHex(16);
+			const recipients = [me, ...(await requesterStaff(selected.requester))].filter(Boolean);
+			const payload: BidPayload = {
 				amount: bidAmount,
 				description: bidDescription,
 				technical: bidTechnical,
+				price,
+				nonce,
 			};
-			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients([me], payload);
-			await ctx.crypto.grantScope(shell.scope, wrappedDeks, { keep: [me] });
+			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(recipients, payload);
+			// A bid is made for a lot, and granting a scope again replaces its keys: each lot's bid has a scope of its own.
+			const scope = `user:${me}:procurement:${tenderId}:${bidVendor}${bidLot ? `:${bidLot}` : ''}`;
+			await ctx.crypto.grantScope(scope, wrappedDeks, { keep: [me] });
 
-			const setRes: any = await callSync('set_bid_payload', {
-				bid_id: shell.bid_id,
-				ciphertext,
-				encryption_mode: 'vetkeys',
+			const res = await run('bid_submit', {
+				tender: tenderId,
+				vendor: bidVendor,
+				payload_ref: JSON.stringify({ scope, ciphertext }),
+				payload_hash: `sha256:${await sha256Hex(`${price}:${nonce}`)}`,
+				...(bidLot ? { lot: bidLot } : {}),
 			});
-			if (!setRes?.success) throw new Error(setRes?.error || 'Failed to store bid');
-
-			actionMsg = `Sealed bid ${shell.bid_id} submitted (vetKeys — only you can read until shared)`;
+			actionMsg = about(tenderId, outcome(res, `Sealed bid ${res.bid} submitted — it stays sealed until bidding closes`));
 			bidAmount = '';
 			bidDescription = '';
 			bidTechnical = '';
-			await loadDetail(selected.rfp_id);
+			if (isOpen(tenderId)) await loadDetail(tenderId);
 		} catch (e: any) {
-			actionError = e?.message ?? String(e);
+			actionError = about(tenderId, e?.message ?? String(e));
 		} finally {
 			busy = false;
 		}
 	}
 
-	async function shareBidWithEvaluators(bid: any) {
-		if (!selected || !ctx.crypto?.encryptForRecipients) return;
-		busy = true;
-		actionError = '';
-		try {
-			const evRes: any = await callSync('get_evaluator_principals');
-			const evaluators: string[] = evRes?.principals ?? [];
-			const recipients = Array.from(new Set([me, ...evaluators].filter(Boolean)));
-
-			const pres: any = await callSync('get_bid_payload', { bid_id: bid.bid_id });
-			if (!pres?.success) throw new Error(pres?.error || 'No payload');
-			const plain = await ctx.crypto.decryptScope<BidPayload>(pres.scope, pres.ciphertext);
-			if (!plain) throw new Error('Cannot decrypt your bid — missing key envelope');
-
-			const { ciphertext, wrappedDeks } = await ctx.crypto.encryptForRecipients(recipients, plain);
-			await callSync('set_bid_payload', {
-				bid_id: bid.bid_id,
-				ciphertext,
-				encryption_mode: 'vetkeys',
-			});
-			await ctx.crypto.grantScope(pres.scope, wrappedDeks, { keep: [me] });
-
-			actionMsg = `Bid shared with ${evaluators.length} evaluator(s)`;
-			await loadDetail(selected.rfp_id);
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function submitScoresForBid(bidId: string) {
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('submit_scores', { bid_id: bidId, scores: scoreInputs[bidId] ?? {} });
-			if (!res?.success) throw new Error(res?.error || 'Scoring failed');
-			actionMsg = `Scores saved for ${bidId}`;
-			await loadDetail(selected!.rfp_id);
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function computeTotals() {
-		if (!selected) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('compute_totals', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Compute failed');
-			actionMsg = 'Totals computed';
-			await loadDetail(selected.rfp_id);
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function awardRfp() {
-		if (!selected || !winningBidId) {
-			actionError = 'Select a winning bid';
+	function submitScoresForBid(bidId: string) {
+		const marks = scoreInputs[bidId] ?? {};
+		if (Object.keys(marks).length === 0) {
+			actionError = `Enter at least one mark from 0 to ${MAX_MARK}`;
 			return;
 		}
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('award_rfp', {
-				rfp_id: selected.rfp_id,
-				winning_bid_id: winningBidId,
-			});
-			if (!res?.success) throw new Error(res?.error || 'Award failed');
-			actionMsg = `Awarded to ${winningBidId}`;
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
+		return act('bid_score', { bid: bidId, scores: marks }, (res) => `Scores saved for ${res.bid ?? bidId} — score ${res.score ?? 0}/100`);
 	}
 
-	async function executeContract() {
-		if (!selected) return;
-		busy = true;
-		actionError = '';
-		try {
-			const res: any = await callSync('execute_contract', { rfp_id: selected.rfp_id });
-			if (!res?.success) throw new Error(res?.error || 'Execute failed');
-			actionMsg = 'Contract execution recorded (vault integration pending)';
-			await loadDetail(selected.rfp_id);
-			await loadRfps();
-		} catch (e: any) {
-			actionError = e?.message ?? String(e);
-		} finally {
-			busy = false;
-		}
+	function awardTender() {
+		const args: Record<string, unknown> = { tender: selected?.id };
+		if (winningBidId) args.bid = winningBidId;
+		if (awardJustification.trim()) args.justification = awardJustification.trim();
+		return act('tender_award', args, (res) => `Awarded to ${res.winner} — contract ${res.contract} signed`);
+	}
+
+	function awardLot(lot: Lot) {
+		const args: Record<string, unknown> = { tender: selected?.id, lot: lot.id };
+		if (lotWinners[lot.id]) args.bid = lotWinners[lot.id];
+		if (lotJustifications[lot.id]?.trim()) args.justification = lotJustifications[lot.id].trim();
+		return act('tender_award', args, (res) => t('lot_awarded', { lot: lot.id, winner: res.winner, contract: res.contract }));
+	}
+
+	function voidLot(lot: Lot) {
+		const args: Record<string, unknown> = { tender: selected?.id, lot: lot.id };
+		if (lotReasons[lot.id]?.trim()) args.reason = lotReasons[lot.id].trim();
+		return act('tender_lot_void', args, () => t('lot_voided', { lot: lot.id }));
 	}
 
 	function statusClass(status: string) {
@@ -490,8 +542,8 @@
 			open: 'bg-green-100 text-green-800',
 			closed: 'bg-yellow-100 text-yellow-800',
 			evaluation: 'bg-blue-100 text-blue-800',
-			award: 'bg-purple-100 text-purple-800',
-			contract_execution: 'bg-emerald-100 text-emerald-800',
+			contracted: 'bg-emerald-100 text-emerald-800',
+			cancelled: 'bg-red-50 text-red-700',
 		};
 		return map[status] ?? 'bg-gray-100 text-gray-700';
 	}
@@ -501,7 +553,8 @@
 		formCloses = formCloses || defaultClosesLocal();
 	});
 
-	loadRfps();
+	loadContext();
+	loadTenders();
 	onDestroy(() => {
 		unsubNarrow?.();
 	});
@@ -555,8 +608,26 @@
 			<h1 class="text-3xl font-bold text-gray-900 dark:text-white">Procurement</h1>
 			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{extensionDescription}</p>
 		</div>
+		{#if view === 'list' || view === 'contracts'}
+			<div class="flex gap-2" role="tablist" data-testid="sections">
+				<button type="button" role="tab" class="chrome-btn" class:is-on={view === 'list'} aria-selected={view === 'list'} onclick={() => (view = 'list')}>
+					{t('tab_requests')}
+				</button>
+				<button type="button" role="tab" class="chrome-btn" class:is-on={view === 'contracts'} aria-selected={view === 'contracts'} onclick={() => (view = 'contracts')}>
+					{t('tab_contracts')}
+				</button>
+			</div>
+		{/if}
 		<div class="flex flex-wrap items-center gap-2">
-			{#if view !== 'list'}
+			{#if view === 'contract'}
+				<button class="chrome-btn" onclick={() => (view = 'contracts')} title={t('all_contracts')} aria-label={t('all_contracts')}>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+					</svg>
+					<span class="chrome-label">{t('all_contracts')}</span>
+				</button>
+			{/if}
+			{#if view === 'create' || view === 'detail'}
 				<button
 					class="chrome-btn"
 					onclick={() => {
@@ -589,7 +660,7 @@
 					<span class="chrome-label">New Request For Proposal</span>
 				</button>
 			{/if}
-			{#if rfps.length > 0 || view !== 'list'}
+			{#if onRequests && (tenders.length > 0 || view !== 'list')}
 				<button
 					type="button"
 					class="chrome-btn"
@@ -605,44 +676,8 @@
 					<span class="chrome-label">Lifecycle</span>
 				</button>
 			{/if}
-			{#if testMode}
-				<button
-					type="button"
-					class="chrome-btn"
-					class:is-on={testFlagsOpen}
-					onclick={toggleTestFlags}
-					title={testFlagsOpen ? 'Hide test flags' : 'Test flags'}
-					aria-label={testFlagsOpen ? 'Hide test flags' : 'Test flags'}
-					aria-pressed={testFlagsOpen}
-				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-					</svg>
-					<span class="chrome-label">Test flags</span>
-				</button>
-			{/if}
 		</div>
 	</header>
-
-	{#if testMode && testFlagsOpen}
-		<div class="border-y border-gray-200 py-3 text-sm dark:border-gray-700">
-			<label class="flex cursor-pointer items-start gap-2">
-				<input
-					type="checkbox"
-					class="mt-1"
-					checked={demoAdvanceEnabled}
-					onchange={(e) => setDemoAdvanceEnabled((e.target as HTMLInputElement).checked)}
-				/>
-				<span>
-					<span class="font-medium">Demo: manual stage advance</span>
-					<span class="mt-0.5 block text-xs text-gray-500">
-						When enabled, the creator of a request can jump to the next lifecycle stage at any time
-						(test mode only).
-					</span>
-				</span>
-			</label>
-		</div>
-	{/if}
 
 	{#if !hasCrypto}
 		<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -650,8 +685,8 @@
 		</div>
 	{/if}
 
-	{#if error}
-		<div class="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>
+	{#if notice}
+		<div class="rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">{notice}</div>
 	{/if}
 	{#if actionMsg}
 		<div class="rounded-lg bg-green-50 p-3 text-sm text-green-800">{actionMsg}</div>
@@ -663,7 +698,7 @@
 	{#if view === 'list'}
 		{#if loading}
 			<p class="text-gray-500">Loading requests…</p>
-		{:else if rfps.length === 0}
+		{:else if tenders.length === 0}
 			<div class="empty-page py-16 text-center">
 				<p class="text-gray-500">No requests yet. Create a Request For Proposal to get started.</p>
 			</div>
@@ -676,18 +711,18 @@
 			{/if}
 			{#if narrow}
 				<div class="divide-y divide-gray-200 dark:divide-gray-700">
-					{#each rfps as rfp}
+					{#each tenders as tender}
 						<article class="py-3">
 							<div class="flex items-start justify-between gap-2">
 								<div class="min-w-0">
-									<div class="font-medium text-gray-900 dark:text-white">{rfp.title}</div>
-									<div class="mt-0.5 font-mono text-xs text-gray-400">{rfp.rfp_id}</div>
+									<div class="font-medium text-gray-900 dark:text-white">{tender.title}</div>
+									<div class="mt-0.5 font-mono text-xs text-gray-400">{tender.id}</div>
 								</div>
-								<span class="shrink-0 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
+								<span class="shrink-0 text-xs {statusClass(tender.status)}">{statusLabel(tender.status)}</span>
 							</div>
 							<div class="mt-1 flex items-center justify-between text-xs text-gray-500">
-								<span>Closes {new Date((rfp.closes_at || 0) * 1000).toLocaleString()}</span>
-								<button class="text-blue-600" onclick={() => openDetail(rfp)}>Open</button>
+								<span>Closes {new Date((tender.closes_at || 0) * 1000).toLocaleString()}</span>
+								<button class="text-blue-600" onclick={() => openDetail(tender)}>Open</button>
 							</div>
 						</article>
 					{/each}
@@ -705,16 +740,16 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each rfps as rfp}
+							{#each tenders as tender}
 								<tr class="border-t border-gray-100 dark:border-gray-700">
-									<td class="px-4 py-3 font-mono text-xs">{rfp.rfp_id}</td>
-									<td class="truncate px-4 py-3">{rfp.title}</td>
+									<td class="px-4 py-3 font-mono text-xs">{tender.id}</td>
+									<td class="truncate px-4 py-3">{tender.title}</td>
 									<td class="px-4 py-3">
-										<span class="rounded-full px-2 py-0.5 text-xs {statusClass(rfp.status)}">{statusLabel(rfp.status)}</span>
+										<span class="rounded-full px-2 py-0.5 text-xs {statusClass(tender.status)}">{statusLabel(tender.status)}</span>
 									</td>
-									<td class="px-4 py-3 text-gray-500">{new Date((rfp.closes_at || 0) * 1000).toLocaleString()}</td>
+									<td class="px-4 py-3 text-gray-500">{new Date((tender.closes_at || 0) * 1000).toLocaleString()}</td>
 									<td class="px-4 py-3 text-right">
-										<button class="text-blue-600 hover:underline" onclick={() => openDetail(rfp)}>Open</button>
+										<button class="text-blue-600 hover:underline" onclick={() => openDetail(tender)}>Open</button>
 									</td>
 								</tr>
 							{/each}
@@ -742,6 +777,17 @@
 					<span class="text-sm text-gray-600">Description</span>
 					<textarea class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" rows="3" bind:value={formDescription}></textarea>
 				</label>
+				<label class="block md:col-span-2">
+					<span class="text-sm text-gray-600">Requesting department</span>
+					<select class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={formDepartment}>
+						{#each departments as dept}
+							<option value={dept.id}>{dept.id}</option>
+						{/each}
+					</select>
+					{#if departments.length === 0}
+						<span class="mt-1 block text-xs text-gray-500">A request is made on behalf of a department; none is listed yet.</span>
+					{/if}
+				</label>
 				<label class="block">
 					<span class="text-sm text-gray-600">Opens</span>
 					<input type="datetime-local" class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={formOpens} />
@@ -755,10 +801,24 @@
 				<p class="font-medium text-gray-700 dark:text-gray-200">Default scoring rubric</p>
 				<p class="mt-1">
 					Evaluators score each bid on <strong>Price</strong> and <strong>Quality</strong>. Each criterion is rated
-					from 0 to 100. Price counts for 50% of the total score and Quality for 50% (weighted average).
+					from 0 to {MAX_MARK}. Price counts for 50% of the total score and Quality for 50%; the bid's score out of
+					100 is the weighted average over evaluators.
 				</p>
 			</div>
-			<button class="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50" disabled={busy} onclick={createRfp}>
+			<fieldset class="mt-3" data-testid="lots-form">
+				<legend class="text-sm font-medium text-gray-700 dark:text-gray-300">{t('form_lots')}</legend>
+				<p class="text-xs text-gray-500">{t('form_lots_help')}</p>
+				{#each formLots as row, index}
+					<div class="mt-2 flex flex-wrap items-center gap-2" data-testid="lot-form-row">
+						<input class="w-20 rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" aria-label={t('form_lot_id')} placeholder={t('form_lot_id')} bind:value={row.id} />
+						<input class="min-w-0 flex-1 rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" aria-label={t('form_lot_title')} placeholder={t('form_lot_title')} bind:value={row.title} />
+						<input class="w-36 rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" aria-label={t('form_lot_budget')} placeholder={t('form_lot_budget')} inputmode="decimal" bind:value={row.budget} />
+						<button type="button" class="text-sm text-red-600" onclick={() => (formLots = formLots.filter((_, i) => i !== index))}>{t('form_lot_remove')}</button>
+					</div>
+				{/each}
+				<button type="button" class="mt-2 text-sm text-blue-600 hover:underline" onclick={() => (formLots = [...formLots, { id: '', title: '', budget: '' }])}>{t('form_lot_add')}</button>
+			</fieldset>
+			<button class="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50" disabled={busy || !formDepartment} onclick={createTender}>
 				{busy ? 'Creating…' : 'Create draft'}
 			</button>
 		</section>
@@ -774,47 +834,152 @@
 			<div class="flex flex-wrap items-center gap-2">
 				<h2 class="text-lg font-medium">{selected.title}</h2>
 				<span class="rounded-full px-2 py-0.5 text-xs {statusClass(selected.status)}">{statusLabel(selected.status)}</span>
-				<span class="font-mono text-xs text-gray-500">{selected.rfp_id}</span>
+				<span class="font-mono text-xs text-gray-500">{selected.id}</span>
 			</div>
-			<p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{selected.description}</p>
+			{#if selected.description}
+				<p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{selected.description}</p>
+			{/if}
 			<p class="mt-1 text-xs text-gray-500">
-				Requester {shortPrincipal(selected.requester_id)} · Opens {new Date((selected.opens_at || 0) * 1000).toLocaleString()} · Closes
+				Requested by {selected.requester || '—'} · Opens {new Date((selected.opens_at || 0) * 1000).toLocaleString()} · Closes
 				{new Date((selected.closes_at || 0) * 1000).toLocaleString()}
 			</p>
+			{#if selected.status === 'contracted' && selected.winner}
+				<p class="mt-1 text-xs text-gray-500">
+					Awarded to bid <span class="font-mono">{selected.winner}</span>{#if selected.contract}
+						· contract
+						<button type="button" class="font-mono text-blue-600 hover:underline" onclick={() => openContract(selected.contract)}>{selected.contract}</button>{/if}
+				</p>
+			{/if}
 
 			<div class="mt-4 flex flex-wrap gap-2">
-				{#if canDemoAdvance}
-					<button
-						class="rounded border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100"
-						disabled={busy}
-						onclick={demoAdvanceStage}
-					>
-						Demo: advance to {nextStageLabel(selected.status)}
-					</button>
+				{#if selected.status === 'draft' && canManage}
+					<button class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={publishTender}>Publish</button>
 				{/if}
-				{#if selected.status === 'draft' && (isAdmin || selected.requester_id === me)}
-					<button class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={publishRfp}>Publish</button>
+				{#if selected.status === 'open' && !biddingEnded && canManage}
+					<button class="rounded bg-yellow-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={closeTender}>Close bidding</button>
 				{/if}
-				{#if selected.status === 'open' && isAdmin}
-					<button class="rounded bg-yellow-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={closeRfp}>Close bidding</button>
+				{#if (selected.status === 'closed' || (selected.status === 'open' && biddingEnded)) && canManage}
+					<button class="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={revealBids}>Reveal bids &amp; start evaluation</button>
 				{/if}
-				{#if selected.status === 'evaluation'}
-					<button class="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={computeTotals}>Compute totals</button>
-				{/if}
-				{#if selected.status === 'evaluation' && isAdmin}
-					<button class="rounded bg-purple-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={awardRfp}>Award</button>
-				{/if}
-				{#if selected.status === 'award' && isAdmin}
-					<button class="rounded bg-emerald-600 px-3 py-1.5 text-sm text-white" disabled={busy} onclick={executeContract}>Execute contract</button>
+				{#if selected.status === 'evaluation' && canManage && lots.length === 0}
+					<button class="rounded bg-purple-600 px-3 py-1.5 text-sm text-white" disabled={busy || bids.length === 0} onclick={awardTender}>Award</button>
 				{/if}
 			</div>
+			{#if selected.status === 'evaluation' && canManage && lots.length === 0}
+				<p class="mt-2 text-xs text-gray-500">
+					Awarding signs the contract with the vendor. Without a selection the best-scored bid wins; choosing a
+					lower-scored bid needs a justification.
+				</p>
+				<label class="mt-2 block text-sm">
+					<span class="text-gray-600">Justification (optional)</span>
+					<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={awardJustification} />
+				</label>
+			{/if}
 		</section>
 
-		{#if selected.status === 'open'}
+		{#if lots.length > 0}
+			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700" data-testid="lots">
+				<h3 class="font-medium">{t('lots_title', { count: lots.length })}</h3>
+				<div class="mt-2 overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead class="text-left text-gray-500">
+							<tr>
+								<th class="py-1 pr-4">{t('lot_col_id')}</th>
+								<th class="py-1 pr-4">{t('lot_col_name')}</th>
+								<th class="py-1 pr-4 text-right">{t('lot_col_budget')}</th>
+								<th class="py-1 pr-4 text-right">{t('lot_col_bids')}</th>
+								<th class="py-1 pr-4">{t('lot_col_winner')}</th>
+								<th class="py-1 pr-4">{t('lot_col_status')}</th>
+								<th class="py-1">{t('lot_col_contract')}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each lots as lot (lot.id)}
+								<tr class="border-t border-gray-100 dark:border-gray-700" data-testid="lot-row">
+									<td class="py-1 pr-4 font-mono text-xs">{lot.id}</td>
+									<td class="py-1 pr-4">{lot.title}</td>
+									<td class="py-1 pr-4 text-right">{lot.estimated_value == null ? '—' : contextReady ? money(lot.estimated_value, facts.currency, facts.decimals) : '…'}</td>
+									<td class="py-1 pr-4 text-right">{detailReady ? bidsOfLot(bids, lot).length : '…'}</td>
+									<td class="py-1 pr-4">{detailReady ? (winningBid(bids, lot)?.vendor ?? '—') : '…'}</td>
+									<td class="py-1 pr-4">{t(`lot_status_${lot.status}`)}</td>
+									<td class="py-1">
+										{#if lot.contract}
+											<button type="button" class="font-mono text-xs text-blue-600 hover:underline" onclick={() => openContract(lot.contract!)}>{lot.contract}</button>
+										{:else}
+											—
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				{#if selected.status === 'evaluation' && mayDecideLots}
+					{#each openLots(lots) as lot (lot.id)}
+						<div class="mt-4 rounded-lg border border-gray-100 p-3 dark:border-gray-700" data-testid="lot-award">
+							<h4 class="text-sm font-medium">{t('lot_award_title', { lot: lot.id, title: lot.title })}</h4>
+							{#each bidsOfLot(bids, lot).filter((b) => !b.sealed) as bid (bid.id)}
+								<label class="mt-2 flex items-center gap-2 text-sm">
+									<input type="radio" name="winner-{lot.id}" value={bid.id} bind:group={lotWinners[lot.id]} />
+									{bid.vendor} <span class="font-mono text-xs text-gray-500">{bid.id}</span>{#if bid.score} · {t('lot_bid_score', { score: bid.score })}{/if}
+								</label>
+							{:else}
+								<p class="mt-2 text-xs text-gray-500">{t('lot_no_evaluated_bids')}</p>
+							{/each}
+							<p class="mt-2 text-xs text-gray-500">{t('lot_award_help')}</p>
+							<label class="mt-2 block text-sm">
+								<span class="text-gray-600">{t('lot_justification')}</span>
+								<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={lotJustifications[lot.id]} />
+							</label>
+							<label class="mt-2 block text-sm">
+								<span class="text-gray-600">{t('lot_void_reason')}</span>
+								<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={lotReasons[lot.id]} />
+							</label>
+							<div class="mt-3 flex flex-wrap gap-2">
+								<button type="button" class="rounded bg-purple-600 px-3 py-1.5 text-sm text-white disabled:opacity-50" disabled={busy || bidsOfLot(bids, lot).length === 0} onclick={() => awardLot(lot)}>
+									{t('lot_award')}
+								</button>
+								<button type="button" class="rounded border px-3 py-1.5 text-sm disabled:opacity-50 dark:border-gray-600" disabled={busy} onclick={() => voidLot(lot)}>
+									{t('lot_void')}
+								</button>
+							</div>
+						</div>
+					{/each}
+				{/if}
+			</section>
+		{/if}
+
+		{#if selected.status === 'open' && !biddingEnded && can('bid.submit')}
 			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
 				<h3 class="font-medium">Submit sealed bid</h3>
-				<p class="text-xs text-gray-500">Encrypted with vetKeys — only you can read until you share after close.</p>
+				<p class="text-xs text-gray-500">
+					Encrypted with vetKeys for you and the requesting department's staff; the realm keeps it sealed until bidding
+					closes.
+				</p>
 				<div class="mt-3 grid gap-3 md:grid-cols-2">
+					<label class="block">
+						<span class="text-sm">Bidding as</span>
+						<select class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidVendor}>
+							{#each organizations as org}
+								<option value={org.id}>{org.id}</option>
+							{/each}
+						</select>
+						{#if organizations.length === 0}
+							<span class="mt-1 block text-xs text-gray-500">Bids are placed for a registered organization you represent; none is registered yet.</span>
+						{/if}
+					</label>
+					{#if lots.length > 0}
+						<label class="block">
+							<span class="text-sm">{t('bid_lot')}</span>
+							<select class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidLot} data-testid="bid-lot">
+								<option value="">{t('bid_lot_choose')}</option>
+								{#each openLots(lots) as lot (lot.id)}
+									<option value={lot.id}>{lot.id} — {lot.title}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
 					<label class="block">
 						<span class="text-sm">Amount (quote)</span>
 						<input class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" bind:value={bidAmount} />
@@ -828,68 +993,67 @@
 						<textarea class="mt-1 w-full rounded border px-3 py-2 dark:border-gray-600 dark:bg-gray-900" rows="2" bind:value={bidTechnical}></textarea>
 					</label>
 				</div>
-				<button class="mt-3 rounded bg-green-600 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={busy || !hasCrypto} onclick={submitBid}>
+				<button class="mt-3 rounded bg-green-600 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={busy || !hasCrypto || !bidVendor} onclick={submitBid}>
 					Submit sealed bid
 				</button>
 			</section>
 		{/if}
 
 		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
-			<h3 class="font-medium">Bids ({bids.length})</h3>
-			{#if bids.length === 0}
+			<h3 class="font-medium">Bids ({detailReady ? bids.length : '…'})</h3>
+			{#if !detailReady}
+				<p class="text-sm text-gray-500">…</p>
+			{:else if bids.length === 0}
 				<p class="text-sm text-gray-500">No bids yet.</p>
 			{:else}
 				<ul class="mt-2 space-y-3">
 					{#each bids as bid}
 						<li class="rounded-lg border border-gray-100 p-3 dark:border-gray-700">
 							<div class="flex flex-wrap items-center justify-between gap-2">
-								<span class="font-mono text-xs">{bid.bid_id}</span>
-								<span class="text-xs text-gray-500">vendor {shortPrincipal(bid.vendor_id)} · {bid.seal_status}</span>
-								{#if bid.total_score}
-									<span class="text-sm font-medium">Score {bid.total_score}</span>
+								<span class="font-mono text-xs">{bid.id}</span>
+								<span class="text-xs text-gray-500">vendor {bid.vendor} · {bid.sealed ? 'sealed' : 'revealed'}{#if bid.lot} · {t('bid_for_lot', { lot: bid.lot })}{/if}</span>
+								{#if !bid.sealed && bid.score}
+									<span class="text-sm font-medium">Score {bid.score}</span>
+								{/if}
+								{#if selected.winner === bid.id}
+									<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">Winner</span>
 								{/if}
 							</div>
 
-							{#if selected.status === 'evaluation' && bid.vendor_id === me && bid.seal_status === 'revealed'}
-								<button class="mt-2 rounded border border-blue-300 px-2 py-1 text-xs text-blue-700" disabled={busy} onclick={() => shareBidWithEvaluators(bid)}>
-									Share with evaluators
-								</button>
-							{/if}
-
-							{#if ['evaluation', 'award', 'contract_execution'].includes(selected.status)}
-								{#if decryptedBids[bid.bid_id]}
+							{#if ['evaluation', 'contracted'].includes(selected.status)}
+								{#if decryptedBids[bid.id]}
 									<div class="mt-2 rounded bg-gray-50 p-2 text-sm dark:bg-gray-800">
-										<div>Amount: {decryptedBids[bid.bid_id]?.amount ?? '—'}</div>
-										<div>{decryptedBids[bid.bid_id]?.description ?? ''}</div>
+										<div>Amount: {decryptedBids[bid.id]?.amount ?? '—'}</div>
+										<div>{decryptedBids[bid.id]?.description ?? ''}</div>
 									</div>
-								{:else if decryptedBids[bid.bid_id] === null}
-									<p class="mt-2 text-xs text-amber-700">Encrypted — waiting for vendor to share with evaluators.</p>
+								{:else if decryptedBids[bid.id] === null}
+									<p class="mt-2 text-xs text-gray-500">Contents are readable by the vendor and the requesting department's staff.</p>
 								{/if}
 
-								{#if selected.status === 'evaluation' && (isAdmin || profiles.includes('member'))}
+								{#if selected.status === 'evaluation' && !bid.sealed && can('bid.evaluate')}
 									<div class="mt-2 grid gap-2 md:grid-cols-2">
-										{#each parseRubric(selected.rubric_json) as crit}
+										{#each rubricCriteria(selected.rubric) as crit}
 											<label class="block text-xs">
-												{crit.label} (0–{crit.max_score})
+												{crit.label} (0–{MAX_MARK}, weight {formatPercent(crit.weight)}%)
 												<input
 													type="number"
 													min="0"
-													max={crit.max_score}
+													max={MAX_MARK}
 													class="mt-1 w-full rounded border px-2 py-1 dark:border-gray-600 dark:bg-gray-900"
 													oninput={(e) => {
 														const val = Number((e.target as HTMLInputElement).value);
-														scoreInputs[bid.bid_id] = { ...(scoreInputs[bid.bid_id] ?? {}), [crit.id]: val };
+														scoreInputs[bid.id] = { ...(scoreInputs[bid.id] ?? {}), [crit.id]: val };
 													}}
 												/>
 											</label>
 										{/each}
 									</div>
-									<button class="mt-2 text-xs text-blue-600 hover:underline" onclick={() => submitScoresForBid(bid.bid_id)}>Save scores</button>
+									<button class="mt-2 text-xs text-blue-600 hover:underline" disabled={busy} onclick={() => submitScoresForBid(bid.id)}>Save scores</button>
 								{/if}
 
-								{#if selected.status === 'evaluation' && isAdmin}
+								{#if selected.status === 'evaluation' && canManage && lots.length === 0}
 									<label class="mt-2 flex items-center gap-2 text-sm">
-										<input type="radio" name="winner" value={bid.bid_id} bind:group={winningBidId} />
+										<input type="radio" name="winner" value={bid.id} bind:group={winningBidId} />
 										Select as winner
 									</label>
 								{/if}
@@ -900,16 +1064,42 @@
 			{/if}
 		</section>
 
-		<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
-			<h3 class="font-medium">Audit log</h3>
-			<ul class="mt-2 space-y-1 text-xs">
-				{#each transitions as t}
-					<li class="font-mono text-gray-600 dark:text-gray-300">
-						{t.timestamp ? new Date(t.timestamp * 1000).toISOString() : '—'} · {t.from_status || '∅'} → {t.to_status} ·
-						{shortPrincipal(t.actor_id)} · {t.note}
-					</li>
-				{/each}
-			</ul>
-		</section>
+		{#if events}
+			<section class="sm:rounded-xl sm:border sm:border-gray-200 sm:p-4 sm:dark:border-gray-700">
+				<h3 class="font-medium">Audit log</h3>
+				{#if events.length === 0}
+					<p class="text-sm text-gray-500">No activity recorded yet.</p>
+				{:else}
+					<ul class="mt-2 space-y-1 text-xs">
+						{#each events as e}
+							<li class="font-mono text-gray-600 dark:text-gray-300">
+								{e.at ? new Date(e.at * 1000).toISOString() : '—'} · {opLabel(e.op)} · {shortPrincipal(e.user)}{#if e.result?.proposal}
+									· proposal {e.result.proposal}{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+		{/if}
+	{:else if view === 'contracts'}
+		{#if contextReady}
+			<Contracts {read} {facts} {narrow} onOpen={openContract} />
+		{:else}
+			<p class="text-gray-500">{t('contracts_loading')}</p>
+		{/if}
+	{:else if view === 'contract'}
+		{#if contextReady}
+			<ContractPage
+				{read}
+				{run}
+				{facts}
+				{contractId}
+				{mayAmend}
+				onOpenTender={(id) => openDetail({ id })}
+				navigate={(path) => ctx.navigate?.(path)}
+			/>
+		{:else}
+			<p class="text-gray-500">{t('contract_loading')}</p>
+		{/if}
 	{/if}
 </div>

@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "description": "See token balances and transfer history for your realm's treasury, send payments when allowed, and look up balances tied to members or invoices.",
   "author": "Smart Social Contracts",
   "repository": "https://github.com/smart-social-contracts/realms-extension-vault",
@@ -9,6 +9,15 @@
     "min_version": "0.1.0",
     "max_version": "0.2.x"
   },
+  "operations": [
+    "status",
+    "token_catalog",
+    "treasury_view",
+    "ledger_view",
+    "user_list",
+    "transfer_create",
+    "invoice_refresh"
+  ],
   "permissions": [
     "treasury_management"
   ],
@@ -46,26 +55,6 @@
     "it": "Caveau",
     "zh-CN": "金库",
     "ca-valencia": "Cofre"
-  },
-  "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "get_active_tokens": "treasury.view",
-      "get_vault_balance": "treasury.view",
-      "get_balance": "treasury.view",
-      "get_transactions": "treasury.view",
-      "get_status": "treasury.view",
-      "lookup_balance": "treasury.view",
-      "list_subaccounts": "treasury.view",
-      "refresh": "treasury.view",
-      "refresh_vault_balance": "treasury.view",
-      "register_subaccount": "treasury.manage",
-      "unregister_subaccount": "treasury.manage",
-      "transfer": {
-        "level": "transfer.create",
-        "governed": true
-      }
-    }
   },
   "query_functions": [
     "get_status",

@@ -1,5 +1,6 @@
 /**
- * Playwright fixture for a realm started with `realms local start` (see .github/actions/local-realm).
+ * Playwright fixture for a realm started with `realms local start` (see local-realm.md, and .github/actions/local-realm
+ * for CI).
  *
  * The released realm is a production build: there is no test-mode login. Like the realm's own e2e, this
  * plays a federation portal host, which the realm frontend accepts through its portal bridge. The host
@@ -9,7 +10,6 @@
 import { execFileSync } from 'node:child_process';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Actor, HttpAgent } from '@dfinity/agent';
 import { DelegationChain, Ed25519KeyIdentity } from '@dfinity/identity';
 import type { FrameLocator, Page } from '@playwright/test';
 
@@ -72,18 +72,26 @@ export interface OpenedExtension {
   ext: FrameLocator;
   /** The realm's frame around it. */
   realm: FrameLocator;
-  /** The signed-in admin. */
+  /** The signed-in user: an admin, or a plain member with `asMember`. */
   user: Ed25519KeyIdentity;
   principal: string;
   close: () => Promise<void>;
 }
 
-/** Log in as a fresh admin and open `/extensions/<id>` (or `path`) in the portal host. */
-export async function openExtension(page: Page, id: string, path = `/extensions/${id}`): Promise<OpenedExtension> {
+/**
+ * Log in as a fresh admin (or, with `asMember`, a fresh plain member) and open `/extensions/<id>`
+ * (or `path`) in the portal host.
+ */
+export async function openExtension(
+  page: Page,
+  id: string,
+  { path = `/extensions/${id}`, asMember = false }: { path?: string; asMember?: boolean } = {},
+): Promise<OpenedExtension> {
   const status = localStatus();
   const user = Ed25519KeyIdentity.generate();
   const principal = user.getPrincipal().toText();
-  execFileSync(REALMS, ['local', 'add-admin', principal], { stdio: 'ignore' });
+  if (asMember) realmCall('user_add', { user: principal });
+  else execFileSync(REALMS, ['local', 'add-admin', principal], { stdio: 'ignore' });
 
   await page.exposeFunction('__signDelegation', async (sessionPublicKeyDer: number[]) => {
     const der = new Uint8Array(sessionPublicKeyDer);
@@ -118,19 +126,48 @@ export async function openExtension(page: Page, id: string, path = `/extensions/
   };
 }
 
-const readIdl = ({ IDL }: { IDL: typeof import('@dfinity/candid').IDL }) =>
-  IDL.Service({ read: IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']) });
-
-/** A public read operation of the realm, as anonymous: the state to check after a flow. */
-export async function readOp(name: string, args: Record<string, unknown> = {}): Promise<Record<string, any>> {
-  const status = localStatus();
-  const host = `http://127.0.0.1:${new URL(status.url).port || 8000}`;
-  const agent = await HttpAgent.create({ host, shouldFetchRootKey: true });
-  const actor = Actor.createActor<{ read: (n: string, a: string) => Promise<string> }>(readIdl as never, {
-    agent,
-    canisterId: status.canisters.realm_backend,
+/** An operation of the realm as the local identity (an admin): to set a realm up and to read back its state. */
+export function realmCall(name: string, args: Record<string, unknown> = {}): Record<string, any> {
+  // The CLI wraps its output to the terminal's width and colours it when Playwright asks for colour: a wide,
+  // plain terminal keeps the JSON whole.
+  const { FORCE_COLOR: _, ...env } = process.env;
+  const out = execFileSync(REALMS, ['local', 'call', name, JSON.stringify(args)], {
+    encoding: 'utf8',
+    env: { ...env, COLUMNS: '100000', NO_COLOR: '1' },
   });
-  return JSON.parse(await actor.read(name, JSON.stringify(args)));
+  const reply = JSON.parse(out.slice(out.indexOf('{')));
+  if (reply.ok === false) throw new Error(`${name}: ${reply.error}`);
+  return reply;
+}
+
+/**
+ * Make a vote decide at once: no voting window, and one yes passes. Set while the root still approves alone,
+ * since changing the voting rules is itself governed.
+ */
+export function makeOneYesDecideAtOnce(): void {
+  realmCall('governance_update', { voting_window: 0, voting_threshold: 0 });
+}
+
+/** The local identity, a member, votes yes on ``proposal``: its action runs at once. */
+function pass(proposal: string): void {
+  realmCall('proposal_vote', { proposal, choice: 'yes' });
+}
+
+/**
+ * How the realm's root department approves: the extensions' governed actions apply at once only under 1 of 1.
+ * Changing the policy is itself governed, so under a voting policy the change is voted through.
+ */
+export function setRootPolicy(m: number, n: number): void {
+  const root = realmCall('department_list').departments.find((d: { is_root: boolean }) => d.is_root);
+  const reply = realmCall('department_set_policy', { department: root.id, m, n });
+  if (reply.requires_vote) pass(reply.proposal);
+}
+
+/** Vote yes on the one open proposal, e.g. one the extension just filed. */
+export function passTheOpenProposal(): void {
+  const { proposals } = realmCall('proposal_list', { status: 'voting' });
+  if (proposals.length !== 1) throw new Error(`expected one open proposal, found ${proposals.length}`);
+  pass(proposals[0].id);
 }
 
 /** A principal nobody holds the key to: a party for a flow that needs another member's id. */

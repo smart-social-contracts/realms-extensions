@@ -1,7 +1,12 @@
 {
   "name": "extensions_manager",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "ggg_api_version": 1,
+  "operations": [
+    "extension_list",
+    "codex_status",
+    "extension_set_access"
+  ],
   "capabilities": [
     "extension_access.list",
     "extension_access.grant",
@@ -30,34 +35,5 @@
     "admin"
   ],
   "show_in_sidebar": false,
-  "icon": "puzzle",
-  "entry_access": {
-    "default": "realm.admin",
-    "functions": {
-      "grant_extension_to_user": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_extension_from_user": {
-        "level": "role.revoke",
-        "governed": true
-      },
-      "grant_extension_to_department": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_extension_from_department": {
-        "level": "role.revoke",
-        "governed": true
-      },
-      "grant_extension_to_profile": {
-        "level": "role.assign",
-        "governed": true
-      },
-      "revoke_extension_from_profile": {
-        "level": "role.revoke",
-        "governed": true
-      }
-    }
-  }
+  "icon": "puzzle"
 }

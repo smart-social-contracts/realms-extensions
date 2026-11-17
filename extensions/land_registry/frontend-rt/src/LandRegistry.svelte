@@ -1,56 +1,128 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, onDestroy, tick } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import AccessDenied from '../../../_shared/frontend-rt/AccessDenied.svelte';
+	import { UTC, formatInZone, isKnownZone } from '../../../_shared/frontend/realm-time';
+	import { loadExtensionI18n, t } from './lib/i18n';
+	import {
+		MAX_ZONES,
+		NO_ZONE,
+		inZone,
+		isDefinedZone,
+		licencesByParcel,
+		planningZones,
+		sameZones,
+		toggleZone,
+		zoneName,
+		zonesOf,
+		type Licence,
+		type Zone,
+	} from './planning';
 
 	let { ctx }: { ctx: any } = $props();
 
-	let lands: any[] = $state([]);
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
+
+	type Reply = { ok: boolean; error?: string; [key: string]: any };
+	type Parcel = {
+		id: string;
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+		land_type: string;
+		status: string;
+		owner: string;
+		owner_kind: string;
+		owner_id: string;
+		token_id: string;
+		/** The planning zones the parcel lies in (`lies_in`), by id. */
+		zones: string[];
+	};
+	type MapZone = { id: string; name: string; kind: string };
+
+	let lands: Parcel[] = $state([]);
+	let zones: MapZone[] = $state([]);
+	// The zones the realm defines (planning areas, districts): they have no shape, so the map does not draw them.
+	let planning: Zone[] = $state([]);
+	// The licences are read when a parcel is opened, not with the registry: `license_list` has no filter by parcel, so it is every page.
+	let licences: Map<string, Licence[]> = $state(new Map());
+	let licencesProblem = $state('');
+	let licencesCapped = $state(false);
+	let licencesLoading = $state(false);
+	let licencesRead = false;
+	// The zones `land_map` lists are cut at MAX_PAGES pages: said, when that is where it stopped.
+	let zonesCapped = $state(false);
+	let parcelsCapped = $state(false);
+	let permissions: string[] = $state([]);
+	let realmZone = $state(UTC);
+	let zoneFilter = $state('');
+	let zoneChoice: string[] = $state([]);
+	let userNames: Record<string, string> = $state({});
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
-	let accessDeniedOp = $state('');
+	let accessDeniedOp: string | null = $state(null);
 	let success = $state('');
 	let expanded = $state(false);
 	let sidebarWidth = $state(380);
 	let isResizing = $state(false);
+	let principal = $state('');
 
 	let selectedLandId = $state('');
-	let drawMode = $state(false);
-	let isDrawing = $state(false);
-	let drawPoints: [number, number][] = $state([]);
-	let paintCells: string[] = $state([]);
-	let paintableCount = $state(0);
-	let paintResolution = $state(8);
-	let drawLandName = $state('');
+	let registerMode = $state(false);
+	let registration = $state({
+		name: '',
+		kind: 'unassigned',
+		x: 0,
+		y: 0,
+		width: 1,
+		height: 1,
+		owner_type: 'user',
+		owner_id: '',
+	});
 
 	let mapContainer: HTMLDivElement | undefined = $state();
 	let mapReady = $state(false);
+	let mapUnavailable = $state(false);
 	let map: any = null;
 	let maplibregl: any = null;
 	let h3: any = null;
+	// h3-js, asked for at the start: it tells a member's home cell from a zone the realm defines when `land_map` does not say.
+	let h3Ready: Promise<unknown> = Promise.resolve();
 	let landPopup: any = null;
 	let didFitBounds = false;
+	let unsubscribePrincipal: (() => void) | null = null;
 
-	let ownership = $state({ land_id: '', owner_user_id: '', owner_organization_id: '', owner_type: 'none' });
-	let landUpdate = $state({ land_id: '', land_type: '', status: '' });
-	let nftMint = $state({ land_id: '', owner_principal: '' });
+	let transfer = $state({ owner_type: 'user', owner_id: '', order: '' });
+	let disputeReason = $state('');
 	let submitting = $state(false);
 
 	const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
-	const SOURCE_LANDS = 'land-parcels';
-	const SOURCE_POINTS = 'land-points';
-	const SOURCE_HIGHLIGHT = 'land-highlight';
-	const SOURCE_DRAFT_LINE = 'draft-line';
-	const SOURCE_DRAFT_POINTS = 'draft-points';
-	const SOURCE_PREVIEW = 'draw-preview';
+	const SOURCE_ZONES = 'zone-cells';
+	const SOURCE_POINTS = 'zone-points';
+	const H3_WAIT_MS = 3000;
+	const PAGE = 500;
+	const MAX_PAGES = 50;
+	const MAX_SPAN = 16;
+	const ACCESS_REFUSAL = /^\S+ needs (\S+)$/;
+	// What `land_zone_set` needs (realms-gos api/assets.py): `me` lists the permissions the member holds, `all` standing for every one.
+	const ZONE_PERMISSION = 'realm.configure';
+	const LICENCE_STATUSES = ['applied', 'active', 'rejected', 'suspended', 'revoked', 'expired'];
 
-	const landStatuses = [
-		{ value: 'active', label: 'Active' },
-		{ value: 'disputed', label: 'Disputed' },
-		{ value: 'transferred', label: 'Transferred' },
-		{ value: 'revoked', label: 'Revoked' },
-	];
+	const STATUS_LABELS: Record<string, string> = {
+		active: 'Active',
+		disputed: 'Disputed',
+		transferred: 'Transferred',
+		revoked: 'Revoked',
+	};
 
 	const LAND_COLORS: Record<string, string> = {
 		residential: '#4ade80',
@@ -59,10 +131,14 @@
 		commercial: '#3b82f6',
 		unassigned: '#e5e7eb',
 	};
-	const DRAFT_PREVIEW_COLOR = '#2563eb';
+	const LAND_TYPES = Object.keys(LAND_COLORS);
 	const HEX_ZOOM_THRESHOLD = 10;
 
 	let selectedLand = $derived(lands.find((l) => l.id === selectedLandId) ?? null);
+	let knownUsers = $derived(Object.entries(userNames));
+	let visibleLands = $derived(inZone(lands, zoneFilter));
+	let canSetZones = $derived(permissions.includes('all') || permissions.includes(ZONE_PERMISSION));
+	let selectedLicences = $derived(selectedLand ? (licences.get(selectedLand.id) ?? []) : []);
 
 	function loadScript(src: string): Promise<void> {
 		return new Promise((resolve, reject) => {
@@ -73,7 +149,7 @@
 			const script = document.createElement('script');
 			script.src = src;
 			script.onload = () => resolve();
-			script.onerror = () => reject(new Error(`Failed to load ${src}`));
+			script.onerror = () => reject(new Error(`Could not fetch ${src}`));
 			document.head.appendChild(script);
 		});
 	}
@@ -88,7 +164,7 @@
 			link.rel = 'stylesheet';
 			link.href = href;
 			link.onload = () => resolve();
-			link.onerror = () => reject(new Error(`Failed to load ${href}`));
+			link.onerror = () => reject(new Error(`Could not fetch ${href}`));
 			document.head.appendChild(link);
 		});
 	}
@@ -110,7 +186,7 @@
 	async function loadH3Lib() {
 		if ((window as any).h3) return (window as any).h3;
 		const res = await fetch('https://unpkg.com/h3-js@4.2.1/dist/h3-js.umd.js');
-		if (!res.ok) throw new Error(`Failed to load h3-js: HTTP ${res.status}`);
+		if (!res.ok) throw new Error(`Could not fetch h3-js: HTTP ${res.status}`);
 		(0, eval)(await res.text());
 		return (window as any).h3;
 	}
@@ -131,33 +207,15 @@
 		return filtered;
 	}
 
-	function parseMetadata(raw: unknown): Record<string, unknown> | null {
-		if (!raw) return null;
-		try {
-			return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
-		} catch {
-			return null;
-		}
-	}
-
 	function landColor(type: string) {
 		return LAND_COLORS[type] || LAND_COLORS.unassigned;
 	}
 
-	function resolveH3Index(land: any): string | null {
-		if (land.h3_index) return land.h3_index;
-		if (land.h3_indexes?.length) return land.h3_indexes[0];
-		if (land.zones?.[0]?.h3_index) return land.zones[0].h3_index;
-		const meta = parseMetadata(land.metadata);
-		if (meta?.parent_zone) return String(meta.parent_zone);
-		return null;
-	}
-
-	function resolveAllH3Indexes(land: any): string[] {
-		if (land.h3_indexes?.length) return land.h3_indexes;
-		if (land.zones?.length) return land.zones.map((z: any) => z.h3_index).filter(Boolean);
-		const idx = resolveH3Index(land);
-		return idx ? [idx] : [];
+	function escapeHtml(text: unknown) {
+		return String(text ?? '').replace(
+			/[&<>"']/g,
+			(ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string
+		);
 	}
 
 	function getLandLatLng(h3Index: string | null): [number, number] | null {
@@ -171,128 +229,27 @@
 		}
 	}
 
-	function resolutionForZoom(zoom: number) {
-		if (zoom <= 8) return 6;
-		if (zoom <= 10) return 7;
-		if (zoom <= 13) return 8;
-		return 9;
-	}
-
-	function maxCellsForResolution(res: number) {
-		if (res <= 6) return 800;
-		if (res <= 8) return 1500;
-		return 2500;
-	}
-
-	function polygonToCells(points: [number, number][], resolution: number): string[] {
-		if (points.length < 3 || !h3) return [];
-		const ring = [...points];
-		const [lat0, lng0] = points[0];
-		const [latN, lngN] = points[points.length - 1];
-		if (lat0 !== latN || lng0 !== lngN) ring.push(points[0]);
-		try {
-			const cells = h3.polygonToCells(ring, resolution, false);
-			const cap = maxCellsForResolution(resolution);
-			return cells.length > cap ? cells.slice(0, cap) : cells;
-		} catch {
-			return [];
-		}
-	}
-
-	function occupiedH3Cells(): Set<string> {
-		const out = new SvelteSet<string>();
-		for (const land of lands) {
-			for (const idx of resolveAllH3Indexes(land)) out.add(idx);
-		}
-		return out;
-	}
-
-	function syncDraftPreview() {
-		if (!isDrawing || !h3 || !map) return;
-		if (drawPoints.length < 3) {
-			paintCells = [];
-			paintableCount = 0;
-			paintResolution = 0;
-			refreshPreviewLayer();
-			return;
-		}
-		const res = resolutionForZoom(map.getZoom());
-		const cells = polygonToCells(drawPoints, res);
-		const occupied = occupiedH3Cells();
-		paintCells = cells;
-		paintableCount = cells.filter((c) => !occupied.has(c)).length;
-		paintResolution = res;
-		refreshPreviewLayer();
-	}
-
-	function draftGeoJson() {
-		const coords = drawPoints.map(([lat, lng]) => [lng, lat]);
-		return {
-			line: {
-				type: 'FeatureCollection',
-				features:
-					coords.length >= 2
-						? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }]
-						: [],
-			},
-			points: {
-				type: 'FeatureCollection',
-				features: coords.map((c, i) => ({
-					type: 'Feature',
-					properties: { first: i === 0 },
-					geometry: { type: 'Point', coordinates: c },
-				})),
-			},
-		};
-	}
-
-	function refreshDraftLayers() {
-		if (!map || !mapReady) return;
-		const { line, points } = draftGeoJson();
-		map.getSource(SOURCE_DRAFT_LINE)?.setData(line);
-		map.getSource(SOURCE_DRAFT_POINTS)?.setData(points);
-	}
-
-	function refreshPreviewLayer() {
-		if (!map || !mapReady || !h3) return;
-		const color = DRAFT_PREVIEW_COLOR;
-		const features = paintCells.map((cell) => {
-			const boundary = h3.cellToBoundary(cell, true);
-			return {
-				type: 'Feature',
-				properties: { h3_index: cell, color },
-				geometry: { type: 'Polygon', coordinates: [boundary] },
-			};
-		});
-		map.getSource(SOURCE_PREVIEW)?.setData({ type: 'FeatureCollection', features });
-	}
-
-	function buildLandGeoJson() {
+	function buildZoneGeoJson() {
 		const features: any[] = [];
 		if (!h3) return { type: 'FeatureCollection', features };
 
-		for (const land of lands) {
-			for (const h3Index of resolveAllH3Indexes(land)) {
-				const isOwned = !!(land.owner_user_id || land.owner_organization_id);
-				const selected = land.id === selectedLandId;
-				try {
-					const boundary = h3.cellToBoundary(h3Index, true);
-					features.push({
-						type: 'Feature',
-						properties: {
-							land_id: land.id,
-							color: landColor(land.land_type),
-							fillOpacity: selected ? 0.85 : isOwned ? 0.7 : 0.5,
-							lineColor: selected ? '#2563eb' : isOwned ? '#1f2937' : '#9ca3af',
-							lineWidth: selected ? 3 : isOwned ? 2 : 1,
-							land_json: JSON.stringify(land),
-							h3_index: h3Index,
-						},
-						geometry: { type: 'Polygon', coordinates: [boundary] },
-					});
-				} catch {
-					/* skip */
-				}
+		for (const zone of zones) {
+			try {
+				const boundary = h3.cellToBoundary(zone.id, true);
+				features.push({
+					type: 'Feature',
+					properties: {
+						zone_id: zone.id,
+						color: landColor(zone.kind),
+						fillOpacity: 0.5,
+						lineColor: '#9ca3af',
+						lineWidth: 1,
+						zone_json: JSON.stringify(zone),
+					},
+					geometry: { type: 'Polygon', coordinates: [boundary] },
+				});
+			} catch {
+				/* not an h3 cell */
 			}
 		}
 		return { type: 'FeatureCollection', features };
@@ -302,43 +259,21 @@
 		const features: any[] = [];
 		if (!h3) return { type: 'FeatureCollection', features };
 
-		for (const land of lands) {
-			const h3Index = resolveH3Index(land);
-			const coords = getLandLatLng(h3Index);
+		for (const zone of zones) {
+			const coords = getLandLatLng(zone.id);
 			if (!coords) continue;
 			const [lat, lng] = coords;
-			const isOwned = !!(land.owner_user_id || land.owner_organization_id);
-			const selected = land.id === selectedLandId;
 			features.push({
 				type: 'Feature',
 				properties: {
-					land_id: land.id,
-					color: landColor(land.land_type),
-					strokeColor: selected ? '#2563eb' : isOwned ? '#1f2937' : '#22c55e',
-					radius: selected ? 11 : 8,
-					land_json: JSON.stringify(land),
-					h3_index: h3Index,
+					zone_id: zone.id,
+					color: landColor(zone.kind),
+					strokeColor: '#22c55e',
+					radius: 8,
+					zone_json: JSON.stringify(zone),
 				},
 				geometry: { type: 'Point', coordinates: [lng, lat] },
 			});
-		}
-		return { type: 'FeatureCollection', features };
-	}
-
-	function buildHighlightGeoJson() {
-		if (!selectedLand || !h3) return { type: 'FeatureCollection', features: [] };
-		const features: any[] = [];
-		for (const h3Index of resolveAllH3Indexes(selectedLand)) {
-			try {
-				const boundary = h3.cellToBoundary(h3Index, true);
-				features.push({
-					type: 'Feature',
-					properties: { land_id: selectedLand.id },
-					geometry: { type: 'Polygon', coordinates: [boundary] },
-				});
-			} catch {
-				/* skip */
-			}
 		}
 		return { type: 'FeatureCollection', features };
 	}
@@ -347,20 +282,14 @@
 		if (!map || !maplibregl || !h3 || (didFitBounds && !force)) return;
 		const bounds = new maplibregl.LngLatBounds();
 		let hasBounds = false;
-		for (const land of lands) {
-			for (const h3Index of resolveAllH3Indexes(land)) {
-				try {
-					for (const [lng, lat] of h3.cellToBoundary(h3Index, true)) {
-						bounds.extend([lng, lat]);
-						hasBounds = true;
-					}
-				} catch {
-					const coords = getLandLatLng(h3Index);
-					if (coords) {
-						bounds.extend([coords[1], coords[0]]);
-						hasBounds = true;
-					}
+		for (const zone of zones) {
+			try {
+				for (const [lng, lat] of h3.cellToBoundary(zone.id, true)) {
+					bounds.extend([lng, lat]);
+					hasBounds = true;
 				}
+			} catch {
+				/* not an h3 cell */
 			}
 		}
 		if (hasBounds) {
@@ -369,86 +298,73 @@
 		}
 	}
 
-	function flyToLand(land: any) {
-		if (!map || !h3) return;
-		const idx = resolveH3Index(land);
-		const coords = getLandLatLng(idx);
-		if (coords) {
-			map.flyTo({ center: [coords[1], coords[0]], zoom: Math.max(map.getZoom(), 12), duration: 700 });
-		}
-	}
-
 	function updateLayerVisibility() {
 		if (!map || !mapReady) return;
 		const showHex = map.getZoom() >= HEX_ZOOM_THRESHOLD;
-		for (const id of ['lands-fill', 'lands-line', 'land-highlight-fill', 'land-highlight-line']) {
+		for (const id of ['zones-fill', 'zones-line']) {
 			if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showHex ? 'visible' : 'none');
 		}
-		if (map.getLayer('land-points')) {
-			map.setLayoutProperty('land-points', 'visibility', showHex ? 'none' : 'visible');
-		}
-		const previewVis = drawMode && paintCells.length > 0 ? 'visible' : 'none';
-		for (const id of ['preview-fill', 'preview-line', 'draft-line-layer', 'draft-points-layer']) {
-			if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', previewVis);
+		if (map.getLayer('zone-points')) {
+			map.setLayoutProperty('zone-points', 'visibility', showHex ? 'none' : 'visible');
 		}
 	}
 
 	function renderMapData() {
 		if (!map || !mapReady || !h3) return;
-		map.getSource(SOURCE_LANDS)?.setData(buildLandGeoJson());
+		map.getSource(SOURCE_ZONES)?.setData(buildZoneGeoJson());
 		map.getSource(SOURCE_POINTS)?.setData(buildPointGeoJson());
-		map.getSource(SOURCE_HIGHLIGHT)?.setData(buildHighlightGeoJson());
-		refreshPreviewLayer();
 		updateLayerVisibility();
 	}
 
-	function selectLand(land: any | null, fly = false) {
-		selectedLandId = land?.id || '';
-		if (land) {
-			ownership = { ...ownership, land_id: land.id };
-			landUpdate = { land_id: land.id, land_type: land.land_type || '', status: land.status || '' };
-			nftMint = { ...nftMint, land_id: land.id, owner_principal: ctx.principal || '' };
-			if (fly) flyToLand(land);
+	/** Every licence of the realm, once: the parcels' panels read their own from them. */
+	async function loadLicences() {
+		if (licencesRead) return;
+		licencesRead = true;
+		licencesLoading = true;
+		try {
+			const rows = await readPages('license_list', 'licenses');
+			licences = licencesByParcel(rows.rows);
+			licencesProblem = rows.error;
+			licencesCapped = rows.capped;
+		} finally {
+			licencesLoading = false;
 		}
-		renderMapData();
 	}
 
-	function landPopupHtml(land: any, h3Index: string | null) {
-		const color = landColor(land.land_type);
-		const ownerInfo = land.owner_user_id
-			? `Owner: User ${land.owner_user_id}`
-			: land.owner_organization_id
-				? `Owner: Org ${land.owner_organization_id}`
-				: 'Available';
+	/** Read the registry again, licences included. */
+	async function refresh() {
+		licencesRead = false;
+		await loadLands(true);
+		if (selectedLandId) void loadLicences();
+	}
+
+	function selectLand(land: Parcel | null) {
+		selectedLandId = land?.id || '';
+		if (land) void loadLicences();
+		zoneChoice = land ? [...land.zones] : [];
+		transfer = { owner_type: 'user', owner_id: '', order: '' };
+		disputeReason = '';
+	}
+
+	function zonePopupHtml(zone: MapZone) {
+		const color = landColor(zone.kind);
 		return `<div style="padding:4px;font-size:13px;line-height:1.45">
-			<strong>${land.id}</strong><br>
-			Type: <span style="color:${color}">${land.land_type}</span><br>
-			${ownerInfo}
-			${h3Index ? `<br><span style="font-size:10px;color:#9ca3af">H3: ${h3Index}</span>` : ''}
+			<strong>${escapeHtml(zone.name || 'Zone')}</strong><br>
+			Type: <span style="color:${color}">${escapeHtml(zone.kind)}</span><br>
+			Not tied to a parcel
+			<br><span style="font-size:10px;color:#9ca3af">H3: ${escapeHtml(zone.id)}</span>
 		</div>`;
 	}
 
-	function onMapClick(e: any) {
-		if (isDrawing) {
-			drawPoints = [...drawPoints, [e.lngLat.lat, e.lngLat.lng]];
-			refreshDraftLayers();
-			syncDraftPreview();
-			return;
-		}
-		if (drawMode) return;
-	}
-
 	function onFeatureClick(e: any) {
-		if (isDrawing || drawMode) return;
 		const feature = e.features?.[0];
-		if (!feature?.properties?.land_json) return;
+		if (!feature?.properties?.zone_json) return;
 		try {
-			const land = JSON.parse(feature.properties.land_json);
-			selectLand(land, false);
+			const zone = JSON.parse(feature.properties.zone_json);
 			landPopup?.remove();
 			landPopup = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
 				.setLngLat(e.lngLat)
-				.setHTML(landPopupHtml(land, feature.properties.h3_index || null))
+				.setHTML(zonePopupHtml(zone))
 				.addTo(map);
 		} catch {
 			/* ignore */
@@ -458,17 +374,13 @@
 	function addMapLayers() {
 		if (!map) return;
 
-		map.addSource(SOURCE_LANDS, { type: 'geojson', data: buildLandGeoJson() });
-		map.addLayer({ id: 'lands-fill', type: 'fill', source: SOURCE_LANDS, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] } });
-		map.addLayer({ id: 'lands-line', type: 'line', source: SOURCE_LANDS, paint: { 'line-color': ['get', 'lineColor'], 'line-width': ['get', 'lineWidth'] } });
-
-		map.addSource(SOURCE_HIGHLIGHT, { type: 'geojson', data: buildHighlightGeoJson() });
-		map.addLayer({ id: 'land-highlight-fill', type: 'fill', source: SOURCE_HIGHLIGHT, paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.12 } });
-		map.addLayer({ id: 'land-highlight-line', type: 'line', source: SOURCE_HIGHLIGHT, paint: { 'line-color': '#2563eb', 'line-width': 3 } });
+		map.addSource(SOURCE_ZONES, { type: 'geojson', data: buildZoneGeoJson() });
+		map.addLayer({ id: 'zones-fill', type: 'fill', source: SOURCE_ZONES, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] } });
+		map.addLayer({ id: 'zones-line', type: 'line', source: SOURCE_ZONES, paint: { 'line-color': ['get', 'lineColor'], 'line-width': ['get', 'lineWidth'] } });
 
 		map.addSource(SOURCE_POINTS, { type: 'geojson', data: buildPointGeoJson() });
 		map.addLayer({
-			id: 'land-points',
+			id: 'zone-points',
 			type: 'circle',
 			source: SOURCE_POINTS,
 			paint: {
@@ -479,42 +391,25 @@
 			},
 		});
 
-		map.addSource(SOURCE_PREVIEW, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-		map.addLayer({ id: 'preview-fill', type: 'fill', source: SOURCE_PREVIEW, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 } });
-		map.addLayer({ id: 'preview-line', type: 'line', source: SOURCE_PREVIEW, paint: { 'line-color': '#171717', 'line-width': 1, 'line-dasharray': [2, 1] } });
-
-		map.addSource(SOURCE_DRAFT_LINE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-		map.addLayer({ id: 'draft-line-layer', type: 'line', source: SOURCE_DRAFT_LINE, paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [1, 1] } });
-		map.addSource(SOURCE_DRAFT_POINTS, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-		map.addLayer({
-			id: 'draft-points-layer',
-			type: 'circle',
-			source: SOURCE_DRAFT_POINTS,
-			paint: { 'circle-radius': 5, 'circle-color': ['case', ['get', 'first'], '#dc2626', '#2563eb'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
-		});
-
-		for (const layerId of ['lands-fill', 'land-points']) {
+		for (const layerId of ['zones-fill', 'zone-points']) {
 			map.on('click', layerId, onFeatureClick);
 			map.on('mouseenter', layerId, () => {
-				if (!isDrawing) map.getCanvas().style.cursor = 'pointer';
+				map.getCanvas().style.cursor = 'pointer';
 			});
 			map.on('mouseleave', layerId, () => {
-				map.getCanvas().style.cursor = isDrawing ? 'crosshair' : '';
+				map.getCanvas().style.cursor = '';
 			});
 		}
 
-		map.on('click', onMapClick);
-		map.on('zoomend', () => {
-			if (isDrawing) syncDraftPreview();
-			updateLayerVisibility();
-		});
+		map.on('zoomend', updateLayerVisibility);
 		updateLayerVisibility();
 	}
 
 	async function initMap() {
 		if (!mapContainer || map) return;
 		maplibregl = await loadMapLibre();
-		h3 = await loadH3Lib();
+		await h3Ready;
+		if (!h3) throw new Error('h3-js is not available');
 		let style: any = STYLE_URL;
 		try {
 			const res = await fetch(STYLE_URL);
@@ -523,6 +418,8 @@
 			/* fallback */
 		}
 		map = new maplibregl.Map({ container: mapContainer, style, center: [0, 20], zoom: 2, attributionControl: true });
+		// Tile hiccups are not the user's concern; without a listener MapLibre logs them as errors.
+		map.on('error', (e: any) => console.warn('land_registry map:', e?.error?.message ?? e));
 		map.on('load', () => {
 			addMapLayers();
 			mapReady = true;
@@ -532,8 +429,82 @@
 		});
 	}
 
-	async function callExt(fn: string, args: Record<string, unknown> = {}) {
-		return await ctx.callSync(fn, args);
+	async function call(write: boolean, name: string, args: Record<string, unknown> = {}): Promise<Reply> {
+		try {
+			const reply = await (write ? ctx.run(name, args) : ctx.read(name, args));
+			if (reply && typeof reply === 'object') return reply;
+		} catch (e: any) {
+			return { ok: false, error: e?.message || `${name} did not answer` };
+		}
+		return { ok: false, error: `${name} did not answer` };
+	}
+
+	/** Every row of a paged read operation (``from``/``count``, continued by ``next``), up to MAX_PAGES pages: ``capped`` when there are more. */
+	async function readPages(name: string, key: string): Promise<{ rows: any[]; error: string; capped: boolean }> {
+		const rows: any[] = [];
+		let from: number | null = 1;
+		for (let i = 0; from != null && i < MAX_PAGES; i++) {
+			const reply = await call(false, name, { from, count: PAGE });
+			if (!reply.ok) return { rows, error: reply.error || `${name} was refused`, capped: false };
+			rows.push(...(Array.isArray(reply[key]) ? reply[key] : []));
+			from = typeof reply.next === 'number' ? reply.next : null;
+		}
+		return { rows, error: '', capped: from != null };
+	}
+
+	function toParcel(raw: any): Parcel {
+		const owner = String(raw?.owner ?? '');
+		const colon = owner.indexOf(':');
+		return {
+			id: String(raw?.id ?? ''),
+			x: Number(raw?.x) || 0,
+			y: Number(raw?.y) || 0,
+			width: Number(raw?.width) || 1,
+			height: Number(raw?.height) || 1,
+			land_type: String(raw?.kind || 'unassigned'),
+			status: String(raw?.status || 'active'),
+			owner,
+			owner_kind: colon >= 0 ? owner.slice(0, colon) : '',
+			owner_id: colon >= 0 ? owner.slice(colon + 1) : owner,
+			token_id: raw?.token_id != null && raw.token_id !== '' ? String(raw.token_id) : '',
+			zones: zonesOf(raw?.lies_in),
+		};
+	}
+
+	function shortId(id: string) {
+		return id.length > 16 ? `${id.slice(0, 5)}…${id.slice(-3)}` : id;
+	}
+
+	/** Who a reference (``User:<id>``, ``Organization:<id>``) names: a member by nickname, an organization by its id. */
+	function refLabel(ref: string) {
+		if (!ref) return 'No owner';
+		const colon = ref.indexOf(':');
+		const kind = colon >= 0 ? ref.slice(0, colon) : '';
+		const id = colon >= 0 ? ref.slice(colon + 1) : ref;
+		if (kind === 'User') return userNames[id] || shortId(id);
+		if (kind === 'Organization') return `Org ${id}`;
+		return ref;
+	}
+
+	function ownerLabel(land: Parcel) {
+		return refLabel(land.owner);
+	}
+
+	function licenceStatus(status: string) {
+		return LICENCE_STATUSES.includes(status) ? t(`licence_status_${status}`) : status;
+	}
+
+	function statusLabel(status: string) {
+		return STATUS_LABELS[status] || status;
+	}
+
+	function ownerRef(type: string, id: string) {
+		return `${type === 'organization' ? 'Organization' : 'User'}:${id}`;
+	}
+
+	/** A free spot on the land grid: right of the parcels already on row 0. */
+	function nextFreeX() {
+		return lands.reduce((most, l) => (l.y < MAX_SPAN && l.y + l.height > 0 ? Math.max(most, l.x + l.width) : most), 0);
 	}
 
 	async function loadLands(silent = false) {
@@ -542,27 +513,50 @@
 			else refreshing = true;
 		}
 		error = '';
-		accessDeniedOp = '';
+		accessDeniedOp = null;
 		try {
-			const res = await callExt('get_lands', { all: true });
-			if (res?.success) lands = res.data ?? [];
-			else lands = res?.data ?? [];
+			const [parcels, mapZones, users, me, info] = await Promise.all([
+				readPages('land_list', 'lands'),
+				readPages('land_map', 'zones'),
+				call(false, 'user_list', { from: 1, count: PAGE }),
+				call(false, 'me'),
+				call(false, 'realm_info'),
+			]);
+			if (parcels.error) {
+				const needs = parcels.error.match(ACCESS_REFUSAL);
+				if (needs || parcels.error === 'sign in first') accessDeniedOp = needs?.[1] ?? '';
+				else error = `Parcels are unavailable right now: ${parcels.error}`;
+			}
+			lands = parcels.rows.map(toParcel).filter((l) => l.id);
+			parcelsCapped = parcels.capped;
+			loading = false; // the parcels are on the screen while h3-js, below, is waited for
+			// A realm that does not say which zones it defined (no `defined`) is read by h3-js, which may be a moment away: not for long.
+			if (mapZones.rows.some((z) => typeof z?.defined !== 'boolean')) await Promise.race([h3Ready, new Promise((done) => setTimeout(done, H3_WAIT_MS))]);
+			const named = new Set(lands.flatMap((l) => l.zones));
+			const isValidCell = h3?.isValidCell ? (id: string) => !!h3.isValidCell(id) : undefined;
+			zones = mapZones.rows
+				.filter((z) => z?.id && !isDefinedZone(z, named, isValidCell))
+				.map((z) => ({ id: String(z.id), name: String(z.name || ''), kind: String(z.kind || 'unassigned') }));
+			planning = planningZones(mapZones.rows, named, isValidCell);
+			zonesCapped = mapZones.capped;
+			if (zoneFilter && zoneFilter !== NO_ZONE && !planning.some((zone) => zone.id === zoneFilter)) zoneFilter = '';
+			if (mapZones.error) console.warn('land_map:', mapZones.error);
+			permissions = me.ok && Array.isArray(me.permissions) ? me.permissions : [];
+			// The realm's official time: its own zone, or on a quarter its capital's (`timezone` is the quarter's own).
+			const officialZone = info.ok ? info.realm?.official_timezone || info.realm?.timezone : '';
+			realmZone = typeof officialZone === 'string' && isKnownZone(officialZone) ? officialZone : UTC;
+			if (users.ok) {
+				const names: Record<string, string> = {};
+				for (const u of users.users ?? []) if (u?.id) names[u.id] = u.nickname || '';
+				userNames = names;
+			} else console.warn('user_list:', users.error);
 			if (selectedLandId && !lands.some((l) => l.id === selectedLandId)) selectedLandId = '';
 			if (mapReady) {
 				didFitBounds = false;
 				renderMapData();
-				if (lands.length) fitMapToData(true);
+				if (zones.length) fitMapToData(true);
 				await tick();
 				map?.resize();
-			}
-		} catch (e: any) {
-			const op = ctx.ui?.accessDeniedOperation?.(e);
-			if (op != null) {
-				accessDeniedOp = op;
-				error = '';
-			} else {
-				accessDeniedOp = '';
-				error = e?.message ?? String(e);
 			}
 		} finally {
 			loading = false;
@@ -570,84 +564,66 @@
 		}
 	}
 
-	function startDrawMode() {
-		drawMode = true;
-		isDrawing = false;
-		drawPoints = [];
-		paintCells = [];
-		paintableCount = 0;
+	function startRegister() {
+		registerMode = true;
 		selectedLandId = '';
-		refreshDraftLayers();
-		refreshPreviewLayer();
-		updateLayerVisibility();
-		if (map) map.getCanvas().style.cursor = '';
+		registration = {
+			name: '',
+			kind: 'unassigned',
+			x: nextFreeX(),
+			y: 0,
+			width: 1,
+			height: 1,
+			owner_type: 'user',
+			owner_id: principal,
+		};
 	}
 
-	function cancelDrawMode() {
-		drawMode = false;
-		isDrawing = false;
-		drawPoints = [];
-		paintCells = [];
-		paintableCount = 0;
-		refreshDraftLayers();
-		refreshPreviewLayer();
-		updateLayerVisibility();
-		if (map) map.getCanvas().style.cursor = '';
+	function cancelRegister() {
+		registerMode = false;
 	}
 
-	function startDrawing() {
-		isDrawing = true;
-		drawPoints = [];
-		paintCells = [];
-		if (map) map.getCanvas().style.cursor = 'crosshair';
-		refreshDraftLayers();
-		syncDraftPreview();
-	}
-
-	function undoPoint() {
-		drawPoints = drawPoints.slice(0, -1);
-		refreshDraftLayers();
-		syncDraftPreview();
-	}
-
-	function finishShape() {
-		if (drawPoints.length < 3) return;
-		syncDraftPreview();
-		isDrawing = false;
-		drawPoints = [];
-		refreshDraftLayers();
-		if (map) map.getCanvas().style.cursor = '';
-		updateLayerVisibility();
-	}
-
-	async function createDrawnParcel() {
-		if (paintableCount === 0) return;
-		const newCells = paintCells.filter((c) => !occupiedH3Cells().has(c));
-		if (!newCells.length) return;
+	/** Run ``name``; a governed call files a proposal instead of acting, which is still a success. */
+	async function act(name: string, args: Record<string, unknown>, done: (reply: Reply) => string) {
 		submitting = true;
 		error = '';
 		success = '';
 		try {
-			const res = await callExt('create_land', {
-				h3_indexes: newCells,
-				name: drawLandName.trim() || undefined,
-			});
-			if (res?.success) {
-				success = res.data?.message || 'Land parcel created.';
-				cancelDrawMode();
-				await loadLands(true);
-				if (res.data?.id) {
-					const created = lands.find((l) => l.id === res.data.id);
-					if (created) selectLand(created, true);
-				}
-			} else {
-				error = res?.error || 'Failed to create land parcel';
+			const reply = await call(true, name, args);
+			if (!reply.ok) {
+				error = reply.error || `${name} was refused`;
+				return null;
 			}
-		} catch (e: any) {
-			error = e?.message ?? String(e);
+			success = reply.proposal ? `Submitted for a vote as proposal ${reply.proposal}.` : done(reply);
+			await loadLands(true);
+			return reply;
 		} finally {
 			submitting = false;
 		}
+	}
+
+	async function registerParcel() {
+		const ownerId = registration.owner_id.trim();
+		if (!ownerId) {
+			error = 'Choose who owns the new parcel.';
+			return;
+		}
+		const span = (v: unknown) => Math.min(MAX_SPAN, Math.max(1, Math.trunc(Number(v)) || 1));
+		const args: Record<string, unknown> = {
+			x: Math.trunc(Number(registration.x)) || 0,
+			y: Math.trunc(Number(registration.y)) || 0,
+			width: span(registration.width),
+			height: span(registration.height),
+			kind: registration.kind,
+			owner: ownerRef(registration.owner_type, ownerId),
+		};
+		const name = registration.name.trim();
+		if (name) args.metadata = { name };
+		const reply = await act('land_register', args, (r) => `Parcel ${r.land} registered.`);
+		if (!reply) return;
+		cancelRegister();
+		const created = reply.land ? lands.find((l) => l.id === reply.land) : null;
+		if (created) selectLand(created);
 	}
 
 	function resizeMapSoon() {
@@ -669,8 +645,8 @@
 			if (expanded) {
 				e.preventDefault();
 				setExpanded(false);
-			} else if (drawMode) {
-				cancelDrawMode();
+			} else if (registerMode) {
+				cancelRegister();
 			}
 		}
 	}
@@ -703,101 +679,76 @@
 		return colors[type] || 'chip-muted';
 	}
 
-	async function updateOwnership() {
-		submitting = true;
-		error = '';
-		success = '';
-		try {
-			const data: any = { land_id: ownership.land_id };
-			if (ownership.owner_type === 'user') data.owner_user_id = ownership.owner_user_id;
-			else if (ownership.owner_type === 'organization') data.owner_organization_id = ownership.owner_organization_id;
-			const res = await callExt('update_land_ownership', data);
-			if (res?.success) {
-				success = 'Ownership updated!';
-				await loadLands(true);
-			} else error = res?.error || 'Failed to update ownership';
-		} catch (e: any) {
-			error = e?.message ?? String(e);
-		} finally {
-			submitting = false;
+	async function transferParcel() {
+		if (!selectedLand) return;
+		const to = transfer.owner_id.trim();
+		const order = transfer.order.trim();
+		if (!to || !order) {
+			error = 'Enter the new owner and the court order.';
+			return;
 		}
+		await act(
+			'land_transfer',
+			{
+				land: selectedLand.id,
+				to: ownerRef(transfer.owner_type, to),
+				order: order.includes(':') ? order : `Verdict:${order}`,
+			},
+			() => 'Ownership updated!'
+		);
 	}
 
-	async function updateLandProps() {
-		submitting = true;
-		error = '';
-		success = '';
-		try {
-			const data: any = { land_id: landUpdate.land_id };
-			if (landUpdate.status) data.status = landUpdate.status;
-			const res = await callExt('update_land', data);
-			if (res?.success) {
-				success = res?.data?.message || 'Land updated!';
-				await loadLands(true);
-			} else error = res?.error || 'Failed to update land';
-		} catch (e: any) {
-			error = e?.message ?? String(e);
-		} finally {
-			submitting = false;
-		}
+	async function freezeParcel() {
+		if (!selectedLand) return;
+		const args: Record<string, unknown> = { land: selectedLand.id };
+		if (disputeReason.trim()) args.reason = disputeReason.trim();
+		await act('land_freeze', args, () => 'Parcel marked as disputed.');
+		disputeReason = '';
+	}
+
+	async function unfreezeParcel() {
+		if (!selectedLand) return;
+		await act('land_unfreeze', { land: selectedLand.id }, () => 'Dispute ended; the parcel is active again.');
+	}
+
+	async function saveZones() {
+		if (!selectedLand) return;
+		const land = selectedLand.id;
+		const reply = await act('land_zone_set', { land, zones: zoneChoice }, () => t('planning_saved', { land }));
+		if (reply) zoneChoice = [...(lands.find((l) => l.id === land)?.zones ?? [])];
 	}
 
 	async function mintNFT() {
-		submitting = true;
-		error = '';
-		success = '';
-		try {
-			const prepRes = await callExt('register_land_nft', {
-				land_id: nftMint.land_id,
-				owner_principal: nftMint.owner_principal,
-				registered_by: ctx.principal || 'admin',
-			});
-			if (!prepRes?.success) {
-				error = prepRes?.error || 'Failed to prepare NFT';
-				return;
-			}
-			const mintRaw = await ctx.backend.mint_land_nft_for_parcel(
-				nftMint.land_id,
-				nftMint.owner_principal,
-				''
-			);
-			const mintRes = JSON.parse(mintRaw);
-			if (mintRes.success) {
-				await callExt('update_land_nft_token', { land_id: nftMint.land_id, nft_token_id: mintRes.token_id });
-				success = `NFT minted! Token ID: ${mintRes.token_id}`;
-				nftMint = { ...nftMint, owner_principal: '' };
-				await loadLands(true);
-			} else error = mintRes.error || 'Mint failed';
-		} catch (e: any) {
-			error = e?.message ?? String(e);
-		} finally {
-			submitting = false;
-		}
+		if (!selectedLand) return;
+		await act('land_mint_nft', { land: selectedLand.id }, (r) => `NFT minted! Token ID: ${r.token_id}`);
 	}
 
 	$effect(() => {
 		if (mapReady) {
-			lands;
-			selectedLandId;
+			zones;
 			renderMapData();
 		}
 	});
 
 	onMount(async () => {
 		window.addEventListener('keydown', onWindowKeydown);
+		unsubscribePrincipal = ctx.principal?.subscribe?.((value: string) => (principal = value || '')) ?? null;
+		h3Ready = loadH3Lib().then((lib) => (h3 = lib), () => null);
 		await loadLands(false);
 		await tick();
 		if (mapContainer) {
 			try {
 				await initMap();
 			} catch (e: any) {
-				error = e?.message || String(e);
+				console.warn('land_registry map unavailable:', e?.message ?? e);
+				mapUnavailable = true;
 			}
 		}
 	});
 
 	onDestroy(() => {
 		window.removeEventListener('keydown', onWindowKeydown);
+		unsubscribePrincipal?.();
 		document.body.classList.remove('land-registry-expanded');
 		document.body.style.overflow = '';
 		landPopup?.remove?.();
@@ -808,14 +759,9 @@
 </script>
 
 <div class="land-registry" class:expanded class:resizing={isResizing}>
-	{#if accessDeniedOp}
+	{#if accessDeniedOp !== null}
 		<div class="denied-shell">
-			{#if ctx.ui?.AccessDenied}
-				{@const AccessDenied = ctx.ui.AccessDenied}
-				<AccessDenied operation={accessDeniedOp} />
-			{:else}
-				<p class="muted">You need additional permissions to view this page.</p>
-			{/if}
+			<AccessDenied operation={accessDeniedOp} />
 		</div>
 	{:else}
 		<aside class="sidebar" style="width: {sidebarWidth}px">
@@ -825,42 +771,74 @@
 					<p class="muted">{extensionDescription}</p>
 					<p class="muted">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</p>
 				</div>
-				<button type="button" class="ghost-btn" onclick={() => loadLands(true)} disabled={refreshing}>Refresh</button>
+				<button type="button" class="ghost-btn" onclick={refresh} disabled={refreshing}>Refresh</button>
 			</div>
 
 			{#if error}<div class="alert error">{error}</div>{/if}
 			{#if success}<div class="alert success">{success}</div>{/if}
 
 			<div class="sidebar-toolbar">
-				{#if drawMode}
-					<button type="button" class="ghost-btn" onclick={cancelDrawMode}>Cancel draw</button>
-					{#if !isDrawing && paintCells.length === 0}
-						<button type="button" class="primary-btn" onclick={startDrawing}>Start drawing</button>
-					{:else if isDrawing}
-						<button type="button" class="ghost-btn" onclick={undoPoint} disabled={drawPoints.length === 0}>Undo</button>
-						<button type="button" class="primary-btn" onclick={finishShape} disabled={drawPoints.length < 3}>Finish shape</button>
-					{:else if paintCells.length > 0}
-						<button type="button" class="primary-btn" onclick={createDrawnParcel} disabled={submitting || paintableCount === 0}>
-							Create {paintableCount} cell(s)
-						</button>
-					{/if}
+				{#if registerMode}
+					<button type="button" class="ghost-btn" onclick={cancelRegister}>Cancel</button>
 				{:else}
-					<button type="button" class="primary-btn" onclick={startDrawMode}>Draw parcel</button>
+					<button type="button" class="primary-btn" onclick={startRegister}>Register parcel</button>
 				{/if}
 			</div>
 
-			{#if drawMode}
-				<div class="draw-panel">
-					<p class="muted">Parcel type is inherited from the covering zone (Zones extension).</p>
+			<datalist id="land-registry-users">
+				{#each knownUsers as [id, nickname] (id)}<option value={id}>{nickname || id}</option>{/each}
+			</datalist>
+
+			{#if registerMode}
+				<form class="draw-panel" onsubmit={(e) => { e.preventDefault(); registerParcel(); }}>
+					<p class="muted">Parcels are rectangles on the realm's land grid, up to {MAX_SPAN} × {MAX_SPAN} cells.</p>
 					<label>Name (optional)
-						<input type="text" bind:value={drawLandName} placeholder="Parcel name" />
+						<input type="text" bind:value={registration.name} placeholder="Parcel name" />
 					</label>
-					{#if isDrawing}
-						<p class="muted">Click the map to add points ({drawPoints.length}). Need at least 3.</p>
-					{:else if paintCells.length > 0}
-						<p class="muted">Previewing {paintableCount} new cell(s) at H3 res {paintResolution}.</p>
-					{:else}
-						<p class="muted">Draw a shape on the map to define the parcel area.</p>
+					<label>Type
+						<select bind:value={registration.kind}>
+							{#each LAND_TYPES as type (type)}<option value={type}>{type}</option>{/each}
+						</select>
+					</label>
+					<div class="grid-fields">
+						<label>X<input type="number" step="1" bind:value={registration.x} /></label>
+						<label>Y<input type="number" step="1" bind:value={registration.y} /></label>
+						<label>Width<input type="number" min="1" max={MAX_SPAN} step="1" bind:value={registration.width} /></label>
+						<label>Height<input type="number" min="1" max={MAX_SPAN} step="1" bind:value={registration.height} /></label>
+					</div>
+					<label>Owner
+						<select bind:value={registration.owner_type}>
+							<option value="user">Citizen</option>
+							<option value="organization">Organization</option>
+						</select>
+					</label>
+					<input
+						type="text"
+						bind:value={registration.owner_id}
+						placeholder={registration.owner_type === 'user' ? 'User ID' : 'Organization ID'}
+						list={registration.owner_type === 'user' ? 'land-registry-users' : undefined}
+					/>
+					<button type="submit" class="primary-btn" disabled={submitting || !registration.owner_id.trim()}>Register parcel</button>
+				</form>
+			{/if}
+
+			{#if parcelsCapped}
+				<p class="muted note zone-filter" data-testid="parcels-capped">{t('parcels_capped', { count: PAGE * MAX_PAGES })}</p>
+			{/if}
+			{#if zonesCapped}
+				<p class="muted note zone-filter" data-testid="zones-capped">{t('planning_zones_capped', { count: PAGE * MAX_PAGES })}</p>
+			{/if}
+			{#if planning.length}
+				<div class="zone-filter">
+					<label>{t('planning_filter_label')}
+						<select bind:value={zoneFilter} data-testid="zone-filter">
+							<option value="">{t('planning_filter_all')}</option>
+							{#each planning as zone (zone.id)}<option value={zone.id}>{zone.name || zone.id}</option>{/each}
+							<option value={NO_ZONE}>{t('planning_filter_none')}</option>
+						</select>
+					</label>
+					{#if zoneFilter}
+						<span class="muted" data-testid="zone-filter-count">{t('planning_filter_count', { shown: visibleLands.length, total: lands.length })}</span>
 					{/if}
 				</div>
 			{/if}
@@ -869,65 +847,154 @@
 				{#if loading}
 					<p class="muted center">Loading lands…</p>
 				{:else if lands.length === 0}
-					<p class="muted center">No parcels yet. Use “Draw parcel” on the map.</p>
+					<p class="muted center">No parcels yet. Use “Register parcel” to add one.</p>
+				{:else if visibleLands.length === 0}
+					<p class="muted center">{t('planning_filter_count', { shown: 0, total: lands.length })}</p>
 				{:else}
-					{#each lands as land (land.id)}
+					{#each visibleLands as land (land.id)}
 						<button
 							type="button"
 							class="parcel-row"
 							class:selected={land.id === selectedLandId}
-							onclick={() => selectLand(land, true)}
+							onclick={() => selectLand(land)}
 						>
 							<span class="dot" style="background:{landColor(land.land_type)}"></span>
 							<span class="parcel-main">
 								<strong>{land.id}</strong>
-								<span class="muted">{land.land_type}{land.h3_index ? ` · ${land.h3_index.slice(0, 10)}…` : ''}</span>
+								<span class="muted">{land.land_type} · ({land.x}, {land.y}) · {ownerLabel(land)}</span>
+								{#if land.zones.length}
+									<span class="muted" data-testid="parcel-zones">{land.zones.map((id) => zoneName(planning, id)).join(', ')}</span>
+								{/if}
 							</span>
 							<span class="parcel-status">
-								{#if land.for_sale}Sale{:else if land.owner_user_id || land.owner_organization_id}Owned{:else}Open{/if}
+								{#if land.status !== 'active'}{statusLabel(land.status)}{:else if land.token_id}NFT{:else}Owned{/if}
 							</span>
 						</button>
 					{/each}
 				{/if}
 			</div>
 
-			{#if selectedLand && !drawMode}
+			{#if selectedLand && !registerMode}
 				<div class="detail-panel">
 					<h3>{selectedLand.id}</h3>
-					<p class="muted">{selectedLand.land_type} · {selectedLand.status || 'active'}</p>
-					{#if selectedLand.h3_index}<code class="h3-code">{selectedLand.h3_index}</code>{/if}
+					<p class="muted">{selectedLand.land_type} · {statusLabel(selectedLand.status)}</p>
+					<code class="h3-code">Grid ({selectedLand.x}, {selectedLand.y}) · {selectedLand.width} × {selectedLand.height}</code>
+					<p class="readonly-field">
+						<span class="readonly-label">Owner</span>
+						<span>{ownerLabel(selectedLand)}</span>
+					</p>
 
-					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); updateOwnership(); }}>
-						<h4>Ownership</h4>
-						<select bind:value={ownership.owner_type}>
-							<option value="none">No owner</option>
-							<option value="user">Citizen</option>
-							<option value="organization">Organization</option>
-						</select>
-						{#if ownership.owner_type === 'user'}
-							<input type="text" bind:value={ownership.owner_user_id} placeholder="User ID" />
-						{:else if ownership.owner_type === 'organization'}
-							<input type="text" bind:value={ownership.owner_organization_id} placeholder="Organization ID" />
+					<div class="mini-form" data-testid="planning-panel">
+						<h4>{t('planning_title')}</h4>
+						{#if selectedLand.zones.length}
+							<div class="zone-chips">
+								{#each selectedLand.zones as id (id)}
+									<span class="zone-chip" title={planning.find((zone) => zone.id === id)?.kind} data-testid="parcel-zone">{zoneName(planning, id)}</span>
+								{/each}
+							</div>
+						{:else}
+							<p class="muted note">{t('planning_none')}</p>
 						{/if}
-						<button type="submit" class="primary-btn green" disabled={submitting}>Update ownership</button>
+						{#if !planning.length}
+							<p class="muted note">{t('planning_no_zones_defined')}</p>
+						{:else if canSetZones}
+							<form class="zone-form" onsubmit={(e) => { e.preventDefault(); saveZones(); }}>
+								<p class="muted note">{t('planning_edit_hint', { max: MAX_ZONES })}</p>
+								{#each planning as zone (zone.id)}
+									<label class="zone-option">
+										<input
+											type="checkbox"
+											checked={zoneChoice.includes(zone.id)}
+											disabled={submitting || (!zoneChoice.includes(zone.id) && zoneChoice.length >= MAX_ZONES)}
+											onchange={() => (zoneChoice = toggleZone(zoneChoice, zone.id))}
+										/>
+										<span>{zone.name || zone.id}</span>
+										{#if zone.kind}<span class="muted">{zone.kind}</span>{/if}
+									</label>
+								{/each}
+								{#if zoneChoice.length >= MAX_ZONES}<p class="muted note">{t('planning_full', { max: MAX_ZONES })}</p>{/if}
+								<button type="submit" class="primary-btn" disabled={submitting || sameZones(zoneChoice, selectedLand.zones)}>{t('planning_save')}</button>
+							</form>
+						{:else}
+							<p class="muted note" data-testid="planning-reason">{t('planning_needs_permission', { permission: ZONE_PERMISSION })}</p>
+						{/if}
+					</div>
+
+					<div class="mini-form" data-testid="licences-panel">
+						<h4>{t('licences_title')}</h4>
+						{#if licencesLoading}
+							<p class="muted note" data-testid="licences-loading">{t('licences_loading')}</p>
+						{:else if licencesProblem}
+							<p class="muted note" data-testid="licences-problem">{t('licences_unavailable', { reason: licencesProblem })}</p>
+						{:else if selectedLicences.length}
+							<ul class="licence-list">
+								{#each selectedLicences as licence (licence.id)}
+									<li data-testid="licence">
+										<strong>{licence.kind}</strong> · {licenceStatus(licence.status)} · {refLabel(licence.holder)}
+										{#if licence.expires_at}<span class="muted"> · {t('licence_until', { date: formatInZone(licence.expires_at, realmZone) })}</span>{/if}
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="muted note">{t('licences_none')}</p>
+						{/if}
+						{#if licencesCapped && !licencesLoading}<p class="muted note">{t('licences_capped', { count: PAGE * MAX_PAGES })}</p>{/if}
+					</div>
+
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); transferParcel(); }}>
+						<h4>Ownership</h4>
+						{#if selectedLand.status === 'active' || selectedLand.status === 'disputed'}
+							<select bind:value={transfer.owner_type}>
+								<option value="user">Citizen</option>
+								<option value="organization">Organization</option>
+							</select>
+							<input
+								type="text"
+								bind:value={transfer.owner_id}
+								placeholder={transfer.owner_type === 'user' ? 'User ID' : 'Organization ID'}
+								list={transfer.owner_type === 'user' ? 'land-registry-users' : undefined}
+							/>
+							<input type="text" bind:value={transfer.order} placeholder="Court order (Verdict ID)" />
+							<p class="muted note">Ownership moves under an issued court verdict about this parcel.</p>
+							<button type="submit" class="primary-btn green" disabled={submitting || !transfer.owner_id.trim() || !transfer.order.trim()}>Update ownership</button>
+						{:else}
+							<p class="muted note">This parcel's ownership is settled.</p>
+						{/if}
 					</form>
 
-					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); updateLandProps(); }}>
+					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); if (selectedLand?.status === 'disputed') unfreezeParcel(); else freezeParcel(); }}>
 						<h4>Properties</h4>
 						<p class="readonly-field">
 							<span class="readonly-label">Type</span>
 							<span>{selectedLand.land_type || 'unassigned'}</span>
 						</p>
-						<select bind:value={landUpdate.status}>
-							{#each landStatuses as s (s.value)}<option value={s.value}>{s.label}</option>{/each}
-						</select>
-						<button type="submit" class="primary-btn amber" disabled={submitting}>Update land</button>
+						<p class="readonly-field">
+							<span class="readonly-label">Status</span>
+							<span>{statusLabel(selectedLand.status)}</span>
+						</p>
+						{#if selectedLand.status === 'active'}
+							<input type="text" bind:value={disputeReason} placeholder="Reason (optional)" />
+							<button type="submit" class="primary-btn amber" disabled={submitting}>Mark disputed</button>
+						{:else if selectedLand.status === 'disputed'}
+							<button type="submit" class="primary-btn amber" disabled={submitting}>End dispute</button>
+						{:else}
+							<p class="muted note">This status is final.</p>
+						{/if}
 					</form>
 
 					<form class="mini-form" onsubmit={(e) => { e.preventDefault(); mintNFT(); }}>
 						<h4>Mint NFT</h4>
-						<input type="text" bind:value={nftMint.owner_principal} placeholder="Owner principal" />
-						<button type="submit" class="primary-btn purple" disabled={submitting}>Mint NFT</button>
+						{#if selectedLand.token_id}
+							<p class="readonly-field">
+								<span class="readonly-label">Token ID</span>
+								<span>{selectedLand.token_id}</span>
+							</p>
+						{:else if selectedLand.status === 'active'}
+							<p class="muted note">The NFT goes to the parcel's owner.</p>
+							<button type="submit" class="primary-btn purple" disabled={submitting}>Mint NFT</button>
+						{:else}
+							<p class="muted note">Only active parcels can be minted.</p>
+						{/if}
 					</form>
 				</div>
 			{/if}
@@ -941,8 +1008,13 @@
 		></button>
 
 		<div class="map-column">
-			<div bind:this={mapContainer} class="land-map" class:drawing={isDrawing}></div>
+			<div bind:this={mapContainer} class="land-map"></div>
 			<div class="map-overlay map-overlay-top">
+				{#if mapUnavailable}
+					<p class="map-note">The map is not available right now.</p>
+				{:else if mapReady && zones.length === 0}
+					<p class="map-note">No zones on the map yet.</p>
+				{/if}
 				<div class="map-actions">
 					<button type="button" class="ghost-btn" onclick={() => setExpanded(!expanded)} aria-pressed={expanded}>
 						{expanded ? 'Exit full screen' : 'Expand'}
@@ -1015,10 +1087,6 @@
 		inset: 0;
 	}
 
-	.land-map.drawing {
-		cursor: crosshair;
-	}
-
 	.map-overlay {
 		position: absolute;
 		left: 0;
@@ -1079,7 +1147,14 @@
 		color: #525252;
 	}
 
+	.grid-fields {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.5rem;
+	}
+
 	.draw-panel input,
+	.draw-panel select,
 	.mini-form input,
 	.mini-form select {
 		padding: 0.45rem 0.6rem;
@@ -1182,6 +1257,57 @@
 		font-size: 0.75rem;
 	}
 
+	.zone-filter {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		padding: 0.5rem 1rem;
+		font-size: 0.8rem;
+		color: #525252;
+	}
+
+	.zone-filter select {
+		margin-left: 0.4rem;
+		padding: 0.3rem 0.5rem;
+		border: 1px solid #d4d4d4;
+		border-radius: 0.45rem;
+		font-size: 0.8rem;
+	}
+
+	.zone-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.zone-chip {
+		padding: 0.15rem 0.55rem;
+		border-radius: 999px;
+		background: #eef2ff;
+		color: #3730a3;
+		font-size: 0.75rem;
+	}
+
+	.zone-form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.zone-option {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+	}
+
+	.licence-list {
+		margin: 0;
+		padding-left: 1.1rem;
+		font-size: 0.8rem;
+	}
+
 	.legend {
 		display: flex;
 		flex-wrap: wrap;
@@ -1251,6 +1377,20 @@
 	.center {
 		text-align: center;
 		padding: 1.5rem 1rem;
+	}
+
+	.note {
+		font-size: 0.75rem;
+	}
+
+	.map-note {
+		margin: 0 auto 0 0;
+		align-self: center;
+		padding: 0.35rem 0.6rem;
+		border-radius: 0.45rem;
+		background: rgba(255, 255, 255, 0.9);
+		color: #525252;
+		font-size: 0.8rem;
 	}
 
 	.denied-shell {

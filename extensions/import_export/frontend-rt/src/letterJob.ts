@@ -14,6 +14,8 @@ export type MintedLetter = {
 	name: string;
 	address: string;
 	code: string;
+	/** The realm's id of the invite behind ``code``, to check whether it was claimed. */
+	invite?: string;
 	join_path: string;
 	/** Portal join URL built in the browser. Overrides join_path on the letter. */
 	join_url?: string;
@@ -114,7 +116,7 @@ export function parseCitizenRows(records: unknown[]): {
 	return { rows, errors };
 }
 
-/** Rows that still need a host mint, starting at `from`, capped at `batchSize`. */
+/** Rows that still need an invite minted, starting at `from`, capped at `batchSize`. */
 export function nextMintBatch(
 	rows: CitizenRow[],
 	mintedIds: Iterable<string>,

@@ -8,7 +8,7 @@ on:
       - 'extensions/_shared/**'
       - '.github/workflows/admin_dashboard-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/admin_dashboard/**'
       - 'extensions/_shared/**'
@@ -28,6 +28,11 @@ jobs:
       with:
         python-version: '3.11'
         
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
     - name: Install base dependencies
       run: |
         python -m pip install --upgrade pip

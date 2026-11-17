@@ -1,9 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import {
-		isNarrowViewport,
-		subscribeNarrowViewport,
-	} from '../../../_shared/frontend/mobile-chrome';
+	import { onMount } from 'svelte';
 
 	let {
 		ctx,
@@ -18,38 +14,63 @@
 	let view: View = $state('list');
 	let votes: any[] = $state.raw([]);
 	let listLoading = $state(true);
+	let listUnavailable = $state(false);
 	let error = $state('');
-	let accessDeniedOp = $state('');
 	let successMsg = $state('');
 
 	let selectedVoteId = $state('');
 	let voteDetail: any = $state(null);
 	let detailLoading = $state(false);
 	let actionBusy = $state(false);
+	/** Outcomes reported by federal_vote_finalize this session, by vote id. */
+	let decided: Record<string, string> = $state({});
 
-	let targetKind = $state<'module' | 'extension'>('module');
-	let formModule = $state('');
-	let formExtension = $state('');
-	let formFunction = $state('');
+	let formTitle = $state('');
+	let formOperation = $state('');
 	let formArgsJson = $state('{}');
-	let formOrgName = $state('');
 	let submitting = $state(false);
 	let formMsg = $state('');
 
-	async function callBackend(method: string, arg: string) {
-		const raw = await ctx.backend[method](arg);
-		return typeof raw === 'string' ? JSON.parse(raw) : raw;
+	// The local leg of federal vote FV-n is a realm-wide proposal titled "FV-n: <title>".
+	const LEG_TITLE = /^(FV-\d+):\s*(.*)$/;
+	const LIST_PAGES = 20;
+
+	async function read(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		try {
+			const reply = await ctx.read(name, args);
+			return reply?.ok ? reply : null;
+		} catch {
+			return null;
+		}
 	}
 
-	function handleAccessDenied(e: any): boolean {
-		const op = ctx.ui?.accessDeniedOperation?.(e);
-		if (op != null) {
-			accessDeniedOp = op;
-			error = '';
-			return true;
+	async function run(name: string, args: Record<string, unknown> = {}): Promise<any> {
+		try {
+			const reply = await ctx.run(name, args);
+			return reply ?? { ok: false, error: `${name} returned no reply` };
+		} catch (e: any) {
+			return { ok: false, error: e?.message ?? String(e) };
 		}
-		accessDeniedOp = '';
-		return false;
+	}
+
+	function voteStatus(legStatus: string, voteId: string): string {
+		if (decided[voteId]) return decided[voteId];
+		if (legStatus === 'voting') return 'open';
+		if (legStatus === 'withdrawn') return 'cancelled';
+		return legStatus || 'open';
+	}
+
+	function legToVote(row: any): any | null {
+		const match = String(row?.title ?? '').match(LEG_TITLE);
+		if (!match) return null;
+		const legStatus = String(row.status ?? '');
+		return {
+			vote_id: match[1],
+			title: match[2] || match[1],
+			deadline: row.deadline,
+			status: voteStatus(legStatus, match[1]),
+			local_leg: { proposal_id: String(row.id ?? ''), status: legStatus },
+		};
 	}
 
 	function statusColor(s: string): string {
@@ -90,29 +111,9 @@
 		return date.toLocaleString();
 	}
 
-	function truncateHash(hash: string): string {
-		if (!hash || hash.length <= 16) return hash || '—';
-		return hash.slice(0, 8) + '…' + hash.slice(-6);
-	}
-
-	function truncateId(id: string): string {
-		if (!id || id.length <= 20) return id || '—';
-		return id.slice(0, 10) + '…' + id.slice(-6);
-	}
-
-	function actionLabel(action: any): string {
-		if (!action || typeof action !== 'object') return '—';
-		const fn = action.function || '—';
-		const target = action.module || action.extension || '';
-		return target ? `${target}.${fn}` : fn;
-	}
-
-	function prettyJson(value: any): string {
-		try {
-			return JSON.stringify(value, null, 2);
-		} catch {
-			return String(value ?? '');
-		}
+	function voteNumber(vote: any): number {
+		const match = String(vote?.vote_id ?? '').match(/^FV-(\d+)$/);
+		return match ? parseInt(match[1], 10) : 0;
 	}
 
 	function parseFederalIdFromUrl(): string | null {
@@ -125,22 +126,27 @@
 		return null;
 	}
 
+	/** Federal votes, found through their local legs among the realm's proposals. */
 	async function loadVotes() {
 		listLoading = true;
 		error = '';
-		accessDeniedOp = '';
 		try {
-			const res = await callBackend('list_federal_votes', '{}');
-			if (res?.success) {
-				votes = Array.isArray(res.votes) ? res.votes : [];
-			} else {
-				error = res?.error || 'Failed to load federal votes';
-				votes = [];
+			const found = new Map<string, any>();
+			let from: number | null = 1;
+			let reachable = false;
+			for (let i = 0; i < LIST_PAGES && from != null; i++) {
+				const res = await read('proposal_list', { from, count: 500 });
+				if (!res) break;
+				reachable = true;
+				for (const row of Array.isArray(res.proposals) ? res.proposals : []) {
+					const vote = legToVote(row);
+					if (vote && !found.has(vote.vote_id)) found.set(vote.vote_id, vote);
+				}
+				const next = Number(res.next);
+				from = res.next != null && Number.isFinite(next) ? next : null;
 			}
-		} catch (e: any) {
-			if (!handleAccessDenied(e)) {
-				error = e?.message ?? String(e);
-			}
+			listUnavailable = !reachable;
+			votes = [...found.values()].sort((a, b) => voteNumber(b) - voteNumber(a));
 		} finally {
 			listLoading = false;
 		}
@@ -150,22 +156,33 @@
 		selectedVoteId = voteId;
 		view = 'detail';
 		detailLoading = true;
+		voteDetail = null;
 		error = '';
-		accessDeniedOp = '';
 		successMsg = '';
 		try {
-			const res = await callBackend('get_federal_vote', voteId);
-			if (res?.success && res.vote) {
-				voteDetail = res.vote;
-			} else {
-				error = res?.error || 'Vote not found';
+			if (!votes.some((v) => v.vote_id === voteId)) await loadVotes();
+			const vote = votes.find((v) => v.vote_id === voteId);
+			if (!vote) {
 				goToList();
+				error = `Realm-wide vote ${voteId} was not found on this realm.`;
+				return;
 			}
-		} catch (e: any) {
-			if (!handleAccessDenied(e)) {
-				error = e?.message ?? String(e);
-			}
-			goToList();
+			const leg = await read('proposal_get', { proposal: vote.local_leg.proposal_id, count: 1 });
+			const tally = leg?.tally ?? {};
+			const legStatus = String(leg?.proposal?.status ?? vote.local_leg.status);
+			voteDetail = {
+				...vote,
+				status: voteStatus(legStatus, voteId),
+				local_leg: {
+					...vote.local_leg,
+					status: legStatus,
+					loaded: !!leg,
+					yes: Number(tally.yes) || 0,
+					no: Number(tally.no) || 0,
+					abstain: Number(tally.abstain) || 0,
+					eligible: Number(leg?.eligible) || 0,
+				},
+			};
 		} finally {
 			detailLoading = false;
 		}
@@ -182,47 +199,33 @@
 	function goToForm() {
 		view = 'form';
 		error = '';
-		accessDeniedOp = '';
 		formMsg = '';
 		successMsg = '';
 	}
 
-	function cancelForm() {
-		targetKind = 'module';
-		formModule = '';
-		formExtension = '';
-		formFunction = '';
+	function resetForm() {
+		formTitle = '';
+		formOperation = '';
 		formArgsJson = '{}';
-		formOrgName = '';
+	}
+
+	function cancelForm() {
+		resetForm();
 		formMsg = '';
 		goToList();
 	}
 
-	async function confirmPropose(payload: Record<string, any>): Promise<boolean> {
-		if (typeof ctx.openModal !== 'function') return true;
-		try {
-			const { actionId } = await ctx.openModal({
-				title: 'Confirm realm-wide vote',
-				body:
-					payload.summary ||
-					'This action may require a local consent ballot before the federal vote starts. Re-submit to confirm.',
-				actions: [
-					{ id: 'cancel', label: 'Cancel', tone: 'secondary' },
-					{ id: 'confirm', label: 'Open proposal / confirm', tone: 'primary' },
-				],
-			});
-			return actionId === 'confirm';
-		} catch {
-			return false;
-		}
-	}
-
-	async function submitPropose(confirm = false) {
-		submitting = true;
+	async function submitPropose() {
 		error = '';
-		accessDeniedOp = '';
 		formMsg = '';
 		successMsg = '';
+
+		const title = formTitle.trim();
+		const operation = formOperation.trim();
+		if (!title || !operation) {
+			error = 'Title and operation are required';
+			return;
+		}
 
 		let args: Record<string, any>;
 		try {
@@ -232,92 +235,50 @@
 			}
 		} catch (e: any) {
 			error = `Invalid args JSON: ${e?.message ?? String(e)}`;
-			submitting = false;
 			return;
 		}
 
-		const fn = formFunction.trim();
-		if (!fn) {
-			error = 'Function name is required';
-			submitting = false;
-			return;
-		}
-
-		const action: Record<string, any> = { function: fn, args };
-		if (targetKind === 'module') {
-			const mod = formModule.trim();
-			if (!mod) {
-				error = 'Backend module is required';
-				submitting = false;
-				return;
-			}
-			action.module = mod;
-		} else {
-			const ext = formExtension.trim();
-			if (!ext) {
-				error = 'Extension id is required';
-				submitting = false;
-				return;
-			}
-			action.extension = ext;
-		}
-
-		const payload: Record<string, any> = { action };
-		const org = formOrgName.trim();
-		if (org) payload.org_name = org;
-		if (confirm) payload.confirm = true;
-
+		submitting = true;
 		try {
-			const res = await callBackend('propose_federal_vote', JSON.stringify(payload));
-
-			if (res?.requires_confirmation) {
-				const ok = await confirmPropose(res);
-				if (ok) {
-					await submitPropose(true);
-				}
+			const res = await run('federal_vote_propose', { title, action: { op: operation, args } });
+			if (!res?.ok) {
+				error = res?.error || 'The realm-wide vote was not opened.';
 				return;
 			}
-
-			if (res?.applied === 'proposal' || (res?.proposal_id && !res?.vote_id)) {
-				successMsg =
-					'A local consent ballot was opened. After it passes, the federal vote starts.';
-				if (res.proposal_id && onopenleg) {
-					formMsg = res.proposal_id;
-				}
-				return;
+			resetForm();
+			const voteId = String(res.vote ?? '');
+			await loadVotes();
+			if (voteId && votes.some((v) => v.vote_id === voteId)) {
+				await openVote(voteId);
+			} else {
+				goToList();
 			}
-
-			if (res?.success && res?.vote_id) {
-				await loadVotes();
-				await openVote(res.vote_id);
-				return;
-			}
-
-			error = res?.error || res?.policy_reason || 'Failed to propose federal vote';
-		} catch (e: any) {
-			if (!handleAccessDenied(e)) {
-				error = e?.message ?? String(e);
-			}
+			successMsg = voteId ? `Realm-wide vote ${voteId} is open.` : 'The realm-wide vote is open.';
 		} finally {
 			submitting = false;
 		}
 	}
 
-	async function advanceTally() {
+	async function finalizeVote() {
+		const voteId = selectedVoteId;
+		if (!voteId) return;
 		actionBusy = true;
 		error = '';
 		try {
-			const res = await callBackend('finalize_federal_vote', '{}');
-			if (res?.success) {
-				successMsg = 'Tally advanced.';
-				await openVote(selectedVoteId);
-				await loadVotes();
-			} else {
-				error = res?.error || 'Failed to advance tally';
+			const res = await run('federal_vote_finalize', { vote: voteId });
+			if (!res?.ok) {
+				error = res?.error || 'The vote could not be finalized yet.';
+				return;
 			}
-		} catch (e: any) {
-			if (!handleAccessDenied(e)) {
-				error = e?.message ?? String(e);
+			if (res.status) decided = { ...decided, [voteId]: String(res.status) };
+			await loadVotes();
+			await openVote(voteId);
+			if (res.status) {
+				successMsg = `Realm-wide vote ${statusLabel(String(res.status)).toLowerCase()}.`;
+			} else if (res.reported) {
+				successMsg = `This quarter's result (${statusLabel(String(res.leg ?? ''))}) was reported to the capital.`;
+			} else {
+				successMsg = `This quarter's result (${statusLabel(String(res.leg ?? ''))}) is recorded; the capital has not confirmed it yet.`;
 			}
 		} finally {
 			actionBusy = false;
@@ -325,24 +286,24 @@
 	}
 
 	async function cancelVote() {
-		if (!selectedVoteId) return;
+		const voteId = selectedVoteId;
+		if (!voteId) return;
 		actionBusy = true;
 		error = '';
 		try {
-			const res = await callBackend(
-				'cancel_federal_vote',
-				JSON.stringify({ vote_id: selectedVoteId }),
-			);
-			if (res?.success) {
-				successMsg = 'Federal vote cancelled.';
-				await openVote(selectedVoteId);
-				await loadVotes();
-			} else {
-				error = res?.error || 'Failed to cancel vote';
+			const res = await run('federal_vote_cancel', { vote: voteId });
+			if (!res?.ok) {
+				error = res?.error || 'The vote was not cancelled.';
+				return;
 			}
-		} catch (e: any) {
-			if (!handleAccessDenied(e)) {
-				error = e?.message ?? String(e);
+			if (!res.requires_vote) decided = { ...decided, [voteId]: 'cancelled' };
+			await loadVotes();
+			await openVote(voteId);
+			if (res.requires_vote && res.proposal) {
+				successMsg = `Cancelling needs a realm-wide decision: proposal ${res.proposal} was filed.`;
+				formMsg = String(res.proposal);
+			} else {
+				successMsg = 'Realm-wide vote cancelled.';
 			}
 		} finally {
 			actionBusy = false;
@@ -353,23 +314,13 @@
 		onopenleg?.(proposalId);
 	}
 
-	let narrow = $state(isNarrowViewport());
-	let unsubNarrow: (() => void) | undefined;
-
 	onMount(() => {
-		unsubNarrow = subscribeNarrowViewport((value) => {
-			narrow = value;
-		});
 		const urlId = parseFederalIdFromUrl();
 		if (urlId) {
 			void openVote(urlId);
 		} else {
 			void loadVotes();
 		}
-	});
-
-	onDestroy(() => {
-		unsubNarrow?.();
 	});
 </script>
 
@@ -410,14 +361,7 @@
 </style>
 
 <div class="px-3 py-3 sm:p-5">
-	{#if accessDeniedOp}
-		{#if ctx.ui?.AccessDenied}
-			{@const AccessDenied = ctx.ui.AccessDenied}
-			<AccessDenied operation={accessDeniedOp} />
-		{:else}
-			<p class="text-sm text-gray-500 mb-4">You need additional permissions for this action.</p>
-		{/if}
-	{:else if error}
+	{#if error}
 		<div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
 			<svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
 			<span>{error}</span>
@@ -435,7 +379,7 @@
 					onclick={() => openLeg(formMsg)}
 					class="ml-2 text-indigo-600 hover:text-indigo-800 underline text-sm"
 				>
-					Open consent ballot
+					Open proposal
 				</button>
 			{/if}
 		</div>
@@ -460,7 +404,7 @@
 			<div class="space-y-5">
 				<div>
 					<div class="flex items-center gap-3 mb-2 flex-wrap">
-						<h2 class="text-xl font-bold text-gray-900">Realm-wide vote</h2>
+						<h2 class="text-xl font-bold text-gray-900">{voteDetail.title}</h2>
 						<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold {statusColor(voteDetail.status)}">
 							{statusLabel(voteDetail.status)}
 						</span>
@@ -468,43 +412,30 @@
 					<div class="flex flex-wrap gap-4 text-sm text-gray-500">
 						<span>ID: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{voteDetail.vote_id}</code></span>
 						<span>Deadline: {formatDateTime(voteDetail.deadline)}</span>
-						<span>Quarters: {voteDetail.known_quarters ?? '—'}</span>
-						<span>Hash: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{truncateHash(voteDetail.vote_hash)}</code></span>
+						<span>Local ballot: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{voteDetail.local_leg.proposal_id}</code></span>
 					</div>
 				</div>
 
-				<div class="rounded-lg border border-gray-200 bg-white p-4">
-					<h3 class="text-sm font-semibold text-gray-900 mb-2">Action</h3>
-					<pre class="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto text-gray-700">{prettyJson(voteDetail.action)}</pre>
-				</div>
-
-				{#if voteDetail.rule && Object.keys(voteDetail.rule).length}
+				{#if voteDetail.local_leg.loaded}
 					<div class="rounded-lg border border-gray-200 bg-white p-4">
-						<h3 class="text-sm font-semibold text-gray-900 mb-2">Rule</h3>
-						<pre class="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto text-gray-700">{prettyJson(voteDetail.rule)}</pre>
-					</div>
-				{/if}
-
-				{#if voteDetail.tally && Object.keys(voteDetail.tally).length}
-					<div class="rounded-lg border border-gray-200 bg-white p-4">
-						<h3 class="text-sm font-semibold text-gray-900 mb-3">Aggregate tally</h3>
+						<h3 class="text-sm font-semibold text-gray-900 mb-3">This realm's ballot</h3>
 						<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
 							<div class="rounded-lg bg-gray-50 px-3 py-2">
 								<div class="text-xs text-gray-500">Status</div>
-								<div class="font-medium text-gray-900">{statusLabel(voteDetail.tally.status)}</div>
+								<div class="font-medium text-gray-900">{statusLabel(voteDetail.local_leg.status)}</div>
 							</div>
 							<div class="rounded-lg bg-green-50 px-3 py-2">
-								<div class="text-xs text-green-600">Yes weight</div>
-								<div class="font-medium text-green-800">{voteDetail.tally.yes_weight ?? 0}</div>
+								<div class="text-xs text-green-600">Yes</div>
+								<div class="font-medium text-green-800">{voteDetail.local_leg.yes}</div>
 							</div>
 							<div class="rounded-lg bg-red-50 px-3 py-2">
-								<div class="text-xs text-red-600">No weight</div>
-								<div class="font-medium text-red-800">{voteDetail.tally.no_weight ?? 0}</div>
+								<div class="text-xs text-red-600">No</div>
+								<div class="font-medium text-red-800">{voteDetail.local_leg.no}</div>
 							</div>
 							<div class="rounded-lg bg-gray-50 px-3 py-2">
-								<div class="text-xs text-gray-500">Reported / absent</div>
+								<div class="text-xs text-gray-500">Abstain / eligible</div>
 								<div class="font-medium text-gray-900">
-									{voteDetail.tally.reported ?? 0} / {voteDetail.tally.absent ?? 0}
+									{voteDetail.local_leg.abstain} / {voteDetail.local_leg.eligible}
 								</div>
 							</div>
 						</div>
@@ -521,82 +452,19 @@
 					</button>
 				{/if}
 
-				{#if Array.isArray(voteDetail.legs) && voteDetail.legs.length}
-					<div class="border-y border-gray-200 sm:rounded-lg sm:border overflow-hidden">
-						<div class="px-3 py-2 sm:px-4 sm:py-3 border-b border-gray-200">
-							<h3 class="text-sm font-semibold text-gray-900">Quarter legs</h3>
-						</div>
-						{#if narrow}
-							<div class="divide-y divide-gray-100">
-								{#each voteDetail.legs as leg (leg.quarter_canister_id + leg.proposal_id)}
-									<div class="px-3 py-3 text-sm">
-										<div class="flex items-center justify-between gap-2">
-											<code class="text-xs">{truncateId(leg.quarter_canister_id)}</code>
-											<span class="text-xs font-semibold {statusColor(leg.status)} px-2 py-0.5">
-												{statusLabel(leg.status)}
-											</span>
-										</div>
-										<div class="mt-1 text-xs text-gray-500">
-											{statusLabel(leg.outcome) || '—'} · Y {leg.votes_yes ?? 0} · N {leg.votes_no ?? 0} · A {leg.votes_abstain ?? 0}
-										</div>
-										{#if leg.proposal_id}
-											<div class="mt-1 text-xs text-gray-500">Proposal <code>{leg.proposal_id}</code></div>
-										{/if}
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<div class="overflow-x-auto">
-								<table class="min-w-full text-sm">
-									<thead class="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
-										<tr>
-											<th class="px-4 py-2">Quarter</th>
-											<th class="px-4 py-2">Status</th>
-											<th class="px-4 py-2">Outcome</th>
-											<th class="px-4 py-2">Yes</th>
-											<th class="px-4 py-2">No</th>
-											<th class="px-4 py-2">Abstain</th>
-											<th class="px-4 py-2">Proposal</th>
-										</tr>
-									</thead>
-									<tbody class="divide-y divide-gray-100">
-										{#each voteDetail.legs as leg (leg.quarter_canister_id + leg.proposal_id)}
-											<tr class="hover:bg-gray-50">
-												<td class="px-4 py-2 font-mono text-xs">{truncateId(leg.quarter_canister_id)}</td>
-												<td class="px-4 py-2">
-													<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(leg.status)}">
-														{statusLabel(leg.status)}
-													</span>
-												</td>
-												<td class="px-4 py-2">{statusLabel(leg.outcome) || '—'}</td>
-												<td class="px-4 py-2">{leg.votes_yes ?? 0}</td>
-												<td class="px-4 py-2">{leg.votes_no ?? 0}</td>
-												<td class="px-4 py-2">{leg.votes_abstain ?? 0}</td>
-												<td class="px-4 py-2">
-													{#if leg.proposal_id}
-														<code class="text-xs bg-gray-100 px-1 py-0.5 rounded">{leg.proposal_id}</code>
-													{:else}
-														—
-													{/if}
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{/if}
-					</div>
-				{/if}
+				<p class="text-xs text-gray-400">
+					The vote's action, rule and other quarters' results are kept by the capital and are not shown here.
+				</p>
 
 				{#if (voteDetail.status || '').toLowerCase() === 'open'}
 					<div class="flex flex-wrap gap-3 pt-2">
 						<button
 							type="button"
-							onclick={advanceTally}
+							onclick={finalizeVote}
 							disabled={actionBusy}
 							class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
 						>
-							Advance tally
+							Finalize tally
 						</button>
 						<button
 							type="button"
@@ -622,73 +490,30 @@
 		<form
 			onsubmit={(e) => {
 				e.preventDefault();
-				void submitPropose(false);
+				void submitPropose();
 			}}
 			class="space-y-4 max-w-2xl"
 		>
-			<fieldset>
-				<legend class="block text-sm font-medium text-gray-700 mb-2">Target kind</legend>
-				<div class="flex gap-4">
-					<label class="inline-flex items-center gap-2 text-sm text-gray-700">
-						<input
-							type="radio"
-							name="target-kind"
-							value="module"
-							checked={targetKind === 'module'}
-							onchange={() => (targetKind = 'module')}
-							disabled={submitting}
-							class="text-indigo-600 focus:ring-indigo-500"
-						/>
-						Backend module
-					</label>
-					<label class="inline-flex items-center gap-2 text-sm text-gray-700">
-						<input
-							type="radio"
-							name="target-kind"
-							value="extension"
-							checked={targetKind === 'extension'}
-							onchange={() => (targetKind = 'extension')}
-							disabled={submitting}
-							class="text-indigo-600 focus:ring-indigo-500"
-						/>
-						Extension
-					</label>
-				</div>
-			</fieldset>
-
-			{#if targetKind === 'module'}
-				<div>
-					<label for="fv-module" class="block text-sm font-medium text-gray-700 mb-1">Module *</label>
-					<input
-						id="fv-module"
-						type="text"
-						bind:value={formModule}
-						placeholder="core.some_module"
-						disabled={submitting}
-						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
-					/>
-				</div>
-			{:else}
-				<div>
-					<label for="fv-extension" class="block text-sm font-medium text-gray-700 mb-1">Extension *</label>
-					<input
-						id="fv-extension"
-						type="text"
-						bind:value={formExtension}
-						placeholder="voting"
-						disabled={submitting}
-						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
-					/>
-				</div>
-			{/if}
+			<div>
+				<label for="fv-title" class="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+				<input
+					id="fv-title"
+					type="text"
+					bind:value={formTitle}
+					placeholder="What the realm is deciding"
+					required
+					disabled={submitting}
+					class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+				/>
+			</div>
 
 			<div>
-				<label for="fv-function" class="block text-sm font-medium text-gray-700 mb-1">Function *</label>
+				<label for="fv-operation" class="block text-sm font-medium text-gray-700 mb-1">Operation *</label>
 				<input
-					id="fv-function"
+					id="fv-operation"
 					type="text"
-					bind:value={formFunction}
-					placeholder="my_function"
+					bind:value={formOperation}
+					placeholder="governance_update"
 					required
 					disabled={submitting}
 					class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
@@ -704,19 +529,6 @@
 					disabled={submitting}
 					class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none resize-y disabled:bg-gray-50"
 				></textarea>
-			</div>
-
-			<div>
-				<label for="fv-org" class="block text-sm font-medium text-gray-700 mb-1">Org name (optional)</label>
-				<input
-					id="fv-org"
-					type="text"
-					bind:value={formOrgName}
-					placeholder="Department that must consent via governed gate"
-					disabled={submitting}
-					class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
-				/>
-				<p class="text-xs text-gray-400 mt-1">Leave empty for a realm-wide consent ballot.</p>
 			</div>
 
 			<div class="flex justify-end gap-3 pt-2">
@@ -781,7 +593,9 @@
 				<span class="ml-3 text-gray-500 text-sm">Loading votes…</span>
 			</div>
 		{:else if !listLoading && votes.length === 0}
-			<div class="text-center py-12 text-gray-500 text-sm">No realm-wide votes yet.</div>
+			<div class="text-center py-12 text-gray-500 text-sm">
+				{listUnavailable ? 'Realm-wide votes are not available to you right now.' : 'No realm-wide votes yet.'}
+			</div>
 		{:else}
 			<div class="space-y-3">
 				{#each votes as vote (vote.vote_id)}
@@ -789,33 +603,18 @@
 						<div class="flex flex-wrap items-start justify-between gap-3">
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center gap-2 flex-wrap mb-1">
-									<span class="font-medium text-gray-900">{actionLabel(vote.action)}</span>
+									<span class="font-medium text-gray-900">{vote.title}</span>
 									<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold {statusColor(vote.status)}">
 										{statusLabel(vote.status)}
 									</span>
 								</div>
 								<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-									<span>ID: <code class="bg-gray-100 px-1 rounded">{truncateId(vote.vote_id)}</code></span>
+									<span>ID: <code class="bg-gray-100 px-1 rounded">{vote.vote_id}</code></span>
 									<span>Deadline: {formatDateTime(vote.deadline)}</span>
-									<span>Hash: <code class="bg-gray-100 px-1 rounded">{truncateHash(vote.vote_hash)}</code></span>
-									<span>Quarters: {vote.known_quarters ?? '—'}</span>
-									{#if vote.tally?.status}
-										<span>Tally: {statusLabel(vote.tally.status)}</span>
-									{/if}
-									{#if vote.tally?.yes_weight != null}
-										<span>Yes/No: {vote.tally.yes_weight}/{vote.tally.no_weight ?? 0}</span>
-									{/if}
-									{#if vote.tally?.reported != null}
-										<span>Reported: {vote.tally.reported}, absent: {vote.tally.absent ?? 0}</span>
-									{/if}
 								</div>
 								{#if vote.local_leg?.proposal_id}
 									<div class="mt-2 text-xs text-gray-600">
-										Local leg: {statusLabel(vote.local_leg.status)}
-										{#if vote.local_leg.outcome}
-											· {statusLabel(vote.local_leg.outcome)}
-										{/if}
-										· {vote.local_leg.proposal_id}
+										Local vote: {statusLabel(vote.local_leg.status)} · {vote.local_leg.proposal_id}
 									</div>
 								{/if}
 							</div>

@@ -1,0 +1,55 @@
+name: Journal Test
+
+on:
+  push:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/journal/**'
+      - 'extensions/_shared/frontend/**'
+      - '.github/workflows/journal-test.yml'
+  pull_request:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/journal/**'
+      - 'extensions/_shared/frontend/**'
+      - '.github/workflows/journal-test.yml'
+
+jobs:
+  test:
+    # Not ubuntu-latest: that is 26.04 now, where Playwright 1.52 cannot install chromium.
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      working-directory: extensions/journal/frontend-rt
+      run: npm install --no-audit --no-fund --silent
+
+    - name: Unit tests
+      working-directory: extensions/journal/frontend-rt
+      run: npm test
+
+    - name: Build
+      working-directory: extensions/journal/frontend-rt
+      run: npm run build
+
+    # The browser tests need no realm: they mount the built bundle on a page that plays the realm.
+    # They check the PDFs with pdftotext and pdfinfo.
+    - name: Install browser and PDF tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y poppler-utils
+        cd extensions/journal/tests/e2e
+        npm install --no-audit --no-fund --silent
+        npx playwright install chromium --with-deps
+
+    - name: Browser tests
+      working-directory: extensions/journal/tests/e2e
+      run: npx playwright test

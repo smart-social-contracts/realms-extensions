@@ -7,7 +7,7 @@ on:
       - 'extensions/justice_litigation/**'
       - '.github/workflows/justice_litigation-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/layered-codex ]
     paths:
       - 'extensions/justice_litigation/**'
       - '.github/workflows/justice_litigation-test.yml'
