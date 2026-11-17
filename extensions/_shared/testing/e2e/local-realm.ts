@@ -1,5 +1,6 @@
 /**
- * Playwright fixture for a realm started with `realms local start` (see local-realm.md).
+ * Playwright fixture for a realm started with `realms local start` (see local-realm.md, and .github/actions/local-realm
+ * for CI).
  *
  * The released realm is a production build: there is no test-mode login. Like the realm's own e2e, this
  * plays a federation portal host, which the realm frontend accepts through its portal bridge. The host
@@ -167,4 +168,9 @@ export function passTheOpenProposal(): void {
   const { proposals } = realmCall('proposal_list', { status: 'voting' });
   if (proposals.length !== 1) throw new Error(`expected one open proposal, found ${proposals.length}`);
   pass(proposals[0].id);
+}
+
+/** A principal nobody holds the key to: a party for a flow that needs another member's id. */
+export function randomPrincipal(): string {
+  return Ed25519KeyIdentity.generate().getPrincipal().toText();
 }
