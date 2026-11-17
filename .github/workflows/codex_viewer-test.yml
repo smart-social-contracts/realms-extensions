@@ -49,11 +49,11 @@ jobs:
         cd extensions/codex_viewer
         if [ -d backend ]; then
           echo "Running black..."
-          black backend --check || echo "⚠️  Black check failed or no Python files found"
+          black backend --check
           echo "Running isort..."
-          isort backend --check-only || echo "⚠️  isort check failed or no Python files found"
+          isort backend --check-only --profile black
           echo "Running flake8..."
-          flake8 backend || echo "⚠️  flake8 check failed or no Python files found"
+          flake8 backend --config ../../.github/flake8.cfg
         fi
         
     - name: Run tests

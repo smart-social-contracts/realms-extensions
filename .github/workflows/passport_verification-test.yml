@@ -46,11 +46,11 @@ jobs:
         cd extensions/passport_verification
         if [ -d backend ]; then
           echo "Running black..."
-          black backend --check || echo "⚠️  Black check failed or no Python files found"
+          black backend --check
           echo "Running isort..."
-          isort backend --check-only || echo "⚠️  isort check failed or no Python files found"
+          isort backend --check-only --profile black
           echo "Running flake8..."
-          flake8 backend || echo "⚠️  flake8 check failed or no Python files found"
+          flake8 backend --config ../../.github/flake8.cfg
         fi
         
     - name: Run backend tests
@@ -59,7 +59,7 @@ jobs:
         if [ -f run_tests.sh ]; then
           bash run_tests.sh
         else
-          echo "ℹ️  No run_tests.sh found - skipping local backend tests"
+          echo "::warning::extensions/passport_verification has no run_tests.sh: this check ran no backend tests"
           echo "ℹ️  UI tests run in the local-realm workflows, where an extension has one"
         fi
 

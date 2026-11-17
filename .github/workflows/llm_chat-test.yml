@@ -38,15 +38,19 @@ jobs:
         fi
         
     - name: Run linters
+      # Failing since this lint was made real (ci-signal-audit, 2026-11-17): black, and for some extensions isort, want
+      # backend/ reformatted. Non-blocking until `black backend` is applied; that edits extensions/llm_chat/, which makes
+      # the next release bump its patch version. Delete `continue-on-error` when it is clean.
+      continue-on-error: true
       run: |
         cd extensions/llm_chat
         if [ -d backend ]; then
           echo "Running black..."
-          black backend --check || echo "⚠️  Black check failed or no Python files found"
+          black backend --check
           echo "Running isort..."
-          isort backend --check-only || echo "⚠️  isort check failed or no Python files found"
+          isort backend --check-only --profile black
           echo "Running flake8..."
-          flake8 backend || echo "⚠️  flake8 check failed or no Python files found"
+          flake8 backend --config ../../.github/flake8.cfg
         fi
         
     - name: Run tests
@@ -55,6 +59,6 @@ jobs:
         if [ -f run_tests.sh ]; then
           bash run_tests.sh
         else
-          echo "ℹ️  No run_tests.sh found - skipping tests"
+          echo "::warning::extensions/llm_chat has no run_tests.sh: this check ran no tests"
           echo "ℹ️  Add run_tests.sh to enable automated testing"
         fi
