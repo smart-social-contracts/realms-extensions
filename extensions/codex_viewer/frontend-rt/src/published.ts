@@ -135,8 +135,17 @@ export async function publishedRelease(layer: string, where: Codices = CODICES):
 }
 
 /**
+ * What was served for a chapter is not the text its release pins. A failure of its own, so that a caller can tell it
+ * from a chapter that could not be read at all, which says nothing against the text.
+ */
+export class DigestMismatch extends Error {
+	name = 'DigestMismatch';
+}
+
+/**
  * The text of one published chapter, fetched at its release's commit and checked against the digest that release
- * pins it by. A digest that does not match throws: it is the only thing standing in for the realm's own pinning.
+ * pins it by. A digest that does not match throws `DigestMismatch`: it is the only thing standing in for the realm's
+ * own pinning.
  */
 export async function publishedChapter(
 	layer: string,
@@ -150,7 +159,7 @@ export async function publishedChapter(
 	// hashed: decoding first drops a byte-order mark and replaces anything invalid, and would hash something else.
 	const raw = await bytes(chapterUrl(layer, domain, release.commit, where));
 	const got = await digestBytes(raw);
-	if (got !== want) throw new Error(`${got} is not the published ${want}`);
+	if (got !== want) throw new DigestMismatch(`${got} is not the published ${want}`);
 	return new TextDecoder().decode(raw);
 }
 

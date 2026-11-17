@@ -22,13 +22,16 @@
 		type Layer,
 	} from './layers';
 	import {
+		chapterUrl,
 		codicesFrom,
+		DigestMismatch,
 		publishedChapter,
 		publishedRelease,
 		releaseChapters,
 		type PublishedRelease,
 	} from './published';
 	import { chapterFile, chapterLanguage } from './source';
+	import { citedLegislation, explainQuestion, type Standing } from './explain';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -103,6 +106,12 @@
 	let publishedUnreachable = $state<string[]>([]);
 	/** A chapter that was fetched and did not match the digest its release pins. That is an error, and it is shown. */
 	let publishedError = $state('');
+	/**
+	 * The chapters whose published text did not match its digest, until a fetch of it does. Kept apart from the
+	 * banner: the banner is cleared when the reader looks at another layer, while the chapter it was about can stay
+	 * open, and that chapter must still not be cited.
+	 */
+	const failedCheck = new Set<string>();
 	let loading = $state(true);
 	/** The `?codex=` of the link the page was opened with, until a chapter of that id is found. */
 	let wantedCodex = $state('');
@@ -139,6 +148,14 @@
 	let allChapters = $derived([...codexes, ...publishedChapters] as DomainChapter[]);
 	let tree = $derived(
 		isLayered(activeCodex) && selectedLayer ? treeFor(allChapters, selectedLayer, inherited, stack) : [],
+	);
+	/**
+	 * The realm's own tree: every domain, and which chapter of it the realm runs. `tree` is the tree of the layer
+	 * being *looked at*, which is not the same thing — from layer `eu/es` of a realm that also runs `eu/es/vc`,
+	 * `eu/es/tax.py` is the deepest chapter in view, while `eu/es/vc/tax.py` is what the realm runs.
+	 */
+	let realmTree = $derived(
+		isLayered(activeCodex) ? treeFor(allChapters, ownLayer(activeCodex), true, stack) : [],
 	);
 	let visibleTree = $derived(
 		searchTerm.trim()
@@ -209,8 +226,11 @@
 	async function publishedSource(codex: Codex): Promise<string | null> {
 		if (!codex.release || !codex.layer || !codex.domain) return null;
 		try {
-			return await publishedChapter(codex.layer, codex.domain, codex.release, codicesFrom(ctx.config));
+			const text = await publishedChapter(codex.layer, codex.domain, codex.release, codicesFrom(ctx.config));
+			failedCheck.delete(getCodexId(codex));
+			return text;
 		} catch (e: any) {
+			if (e instanceof DigestMismatch) failedCheck.add(getCodexId(codex));
 			publishedError = `${codex.id}: ${e?.message ?? e}`;
 			console.warn(`published ${codex.id}:`, e);
 			return null;
@@ -404,6 +424,23 @@
 		pendingExplainOnLoad = params.get('explain') === '1';
 		initialRange = parseLinesParam(params.get('lines'));
 		wantedCodex = params.get('codex') ?? '';
+		// `explain=1` is served once and then gone from the address. The flag lives on in memory for the link's own
+		// chapter; leaving the parameter in the URL would arm it again on every remount — the Legislation/Source tab
+		// switch unmounts this component — and on a back or forward to that address, so the question would be
+		// dispatched again inside a click that asked for something else.
+		if (pendingExplainOnLoad) dropExplainParam(params);
+	}
+
+	/** Take `explain` out of the address, keeping everything else, without adding a history entry. */
+	function dropExplainParam(params: URLSearchParams) {
+		if (typeof window === 'undefined' || !window.history?.replaceState) return;
+		params.delete('explain');
+		const query = params.toString();
+		window.history.replaceState(
+			window.history.state,
+			'',
+			`${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+		);
 	}
 
 	/**
@@ -422,7 +459,7 @@
 			all.find((c) => c.name === want);
 		if (!match) return false;
 		wantedCodex = '';
-		await selectCodex(match, { skipUrlSync: true });
+		await selectCodex(match, { skipUrlSync: true, fromLink: true });
 		return true;
 	}
 
@@ -492,8 +529,12 @@
 
 	async function selectCodex(
 		codex: Codex,
-		opts: { skipUrlSync?: boolean; preserveRange?: boolean } = {},
+		opts: { skipUrlSync?: boolean; preserveRange?: boolean; fromLink?: boolean } = {},
 	) {
+		// `?explain=1` belongs to the chapter the link names and to nothing else. A pick of the reader's own ends
+		// its claim, exactly as it ends the link's (see `wantedCodex` below), so no question is ever dispatched
+		// inside a click of theirs; and a link that matched nothing explains nothing.
+		if (!opts.fromLink) pendingExplainOnLoad = false;
 		if (selectedCodex && getCodexId(selectedCodex) === getCodexId(codex) && selectedCodex.code != null) {
 			if (!opts.preserveRange) {
 				currentSelection = null;
@@ -532,14 +573,167 @@
 		maybeTriggerExplainOnLoad();
 	}
 
+	/**
+	 * `?explain=1`: the link's chapter is open, so the question goes up — but it does not send itself. A link is
+	 * not a gesture, and the portal would honour `autoSend` while any click of the reader's is still live. The
+	 * question lands in the assistant's input, and the Explain button is what sends it.
+	 */
 	function maybeTriggerExplainOnLoad() {
-		if (!pendingExplainOnLoad || !aiAssistantEnabled) return;
+		if (!pendingExplainOnLoad || !aiAssistantEnabled || !selectedCodex) return;
 		pendingExplainOnLoad = false;
-		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
+		dispatchExplain(selectedCodex, selectionFor(selectedCodex), { autoSend: false });
+	}
+
+	/**
+	 * The passage the question is about: what is selected in the editor, or else the lines a `lines=` link names,
+	 * which Monaco has not reported as a selection yet when the link is still opening the chapter.
+	 */
+	function selectionFor(codex: Codex): SelectionInfo | null {
+		if (currentSelection?.text?.trim()) return currentSelection;
+		const code = codex.code ?? '';
+		if (!initialRange || !code) return currentSelection;
+		const lines = code.split('\n');
+		const startLine = Math.max(1, Math.min(initialRange.startLine, lines.length));
+		const endLine = Math.max(startLine, Math.min(initialRange.endLine, lines.length));
+		return { text: lines.slice(startLine - 1, endLine).join('\n'), startLine, endLine };
+	}
+
+	/** Where the chapter stands in the stack, and the chapter that builds on it when it is not the one that runs. */
+	function standingOf(codex: Codex): { standing: Standing; runsFile?: string } {
+		if (codex.held === 'published') return { standing: 'not_run' };
+		// A codex of the earlier kind is not in any layer: the history says whether the realm still runs it.
+		if (codex.kind === 'package') {
+			return { standing: codex.status === 'active' ? 'runs' : 'no_longer_run' };
+		}
+		const row = codex.domain ? realmTree.find((entry) => entry.domain === codex.domain) : undefined;
+		if (row && getCodexId(row.runs) !== getCodexId(codex)) {
+			return { standing: 'builds_on', runsFile: row.runs.name };
+		}
+		return { standing: 'runs' };
+	}
+
+	/**
+	 * The question to ask about what is on screen, and the text it is about: the passage selected, or else the whole
+	 * chapter. The host caps the text, so a long chapter is cut there, not here.
+	 */
+	function explainPrompt(codex: Codex, selection: SelectionInfo | null) {
+		const code = codex.code ?? '';
+		const selected = selection?.text?.trim() ? selection : null;
+		const text = selected ? selected.text : code;
+		// An earlier codex and its successor carry the same display name, so a package is named by its id.
+		const file = (codex.kind === 'package' ? getCodexId(codex) : codex.name) || getCodexId(codex);
+		const reference = chapterReference(codex);
+		if (!text.trim()) {
+			// The text could not be read. A chapter the realm pins can still be named by its digest, which is what
+			// the assistant reads the whole of it by; a published one whose text failed its check is named by
+			// nothing, and the question says why rather than going up bare.
+			const unverified = failedItsCheck(codex);
+			if (!reference.checksum && !unverified) return null;
+			const { standing, runsFile } = standingOf(codex);
+			return {
+				message: explainQuestion({
+					file,
+					layer: codex.layer ?? '',
+					standing,
+					runsFile,
+					language: codex.language,
+					unverified,
+				}),
+				...(reference.checksum
+					? {
+							context: {
+								languageId: codex.language,
+								label: file,
+								uri: buildFocusUri(getCodexId(codex), null),
+								...reference,
+							},
+						}
+					: {}),
+			};
+		}
+		const totalLines = code ? code.split('\n').length : undefined;
+		const range = selected
+			? { startLine: selected.startLine, endLine: selected.endLine }
+			: totalLines
+				? { startLine: 1, endLine: totalLines }
+				: null;
+		const { standing, runsFile } = standingOf(codex);
+		return {
+			message: explainQuestion({
+				file,
+				layer: codex.layer ?? '',
+				standing,
+				runsFile,
+				legislation: citedLegislation(code),
+				// The whole chapter is named by its file, not by "lines 1 to its end".
+				range: selected ? range : null,
+				language: codex.language,
+			}),
+			context: {
+				text,
+				languageId: codex.language,
+				label: file,
+				uri: buildFocusUri(getCodexId(codex), range),
+				range: range ?? undefined,
+				totalLines,
+				// Where the whole chapter is read, and how to tell it is the right text: the realm pins a chapter by
+				// its digest, and a published layer's release pins its own at the commit it was cut from.
+				...reference,
+			},
+		};
+	}
+
+	/**
+	 * Where the whole of a chapter can be read, beyond the text that fits in one prompt: its digest, who holds it,
+	 * and — for a layer the realm does not run — the file at the commit its release was cut from, which never
+	 * changes. The realm's own `legislation_chapter` read is keyed by the digest, so the digest is both the address
+	 * and the proof.
+	 */
+	function chapterReference(codex: Codex): { checksum?: string; held?: 'realm' | 'published'; url?: string } {
+		if (codex.held === 'published') {
+			// The text served under that URL was not the text the release pins. Nothing here is worth citing: the
+			// digest would stand for text the assistant cannot get, and the URL for text that failed its check.
+			if (failedItsCheck(codex)) return {};
+			const release = codex.release;
+			const digest = release && codex.domain ? releaseChapters(release)[codex.domain] : undefined;
+			return {
+				held: 'published',
+				...(digest ? { checksum: digest } : {}),
+				...(release && codex.layer && codex.domain
+					? { url: chapterUrl(codex.layer, codex.domain, release.commit, codicesFrom(ctx.config)) }
+					: {}),
+			};
+		}
+		return codex.checksum ? { checksum: codex.checksum, held: 'realm' } : {};
+	}
+
+	/** Whether the published text read for this chapter was not the text its release pins (`published.ts`). */
+	function failedItsCheck(codex: Codex): boolean {
+		return failedCheck.has(getCodexId(codex));
+	}
+
+	/**
+	 * Ask the question. The button is one click, one question, sent at once (`autoSend`); a link that asks on load
+	 * is not a gesture and only fills the input.
+	 */
+	function dispatchExplain(
+		codex: Codex,
+		selection: SelectionInfo | null,
+		opts: { autoSend?: boolean } = {},
+	) {
+		ctx.host?.dispatch?.({
+			type: 'assistant.prompt',
+			autoSend: opts.autoSend !== false,
+			...(explainPrompt(codex, selection) ?? {}),
+		});
 	}
 
 	/** Look at another layer of the stack: what it inherits is read where it is published, if the realm lacks it. */
 	async function chooseLayer(layer: string) {
+		// Looking somewhere else is the reader taking over, as picking a chapter is: the link's chapter is not
+		// opened over what they asked for, and `?explain=1` explains nothing.
+		wantedCodex = '';
+		pendingExplainOnLoad = false;
 		selectedLayer = layer;
 		if (!inheritsAnything(layer, stack)) inherited = true;
 		publishedError = '';
@@ -601,7 +795,9 @@
 
 	function explainWithAI() {
 		if (!selectedCodex || !aiAssistantEnabled) return;
-		ctx.host?.dispatch?.({ type: 'assistant.prompt', autoSend: true });
+		// Asked by hand: the link has nothing left to ask, and must not refill the input after this answer.
+		pendingExplainOnLoad = false;
+		dispatchExplain(selectedCodex, currentSelection);
 	}
 
 	function toggleSidebar() {
