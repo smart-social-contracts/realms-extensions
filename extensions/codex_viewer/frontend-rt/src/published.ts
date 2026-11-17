@@ -16,9 +16,10 @@
  *    what is fetched: a release that fails either is treated as unpublished rather than fetched from.
  *
  * The ref that `releases.json` itself is read from is the one thing not pinned, so it is configuration, not a constant
- * buried here: `ctx.config.codices` overrides `CODICES`. `legislation/` is not on the codices repository's `main`
- * yet — it lives on `feat/layered-codex`, like the verify page — so the default names that branch, and becomes `main`
- * (better, a tag) when the codices release lands there.
+ * buried here: `ctx.config.codices` overrides `CODICES`. The default is the codices repository's `main`: `legislation/`
+ * was developed on `feat/layered-codex`, and that branch was deleted once codices#30 merged it into `main` (17 Nov
+ * 2026), so a default naming it left every layer the realm does not run "source unavailable". A feature branch goes
+ * when it merges; `main` stays. Better still would be a tag, once the codices cut one.
  *
  * No DOM beyond `fetch` and `crypto.subtle`: `published.test.ts` runs on node.
  */
@@ -41,7 +42,7 @@ export const CODICES_TIMEOUT_MS = 10_000;
 export const CODICES: Codices = {
 	base: 'https://raw.githubusercontent.com',
 	repo: 'smart-social-contracts/realms-codices',
-	ref: 'feat/layered-codex',
+	ref: 'main',
 	root: 'legislation',
 };
 

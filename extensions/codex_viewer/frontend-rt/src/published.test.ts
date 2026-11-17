@@ -44,9 +44,19 @@ describe('where published source is read from', () => {
 		assert.ok(chapterUrl('eu/es', 'calendar', 'abc123').endsWith('/legislation/eu/es/calendar.json'));
 	});
 
+	it("reads releases from the codices repository's main, not the branch legislation/ was developed on", () => {
+		// `feat/layered-codex` was deleted after codices#30 merged it: a default naming it 404s, and every layer the
+		// realm does not run shows "source unavailable".
+		assert.equal(CODICES.ref, 'main');
+		assert.equal(
+			releasesUrl('eu'),
+			'https://raw.githubusercontent.com/smart-social-contracts/realms-codices/main/legislation/eu/releases.json',
+		);
+	});
+
 	it('takes the source from the host, field by field, and keeps the rest', () => {
-		const where = codicesFrom({ codices: { ref: 'main', base: 'https://mirror.example/' } });
-		assert.equal(where.ref, 'main');
+		const where = codicesFrom({ codices: { ref: 'v2.6.0', base: 'https://mirror.example/' } });
+		assert.equal(where.ref, 'v2.6.0');
 		assert.equal(where.base, 'https://mirror.example');
 		assert.equal(where.repo, CODICES.repo);
 	});
