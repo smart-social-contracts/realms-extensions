@@ -123,6 +123,21 @@
 	const decimals = $derived(overview?.decimals ?? 8);
 	const currency = $derived(overview?.currency ?? '');
 
+	const PERIODS: Record<string, string> = {
+		weekly: 'Weekly periods',
+		biweekly: 'Two-week periods',
+		monthly: 'Monthly periods',
+		quarterly: 'Quarterly periods',
+		semiannual: 'Half-year periods',
+		annual: 'Yearly periods',
+		yearly: 'Yearly periods',
+	};
+
+	/** How long a budget period is, in words ("Monthly periods"), from the stored length ("monthly"). */
+	function periodLabel(length: string | undefined): string {
+		return PERIODS[length || ''] ?? (length ? `${length} periods` : '');
+	}
+
 	function fmt(raw: number): string {
 		return formatMoney(raw, decimals, currency);
 	}
@@ -605,11 +620,11 @@
 			{#if overview}
 				{#if narrow}
 					<span class="text-xs text-gray-500 shrink-0">
-						{overview.epoch_length} · {overview.schedule_active ? 'automatic' : 'manual'}
+						{periodLabel(overview.epoch_length)} · {overview.schedule_active ? 'Allocated automatically' : 'Allocated by hand'}
 					</span>
 				{:else}
 					<span class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full">
-						epoch: {overview.epoch_length}
+						{periodLabel(overview.epoch_length)}
 					</span>
 					<span
 						class={cn(
@@ -619,7 +634,7 @@
 								: 'bg-gray-100 text-gray-500',
 						)}
 					>
-						{overview.schedule_active ? 'automatic' : 'manual'}
+						{overview.schedule_active ? 'Allocated automatically' : 'Allocated by hand'}
 					</span>
 				{/if}
 			{/if}

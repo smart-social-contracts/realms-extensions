@@ -775,7 +775,7 @@
 			<div class="bg-white p-0 sm:p-5 sm:rounded-lg sm:border sm:border-gray-200">
 				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
 					<div>
-						<h2 class="text-xl font-bold text-gray-900">{selectedUser.nickname || 'Unnamed User'}</h2>
+						<h2 class="text-xl font-bold text-gray-900">{selectedUser.nickname || 'Member'}</h2>
 						<code class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded break-all">{selectedUser.principal}</code>
 					</div>
 					<div class="flex flex-wrap gap-2">
@@ -1151,7 +1151,7 @@
 						<div class="px-5 py-3 hover:bg-gray-50 transition-colors flex items-center justify-between">
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2 mb-1">
-									<span class="text-sm font-medium text-gray-900 truncate">{user.nickname || 'Unnamed'}</span>
+									<span class="text-sm font-medium text-gray-900 truncate">{user.nickname || 'Member'}</span>
 									<code class="text-xs text-gray-400">{truncatePrincipal(user.principal)}</code>
 								</div>
 								<div class="flex flex-wrap gap-1.5">

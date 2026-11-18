@@ -815,7 +815,7 @@
 			<div class={panelClass}>
 				<div class={panelHeadClass}>
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📋 Balance Sheet</h3>
+						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">Balance Sheet</h3>
 						{@render statementCurrencyNote()}
 					</div>
 				</div>
@@ -880,7 +880,7 @@
 			<div class={panelClass}>
 				<div class={panelHeadClass}>
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">📈 Income Statement</h3>
+						<h3 class="text-lg font-semibold text-gray-800 dark:text-white">Income Statement</h3>
 						{@render statementCurrencyNote()}
 					</div>
 				</div>
@@ -1339,7 +1339,7 @@
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 					<div class={narrow ? 'py-2' : 'bg-white dark:bg-gray-750 rounded-lg p-4 border border-gray-200 dark:border-gray-600'}>
 						<div class="flex items-center justify-between mb-3">
-							<span class="text-sm font-medium text-blue-700 dark:text-blue-400">📈 Income</span>
+							<span class="text-sm font-medium text-blue-700 dark:text-blue-400">Income</span>
 							<span class="text-lg font-bold text-blue-800 dark:text-blue-300">+{fmtCompact(cashFlowBreakdown.totalIncome)}</span>
 						</div>
 						<div class="space-y-1 text-xs">

@@ -1041,19 +1041,19 @@
 								{/if}
 							</div>
 							<div class="grid grid-cols-3 gap-2">
-								<label class="text-xs text-gray-500">M
+								<label class="text-xs text-gray-600">Approvals needed
 									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].m} />
 									{#if pv.errors.m}
 										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.m}</span>
 									{/if}
 								</label>
-								<label class="text-xs text-gray-500">N
+								<label class="text-xs text-gray-600">Out of
 									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].n} />
 									{#if pv.errors.n}
 										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.n}</span>
 									{/if}
 								</label>
-								<label class="text-xs text-gray-500">Quorum %
+								<label class="text-xs text-gray-600">Minimum turnout %
 									<input class="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" bind:value={policyDraft[dept.name].quorum} />
 									{#if pv.errors.quorum}
 										<span class="block mt-0.5 text-[11px] text-red-600">{pv.errors.quorum}</span>

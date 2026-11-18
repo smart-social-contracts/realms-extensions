@@ -1284,7 +1284,7 @@
 						</svg>
 						<p class="text-gray-500 dark:text-gray-400">
 							{userProfile === 'admin'
-								? 'No litigations found in the system.'
+								? 'No cases yet.'
 								: 'You have no litigation cases.'}
 						</p>
 					</div>
