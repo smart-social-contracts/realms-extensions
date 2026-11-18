@@ -4,6 +4,8 @@
   "citizenship_title": "Membresia",
   "membership_status_active": "Membre actiu",
   "membership_status_pending": "Activació pendent",
+  "membership_status_suspended": "Suspés",
+  "membership_status_banned": "Expulsat",
   "citizenship_steps": "{done} de {total} completat",
   "citizenship_passport": "Passaport",
   "citizenship_passport_done": "Verificat",

@@ -4,6 +4,8 @@
   "citizenship_title": "Membresía",
   "membership_status_active": "Miembro activo",
   "membership_status_pending": "Activación pendiente",
+  "membership_status_suspended": "Suspendido",
+  "membership_status_banned": "Expulsado",
   "citizenship_steps": "{done} de {total} completado",
   "citizenship_passport": "Pasaporte",
   "citizenship_passport_done": "Verificado",

@@ -4,6 +4,8 @@
   "citizenship_title": "会籍",
   "membership_status_active": "正式会员",
   "membership_status_pending": "待激活",
+  "membership_status_suspended": "已暂停",
+  "membership_status_banned": "已封禁",
   "citizenship_steps": "已完成 {done} / {total}",
   "citizenship_passport": "护照",
   "citizenship_passport_done": "已验证",

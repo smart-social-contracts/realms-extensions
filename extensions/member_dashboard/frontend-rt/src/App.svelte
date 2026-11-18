@@ -403,12 +403,14 @@
 		{:else}
 			{#if citizenship}
 				<section class="overflow-hidden rounded-xl border border-slate-200/70 bg-white dark:border-slate-700 dark:bg-slate-800">
-					<div class="flex items-center justify-between gap-3 px-4 pt-4 pb-2">
+					<div class={cn('flex items-center justify-between gap-3 px-4 pt-4', steps.total > 0 ? 'pb-2' : 'pb-4')}>
 						<div>
 							<h2 class="text-base font-semibold text-slate-900 dark:text-white">{t('citizenship_title')}</h2>
-							<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-								{t('citizenship_steps', { done: steps.done, total: steps.total })}
-							</p>
+							{#if steps.total > 0}
+								<p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+									{t('citizenship_steps', { done: steps.done, total: steps.total })}
+								</p>
+							{/if}
 						</div>
 						{#if citizenship.status}
 							<span
@@ -416,22 +418,27 @@
 									'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
 									citizenship.status === 'active'
 										? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-										: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+										: citizenship.status === 'pending'
+											? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+											: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 								)}
 							>
 								<span
 									class={cn(
 										'h-1.5 w-1.5 rounded-full',
-										citizenship.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500',
+										citizenship.status === 'active'
+											? 'bg-emerald-500'
+											: citizenship.status === 'pending'
+												? 'bg-amber-500'
+												: 'bg-red-500',
 									)}
 									aria-hidden="true"
 								></span>
-								{citizenship.status === 'active'
-									? t('membership_status_active')
-									: t('membership_status_pending')}
+								{t(`membership_status_${citizenship.status}`)}
 							</span>
 						{/if}
 					</div>
+					{#if steps.total > 0}
 					<div class="px-4 pb-2">
 						<div class="h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
 							<div
@@ -474,6 +481,7 @@
 							</div>
 						</li>
 						{/if}
+						{#if steps.showInvoice}
 						<li class="flex items-start gap-3 px-4 py-3">
 							<div
 								class={cn(
@@ -507,7 +515,10 @@
 								</p>
 							</div>
 						</li>
+						{/if}
 					</ol>
+					{/if}
+					{#if Number(citizenship.total_invoices || 0) > 0}
 					<div class="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100 dark:divide-slate-700 dark:border-slate-700">
 						<div class="px-4 py-2.5">
 							<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('citizenship_total_invoices')}</p>
@@ -518,6 +529,7 @@
 							<p class="text-base font-semibold tabular-nums text-slate-900 dark:text-white">{citizenship.paid_invoices ?? 0}</p>
 						</div>
 					</div>
+					{/if}
 				</section>
 			{/if}
 
