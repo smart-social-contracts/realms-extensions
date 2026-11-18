@@ -592,7 +592,7 @@
 	}
 
 	.chrome-tab.is-on {
-		border-bottom-color: #111827;
+		border-bottom-color: var(--color-primary-600, #111827);
 		color: #111827;
 	}
 
@@ -848,7 +848,7 @@
 						<button
 							onclick={saveRule}
 							disabled={ruleBusy || ruleTotal > ONE || !can('org.manage_budget')}
-							class="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
+							class="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
 						>
 							{#if ruleBusy}
 								<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -1041,7 +1041,7 @@
 					<button
 						onclick={saveEpoch}
 						disabled={epochBusy || !can('treasury.manage')}
-						class="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
+						class="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
 					>
 						{#if epochBusy}
 							<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -1080,7 +1080,7 @@
 							'mt-2 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg disabled:opacity-50',
 							overview?.schedule_active
 								? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
-								: 'bg-gray-900 text-white hover:bg-gray-800',
+								: 'bg-blue-600 text-white hover:bg-blue-700',
 						)}
 					>
 						{#if scheduleBusy}
@@ -1130,7 +1130,7 @@
 					<button
 						onclick={() => $voteConfirm?.run()}
 						disabled={$voteConfirmBusy}
-						class="inline-flex items-center gap-2 px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
+						class="inline-flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
 					>
 						{#if $voteConfirmBusy}
 							<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>

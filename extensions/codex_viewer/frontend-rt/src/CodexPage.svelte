@@ -99,8 +99,8 @@
 	}
 
 	.tabs button.active {
-		color: #4338ca;
-		border-bottom-color: #6366f1;
+		color: var(--color-primary-700, #4338ca);
+		border-bottom-color: var(--color-primary-500, #6366f1);
 		font-weight: 600;
 	}
 

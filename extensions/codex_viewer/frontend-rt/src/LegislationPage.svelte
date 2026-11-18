@@ -208,8 +208,8 @@
 	}
 
 	.legislation :global(.notice) {
-		background: #eff6ff;
-		border: 1px solid #bfdbfe;
+		background: var(--color-primary-50, #eff6ff);
+		border: 1px solid var(--color-primary-200, #bfdbfe);
 		border-radius: 6px;
 		padding: 8px 12px;
 	}
@@ -316,8 +316,8 @@
 	}
 
 	.legislation :global(.btn.primary) {
-		background: #4f46e5;
-		border-color: #4f46e5;
+		background: var(--color-primary-600, #4f46e5);
+		border-color: var(--color-primary-600, #4f46e5);
 		color: #fff;
 	}
 
@@ -328,6 +328,6 @@
 	}
 
 	.legislation :global(.value) {
-		color: #4338ca;
+		color: var(--color-primary-700, #4338ca);
 	}
 </style>

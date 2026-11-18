@@ -734,8 +734,8 @@
 	}
 
 	.chrome-tab.is-on {
-		border-bottom-color: #4f46e5;
-		color: #4f46e5;
+		border-bottom-color: var(--color-primary-600, #4f46e5);
+		color: var(--color-primary-600, #4f46e5);
 	}
 
 	.case-row {
@@ -755,7 +755,7 @@
 	}
 
 	.case-open:focus-visible {
-		outline: 2px solid #6366f1;
+		outline: 2px solid var(--color-primary-500, #6366f1);
 		outline-offset: 2px;
 		border-radius: 4px;
 	}

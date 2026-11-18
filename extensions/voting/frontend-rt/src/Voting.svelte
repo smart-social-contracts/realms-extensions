@@ -1211,7 +1211,7 @@
 	}
 
 	.chrome-btn.is-on {
-		background: #111827;
+		background: var(--color-primary-600, #111827);
 		color: #fff;
 	}
 
@@ -1850,7 +1850,7 @@
 					<button
 						type="submit"
 						disabled={submitting || !isFormValid()}
-						class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+						class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
 					>
 						{#if submitting}
 							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>

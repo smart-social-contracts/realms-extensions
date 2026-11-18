@@ -929,7 +929,7 @@
 		padding: 0.5rem 1rem;
 		border: none;
 		border-radius: 0.5rem;
-		background: #2563eb;
+		background: var(--color-primary-600, #2563eb);
 		color: #fff;
 		font-size: 0.85rem;
 		font-weight: 500;

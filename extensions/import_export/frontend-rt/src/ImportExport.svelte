@@ -635,7 +635,7 @@
 						type="button"
 						onclick={startLetterJob}
 						disabled={letterRunning || !citizenJson.trim()}
-						class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg disabled:opacity-50"
+						class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50"
 					>{letterRunning && !letterJob?.paused ? 'Generating…' : 'Generate / download letters'}</button>
 					{#if letterRunning}
 						<button

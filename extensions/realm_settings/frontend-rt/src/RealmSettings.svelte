@@ -519,7 +519,7 @@
 	}
 
 	.chrome-tab.is-on {
-		border-bottom-color: #111827;
+		border-bottom-color: var(--color-primary-600, #111827);
 		color: #111827;
 	}
 

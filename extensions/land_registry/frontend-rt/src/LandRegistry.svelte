@@ -1213,7 +1213,7 @@
 
 	.parcel-row:hover,
 	.parcel-row.selected {
-		background: #eff6ff;
+		background: var(--color-primary-50, #eff6ff);
 	}
 
 	.dot {
@@ -1311,7 +1311,7 @@
 	.zone-chip {
 		padding: 0.15rem 0.55rem;
 		border-radius: 999px;
-		background: #eef2ff;
+		background: var(--color-primary-50, #eef2ff);
 		color: #3730a3;
 		font-size: 0.75rem;
 	}
@@ -1372,7 +1372,7 @@
 
 	.primary-btn {
 		border: none;
-		background: #2563eb;
+		background: var(--color-primary-600, #2563eb);
 		color: #fff;
 	}
 

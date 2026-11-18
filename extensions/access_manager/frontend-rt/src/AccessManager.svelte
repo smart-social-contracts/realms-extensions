@@ -795,7 +795,7 @@
 		font-weight: 500;
 		border-radius: 6px;
 		border: 1px solid #111827;
-		background: #111827;
+		background: var(--color-primary-600, #111827);
 		color: #fff;
 		cursor: pointer;
 		flex-shrink: 0;
@@ -823,7 +823,7 @@
 	}
 
 	.chrome-tab.is-on {
-		border-bottom-color: #111827;
+		border-bottom-color: var(--color-primary-600, #111827);
 		color: #111827;
 	}
 
@@ -920,7 +920,7 @@
 					<input bind:value={newThresholdN} placeholder="N" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
 				</div>
 				<p class="text-xs text-gray-500">The head is chosen later, among the people holding a seat in the department.</p>
-				<button onclick={createDepartment} disabled={!newDeptName.trim()} class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50">
+				<button onclick={createDepartment} disabled={!newDeptName.trim()} class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
 					Create
 				</button>
 			</div>
@@ -1067,7 +1067,7 @@
 								type="button"
 								onclick={() => savePolicy(dept.name)}
 								disabled={!policyDraftDirty(dept.name) || !pv.valid}
-								class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+								class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
 							>
 								Save policy
 							</button>
@@ -1103,7 +1103,7 @@
 										</label>
 									</div>
 									<div class="flex flex-wrap items-center gap-2">
-										<button onclick={() => createPosition(dept.name)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">
+										<button onclick={() => createPosition(dept.name)} class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
 											Create position
 										</button>
 										<span class="text-xs text-gray-400">
@@ -1131,7 +1131,7 @@
 													<label class="text-xs text-gray-500">Salary
 														<input class="mt-1 w-20 px-2 py-1 border border-gray-300 rounded text-sm" bind:value={posDraft.salary} />
 													</label>
-													<button onclick={() => saveEditPosition(pos)} class="px-2 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800">Save</button>
+													<button onclick={() => saveEditPosition(pos)} class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
 													<button onclick={() => { editingPosition = null; }} class="px-2 py-1 text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-100">Cancel</button>
 												</div>
 											{:else}
@@ -1330,7 +1330,7 @@
 							type="button"
 							onclick={() => addMember(dept)}
 							disabled={!resolvedMemberPrincipal || addingMember}
-							class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+							class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
 						>
 							{addingMember ? 'Adding…' : 'Add'}
 						</button>
@@ -1386,7 +1386,7 @@
 						<button
 							onclick={() => grantAuthority(dept.name)}
 							disabled={!authTarget.trim() && !authRemoteQuarter.trim()}
-							class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+							class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
 						>
 							Grant from {dept.name}
 						</button>
@@ -1417,7 +1417,7 @@
 								type="button"
 								onclick={() => createFund(dept.name)}
 								disabled={!newFundCode.trim() || fundBusy}
-								class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+								class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
 							>
 								{fundBusy ? 'Creating…' : 'Create fund'}
 							</button>
@@ -1433,7 +1433,7 @@
 								type="button"
 								onclick={() => runPayroll(dept.name)}
 								disabled={payrollBusy}
-								class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+								class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
 							>
 								{payrollBusy ? 'Running…' : 'Run payroll'}
 							</button>

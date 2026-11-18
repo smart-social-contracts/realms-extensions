@@ -590,14 +590,14 @@
 	}
 
 	.chrome-tab.is-on {
-		border-bottom-color: #111827;
+		border-bottom-color: var(--color-primary-600, #111827);
 		color: #111827;
 	}
 
 	.chrome-btn.is-on {
-		background: #111827;
+		background: var(--color-primary-600, #111827);
 		color: #fff;
-		border-color: #111827;
+		border-color: var(--color-primary-600, #111827);
 	}
 
 	@media (max-width: 720px) {
@@ -733,7 +733,7 @@
 					<button
 						onclick={handlePropose}
 						disabled={assignLoading}
-						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40"
+						class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
 					>
 						{#if assignLoading}
 							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -781,7 +781,7 @@
 					<div class="flex flex-wrap gap-2">
 						<button
 							onclick={() => { view = 'assign'; assignProfileName = ''; }}
-							class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black transition-colors"
+							class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
 						>
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
 							Assign Profile
@@ -887,7 +887,7 @@
 			<button
 				onclick={handleAssign}
 				disabled={assignLoading || !assignProfileName}
-				class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+				class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
 			>
 				{#if assignLoading}
 					<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -996,7 +996,7 @@
 									<button
 										onclick={applyProfilePermChanges}
 										disabled={profilePermApplying}
-										class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-gray-900 text-white font-medium hover:bg-black disabled:opacity-40"
+										class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40"
 									>
 										{#if profilePermApplying}
 											<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
