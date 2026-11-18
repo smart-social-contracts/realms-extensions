@@ -1,12 +1,6 @@
 /** Same-origin branding files written to the realm frontend asset canister. */
 export const CUSTOM_LOGO = '/custom/logo.png';
 export const CUSTOM_BACKGROUND = '/custom/background.png';
-/**
- * The covers the shell ships, shown by a realm that has none of its own: the moving picture first, then the still
- * (the only one a shell older than the moving picture has).
- */
-export const DEFAULT_BACKGROUNDS = ['/images/background.svg', '/images/background.png'] as const;
-
 /** The first of ``urls`` that loads as an image, or '' when none does. */
 export function firstLoadableImage(urls: readonly string[]): Promise<string> {
 	return new Promise((resolve) => {

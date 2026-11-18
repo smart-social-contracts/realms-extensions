@@ -3,7 +3,6 @@
 	import {
 		CUSTOM_BACKGROUND,
 		CUSTOM_LOGO,
-		DEFAULT_BACKGROUNDS,
 		firstLoadableImage,
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
@@ -33,15 +32,21 @@
 	let realmData: any = $state(null);
 	let brandingLogo = $state(CUSTOM_LOGO);
 	let brandingBackground = $state(CUSTOM_BACKGROUND);
-	/** The cover the hero draws: the realm's own once it has loaded, the shell's default when it has none. */
+	/** The realm's cover once it has loaded; '' when the realm has none. Without one the hero is a plain header. */
 	let heroCover = $state('');
+	/** False until the cover has been looked for: no hero is drawn before, so the page never jumps. */
+	let coverChecked = $state(false);
+
+	// A CSS background that fails to load leaves a blank screen and says nothing: try it as an image first.
+	async function checkCover(wanted: string) {
+		const cover = await firstLoadableImage([wanted]);
+		if (brandingBackground !== wanted) return;
+		heroCover = cover;
+		coverChecked = true;
+	}
 
 	$effect(() => {
-		const wanted = brandingBackground;
-		// A CSS background that fails to load leaves a blank screen and says nothing: try it as an image first.
-		void firstLoadableImage([wanted, ...DEFAULT_BACKGROUNDS]).then((cover) => {
-			if (brandingBackground === wanted) heroCover = cover || wanted;
-		});
+		void checkCover(brandingBackground);
 	});
 	let brandingPrimary = $state('#111827');
 	let lifecycleData: any = $state({});
@@ -98,6 +103,8 @@
 					brandingPrimary = realmData.primary_color;
 				}
 			}
+			// Known before the page is first drawn: a cover makes a full-screen hero, none a short header.
+			await checkCover(brandingBackground);
 			const quarters = ((directory?.quarters || []) as any[]).map((q) => ({
 				canister_id: q.id,
 				name: q.name,
@@ -421,8 +428,9 @@
 			<span class="ml-3 text-gray-500">{t('loading_dashboard')}</span>
 		</div>
 	{:else}
-		<!-- Hero: pane-bleed background image with content inside -->
+		<!-- Hero: the realm's cover, pane-bleed, with content inside; a plain header when the realm has no cover -->
 		{#if realmData}
+			{#if heroCover}
 			<div
 				class="hero-screen"
 				style="background-image: url('{heroCover}');"
@@ -458,6 +466,24 @@
 					</div>
 				</div>
 			</div>
+			{:else if coverChecked}
+			<div class="hero-plain" style="--realm-primary: {brandingPrimary}">
+				<div class="hero-identity">
+					<div class="hero-brand-row">
+						<img
+							src={brandingLogo}
+							alt=""
+							class="hero-logo"
+							onerror={(e) => { e.currentTarget.src = '/images/logo_sphere_only.svg'; }}
+						/>
+						<h1 class="hero-title">{realmData.name || t('realm_default')}</h1>
+					</div>
+					{#if realmData.welcome_message}
+						<p class="hero-welcome">{realmData.welcome_message}</p>
+					{/if}
+				</div>
+			</div>
+			{/if}
 
 		<style>
 			@keyframes bounceDown {
@@ -473,6 +499,15 @@
 				margin-top: -6rem;
 				padding-top: 6rem;
 				overflow: hidden;
+			}
+			/* No cover: a short header on a soft tint of the realm's colour, so the page's content starts on the first screen. */
+			.hero-plain {
+				margin-top: -6rem;
+				padding: calc(6rem + 56px) 24px 40px;
+				display: flex;
+				justify-content: center;
+				background: #f6f7f9;
+				background: linear-gradient(180deg, color-mix(in srgb, var(--realm-primary) 12%, #fff) 0%, #fff 100%);
 			}
 			.hero-gradient {
 				position: absolute;

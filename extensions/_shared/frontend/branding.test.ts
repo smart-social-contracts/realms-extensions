@@ -3,7 +3,6 @@ import { describe, it } from 'node:test';
 import {
 	CUSTOM_BACKGROUND,
 	CUSTOM_LOGO,
-	DEFAULT_BACKGROUNDS,
 	firstLoadableImage,
 	isValidHexColor,
 	resolvePublicAssetUrl,
@@ -46,7 +45,7 @@ describe('snapshotEquals', () => {
 
 describe('firstLoadableImage', () => {
 	it('takes the first address that loads, in order, and none when nothing does', async () => {
-		const loads = new Set<string>(['/images/background.png']);
+		const loads = new Set<string>(['/b.png']);
 		const scope = globalThis as Record<string, unknown>;
 		scope.Image = class {
 			onload = () => {};
@@ -56,15 +55,11 @@ describe('firstLoadableImage', () => {
 			}
 		};
 		try {
-			const wanted = ['/custom/background.png', ...DEFAULT_BACKGROUNDS];
-			// A shell older than the moving cover has only the still.
-			assert.equal(await firstLoadableImage(wanted), '/images/background.png');
-			loads.add('/images/background.svg');
-			assert.equal(await firstLoadableImage(wanted), '/images/background.svg');
-			loads.add('/custom/background.png');
-			assert.equal(await firstLoadableImage(wanted), '/custom/background.png');
-			loads.clear();
-			assert.equal(await firstLoadableImage(wanted), '');
+			assert.equal(await firstLoadableImage(['/a.png', '/b.png']), '/b.png');
+			loads.add('/a.png');
+			assert.equal(await firstLoadableImage(['/a.png', '/b.png']), '/a.png');
+			// A realm without a cover: nothing loads, and the caller draws no picture.
+			assert.equal(await firstLoadableImage(['/custom/background.png']), '');
 		} finally {
 			delete scope.Image;
 		}
