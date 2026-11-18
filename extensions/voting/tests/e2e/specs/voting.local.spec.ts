@@ -31,7 +31,7 @@ test('a member submits a proposal, votes yes on it, and it is executed', async (
 
     // The list shows it open for voting, with no votes; the card nearest the title holds the vote buttons.
     const card = ext.getByText(title).locator('xpath=ancestor::div[.//button[normalize-space()="Yes"]][1]');
-    await expect(card.getByText(/Y:0\b/)).toBeVisible({ timeout: 60_000 });
+    await expect(card.getByText(/Yes 0\b/)).toBeVisible({ timeout: 60_000 });
     await card.getByRole('button', { name: 'Yes' }).click();
 
     // The admin is the realm's only voter, so one yes passes the poll and it is executed at once.
