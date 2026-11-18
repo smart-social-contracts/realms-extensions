@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 import {
 	CUSTOM_BACKGROUND,
 	CUSTOM_LOGO,
+	DEFAULT_BACKGROUNDS,
+	firstLoadableImage,
 	isValidHexColor,
 	resolvePublicAssetUrl,
 	snapshotEquals,
@@ -39,5 +41,32 @@ describe('snapshotEquals', () => {
 	it('compares JSON-stable values', () => {
 		assert.equal(snapshotEquals(['en'], ['en']), true);
 		assert.equal(snapshotEquals(['en'], ['de']), false);
+	});
+});
+
+describe('firstLoadableImage', () => {
+	it('takes the first address that loads, in order, and none when nothing does', async () => {
+		const loads = new Set<string>(['/images/background.png']);
+		const scope = globalThis as Record<string, unknown>;
+		scope.Image = class {
+			onload = () => {};
+			onerror = () => {};
+			set src(url: string) {
+				queueMicrotask(() => (loads.has(url) ? this.onload() : this.onerror()));
+			}
+		};
+		try {
+			const wanted = ['/custom/background.png', ...DEFAULT_BACKGROUNDS];
+			// A shell older than the moving cover has only the still.
+			assert.equal(await firstLoadableImage(wanted), '/images/background.png');
+			loads.add('/images/background.svg');
+			assert.equal(await firstLoadableImage(wanted), '/images/background.svg');
+			loads.add('/custom/background.png');
+			assert.equal(await firstLoadableImage(wanted), '/custom/background.png');
+			loads.clear();
+			assert.equal(await firstLoadableImage(wanted), '');
+		} finally {
+			delete scope.Image;
+		}
 	});
 });

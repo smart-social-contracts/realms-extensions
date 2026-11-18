@@ -1,7 +1,7 @@
 <script lang="ts">
 	import {
 		CUSTOM_BACKGROUND,
-		DEFAULT_BACKGROUND,
+		DEFAULT_BACKGROUNDS,
 		CUSTOM_LOGO,
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
@@ -78,7 +78,13 @@
 			src={brandingBackground}
 			alt={realmName ? `${realmName} background` : `${t('realm_default')} background`}
 			class="w-full h-full object-cover opacity-80 transition-opacity duration-1000"
-			onerror={(e) => { e.currentTarget.src = DEFAULT_BACKGROUND; }}
+			onerror={(e) => {
+				// the realm's own cover, then the shell's moving one, then its still
+				const next = DEFAULT_BACKGROUNDS.find((url) => !e.currentTarget.dataset.tried?.includes(url));
+				if (!next) return;
+				e.currentTarget.dataset.tried = `${e.currentTarget.dataset.tried ?? ''} ${next}`;
+				e.currentTarget.src = next;
+			}}
 		/>
 		<div class="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-black/70"></div>
 	</div>

@@ -3,7 +3,8 @@
 	import {
 		CUSTOM_BACKGROUND,
 		CUSTOM_LOGO,
-		DEFAULT_BACKGROUND,
+		DEFAULT_BACKGROUNDS,
+		firstLoadableImage,
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
 	import { loadExtensionI18n, t } from './lib/i18n';
@@ -37,19 +38,10 @@
 
 	$effect(() => {
 		const wanted = brandingBackground;
-		if (typeof Image === 'undefined') {
-			heroCover = wanted;
-			return;
-		}
 		// A CSS background that fails to load leaves a blank screen and says nothing: try it as an image first.
-		const probe = new Image();
-		probe.onload = () => {
-			if (brandingBackground === wanted) heroCover = wanted;
-		};
-		probe.onerror = () => {
-			if (brandingBackground === wanted) heroCover = DEFAULT_BACKGROUND;
-		};
-		probe.src = wanted;
+		void firstLoadableImage([wanted, ...DEFAULT_BACKGROUNDS]).then((cover) => {
+			if (brandingBackground === wanted) heroCover = cover || wanted;
+		});
 	});
 	let brandingPrimary = $state('#111827');
 	let lifecycleData: any = $state({});

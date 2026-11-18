@@ -1,8 +1,25 @@
 /** Same-origin branding files written to the realm frontend asset canister. */
 export const CUSTOM_LOGO = '/custom/logo.png';
 export const CUSTOM_BACKGROUND = '/custom/background.png';
-/** The cover the shell ships, shown by a realm that has none of its own. */
-export const DEFAULT_BACKGROUND = '/images/background.png';
+/**
+ * The covers the shell ships, shown by a realm that has none of its own: the moving picture first, then the still
+ * (the only one a shell older than the moving picture has).
+ */
+export const DEFAULT_BACKGROUNDS = ['/images/background.svg', '/images/background.png'] as const;
+
+/** The first of ``urls`` that loads as an image, or '' when none does. */
+export function firstLoadableImage(urls: readonly string[]): Promise<string> {
+	return new Promise((resolve) => {
+		const tryAt = (i: number) => {
+			if (i >= urls.length || typeof Image === 'undefined') return resolve('');
+			const probe = new Image();
+			probe.onload = () => resolve(urls[i]);
+			probe.onerror = () => tryAt(i + 1);
+			probe.src = urls[i];
+		};
+		tryAt(0);
+	});
+}
 
 export const BRANDING_DATA_URL_MAX_BYTES = 1_572_864;
 /** Binary file cap so the data URL stays under the canister bound. */
