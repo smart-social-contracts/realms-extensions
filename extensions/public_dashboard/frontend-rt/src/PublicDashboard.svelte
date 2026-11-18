@@ -345,6 +345,16 @@
 
 	let showOverlay = $state(false);
 
+	/** A member holds at least one profile; a visitor, signed in or not, holds none. */
+	let isMember = $state(false);
+
+	$effect(() => {
+		const unsub = ctx.userProfiles?.subscribe?.((profiles: unknown) => {
+			isMember = Array.isArray(profiles) && profiles.length > 0;
+		});
+		return () => unsub?.();
+	});
+
 	$effect(() => {
 		const unsub = ctx.realmInfo?.subscribe?.((info: any) => {
 			if (!info || typeof info !== 'object') return;
@@ -732,14 +742,14 @@
 				</div>
 			{/if}
 
-			<!-- Join button -->
+			<!-- Join button; a member is taken to their dashboard instead -->
 			<div style="display: flex; justify-content: center; padding: 2.5rem 0;">
 				<a
-					href="/join"
+					href={isMember ? '/extensions/member_dashboard' : '/join'}
 					class="join-btn"
 					style="--realm-primary: {brandingPrimary}"
 				>
-					{t('join_this_realm')}
+					{t(isMember ? 'my_dashboard' : 'join_this_realm')}
 					<svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
 					</svg>

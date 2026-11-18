@@ -2,6 +2,7 @@
   "realm_default": "领域",
   "loading_dashboard": "正在加载仪表板…",
   "join_this_realm": "加入此领域",
+  "my_dashboard": "我的控制台",
   "realm_status": "领域状态",
   "stage_phase": "{label}阶段",
   "currently": "当前{label}",
