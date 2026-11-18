@@ -24,6 +24,7 @@
   "citizenship_pay_invoice": "Pay invoice",
   "citizenship_view_invoices": "View invoices",
   "notifications_title": "Messages",
+  "notification_from_realm": "This realm",
   "notifications_empty_title": "No messages yet",
   "notifications_empty_body": "When something needs your attention, it will show up here.",
   "invoices_title": "Invoices",

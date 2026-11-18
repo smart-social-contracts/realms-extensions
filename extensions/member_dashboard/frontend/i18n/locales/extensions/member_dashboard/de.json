@@ -24,6 +24,7 @@
   "citizenship_pay_invoice": "Rechnung zahlen",
   "citizenship_view_invoices": "Rechnungen ansehen",
   "notifications_title": "Nachrichten",
+  "notification_from_realm": "Dieses Realm",
   "notifications_empty_title": "Noch keine Nachrichten",
   "notifications_empty_body": "Sobald etwas Ihre Aufmerksamkeit braucht, erscheint es hier.",
   "invoices_title": "Rechnungen",

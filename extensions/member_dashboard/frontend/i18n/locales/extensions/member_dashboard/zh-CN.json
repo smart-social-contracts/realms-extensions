@@ -24,6 +24,7 @@
   "citizenship_pay_invoice": "支付发票",
   "citizenship_view_invoices": "查看发票",
   "notifications_title": "消息",
+  "notification_from_realm": "本领域",
   "notifications_empty_title": "暂无消息",
   "notifications_empty_body": "需要你处理的事项会显示在这里。",
   "invoices_title": "发票",

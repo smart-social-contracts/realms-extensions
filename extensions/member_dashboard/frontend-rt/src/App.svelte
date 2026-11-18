@@ -46,6 +46,25 @@
 
 	let summary: Record<string, unknown> | null = $state(null);
 	let citizenship: Record<string, unknown> | null = $state(null);
+
+	// Line icons of the message actions (drawn like the rest of the page, with a name for screen readers).
+	const ICON = {
+		open: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+		close: '<path d="m18 15-6-6-6 6"/>',
+		read: '<path d="M21.2 8.4c.5.38.8.97.8 1.6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V10a2 2 0 0 1 .8-1.6l8-6a2 2 0 0 1 2.4 0l8 6Z"/><path d="m22 10-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 10"/>',
+		unread: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+		trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+	};
+
+	function svgIcon(paths: string): string {
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+	}
+
+	/** Who a message is from. The realm's own notices come from its canister: say so, not its id. */
+	function senderLabel(sender: string | undefined): string {
+		if (!sender) return '—';
+		return sender.endsWith('-cai') ? t('notification_from_realm') : sender;
+	}
 	let notifications: NotificationItem[] = $state([]);
 	let notificationsUnavailable = $state(false);
 	let loading = $state(true);
@@ -590,7 +609,7 @@
 														</div>
 													</div>
 													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-														{notif.sender || '—'} · {formatRelativeTime(notif.timestamp_ms || 0)}
+														{senderLabel(notif.sender)} · {formatRelativeTime(notif.timestamp_ms || 0)}
 													</div>
 												</div>
 												<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -598,26 +617,29 @@
 													<button
 														onclick={() => toggleExpand(notif)}
 														title={expandedId === notif.id ? 'Collapse' : 'Read message'}
+														aria-label={expandedId === notif.id ? 'Collapse' : 'Read message'}
 														class={cn(
 															'rounded p-1 transition-colors hover:bg-gray-200 dark:hover:bg-gray-600',
-															expandedId === notif.id ? 'text-blue-500' : 'text-gray-400',
+															expandedId === notif.id ? 'text-blue-600' : 'text-gray-500',
 														)}
 													>
-														{expandedId === notif.id ? '👁‍🗨' : '👁'}
+														{@html svgIcon(expandedId === notif.id ? ICON.close : ICON.open)}
 													</button>
 													<button
 														onclick={() => toggleRead(notif)}
 														title={notif.read ? 'Mark as unread' : 'Mark as read'}
-														class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300"
+														aria-label={notif.read ? 'Mark as unread' : 'Mark as read'}
+														class="rounded p-1 text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-300"
 													>
-														{notif.read ? '✉' : '📬'}
+														{@html svgIcon(notif.read ? ICON.unread : ICON.read)}
 													</button>
 													<button
 														onclick={() => deleteNotification(notif)}
 														title="Delete"
-														class="rounded p-1 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+														aria-label="Delete"
+														class="rounded p-1 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
 													>
-														🗑
+														{@html svgIcon(ICON.trash)}
 													</button>
 												</div>
 											</div>
@@ -681,7 +703,7 @@
 												</td>
 												<td
 													class="hidden px-3 py-3 align-top text-xs whitespace-nowrap text-gray-500 md:table-cell dark:text-gray-400"
-													>{notif.sender || '—'}</td
+													>{senderLabel(notif.sender)}</td
 												>
 												<td
 													class="hidden px-3 py-3 align-top text-xs whitespace-nowrap text-gray-400 sm:table-cell dark:text-gray-500"
@@ -695,26 +717,29 @@
 														<button
 															onclick={() => toggleExpand(notif)}
 															title={expandedId === notif.id ? 'Collapse' : 'Read message'}
+														aria-label={expandedId === notif.id ? 'Collapse' : 'Read message'}
 															class={cn(
 																'rounded p-1 transition-colors hover:bg-gray-200 dark:hover:bg-gray-600',
-																expandedId === notif.id ? 'text-blue-500' : 'text-gray-400',
+																expandedId === notif.id ? 'text-blue-600' : 'text-gray-500',
 															)}
 														>
-															{expandedId === notif.id ? '👁‍🗨' : '👁'}
+															{@html svgIcon(expandedId === notif.id ? ICON.close : ICON.open)}
 														</button>
 														<button
 															onclick={() => toggleRead(notif)}
 															title={notif.read ? 'Mark as unread' : 'Mark as read'}
-															class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-300"
+														aria-label={notif.read ? 'Mark as unread' : 'Mark as read'}
+															class="rounded p-1 text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-300"
 														>
-															{notif.read ? '✉' : '📬'}
+															{@html svgIcon(notif.read ? ICON.unread : ICON.read)}
 														</button>
 														<button
 															onclick={() => deleteNotification(notif)}
 															title="Delete"
-															class="rounded p-1 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+														aria-label="Delete"
+															class="rounded p-1 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
 														>
-															🗑
+															{@html svgIcon(ICON.trash)}
 														</button>
 													</div>
 												</td>

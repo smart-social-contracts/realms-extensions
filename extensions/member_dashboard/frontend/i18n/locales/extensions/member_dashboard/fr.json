@@ -24,6 +24,7 @@
   "citizenship_pay_invoice": "Payer la facture",
   "citizenship_view_invoices": "Voir les factures",
   "notifications_title": "Messages",
+  "notification_from_realm": "Ce royaume",
   "notifications_empty_title": "Pas encore de messages",
   "notifications_empty_body": "Lorsqu’une action sera nécessaire, elle apparaîtra ici.",
   "invoices_title": "Factures",

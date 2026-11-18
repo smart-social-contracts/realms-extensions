@@ -24,6 +24,7 @@
   "citizenship_pay_invoice": "Pagar factura",
   "citizenship_view_invoices": "Veure factures",
   "notifications_title": "Missatges",
+  "notification_from_realm": "Este regne",
   "notifications_empty_title": "Encara no hi ha missatges",
   "notifications_empty_body": "Quan alguna cosa requerisca la teua atenció, apareixerà ací.",
   "invoices_title": "Factures",
