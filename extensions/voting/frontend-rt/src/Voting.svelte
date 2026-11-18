@@ -1220,14 +1220,25 @@
 	}
 
 	@media (max-width: 720px) {
-		.chrome-label {
+		/* The three views keep their words on a phone: an icon alone does not say which one files a proposal. */
+		.chrome-btn:not(.chrome-tab) .chrome-label {
 			display: none;
 		}
 
-		.chrome-btn {
+		.chrome-btn:not(.chrome-tab) {
 			width: 32px;
 			height: 32px;
 			padding: 0;
+		}
+
+		.chrome-tab {
+			padding: 6px 8px;
+			font-size: 0.75rem;
+			white-space: nowrap;
+		}
+
+		.chrome-tab svg {
+			display: none;
 		}
 	}
 </style>
@@ -1858,10 +1869,10 @@
 		<div class="list-surface border-y border-gray-200 bg-white sm:rounded-lg sm:border">
 			<!-- Tab bar & refresh -->
 			<div class="flex items-center justify-between px-3 py-2 sm:px-5 sm:py-3 border-b border-gray-200">
-				<div class="flex gap-1">
+				<div class="flex min-w-0 gap-1 overflow-x-auto">
 					<button
 						onclick={() => view = 'list'}
-						class="chrome-btn {view === 'list' ? 'is-on' : ''}"
+						class="chrome-btn chrome-tab {view === 'list' ? 'is-on' : ''}"
 						title={t('proposals')}
 						aria-label={t('proposals')}
 					>
@@ -1870,7 +1881,7 @@
 					</button>
 					<button
 						onclick={openSubmitForm}
-						class="chrome-btn"
+						class="chrome-btn chrome-tab"
 						title={t('submit_proposal')}
 						aria-label={t('submit_proposal')}
 					>
@@ -1879,7 +1890,7 @@
 					</button>
 					<button
 						onclick={() => view = 'federal'}
-						class="chrome-btn {view === 'federal' ? 'is-on' : ''}"
+						class="chrome-btn chrome-tab {view === 'federal' ? 'is-on' : ''}"
 						title={t('realm_wide')}
 						aria-label={t('realm_wide')}
 					>
