@@ -503,7 +503,7 @@
 			/* No cover: a short header on a soft tint of the realm's colour, so the page's content starts on the first screen. */
 			.hero-plain {
 				margin-top: -6rem;
-				padding: calc(6rem + 56px) 24px 40px;
+				padding: 88px 24px 36px;
 				display: flex;
 				justify-content: center;
 				background: #f6f7f9;
