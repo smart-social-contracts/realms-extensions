@@ -111,13 +111,14 @@
 	let confirmLaunch = $state(false);
 	let currentStage = $state('alpha');
 	const STAGES = ['setup', 'alpha', 'beta', 'production', 'deprecation', 'terminated'];
+	// The words the home page and the registry use for the same stages.
 	const STAGE_LABELS: Record<string, string> = {
 		setup: 'Setup',
 		alpha: 'Alpha',
 		beta: 'Beta',
-		production: 'Production',
-		deprecation: 'Deprecation',
-		terminated: 'Terminated',
+		production: 'Live',
+		deprecation: 'Winding Down',
+		terminated: 'Archived',
 	};
 	const STAGE_DESCRIPTIONS: Record<string, string> = {
 		setup: 'The founder is configuring the realm',
@@ -648,11 +649,11 @@
 		{:else}
 			<!-- Stage timeline -->
 			<div class="relative mb-6 overflow-x-auto">
-				<div class="flex items-center justify-between">
+				<div class="flex items-start justify-between">
 					{#each STAGES as stage, i}
 						{@const isCurrent = i === stageIndex}
 						{@const isPast = i < stageIndex}
-						<div class="flex flex-col items-center relative z-10" style="flex: 1;">
+						<div class="flex flex-col items-center relative z-10 min-w-0" style="flex: 1 1 0;">
 							<div class={cn(
 								'w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all',
 								isCurrent ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' :
@@ -666,8 +667,8 @@
 								{/if}
 							</div>
 							<span class={cn(
-								'text-xs mt-2 font-medium text-center',
-								isCurrent ? 'text-blue-700' : isPast ? 'text-green-600' : 'text-gray-400'
+								'mt-2 px-0.5 text-center text-[11px] font-medium leading-tight sm:text-xs',
+								isCurrent ? 'text-blue-700' : isPast ? 'text-green-700' : 'text-gray-500'
 							)}>{STAGE_LABELS[stage]}</span>
 							{#if isCurrent}
 								<span class="text-[10px] text-gray-500 mt-0.5 text-center max-w-[90px]">{STAGE_DESCRIPTIONS[stage]}</span>
@@ -706,10 +707,6 @@
 							: STAGE_DESCRIPTIONS[nextStage]}
 					</span>
 				</div>
-			{:else if currentStage !== 'terminated'}
-				<p class="pt-2 border-t border-gray-100 text-xs text-gray-500">
-					Advancing to the next stage is not available in this realm version.
-				</p>
 			{/if}
 
 			{#if lifecycleError}

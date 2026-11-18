@@ -27,7 +27,7 @@
     "setup_state",
     "token_catalog"
   ],
-  "description": "Change your realm's name, welcome message, and branding; control who can join; set voting rules and currency; launch the realm; and apply or destroy department-table JSON.",
+  "description": "Change your realm's name, welcome message, and branding; control who can join; set voting rules and currency; and launch the realm.",
   "author": "Realms Team",
   "categories": [
     "realm_management"
