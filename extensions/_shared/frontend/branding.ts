@@ -1,6 +1,8 @@
 /** Same-origin branding files written to the realm frontend asset canister. */
 export const CUSTOM_LOGO = '/custom/logo.png';
 export const CUSTOM_BACKGROUND = '/custom/background.png';
+/** The cover the shell ships, shown by a realm that has none of its own. */
+export const DEFAULT_BACKGROUND = '/images/background.png';
 
 export const BRANDING_DATA_URL_MAX_BYTES = 1_572_864;
 /** Binary file cap so the data URL stays under the canister bound. */

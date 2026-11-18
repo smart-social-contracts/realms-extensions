@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		CUSTOM_BACKGROUND,
+		DEFAULT_BACKGROUND,
 		CUSTOM_LOGO,
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
@@ -77,7 +78,7 @@
 			src={brandingBackground}
 			alt={realmName ? `${realmName} background` : `${t('realm_default')} background`}
 			class="w-full h-full object-cover opacity-80 transition-opacity duration-1000"
-			onerror={(e) => { e.currentTarget.src = '/images/background.png'; }}
+			onerror={(e) => { e.currentTarget.src = DEFAULT_BACKGROUND; }}
 		/>
 		<div class="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-black/70"></div>
 	</div>

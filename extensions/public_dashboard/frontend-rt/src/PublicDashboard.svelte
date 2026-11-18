@@ -3,6 +3,7 @@
 	import {
 		CUSTOM_BACKGROUND,
 		CUSTOM_LOGO,
+		DEFAULT_BACKGROUND,
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
 	import { loadExtensionI18n, t } from './lib/i18n';
@@ -31,6 +32,25 @@
 	let realmData: any = $state(null);
 	let brandingLogo = $state(CUSTOM_LOGO);
 	let brandingBackground = $state(CUSTOM_BACKGROUND);
+	/** The cover the hero draws: the realm's own once it has loaded, the shell's default when it has none. */
+	let heroCover = $state('');
+
+	$effect(() => {
+		const wanted = brandingBackground;
+		if (typeof Image === 'undefined') {
+			heroCover = wanted;
+			return;
+		}
+		// A CSS background that fails to load leaves a blank screen and says nothing: try it as an image first.
+		const probe = new Image();
+		probe.onload = () => {
+			if (brandingBackground === wanted) heroCover = wanted;
+		};
+		probe.onerror = () => {
+			if (brandingBackground === wanted) heroCover = DEFAULT_BACKGROUND;
+		};
+		probe.src = wanted;
+	});
 	let brandingPrimary = $state('#111827');
 	let lifecycleData: any = $state({});
 	let lifecycleStageIndex = $state(0);
@@ -413,7 +433,7 @@
 		{#if realmData}
 			<div
 				class="hero-screen"
-				style="background-image: url('{brandingBackground}');"
+				style="background-image: url('{heroCover}');"
 			>
 				<div
 					class="hero-gradient"
