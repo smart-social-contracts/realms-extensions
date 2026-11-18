@@ -160,8 +160,8 @@
 
 		const stage = statusData?.realm_stage || realmData?.status || 'alpha';
 		lifecycleStageIndex = Math.max(0, STAGES.indexOf(stage));
+		// The realm reports no critical mass here: none is shown (a built-in 10,000 used to stand in for it).
 		lifecycleData = {
-			critical_mass: 10000,
 			registered_users: Number(statusData?.users_count || 0),
 			deposits_locked: stage !== 'alpha',
 			land_acquired: ['production', 'deprecation', 'terminated'].includes(stage),
@@ -698,7 +698,7 @@
 			}
 			@media (min-width: 768px) {
 				.realm-status-metrics {
-					grid-template-columns: repeat(4, minmax(0, 1fr));
+					grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 				}
 			}
 			.realm-status-metric {
@@ -909,12 +909,14 @@
 									{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()}
 								</div>
 							</div>
+							{#if statusData.proposals_count != null}
 							<div class="realm-status-metric">
 								<div class="realm-status-metric-label">Governance Activity</div>
 								<div class="realm-status-metric-value">
 									{Number(statusData.proposals_count ?? 0).toLocaleString()} proposals · {Number(statusData.votes_count ?? 0).toLocaleString()} votes
 								</div>
 							</div>
+							{/if}
 							<div class="realm-status-metric">
 								<div class="realm-status-metric-label">{quarterCount === 1 && statusData.quarters?.[0]?.is_capital ? 'Capital Quarter' : 'Quarters'}</div>
 								<div class="realm-status-metric-value">
@@ -923,20 +925,24 @@
 							</div>
 						</div>
 
-						{#if realmStage === 'alpha' || realmStage === 'beta'}
+						{#if (realmStage === 'alpha' || realmStage === 'beta') && Number(lifecycleData.critical_mass) > 0}
 							<div style="margin-top: 20px; padding: 16px; border-radius: 12px; background: {stageTheme.bg}; border: 1px solid {stageTheme.border};">
 								<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
 									<div>
 										<div style="font-size: 0.8rem; font-weight: 600; color: {stageTheme.text};">Path to next phase</div>
 										<div style="font-size: 0.85rem; color: #4b5563; margin-top: 4px;">
-											{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()} of {Number(lifecycleData.critical_mass ?? 10000).toLocaleString()} members toward critical mass
+											{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()} of {Number(lifecycleData.critical_mass).toLocaleString()} members needed for the next phase
 										</div>
 									</div>
-									<div style="font-size: 1.25rem; font-weight: 700; color: {stageTheme.accent};">{stageProgressPct}%</div>
+									{#if stageProgressPct >= 1}
+										<div style="font-size: 1.25rem; font-weight: 700; color: {stageTheme.accent};">{stageProgressPct}%</div>
+									{/if}
 								</div>
-								<div class="realm-progress-bar">
-									<div class="realm-progress-fill" style="width: {stageProgressPct}%; background: {stageTheme.accent};"></div>
-								</div>
+								{#if stageProgressPct >= 1}
+									<div class="realm-progress-bar">
+										<div class="realm-progress-fill" style="width: {stageProgressPct}%; background: {stageTheme.accent};"></div>
+									</div>
+								{/if}
 							</div>
 						{/if}
 
@@ -1020,9 +1026,8 @@
 					{#if scaleStatus}
 						<p class="text-sm text-gray-600 mb-4">
 							{#if scaleStatus.auto_scale_enabled}
-								A new quarter is created automatically once a quarter reaches
-								<strong>{Number(scaleStatus.threshold).toLocaleString()}</strong> members
-								(capacity {Number(scaleStatus.n).toLocaleString()} each).
+								This realm grows in quarters of up to <strong>{Number(scaleStatus.n).toLocaleString()}</strong> members:
+								a new one opens when the newest is nearly full.
 							{:else}
 								Automatic expansion is currently paused for this realm.
 							{/if}
