@@ -100,8 +100,9 @@ export interface ViewRow {
 	value?: unknown;
 }
 
+/** One view of `codex_views`, under its key. The realm also names it inside (`subject_matter`, or `domain` before
+ * realms-gos#741); the page reads the key only, so it works with either. */
 export interface DomainView {
-	domain: string;
 	path: string[];
 	members: ViewRow[];
 }

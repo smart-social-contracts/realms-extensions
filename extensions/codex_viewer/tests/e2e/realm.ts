@@ -73,7 +73,7 @@ export const VIEWS = {
   ok: true,
   views: {
     tax: {
-      domain: 'tax',
+      subject_matter: 'tax',
       path: ['eu/es', 'eu/es/vc/46250-valencia'],
       members: [
         { name: 'capital', kind: 'setting', mark: null, value: true, layers: [
