@@ -6,7 +6,8 @@
 
 	let domains = $derived(Object.keys(views).sort());
 	let chosen = $state('');
-	let domain = $derived(views[chosen] ?? views[domains[0]]);
+	let shown = $derived(chosen in views ? chosen : domains[0]);
+	let domain = $derived(views[shown]);
 </script>
 
 <section class="card" data-testid="views">
@@ -17,7 +18,7 @@
 	{:else}
 		<label>
 			{t('domain')}
-			<select value={domain.domain} onchange={(event) => (chosen = event.currentTarget.value)}>
+			<select value={shown} onchange={(event) => (chosen = event.currentTarget.value)}>
 				{#each domains as name (name)}
 					<option value={name}>{name}</option>
 				{/each}
