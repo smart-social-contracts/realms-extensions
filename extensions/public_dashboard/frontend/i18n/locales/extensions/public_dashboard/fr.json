@@ -2,6 +2,7 @@
   "realm_default": "Royaume",
   "loading_dashboard": "Chargement du tableau de bord…",
   "join_this_realm": "Rejoindre ce royaume",
+  "my_dashboard": "Mon Tableau de Bord",
   "realm_status": "État du royaume",
   "stage_phase": "Phase {label}",
   "currently": "Actuellement {label}",

@@ -257,7 +257,7 @@
 								</span>
 								<span class="min-w-0 flex-1">
 									<span class="block truncate text-sm font-medium text-gray-900 dark:text-white">
-										{m.nickname || 'Unnamed'}
+										{m.nickname || 'Member'}
 									</span>
 									<span class="block truncate text-xs font-mono text-gray-400">{m.id}</span>
 								</span>

@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 import {
 	PASSPORT_VERIFICATION_PATH,
 	citizenshipActionTarget,
+	citizenshipFromRealm,
 	citizenshipNextActions,
 	citizenshipSteps,
 	isPassportVerificationAvailable,
+	membershipStatus,
 } from './helpers.ts';
 
 const agoraInstalled = ['member_dashboard', 'welcome', 'voting', 'role_manager'];
@@ -75,7 +77,7 @@ describe('citizenshipSteps', () => {
 
 	it('does not count an unverified passport when the extension is absent', () => {
 		const steps = citizenshipSteps(
-			{ ...pendingMembership, passport_verified: true, invoice_paid: true },
+			{ ...pendingMembership, passport_verified: true, invoice_paid: true, paid_invoices: 1 },
 			{ installed: agoraInstalled },
 		);
 		assert.equal(steps.showPassport, false);
@@ -84,9 +86,79 @@ describe('citizenshipSteps', () => {
 		assert.equal(steps.done, 1);
 		assert.equal(steps.total, 1);
 	});
+
+	it('a member who was never billed has no invoice step', () => {
+		const steps = citizenshipSteps(citizenshipFromRealm({ status: 'active' }, [], agoraInstalled), {
+			installed: agoraInstalled,
+		});
+		assert.equal(steps.showInvoice, false);
+		assert.equal(steps.total, 0);
+	});
+});
+
+const invoice = (status: string) => ({ id: `INV-${status}`, amount: 5, symbol: 'AGR', status });
+
+describe('membershipStatus', () => {
+	it('is the realm\'s record of the member', () => {
+		assert.equal(membershipStatus('active', false), 'active');
+		assert.equal(membershipStatus('inactive', false), 'pending');
+		assert.equal(membershipStatus('suspended', false), 'suspended');
+		assert.equal(membershipStatus('banned', false), 'banned');
+		assert.equal(membershipStatus('', false), '');
+	});
+
+	it('waits for the passport where the realm asks for one', () => {
+		assert.equal(membershipStatus('active', true), 'pending');
+		assert.equal(membershipStatus('suspended', true), 'suspended');
+	});
+});
+
+describe('citizenshipFromRealm', () => {
+	it('a member with no invoice is active and owes nothing', () => {
+		const card = citizenshipFromRealm({ status: 'active' }, [], agoraInstalled);
+		assert.equal(card.status, 'active');
+		assert.equal(card.invoice_paid, true);
+		assert.equal(card.total_invoices, 0);
+	});
+
+	it('an unpaid invoice is owed and does not change the activation', () => {
+		for (const status of ['pending', 'overdue']) {
+			const card = citizenshipFromRealm({ status: 'active' }, [invoice('paid'), invoice(status)], agoraInstalled);
+			assert.equal(card.status, 'active');
+			assert.equal(card.invoice_paid, false);
+			assert.equal(card.owed_invoices, 1);
+			assert.equal(card.paid_invoices, 1);
+		}
+	});
+
+	it('a cancelled invoice is not owed', () => {
+		const card = citizenshipFromRealm({ status: 'active' }, [invoice('cancelled')], agoraInstalled);
+		assert.equal(card.invoice_paid, true);
+		assert.equal(citizenshipSteps(card, { installed: agoraInstalled }).showInvoice, false);
+	});
+
+	it('paying does not activate a member the realm holds inactive', () => {
+		const card = citizenshipFromRealm({ status: 'inactive' }, [invoice('paid')], agoraInstalled);
+		assert.equal(card.status, 'pending');
+		assert.equal(card.invoice_paid, true);
+	});
+
+	it('a realm that asks for a passport keeps the member pending until it is verified', () => {
+		assert.equal(citizenshipFromRealm({ status: 'active' }, [], syntropiaInstalled).status, 'pending');
+	});
 });
 
 describe('citizenshipNextActions', () => {
+	it('an active member who owes an invoice is still asked to pay it', () => {
+		const card = citizenshipFromRealm({ status: 'active' }, [invoice('pending')], agoraInstalled);
+		assert.deepEqual(
+			citizenshipNextActions(card, { installed: agoraInstalled }).map((action) => action.labelKey),
+			['citizenship_pay_invoice'],
+		);
+		assert.deepEqual(citizenshipNextActions(citizenshipFromRealm({ status: 'active' }, [], agoraInstalled)), []);
+	});
+
+
 	it('agora-like: no verify_passport action; invoices stay available', () => {
 		const actions = citizenshipNextActions(pendingMembership, { installed: agoraInstalled });
 		assert.deepEqual(
@@ -113,6 +185,7 @@ describe('App.svelte wires the runtime gate', () => {
 		const dir = dirname(fileURLToPath(import.meta.url));
 		const source = readFileSync(join(dir, '..', 'App.svelte'), 'utf8');
 		assert.match(source, /steps\.showPassport/);
+		assert.match(source, /steps\.showInvoice/);
 		assert.match(source, /citizenshipActionTarget/);
 		assert.equal(source.includes("ctx?.navigate('/extensions/passport_verification')"), false);
 	});

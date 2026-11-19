@@ -2,6 +2,7 @@
   "realm_default": "Regne",
   "loading_dashboard": "Carregant el tauler…",
   "join_this_realm": "Unir-se a este regne",
+  "my_dashboard": "El Meu Panell",
   "realm_status": "Estat del regne",
   "stage_phase": "Fase {label}",
   "currently": "Actualment {label}",

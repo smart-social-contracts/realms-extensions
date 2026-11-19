@@ -557,8 +557,8 @@
 	}
 
 	.chrome-tab.is-on {
-		border-bottom-color: #4f46e5;
-		color: #4f46e5;
+		border-bottom-color: var(--color-primary-600, #4f46e5);
+		color: var(--color-primary-600, #4f46e5);
 	}
 
 	@media (max-width: 720px) {
@@ -588,7 +588,7 @@
 			</p>
 			<button
 				onclick={() => ctx.navigate?.('/join')}
-				class={cn('px-5 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800')}
+				class={cn('px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700')}
 			>
 				Sign in
 			</button>

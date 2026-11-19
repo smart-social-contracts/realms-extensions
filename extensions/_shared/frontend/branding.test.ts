@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
 	CUSTOM_BACKGROUND,
 	CUSTOM_LOGO,
+	firstLoadableImage,
 	isValidHexColor,
 	resolvePublicAssetUrl,
 	snapshotEquals,
@@ -39,5 +40,28 @@ describe('snapshotEquals', () => {
 	it('compares JSON-stable values', () => {
 		assert.equal(snapshotEquals(['en'], ['en']), true);
 		assert.equal(snapshotEquals(['en'], ['de']), false);
+	});
+});
+
+describe('firstLoadableImage', () => {
+	it('takes the first address that loads, in order, and none when nothing does', async () => {
+		const loads = new Set<string>(['/b.png']);
+		const scope = globalThis as Record<string, unknown>;
+		scope.Image = class {
+			onload = () => {};
+			onerror = () => {};
+			set src(url: string) {
+				queueMicrotask(() => (loads.has(url) ? this.onload() : this.onerror()));
+			}
+		};
+		try {
+			assert.equal(await firstLoadableImage(['/a.png', '/b.png']), '/b.png');
+			loads.add('/a.png');
+			assert.equal(await firstLoadableImage(['/a.png', '/b.png']), '/a.png');
+			// A realm without a cover: nothing loads, and the caller draws no picture.
+			assert.equal(await firstLoadableImage(['/custom/background.png']), '');
+		} finally {
+			delete scope.Image;
+		}
 	});
 });

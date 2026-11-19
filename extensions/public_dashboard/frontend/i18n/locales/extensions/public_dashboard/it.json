@@ -2,6 +2,7 @@
   "realm_default": "Regno",
   "loading_dashboard": "Caricamento dashboard…",
   "join_this_realm": "Unisciti a questo regno",
+  "my_dashboard": "Mio Pannello",
   "realm_status": "Stato del regno",
   "stage_phase": "Fase {label}",
   "currently": "Attualmente {label}",

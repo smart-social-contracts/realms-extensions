@@ -100,7 +100,7 @@
 					onclick={() => (filter = f)}
 					aria-pressed={filter === f}
 					class="px-3 py-1.5 text-sm rounded-lg border {filter === f
-						? 'bg-gray-900 text-white border-gray-900'
+						? 'bg-blue-600 text-white border-blue-600'
 						: 'border-gray-300 text-gray-700 hover:bg-gray-50'}"
 				>
 					{filterLabel(f)}

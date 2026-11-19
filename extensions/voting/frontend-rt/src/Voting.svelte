@@ -1033,14 +1033,14 @@
 		if (!value && value !== 0) return 'N/A';
 		const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
 		if (isNaN(date.getTime())) return 'N/A';
-		return date.toLocaleDateString();
+		return date.toLocaleDateString(undefined, { dateStyle: 'medium' });
 	}
 
 	function formatDateTime(value: any): string {
 		if (!value && value !== 0) return 'N/A';
 		const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
 		if (isNaN(date.getTime())) return 'N/A';
-		return date.toLocaleString();
+		return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 	}
 
 	function parseEpochSeconds(value: any): number | null {
@@ -1211,7 +1211,7 @@
 	}
 
 	.chrome-btn.is-on {
-		background: #111827;
+		background: var(--color-primary-600, #111827);
 		color: #fff;
 	}
 
@@ -1220,14 +1220,25 @@
 	}
 
 	@media (max-width: 720px) {
-		.chrome-label {
+		/* The three views keep their words on a phone: an icon alone does not say which one files a proposal. */
+		.chrome-btn:not(.chrome-tab) .chrome-label {
 			display: none;
 		}
 
-		.chrome-btn {
+		.chrome-btn:not(.chrome-tab) {
 			width: 32px;
 			height: 32px;
 			padding: 0;
+		}
+
+		.chrome-tab {
+			padding: 6px 8px;
+			font-size: 0.75rem;
+			white-space: nowrap;
+		}
+
+		.chrome-tab svg {
+			display: none;
 		}
 	}
 </style>
@@ -1269,7 +1280,8 @@
 {/snippet}
 
 <div class="voting-page w-full px-3 pt-4 sm:px-6 sm:pt-8 max-w-none">
-	<!-- Header -->
+	<!-- Header: the list's. A proposal's page leads with the proposal. -->
+	{#if view !== 'detail'}
 	<div class="mb-6">
 		<h1 class="text-3xl font-bold text-gray-900 mb-1">{t('page_title')}</h1>
 		<p class="text-gray-500 text-sm">{extensionDescription}</p>
@@ -1284,6 +1296,7 @@
 			</button>.
 		</p>
 	</div>
+	{/if}
 
 	<!-- Error / Success banners -->
 	{#if error}
@@ -1366,7 +1379,6 @@
 							{/if}
 						</span>
 					{/if}
-					<span class="font-mono text-xs break-all">Link: {buildProposalUrl(selectedProposal)}</span>
 					<button
 						type="button"
 						onclick={() => copyProposalLink(selectedProposal)}
@@ -1472,7 +1484,7 @@
 						<div class="text-center">
 							<div class="text-2xl font-bold text-gray-900">{tally.total}</div>
 							<div class="text-xs text-gray-500">Total</div>
-							<div class="text-xs font-medium text-gray-400 mt-0.5">100%</div>
+							<div class="text-xs font-medium text-gray-500 mt-0.5">{tally.total > 0 ? '100%' : '\u00a0'}</div>
 						</div>
 					</div>
 
@@ -1641,13 +1653,12 @@
 						id="rt-type"
 						bind:value={formProposalType}
 						disabled={submitting}
-						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+						class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
 					>
 						{#each formTypeOptions as opt}
 							<option value={opt.value}>{opt.label}</option>
 						{/each}
 					</select>
-					<p class="text-xs text-gray-400 mt-1">Code-execution and core-orchestration proposals are not offered on this realm.</p>
 				</div>
 
 				<div>
@@ -1656,7 +1667,7 @@
 						id="rt-org"
 						bind:value={formOrgScope}
 						disabled={submitting}
-						class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
+						class="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none disabled:bg-gray-50"
 					>
 						<option value="">Realm-wide</option>
 						{#each orgOptions as org}
@@ -1699,7 +1710,7 @@
 								id="rt-fund"
 								bind:value={formFund}
 								disabled={submitting}
-								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 							>
 								{#if fundIds.length === 0}
 									<option value="">No funds available</option>
@@ -1716,7 +1727,7 @@
 								id="rt-token"
 								bind:value={formToken}
 								disabled={submitting}
-								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 							>
 								{#if vaultTokens.length === 0}
 									<option value="">No tokens available</option>
@@ -1766,7 +1777,7 @@
 								id="rt-upgrade-target"
 								bind:value={formUpgradeTarget}
 								disabled={submitting}
-								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
 							>
 								<option value="codex">Codex</option>
 								<option value="extension">Extension</option>
@@ -1839,7 +1850,7 @@
 					<button
 						type="submit"
 						disabled={submitting || !isFormValid()}
-						class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+						class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
 					>
 						{#if submitting}
 							<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -1858,10 +1869,10 @@
 		<div class="list-surface border-y border-gray-200 bg-white sm:rounded-lg sm:border">
 			<!-- Tab bar & refresh -->
 			<div class="flex items-center justify-between px-3 py-2 sm:px-5 sm:py-3 border-b border-gray-200">
-				<div class="flex gap-1">
+				<div class="flex min-w-0 gap-1 overflow-x-auto">
 					<button
 						onclick={() => view = 'list'}
-						class="chrome-btn {view === 'list' ? 'is-on' : ''}"
+						class="chrome-btn chrome-tab {view === 'list' ? 'is-on' : ''}"
 						title={t('proposals')}
 						aria-label={t('proposals')}
 					>
@@ -1870,7 +1881,7 @@
 					</button>
 					<button
 						onclick={openSubmitForm}
-						class="chrome-btn"
+						class="chrome-btn chrome-tab"
 						title={t('submit_proposal')}
 						aria-label={t('submit_proposal')}
 					>
@@ -1879,7 +1890,7 @@
 					</button>
 					<button
 						onclick={() => view = 'federal'}
-						class="chrome-btn {view === 'federal' ? 'is-on' : ''}"
+						class="chrome-btn chrome-tab {view === 'federal' ? 'is-on' : ''}"
 						title={t('realm_wide')}
 						aria-label={t('realm_wide')}
 					>
@@ -1908,7 +1919,8 @@
 			{#if view === 'federal'}
 				<FederalVotes {ctx} onopenleg={(id) => openProposalById(id)} />
 			{:else}
-			<!-- Filters (toggled on narrow viewports) -->
+			<!-- Filters (toggled on narrow viewports); an empty list has nothing to filter -->
+			{#if proposals.length > 0 || filtering}
 			<div class="flex items-center gap-2 px-3 py-2 sm:px-5 border-b border-gray-200">
 				<button
 					type="button"
@@ -1980,6 +1992,7 @@
 					</button>
 				{/if}
 			</div>
+			{/if}
 			{/if}
 
 			<!-- Content -->
@@ -2075,9 +2088,9 @@
 									{/if}
 									<div class="flex justify-between items-center mb-2 gap-2">
 										<div class="flex gap-3 text-xs">
-											<span class="text-green-600">Y:{tally.yes} ({votePercent(tally.yes, tally.total)})</span>
-											<span class="text-red-600">N:{tally.no} ({votePercent(tally.no, tally.total)})</span>
-											<span class="text-gray-500">A:{tally.abstain} ({votePercent(tally.abstain, tally.total)})</span>
+											<span class="text-green-700">Yes {tally.yes}{tally.total > 0 ? ` (${votePercent(tally.yes, tally.total)})` : ''}</span>
+											<span class="text-red-700">No {tally.no}{tally.total > 0 ? ` (${votePercent(tally.no, tally.total)})` : ''}</span>
+											<span class="text-gray-600">Abstain {tally.abstain}{tally.total > 0 ? ` (${votePercent(tally.abstain, tally.total)})` : ''}</span>
 										</div>
 										{#if proposal.voting_deadline}
 											<span class="text-xs whitespace-nowrap max-w-[55%] text-right {votingOpen ? 'text-emerald-600' : 'text-amber-700'}">{formatVotingStatusLabel(proposal, nowMs)}</span>

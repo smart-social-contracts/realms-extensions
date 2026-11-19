@@ -578,15 +578,15 @@
 	}
 
 	.chrome-btn.chrome-primary {
-		background: #2563eb;
-		border-color: #2563eb;
+		background: var(--color-primary-600, #2563eb);
+		border-color: var(--color-primary-600, #2563eb);
 		color: #fff;
 	}
 
 	.chrome-btn.is-on {
-		background: #eef2ff;
-		border-color: #6366f1;
-		color: #4338ca;
+		background: var(--color-primary-50, #eef2ff);
+		border-color: var(--color-primary-500, #6366f1);
+		color: var(--color-primary-700, #4338ca);
 	}
 
 	@media (max-width: 720px) {

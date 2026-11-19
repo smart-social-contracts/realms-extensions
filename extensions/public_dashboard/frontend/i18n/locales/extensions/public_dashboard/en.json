@@ -2,6 +2,7 @@
   "realm_default": "Realm",
   "loading_dashboard": "Loading dashboard...",
   "join_this_realm": "Join this Realm",
+  "my_dashboard": "My Dashboard",
   "realm_status": "Realm Status",
   "stage_phase": "{label} Phase",
   "currently": "Currently {label}",

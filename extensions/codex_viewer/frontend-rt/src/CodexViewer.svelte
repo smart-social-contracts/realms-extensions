@@ -81,8 +81,9 @@
 		}
 	}
 
+	/** The file list starts closed on a phone: beside it the text had a hundred pixels left. */
 	function readSidebarCollapsed(): boolean {
-		return readSessionFlag(SIDEBAR_COLLAPSED_KEY) === true;
+		return readSessionFlag(SIDEBAR_COLLAPSED_KEY) ?? isNarrowViewport();
 	}
 
 	function persistSidebarCollapsed(collapsed: boolean) {
@@ -535,6 +536,11 @@
 		// its claim, exactly as it ends the link's (see `wantedCodex` below), so no question is ever dispatched
 		// inside a click of theirs; and a link that matched nothing explains nothing.
 		if (!opts.fromLink) pendingExplainOnLoad = false;
+		// On a phone the list and the text take turns: a pick shows the text.
+		if (isNarrowViewport() && !sidebarCollapsed) {
+			sidebarCollapsed = true;
+			persistSidebarCollapsed(true);
+		}
 		if (selectedCodex && getCodexId(selectedCodex) === getCodexId(codex) && selectedCodex.code != null) {
 			if (!opts.preserveRange) {
 				currentSelection = null;
@@ -1339,7 +1345,7 @@
 	}
 
 	.search-input:focus {
-		border-color: #6366f1;
+		border-color: var(--color-primary-500, #6366f1);
 		box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
 	}
 
@@ -1384,8 +1390,8 @@
 	}
 
 	.codex-item.selected {
-		background: #eef2ff;
-		box-shadow: inset 3px 0 0 #6366f1;
+		background: var(--color-primary-50, #eef2ff);
+		box-shadow: inset 3px 0 0 var(--color-primary-500, #6366f1);
 	}
 
 	.layer-stack {
@@ -1422,8 +1428,8 @@
 	.layer-item:hover { background: #f3f4f6; }
 
 	.layer-item.selected {
-		background: #eef2ff;
-		border-color: #c7d2fe;
+		background: var(--color-primary-50, #eef2ff);
+		border-color: var(--color-primary-200, #c7d2fe);
 		font-weight: 600;
 	}
 
@@ -1571,8 +1577,8 @@
 	}
 
 	.badge-lang {
-		background: #dbeafe;
-		color: #1e40af;
+		background: var(--color-primary-100, #dbeafe);
+		color: var(--color-primary-800, #1e40af);
 		text-transform: capitalize;
 	}
 
@@ -1615,13 +1621,13 @@
 	}
 
 	.btn-action.is-on {
-		background: #eef2ff;
-		border-color: #6366f1;
-		color: #4338ca;
+		background: var(--color-primary-50, #eef2ff);
+		border-color: var(--color-primary-500, #6366f1);
+		color: var(--color-primary-700, #4338ca);
 	}
 
 	.btn-explain {
-		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		background: linear-gradient(135deg, var(--color-primary-500, #6366f1), #8b5cf6);
 		border-color: transparent;
 		color: #fff;
 	}
@@ -1631,6 +1637,16 @@
 	}
 
 	@media (max-width: 720px) {
+		/* One pane at a time: the open file list takes the screen, and choosing a file closes it. */
+		.codex-sidebar {
+			width: 100%;
+			border-right: 0;
+		}
+
+		.codex-sidebar + .codex-editor-pane {
+			display: none;
+		}
+
 		.badge-lang {
 			display: none;
 		}

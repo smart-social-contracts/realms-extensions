@@ -311,8 +311,8 @@
 		cursor: default;
 	}
 	button.primary {
-		background: #1d4ed8;
-		border-color: #1d4ed8;
+		background: var(--color-primary-700, #1d4ed8);
+		border-color: var(--color-primary-700, #1d4ed8);
 		color: #fff;
 	}
 	.sheet {
