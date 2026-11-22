@@ -45,5 +45,6 @@
   "show_in_sidebar": true,
   "screenshots": [
     "screenshots/01-overview.png"
-  ]
+  ],
+  "backend": true
 }
