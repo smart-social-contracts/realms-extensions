@@ -38,19 +38,24 @@ export function creditorReferenceOf(body: string): string {
 	return `RF${String(check).padStart(2, '0')}${clean}`;
 }
 
-/** The creditor reference of a realm invoice: its id without the hyphen ("INV-12" is RF..INV12). */
+/** The creditor reference of a realm record: its id without the hyphen ("INV-12" is RF..INV12, "BILL-7" RF..BILL7). */
 export function invoiceReference(invoiceId: string): string {
 	return creditorReferenceOf(invoiceId.replace(/-/g, ''));
 }
 
-/** The QR reference of a realm invoice whose id ends in a number ("INV-12" pays with …00012 and its check digit). */
+/** The kinds of realm records a QR reference names, by the two digits before the record's ten-digit number. A realm
+ * invoice's code is 00, so "INV-12" pays with …00000000012 and its check digit, as it always has. */
+const QRR_KINDS: Record<string, string> = { INV: '00', BILL: '01' };
+
+/** The QR reference of a realm invoice or bill whose id ends in a number of at most ten digits. */
 export function invoiceQrr(invoiceId: string): string | null {
-	const number = /([0-9]+)$/.exec(invoiceId)?.[1];
-	return number && number.length <= 26 ? qrrOf(number) : null;
+	const m = /^([A-Z]+)-([0-9]{1,10})$/.exec(invoiceId);
+	const kind = m && QRR_KINDS[m[1]];
+	return kind ? qrrOf(kind + m![2].padStart(10, '0')) : null;
 }
 
-/** The realm invoice an incoming reference names, or null: "RF..INV12" names INV-12, a QR reference ending in 12
- * does too. */
+/** The realm invoice or bill an incoming reference names, or null: "RF..INV12" names INV-12, "RF..BILL7" BILL-7, and a
+ * QR reference names one by its kind code and number. */
 export function invoiceOfReference(ref: string): string | null {
 	const compact = ref.replace(/\s+/g, '').toUpperCase();
 	if (isCreditorReference(compact)) {
@@ -58,8 +63,9 @@ export function invoiceOfReference(ref: string): string | null {
 		return body ? `${body[1]}-${Number(body[2])}` : null;
 	}
 	if (isQrr(compact)) {
-		const number = Number(compact.slice(0, 26));
-		return number > 0 ? `INV-${number}` : null;
+		const [zeros, code, number] = [compact.slice(0, 14), compact.slice(14, 16), Number(compact.slice(16, 26))];
+		const kind = Object.keys(QRR_KINDS).find((k) => QRR_KINDS[k] === code);
+		return /^0+$/.test(zeros) && kind && number > 0 ? `${kind}-${number}` : null;
 	}
 	return null;
 }

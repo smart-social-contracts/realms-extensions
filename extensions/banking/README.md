@@ -32,6 +32,11 @@ collections, returned payments and paid invoices; anything else goes on a review
 
 ![Importing a statement](docs/statement-import.png)
 
+**Bill residents and companies.** A Swiss QR-bill for a tax, a fee or an invoice, in CHF or EUR, paid by scanning the
+code in any e-banking app. Its reference names the bill, so the statement import marks it paid.
+
+![A QR-bill](docs/qr-bill.png)
+
 **5. Follow every order** from the file to the bank's acceptance to the booking.
 
 ![Orders](docs/orders.png)
@@ -54,7 +59,7 @@ runs as the member and refuses to anyone outside the treasury's staff.
 | **Bank connection** | File upload and download in the realm's e-banking. | Works with any bank, no contract, and the bank keys stay with the people who sign. |
 | | Not: EBICS, SIX bLink. | Each needs a bank or SIX contract and a program outside the realm; a later step. |
 | | Never: the realm calling the bank itself. | A blockchain call is repeated by every node, and the realm cannot keep a bank key secret. |
-| **Bills** | Swiss QR-bills to residents and companies, marked paid by their reference: in review (#124). | |
+| **Bills** | Swiss QR-bills to residents and companies, marked paid by their reference (in review, #124). | The way residents and companies already pay Swiss public bodies. The QR code is drawn by the `swissqrbill` library, which the realm trusts to encode the IBAN it is given: see [DESIGN.md](DESIGN.md). |
 | **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext connector: in review (#122). Odoo connector: in progress. | The ERP keeps the books; the realm approves what it pays. |
 | **Not yet** | Members entering their own bank details. Billing the realm's own invoices in francs. Paying a realm transfer through the bank. | Each needs a change to the realm itself, written up in [GGG-PROPOSAL.md](GGG-PROPOSAL.md). |
 

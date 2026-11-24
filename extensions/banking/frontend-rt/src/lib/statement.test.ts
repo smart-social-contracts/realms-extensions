@@ -7,6 +7,7 @@ import { collectionFormatById, formatById, sentBatch } from './formats.ts';
 import { matchStatement, reportOf } from './match.ts';
 import { SEPA_DD_ORDER, SWISS_ORDER } from './samples.ts';
 import { parseStatusReport, statusReportOf } from './status.ts';
+import { invoiceReference } from './references.ts';
 
 const fixture = (name: string) => readFileSync(new URL(`../../../tests/fixtures/${name}`, import.meta.url), 'utf8');
 const sent = [sentBatch(SWISS_ORDER, formatById('sps-2025'))];
@@ -99,4 +100,17 @@ describe('pain.002', () => {
 
 it('refuses a file that is no statement', () => {
 	assert.throws(() => parseStatements('<Document><CstmrCdtTrfInitn/></Document>'), /not a camt/);
+});
+
+it('matches a payment to the bill its reference names', () => {
+	const statement = {
+		kind: 'camt.054' as const, messageId: 'N1', id: 'N1-1', createdAt: '', account: { iban: '', currency: 'CHF' },
+		entries: [{
+			ref: 'E1', amount: 15000, currency: 'CHF', direction: 'in' as const, reversal: false, status: 'BOOK', bookingDate: '2026-12-04', batch: null,
+			transactions: [{ endToEndId: '', paymentGroupId: '', amount: 15000, currency: 'CHF', reference: invoiceReference('BILL-1'), note: '',
+				counterparty: { name: 'Ada Example', iban: '' } }],
+		}],
+	};
+	const [match] = matchStatement(statement, []);
+	assert.ok(match.kind === 'incoming' && match.invoice === 'BILL-1');
 });

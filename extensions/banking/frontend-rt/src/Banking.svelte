@@ -6,6 +6,7 @@
 	import { version } from '../../manifest.json';
 	import type { Env } from './env';
 	import { errorText } from './env';
+	import BillsTab from './BillsTab.svelte';
 	import { bankDispatches, bankRegistered, KIND, listDocs, loadRegister, realmOf, Refused, registerBank, treasuriesOf,
 		type Dispatch, type Doc, type Register, type Treasury } from './lib/realm';
 	import { bridgeVault } from './lib/vault';
@@ -32,13 +33,14 @@
 	let error = $state('');
 	let treasuries = $state<Treasury[]>([]);
 	let treasury = $state<Treasury | null>(null);
-	let tab = $state<'register' | 'order' | 'orders' | 'statements'>('orders');
+	let tab = $state<'register' | 'order' | 'bills' | 'orders' | 'statements'>('orders');
 
 	let register = $state<Register | null>(null);
 	let registerDoc = $state<string | null>(null);
 	let bank = $state(true);
 	let orders = $state<Doc[]>([]);
 	let statements = $state<Doc[]>([]);
+	let bills = $state<Doc[]>([]);
 	let outbox = $state<Map<string, Dispatch>>(new Map());
 
 	/** Payment id → the statement record that booked it, from the reports in clear. A group booked as one entry books
@@ -63,10 +65,11 @@
 	async function load() {
 		if (!treasury) return;
 		try {
-			const [reg, os, ss, out, hasBank] = await Promise.all([
+			const [reg, os, ss, bs, out, hasBank] = await Promise.all([
 				loadRegister(realm, vault, treasury),
 				listDocs(realm, treasury.department, KIND.order),
 				listDocs(realm, treasury.department, KIND.statement),
+				listDocs(realm, treasury.department, KIND.bill),
 				bankDispatches(realm),
 				bankRegistered(realm),
 			]);
@@ -74,6 +77,7 @@
 			registerDoc = reg.doc;
 			orders = os.sort((a, b) => b.at - a.at);
 			statements = ss.sort((a, b) => b.at - a.at);
+			bills = bs.sort((a, b) => b.at - a.at);
 			outbox = out;
 			bank = hasBank;
 			state = 'ready';
@@ -154,6 +158,7 @@
 		<nav class="bk-tabs">
 			<button type="button" class:bk-on={tab === 'orders'} onclick={() => (tab = 'orders')}>Orders</button>
 			<button type="button" class:bk-on={tab === 'order'} onclick={() => (tab = 'order')}>New order</button>
+			<button type="button" class:bk-on={tab === 'bills'} onclick={() => (tab = 'bills')}>QR-bills</button>
 			<button type="button" class:bk-on={tab === 'statements'} onclick={() => (tab = 'statements')}>Statements</button>
 			<button type="button" class:bk-on={tab === 'register'} onclick={() => (tab = 'register')}>Accounts and payees</button>
 		</nav>
@@ -161,6 +166,8 @@
 			<OrdersTab {env} {orders} {outbox} {booked} onchanged={load} />
 		{:else if tab === 'order'}
 			<NewOrderTab {env} {register} {orders} oncommitted={() => load().then(() => (tab = 'orders'))} />
+		{:else if tab === 'bills'}
+			<BillsTab {env} {register} {bills} {statements} onissued={load} />
 		{:else if tab === 'statements'}
 			<StatementsTab {env} {orders} {statements} {outbox} onimported={load} />
 		{:else}
@@ -201,6 +208,8 @@
 	.bk :global(.bk-tabs .bk-on) { border-bottom-color: currentColor; font-weight: 600; }
 	.bk :global(.bk-problems) { color: #b42318; margin: 0; padding-left: 1.2rem; }
 	.bk :global(.bk-file) { max-width: 30rem; }
+	.bk :global(.bk-bill) { overflow-x: auto; background: white; border: 1px solid rgb(128 128 128 / 0.3); }
+	.bk :global(.bk-bill img) { display: block; width: 100%; max-width: 210mm; height: auto; }
 	@media print {
 		.bk :global(button), .bk :global(.bk-tabs) { display: none; }
 	}

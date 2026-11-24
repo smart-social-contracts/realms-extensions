@@ -36,9 +36,17 @@ describe('creditor reference (ISO 11649)', () => {
 });
 
 describe('invoice references', () => {
-	it('come back to the invoice they were made from', () => {
+	it('come back to the invoice or bill they were made from', () => {
 		assert.equal(invoiceOfReference(invoiceReference('INV-7')), 'INV-7');
 		assert.equal(invoiceOfReference(invoiceQrr('INV-12')!), 'INV-12');
+		assert.equal(invoiceOfReference(invoiceReference('BILL-7')), 'BILL-7');
+		assert.equal(invoiceOfReference(invoiceQrr('BILL-7')!), 'BILL-7');
+	});
+
+	it("keep an invoice's QR reference as it was, and give a bill another one", () => {
+		assert.equal(invoiceQrr('INV-12'), qrrOf('12'));
+		assert.notEqual(invoiceQrr('BILL-12'), invoiceQrr('INV-12'));
+		assert.equal(invoiceOfReference('210000000003139471430009017'), null, "SIX's sample names no realm record");
 	});
 
 	it('name no invoice when the reference is not one of the realm', () => {

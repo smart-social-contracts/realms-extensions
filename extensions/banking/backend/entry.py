@@ -16,7 +16,8 @@ A function that fails after it changed the realm traps, and the realm undoes the
 """
 
 BANK = "bank"
-KINDS = {"register": "banking.register", "order": "banking.order", "statement": "banking.statement"}
+KINDS = {"register": "banking.register", "order": "banking.order", "statement": "banking.statement",
+         "bill": "banking.bill"}
 # What a stored document carries: the fields of ``document_store`` the screen may set.
 DOCUMENT_FIELDS = ("department", "document", "title", "languages", "kind", "ref", "hash", "keys", "facts")
 
@@ -74,6 +75,14 @@ def save_register(**args):
     return {"ok": True, "document": _done(reply, "document_store")["document"]}
 
 
+def save_bill(**args):
+    """Keep an issued QR-bill: who is billed, sealed; its id, amount and reference in the facts."""
+    fields = _document(args, KINDS["bill"])
+    if not str((fields.get("facts") or {}).get("bill", "")).startswith("BILL-"):
+        raise ValueError("a bill's facts carry its id")
+    return {"ok": True, "document": _done(rpc("document_store", **fields), "document_store")["document"]}
+
+
 def _order_title(facts):
     what = "Direct debit collection" if facts.get("kind") == "collection" else "Payment order"
     return what + " " + str(facts["message_id"]) + " sha256:" + str(facts["file_sha256"])
@@ -117,9 +126,37 @@ def register_bank(name):
 # --- what the host asks before a file leaves -----------------------------------------------------------------------
 
 
+def _departments():
+    """Every department of the realm, from its chart."""
+    todo, out = [rpc("department_chart").get("chart") or {}], []
+    while todo:
+        node = todo.pop()
+        if node.get("department"):
+            out.append(node["department"])
+        todo.extend(node.get("children") or [])
+    return out
+
+
+def _bill_kept(bill):
+    """Whether a department whose staff the member is keeps the bill ``bill`` (the others refuse to list theirs)."""
+    for department in _departments():
+        start = 1
+        while start:
+            page = rpc("document_list", department=department, kind=KINDS["bill"], **{"from": start, "count": 500})
+            if not page.get("ok"):
+                break
+            if any((d.get("facts") or {}).get("bill") == bill for d in page.get("documents", [])):
+                return True
+            start = page.get("next")
+    return False
+
+
 def download_allowed(name, sha256, size):
     """Whether the member may save this file: a payment file leaves only once a dispatch to the bank names its sha256,
-    that is once ``commit_order`` recorded it."""
+    that is once ``commit_order`` recorded it; a QR-bill (``BILL-<n>.svg``) once the bill is kept in the realm."""
+    if str(name).startswith("BILL-") and str(name).endswith(".svg"):
+        kept = _bill_kept(str(name)[:-len(".svg")])
+        return {"ok": True, "allowed": kept, "reason": "" if kept else "no bill with this id is kept in the realm"}
     mark = "sha256:" + str(sha256)
     start = 1
     while start:

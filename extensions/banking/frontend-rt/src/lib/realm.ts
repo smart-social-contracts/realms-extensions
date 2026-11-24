@@ -9,12 +9,13 @@
 //   banking.statement  one imported camt file or pain.002 status report, encrypted, with what matched; its facts: the
 //                      report, in clear
 
+import type { Bill } from './bill.ts';
 import type { Mandate } from './collection.ts';
 import type { Account } from './order.ts';
 import type { Match } from './match.ts';
 import { plain, type Vault } from './vault.ts';
 
-export const KIND = { register: 'banking.register', order: 'banking.order', statement: 'banking.statement' } as const;
+export const KIND = { register: 'banking.register', order: 'banking.order', statement: 'banking.statement', bill: 'banking.bill' } as const;
 /** The outside body the realm's payment orders go to. */
 export const BANK = 'bank';
 const INLINE = 'inline:';
@@ -267,4 +268,28 @@ export async function recordImport(
 	});
 	const reply = await realm.run('import_statement', { document, reports: imported.reports, topic: imported.topic ?? KIND.statement });
 	return String(reply.document);
+}
+
+// --- bills ---------------------------------------------------------------------------------------------------------
+
+export interface BillFacts {
+	bill: string;
+	amount: number | null;
+	currency: string;
+	reference: string;
+	due: string;
+	/** The realm invoice the bill settles, or "". */
+	invoice: string;
+}
+
+/** Keep an issued bill (``save_bill``): who is billed, encrypted for the treasury's staff; its id, amount and reference
+ * in clear. Once it is kept, the member may save its QR-bill. */
+export async function storeBill(realm: Realm, vault: Vault, treasury: Treasury, me: string, bill: Bill, reference: string, language: string) {
+	const facts: BillFacts = {
+		bill: bill.id, amount: bill.amount ?? null, currency: bill.currency, reference, due: bill.dueDate ?? '', invoice: bill.invoice ?? '',
+	};
+	const document = await sealedDocument(vault, treasury, me, {
+		kind: KIND.bill, title: `Bill ${bill.id}`, language, data: bill, facts: facts as unknown as Record<string, unknown>,
+	});
+	return String((await realm.run('save_bill', document)).document);
 }
