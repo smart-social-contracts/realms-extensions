@@ -119,7 +119,39 @@ function realmAs(me: string, permissions: string[]): Realm {
 		calls.push({ op, args });
 		return ops[op](args);
 	};
-	return { read: call, run: call };
+	// Banking's backend (backend/entry.py), whose functions the screen runs: each calls the realm's operations, which
+	// is what ``calls`` records, as the audit log would.
+	const backend: Record<string, (a: any) => Promise<any>> = {
+		save_register: async (a) => ({ document: (await call('document_store', a)).document }),
+		commit_order: async (a) => {
+			const { document } = await call('document_store', a);
+			const what = a.facts.kind === 'collection' ? 'Direct debit collection' : 'Payment order';
+			const sent = await call('notification_send', {
+				recipient: 'External:bank', topic: 'banking.order', title: `${what} ${a.facts.message_id} sha256:${a.facts.file_sha256}`, body: document,
+			});
+			return { document, dispatch: sent.dispatch };
+		},
+		register_bank: (a) => call('external_add', { external: 'bank', name: a.name, kind: 'bank', channel: 'manual' }),
+		propose_file: async (a) => {
+			const { proposal } = await call('proposal_create', { ...a.motion, department: a.document.department });
+			const { document } = await call('document_store', { ...a.document, facts: { ...a.document.facts, proposal } });
+			return { document, proposal };
+		},
+		commit_approved: async (a) => {
+			const { document: d } = await call('document_get', { document: a.document });
+			const { proposal } = await call('proposal_get', { proposal: d.facts.proposal });
+			if (!['accepted', 'executed', 'execution_scheduled'].includes(proposal.status)) {
+				throw new Refused(`${d.facts.proposal} has not approved the file (${proposal.status})`);
+			}
+			const what = d.facts.kind === 'collection' ? 'Direct debit file' : 'Payment file';
+			return call('notification_send', {
+				recipient: 'External:bank', topic: 'banking.order', body: a.document,
+				title: `${what} ${d.facts.message_id} approved by ${d.facts.proposal} sha256:${d.facts.file_sha256}`,
+			});
+		},
+	};
+	const run = async (name: string, args: any = {}) => (backend[name] ? backend[name](args) : call(name, args));
+	return { read: run, run };
 }
 
 const REGISTER: Register = {

@@ -12,7 +12,7 @@
 import type { Mandate } from './collection.ts';
 import { decimalsOf, type Account } from './order.ts';
 import type { Match } from './match.ts';
-import type { Vault } from './vault.ts';
+import { plain, type Vault } from './vault.ts';
 
 export const KIND = { register: 'banking.register', order: 'banking.order', statement: 'banking.statement' } as const;
 /** The outside body the realm's payment orders go to. */
@@ -28,10 +28,12 @@ export interface Realm {
 
 export class Refused extends Error {}
 
-/** The realm as the extension context gives it: ``ctx.read``/``ctx.run`` answer ``{ok, ...}``. */
+/** The realm, through Banking's own backend (``backend/entry.py``): ``ctx.read``/``ctx.run`` run a function of it, which
+ * answers ``{ok, ...}``. The reads are the realm's operations by their names; the writes are the backend's own
+ * (``save_register``, ``commit_order``, ``import_statement``, ``dispatch_confirm``, ``register_bank``). */
 export function realmOf(ctx: any): Realm {
 	async function call(kind: 'read' | 'run', name: string, args: Record<string, unknown>) {
-		const reply = await ctx[kind](name, args);
+		const reply = await ctx[kind](name, plain(args));
 		if (!reply?.ok) throw new Refused(String(reply?.error ?? `${name} was refused`));
 		return reply;
 	}
@@ -96,16 +98,15 @@ export async function listDocs(realm: Realm, department: string, kind: string): 
 	return (await readAll(realm, 'document_list', 'documents', { department, kind })).map(docOf);
 }
 
-/** Seal ``data`` for the treasury's staff and store it as ``kind`` (replacing ``existing``). Returns the document. */
-export async function storeSealed(
-	realm: Realm,
+/** ``data`` sealed for the treasury's staff, as the document of ``kind`` the backend stores (replacing ``existing``). */
+export async function sealedDocument(
 	vault: Vault,
 	treasury: Treasury,
 	me: string,
 	record: { kind: string; title: string; language: string; data: unknown; facts?: Record<string, unknown>; existing?: string },
-): Promise<string> {
+): Promise<Record<string, unknown>> {
 	const sealed = await vault.seal([...treasury.staff, me], record.data);
-	const reply = await realm.run('document_store', {
+	return {
 		department: treasury.department,
 		...(record.existing ? { document: record.existing } : {}),
 		title: record.title,
@@ -115,8 +116,7 @@ export async function storeSealed(
 		hash: await sha256Hex(sealed.ciphertext),
 		keys: sealed.keys,
 		...(record.facts ? { facts: record.facts } : {}),
-	});
-	return String(reply.document);
+	};
 }
 
 /** The record ``document`` holds, opened with the caller's key, and its facts. ``data`` is null without a key. */
@@ -158,10 +158,11 @@ export async function loadRegister(realm: Realm, vault: Vault, treasury: Treasur
 	return { doc: doc.id, register: data };
 }
 
-export function saveRegister(realm: Realm, vault: Vault, treasury: Treasury, me: string, register: Register, existing: string | null, language: string) {
-	return storeSealed(realm, vault, treasury, me, {
+export async function saveRegister(realm: Realm, vault: Vault, treasury: Treasury, me: string, register: Register, existing: string | null, language: string) {
+	const document = await sealedDocument(vault, treasury, me, {
 		kind: KIND.register, title: 'Bank register', language, data: register, existing: existing ?? undefined,
 	});
+	return String((await realm.run('save_register', document)).document);
 }
 
 // --- orders and the bank --------------------------------------------------------------------------------------------
@@ -188,7 +189,9 @@ export interface CommittedOrder {
 }
 
 /** Commit the file before anyone downloads it: its sha256 and lines go on the record, the encrypted file with them,
- * and the order goes in the bank's outbox. Returns the document and the dispatch. */
+ * and the order goes in the bank's outbox, in one call of the backend (``commit_order``), which also names the hash in
+ * the dispatch, from the facts: the audit log keeps a call's arguments only up to a size, which the encrypted file
+ * passes, so the dispatch is where anyone who reads the log sees the commitment. Returns the document and the dispatch. */
 export async function commitOrder(
 	realm: Realm,
 	vault: Vault,
@@ -200,16 +203,11 @@ export async function commitOrder(
 ): Promise<CommittedOrder> {
 	if (facts.file_sha256 !== (await sha256Hex(file))) throw new Error('the file is not the one whose hash is committed');
 	const what = facts.kind === 'collection' ? 'Direct debit collection' : 'Payment order';
-	const document = await storeSealed(realm, vault, treasury, me, {
+	const document = await sealedDocument(vault, treasury, me, {
 		kind: KIND.order, title: `${what} ${facts.message_id}`, language, data: { format: facts.format, file }, facts,
 	});
-	// The dispatch names the hash too: the audit log keeps a call's arguments only up to a size, which the encrypted
-	// file passes, so this small call is where anyone who reads the log sees the commitment.
-	const sent = await realm.run('notification_send', {
-		recipient: `External:${BANK}`, topic: KIND.order, title: `${what} ${facts.message_id} sha256:${facts.file_sha256}`,
-		body: document,
-	});
-	return { document, dispatch: sent.dispatch ?? null };
+	const reply = await realm.run('commit_order', document);
+	return { document: String(reply.document), dispatch: reply.dispatch ?? null };
 }
 
 // --- files from the public body's ERP, approved by the treasury's vote ------------------------------------------
@@ -244,7 +242,8 @@ export function motionOfFile(facts: OrderFacts): { title: string; description: s
 	};
 }
 
-/** Put a file the ERP made to the treasury's vote: the motion first, then the encrypted file with its facts. */
+/** Put a file the ERP made to the treasury's vote, in one call of the backend (``propose_file``): the motion, then the
+ * encrypted file with its facts, naming the motion. */
 export async function proposeFile(
 	realm: Realm,
 	vault: Vault,
@@ -255,13 +254,11 @@ export async function proposeFile(
 	language: string,
 ): Promise<{ document: string; proposal: string }> {
 	if (facts.file_sha256 !== (await sha256Hex(file))) throw new Error('the file is not the one whose hash is proposed');
-	const { proposal } = await realm.run('proposal_create', {
-		...motionOfFile(facts), department: treasury.department, kind: 'payment file', tags: ['banking'],
+	const document = await sealedDocument(vault, treasury, me, {
+		kind: KIND.order, title: `ERP file ${facts.message_id}`, language, data: { format: facts.format, file }, facts,
 	});
-	const document = await storeSealed(realm, vault, treasury, me, {
-		kind: KIND.order, title: `ERP file ${facts.message_id}`, language, data: { format: facts.format, file }, facts: { ...facts, proposal },
-	});
-	return { document, proposal };
+	const reply = await realm.run('propose_file', { document, motion: { ...motionOfFile(facts), kind: 'payment file', tags: ['banking'] } });
+	return { document: String(reply.document), proposal: String(reply.proposal) };
 }
 
 /** The vote on a file from the ERP: its status, what it means, and the tally. */
@@ -271,16 +268,12 @@ export async function approvalOf(realm: Realm, proposal: string) {
 	return { status, outcome: outcomeOf(status), yes: reply.tally?.yes ?? 0, no: reply.tally?.no ?? 0, eligible: reply.eligible ?? 0 };
 }
 
-/** Once the treasury approved the file, commit its hash to the bank's outbox, naming the motion. */
+/** Once the treasury approved the file, commit its hash to the bank's outbox, naming the motion. The backend
+ * (``commit_approved``) reads the vote in the realm itself, and refuses a file the treasury has not approved. */
 export async function commitApproved(realm: Realm, document: string, facts: OrderFacts): Promise<string> {
-	const { outcome } = await approvalOf(realm, facts.proposal!);
-	if (outcome !== 'approved') throw new Error(`${facts.proposal} has not approved the file`);
-	const what = facts.kind === 'collection' ? 'Direct debit file' : 'Payment file';
-	const sent = await realm.run('notification_send', {
-		recipient: `External:${BANK}`, topic: KIND.order, body: document,
-		title: `${what} ${facts.message_id} approved by ${facts.proposal} sha256:${facts.file_sha256}`,
-	});
-	return String(sent.dispatch);
+	void facts;
+	const reply = await realm.run('commit_approved', { document });
+	return String(reply.dispatch);
 }
 
 export interface Dispatch {
@@ -320,7 +313,7 @@ export async function bankRegistered(realm: Realm): Promise<boolean> {
 
 /** Register the bank as an outside body with a manual channel. A realm-wide change: it may be filed as a proposal. */
 export function registerBank(realm: Realm, name: string) {
-	return realm.run('external_add', { external: BANK, name, kind: 'bank', channel: 'manual' });
+	return realm.run('register_bank', { name });
 }
 
 // --- statements ----------------------------------------------------------------------------------------------------
@@ -335,15 +328,13 @@ export async function recordImport(
 	imported: { name: string; file: string; matches: Match[]; reports: Record<string, unknown>[]; topic?: string },
 	language: string,
 ): Promise<string> {
-	const document = await storeSealed(realm, vault, treasury, me, {
+	const document = await sealedDocument(vault, treasury, me, {
 		kind: KIND.statement,
 		title: `Bank file ${imported.reports.map((r) => r.statement).join(', ')}`,
 		language,
 		data: { name: imported.name, file: imported.file, matches: imported.matches },
 		facts: { reports: imported.reports },
 	});
-	for (const report of imported.reports) {
-		await realm.run('external_report', { external: BANK, topic: imported.topic ?? KIND.statement, body: report, evidence_ref: document });
-	}
-	return document;
+	const reply = await realm.run('import_statement', { document, reports: imported.reports, topic: imported.topic ?? KIND.statement });
+	return String(reply.document);
 }

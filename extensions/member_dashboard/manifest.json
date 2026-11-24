@@ -42,5 +42,6 @@
   "is_default": true,
   "screenshots": [
     "screenshots/01-overview.png"
-  ]
+  ],
+  "backend": true
 }

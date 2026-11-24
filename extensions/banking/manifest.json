@@ -1,6 +1,13 @@
 {
   "name": "banking",
   "version": "0.1.0",
+  "runtime": "sandboxed",
+  "sdk_version": "1",
+  "capabilities": [
+    "notify",
+    "vault",
+    "download"
+  ],
   "description": "Pay, collect and be paid through the realm's ordinary bank account: generate payment and direct debit files (Swiss Payment Standards, SEPA), or put a file from your ERP to the treasury's vote, then import the bank's status reports and camt statements to match payments and invoices. For the treasury's staff; bank details stay encrypted.",
   "author": "Smart Social Contracts",
   "ggg_api_version": 1,
@@ -37,5 +44,6 @@
     "external_report",
     "proposal_create",
     "proposal_get"
-  ]
+  ],
+  "backend": true
 }
