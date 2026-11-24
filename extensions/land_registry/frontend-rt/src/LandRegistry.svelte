@@ -767,7 +767,7 @@
 		<aside class="sidebar" style="width: {sidebarWidth}px">
 			<div class="sidebar-head">
 				<div>
-					<h2>Land Registry</h2>
+					<h1>Land Registry</h1>
 					<p class="muted">{extensionDescription}</p>
 					<p class="muted">{lands.length} parcel{lands.length !== 1 ? 's' : ''}</p>
 				</div>
@@ -1066,6 +1066,33 @@
 		overflow: hidden;
 	}
 
+	/* A phone has no room for a panel beside the map: the panel comes first and the map below it, on one scrolling page. */
+	@media (max-width: 720px) {
+		.land-registry:not(.expanded) {
+			flex-direction: column;
+			overflow-y: auto;
+		}
+
+		.land-registry:not(.expanded) .sidebar {
+			width: 100% !important;
+			min-width: 0;
+			max-width: none;
+			border-right: 0;
+			border-bottom: 1px solid #e5e5e5;
+			overflow: visible;
+		}
+
+		.land-registry:not(.expanded) .resize-handle {
+			display: none;
+		}
+
+		.land-registry:not(.expanded) .map-column {
+			flex: none;
+			height: 70vh;
+			min-height: 320px;
+		}
+	}
+
 	.resize-handle {
 		flex: none;
 		width: 6px;
@@ -1121,7 +1148,7 @@
 		padding: 1rem 1rem 0.5rem;
 	}
 
-	.sidebar-head h2 {
+	.sidebar-head h1 {
 		margin: 0 0 0.15rem;
 		font-size: 1.15rem;
 	}
@@ -1186,7 +1213,7 @@
 
 	.parcel-row:hover,
 	.parcel-row.selected {
-		background: #eff6ff;
+		background: var(--color-primary-50, #eff6ff);
 	}
 
 	.dot {
@@ -1284,7 +1311,7 @@
 	.zone-chip {
 		padding: 0.15rem 0.55rem;
 		border-radius: 999px;
-		background: #eef2ff;
+		background: var(--color-primary-50, #eef2ff);
 		color: #3730a3;
 		font-size: 0.75rem;
 	}
@@ -1345,7 +1372,7 @@
 
 	.primary-btn {
 		border: none;
-		background: #2563eb;
+		background: var(--color-primary-600, #2563eb);
 		color: #fff;
 	}
 

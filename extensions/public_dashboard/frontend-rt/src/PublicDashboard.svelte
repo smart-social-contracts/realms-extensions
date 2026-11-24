@@ -3,6 +3,7 @@
 	import {
 		CUSTOM_BACKGROUND,
 		CUSTOM_LOGO,
+		firstLoadableImage,
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
 	import { loadExtensionI18n, t } from './lib/i18n';
@@ -31,6 +32,22 @@
 	let realmData: any = $state(null);
 	let brandingLogo = $state(CUSTOM_LOGO);
 	let brandingBackground = $state(CUSTOM_BACKGROUND);
+	/** The realm's cover once it has loaded; '' when the realm has none. Without one the hero is a plain header. */
+	let heroCover = $state('');
+	/** False until the cover has been looked for: no hero is drawn before, so the page never jumps. */
+	let coverChecked = $state(false);
+
+	// A CSS background that fails to load leaves a blank screen and says nothing: try it as an image first.
+	async function checkCover(wanted: string) {
+		const cover = await firstLoadableImage([wanted]);
+		if (brandingBackground !== wanted) return;
+		heroCover = cover;
+		coverChecked = true;
+	}
+
+	$effect(() => {
+		void checkCover(brandingBackground);
+	});
 	let brandingPrimary = $state('#111827');
 	let lifecycleData: any = $state({});
 	let lifecycleStageIndex = $state(0);
@@ -86,6 +103,8 @@
 					brandingPrimary = realmData.primary_color;
 				}
 			}
+			// Known before the page is first drawn: a cover makes a full-screen hero, none a short header.
+			await checkCover(brandingBackground);
 			const quarters = ((directory?.quarters || []) as any[]).map((q) => ({
 				canister_id: q.id,
 				name: q.name,
@@ -140,8 +159,8 @@
 
 		const stage = statusData?.realm_stage || realmData?.status || 'alpha';
 		lifecycleStageIndex = Math.max(0, STAGES.indexOf(stage));
+		// The realm reports no critical mass here: none is shown (a built-in 10,000 used to stand in for it).
 		lifecycleData = {
-			critical_mass: 10000,
 			registered_users: Number(statusData?.users_count || 0),
 			deposits_locked: stage !== 'alpha',
 			land_acquired: ['production', 'deprecation', 'terminated'].includes(stage),
@@ -345,6 +364,16 @@
 
 	let showOverlay = $state(false);
 
+	/** A member holds at least one profile; a visitor, signed in or not, holds none. */
+	let isMember = $state(false);
+
+	$effect(() => {
+		const unsub = ctx.userProfiles?.subscribe?.((profiles: unknown) => {
+			isMember = Array.isArray(profiles) && profiles.length > 0;
+		});
+		return () => unsub?.();
+	});
+
 	$effect(() => {
 		const unsub = ctx.realmInfo?.subscribe?.((info: any) => {
 			if (!info || typeof info !== 'object') return;
@@ -399,11 +428,12 @@
 			<span class="ml-3 text-gray-500">{t('loading_dashboard')}</span>
 		</div>
 	{:else}
-		<!-- Hero: pane-bleed background image with content inside -->
+		<!-- Hero: the realm's cover, pane-bleed, with content inside; a plain header when the realm has no cover -->
 		{#if realmData}
+			{#if heroCover}
 			<div
 				class="hero-screen"
-				style="background-image: url('{brandingBackground}');"
+				style="background-image: url('{heroCover}');"
 			>
 				<div
 					class="hero-gradient"
@@ -436,6 +466,24 @@
 					</div>
 				</div>
 			</div>
+			{:else if coverChecked}
+			<div class="hero-plain" style="--realm-primary: {brandingPrimary}">
+				<div class="hero-identity">
+					<div class="hero-brand-row">
+						<img
+							src={brandingLogo}
+							alt=""
+							class="hero-logo"
+							onerror={(e) => { e.currentTarget.src = '/images/logo_sphere_only.svg'; }}
+						/>
+						<h1 class="hero-title">{realmData.name || t('realm_default')}</h1>
+					</div>
+					{#if realmData.welcome_message}
+						<p class="hero-welcome">{realmData.welcome_message}</p>
+					{/if}
+				</div>
+			</div>
+			{/if}
 
 		<style>
 			@keyframes bounceDown {
@@ -451,6 +499,15 @@
 				margin-top: -6rem;
 				padding-top: 6rem;
 				overflow: hidden;
+			}
+			/* No cover: a short header on a soft tint of the realm's colour, so the page's content starts on the first screen. */
+			.hero-plain {
+				margin-top: -6rem;
+				padding: 88px 24px 36px;
+				display: flex;
+				justify-content: center;
+				background: #f6f7f9;
+				background: linear-gradient(180deg, color-mix(in srgb, var(--realm-primary) 12%, #fff) 0%, #fff 100%);
 			}
 			.hero-gradient {
 				position: absolute;
@@ -668,7 +725,7 @@
 			}
 			@media (min-width: 768px) {
 				.realm-status-metrics {
-					grid-template-columns: repeat(4, minmax(0, 1fr));
+					grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 				}
 			}
 			.realm-status-metric {
@@ -732,14 +789,14 @@
 				</div>
 			{/if}
 
-			<!-- Join button -->
+			<!-- Join button; a member is taken to their dashboard instead -->
 			<div style="display: flex; justify-content: center; padding: 2.5rem 0;">
 				<a
-					href="/join"
+					href={isMember ? '/extensions/member_dashboard' : '/join'}
 					class="join-btn"
 					style="--realm-primary: {brandingPrimary}"
 				>
-					{t('join_this_realm')}
+					{t(isMember ? 'my_dashboard' : 'join_this_realm')}
 					<svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
 					</svg>
@@ -879,12 +936,14 @@
 									{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()}
 								</div>
 							</div>
+							{#if statusData.proposals_count != null}
 							<div class="realm-status-metric">
 								<div class="realm-status-metric-label">Governance Activity</div>
 								<div class="realm-status-metric-value">
 									{Number(statusData.proposals_count ?? 0).toLocaleString()} proposals · {Number(statusData.votes_count ?? 0).toLocaleString()} votes
 								</div>
 							</div>
+							{/if}
 							<div class="realm-status-metric">
 								<div class="realm-status-metric-label">{quarterCount === 1 && statusData.quarters?.[0]?.is_capital ? 'Capital Quarter' : 'Quarters'}</div>
 								<div class="realm-status-metric-value">
@@ -893,20 +952,24 @@
 							</div>
 						</div>
 
-						{#if realmStage === 'alpha' || realmStage === 'beta'}
+						{#if (realmStage === 'alpha' || realmStage === 'beta') && Number(lifecycleData.critical_mass) > 0}
 							<div style="margin-top: 20px; padding: 16px; border-radius: 12px; background: {stageTheme.bg}; border: 1px solid {stageTheme.border};">
 								<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
 									<div>
 										<div style="font-size: 0.8rem; font-weight: 600; color: {stageTheme.text};">Path to next phase</div>
 										<div style="font-size: 0.85rem; color: #4b5563; margin-top: 4px;">
-											{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()} of {Number(lifecycleData.critical_mass ?? 10000).toLocaleString()} members toward critical mass
+											{Number(lifecycleData.registered_users ?? statusData.users_count ?? 0).toLocaleString()} of {Number(lifecycleData.critical_mass).toLocaleString()} members needed for the next phase
 										</div>
 									</div>
-									<div style="font-size: 1.25rem; font-weight: 700; color: {stageTheme.accent};">{stageProgressPct}%</div>
+									{#if stageProgressPct >= 1}
+										<div style="font-size: 1.25rem; font-weight: 700; color: {stageTheme.accent};">{stageProgressPct}%</div>
+									{/if}
 								</div>
-								<div class="realm-progress-bar">
-									<div class="realm-progress-fill" style="width: {stageProgressPct}%; background: {stageTheme.accent};"></div>
-								</div>
+								{#if stageProgressPct >= 1}
+									<div class="realm-progress-bar">
+										<div class="realm-progress-fill" style="width: {stageProgressPct}%; background: {stageTheme.accent};"></div>
+									</div>
+								{/if}
 							</div>
 						{/if}
 
@@ -990,9 +1053,8 @@
 					{#if scaleStatus}
 						<p class="text-sm text-gray-600 mb-4">
 							{#if scaleStatus.auto_scale_enabled}
-								A new quarter is created automatically once a quarter reaches
-								<strong>{Number(scaleStatus.threshold).toLocaleString()}</strong> members
-								(capacity {Number(scaleStatus.n).toLocaleString()} each).
+								This realm grows in quarters of up to <strong>{Number(scaleStatus.n).toLocaleString()}</strong> members:
+								a new one opens when the newest is nearly full.
 							{:else}
 								Automatic expansion is currently paused for this realm.
 							{/if}

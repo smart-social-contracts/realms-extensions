@@ -1023,7 +1023,7 @@
 		font-weight: 500;
 		border-radius: 6px;
 		border: none;
-		background: #2563eb;
+		background: var(--color-primary-600, #2563eb);
 		color: #fff;
 		cursor: pointer;
 		flex-shrink: 0;

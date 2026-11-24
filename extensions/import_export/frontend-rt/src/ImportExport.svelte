@@ -538,7 +538,7 @@
 
 	{:else if activeTab === 'import'}
 		<div class="bg-white shadow-sm rounded-lg p-6">
-			<p class="text-gray-600 text-sm mb-4">Import entity JSON. This realm version imports User records only, as members, in batches of {USER_BATCH}; importing other entity types is not supported.</p>
+			<p class="text-gray-600 text-sm mb-4">Import members from entity JSON: its User records are added as members, in batches of {USER_BATCH}.</p>
 			<div class="flex gap-2 mb-4">
 				<button onclick={() => importMode = 'file'} class={cn('px-3 py-1.5 text-sm rounded-lg', importMode === 'file' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100')}>Upload File</button>
 				<button onclick={() => importMode = 'editor'} class={cn('px-3 py-1.5 text-sm rounded-lg', importMode === 'editor' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100')}>JSON Editor</button>
@@ -616,8 +616,8 @@
 				<textarea bind:value={citizenJson} class="w-full h-40 p-3 border rounded-lg font-mono text-sm" placeholder={citizenImportPlaceholder}></textarea>
 				<button disabled class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">Import Citizens</button>
 				<p class="text-xs text-amber-700 mt-2">
-					Importing citizens without letters is not supported by this realm version: an invite code is
-					shown only when it is created, so codes are minted when you generate the letters below.
+					Citizens are imported together with their letters: an invite code is shown only when it is
+					created, so codes are made when you generate the letters below.
 				</p>
 			</div>
 			<div class="border-t border-gray-100 pt-6">
@@ -635,7 +635,7 @@
 						type="button"
 						onclick={startLetterJob}
 						disabled={letterRunning || !citizenJson.trim()}
-						class="px-4 py-2 bg-gray-900 text-white text-sm rounded-lg disabled:opacity-50"
+						class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50"
 					>{letterRunning && !letterJob?.paused ? 'Generating…' : 'Generate / download letters'}</button>
 					{#if letterRunning}
 						<button

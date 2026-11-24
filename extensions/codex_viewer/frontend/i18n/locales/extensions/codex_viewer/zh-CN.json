@@ -1,6 +1,7 @@
 {
   "tab_legislation": "立法",
   "tab_source": "源代码",
+  "loading": "加载中…",
   "local_time": "{time}（本地时间）",
   "in_force": "现行立法",
   "healthy": "正常",

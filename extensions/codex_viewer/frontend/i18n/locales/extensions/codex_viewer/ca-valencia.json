@@ -1,6 +1,7 @@
 {
   "tab_legislation": "Legislació",
   "tab_source": "Codi font",
+  "loading": "Carregant…",
   "local_time": "{time} (hora local)",
   "in_force": "Legislació en vigor",
   "healthy": "Sa",

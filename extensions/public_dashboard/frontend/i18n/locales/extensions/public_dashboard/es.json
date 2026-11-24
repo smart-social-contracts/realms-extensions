@@ -2,6 +2,7 @@
   "realm_default": "Reino",
   "loading_dashboard": "Cargando el panel…",
   "join_this_realm": "Unirse a este reino",
+  "my_dashboard": "Mi Panel",
   "realm_status": "Estado del reino",
   "stage_phase": "Fase {label}",
   "currently": "Actualmente {label}",

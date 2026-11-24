@@ -759,7 +759,7 @@
 				'bg-gray-50 dark:bg-gray-800/50',
 			)}
 		>
-			<p class={cn('text-sm font-medium text-gray-600 dark:text-gray-300')}>No token configured</p>
+			<p class={cn('text-sm font-medium text-gray-600 dark:text-gray-300')}>This realm has no currency yet</p>
 			<p class={cn('text-xs text-gray-500 dark:text-gray-400 mt-1')}>
 				This realm's treasury has no active token yet, so the vault holds no balance.
 			</p>

@@ -1,0 +1,68 @@
+name: Voting UI test (local realm)
+
+# Starts a realm on the runner with `realms local start`, installs the voting extension from this checkout
+# and drives its UI in Playwright, checking the realm's own state afterwards. Needs no shared test realm.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/voting/**'
+      - 'extensions/_shared/testing/e2e/**'
+      - '.github/actions/local-realm/**'
+      - '.github/workflows/voting-local-e2e.yml'
+  pull_request:
+    paths:
+      - 'extensions/voting/**'
+      - 'extensions/_shared/testing/e2e/**'
+      - '.github/actions/local-realm/**'
+      - '.github/workflows/voting-local-e2e.yml'
+  schedule:
+    # Nightly against the newest realm release, pre-releases included: the break to catch is an extension
+    # that no longer loads on the realm about to ship
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      realms_version:
+        description: 'Realms release to run (latest, newest including pre-releases, or a tag)'
+        default: latest
+        type: string
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Local realm with the voting extension
+        uses: ./.github/actions/local-realm
+        with:
+          extension: extensions/voting
+          realms-version: ${{ inputs.realms_version || (github.event_name == 'schedule' && 'newest' || 'latest') }}
+
+      - name: Install the test dependencies
+        run: |
+          npm install --no-audit --no-fund --prefix extensions/_shared/testing/e2e
+          npm install --no-audit --no-fund --prefix extensions/voting/tests/e2e
+          npx --prefix extensions/voting/tests/e2e playwright install --with-deps chromium
+
+      - name: Voting UI test
+        working-directory: extensions/voting/tests/e2e
+        # The default config runs the canned-realm specs (voting-test.yml); the other *.local specs need a seeded realm.
+        run: npx playwright test -c playwright.local.config.ts specs/voting.local.spec.ts
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voting-local-e2e
+          path: |
+            extensions/voting/tests/e2e/playwright-report
+            extensions/voting/tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 14

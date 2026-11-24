@@ -10,6 +10,8 @@
 	type Tab = 'legislation' | 'source';
 
 	let status = $state<CodexStatus | null>(null);
+	/** Whether `codex_status` has answered, however it answered: a realm that cannot be read still has a viewer. */
+	let asked = $state(false);
 	let tab = $state<Tab>('legislation');
 
 	$effect(() => {
@@ -28,6 +30,8 @@
 			if (reply?.ok) status = reply;
 		} catch (e) {
 			console.warn('codex_status failed:', e);
+		} finally {
+			asked = true;
 		}
 	}
 
@@ -57,8 +61,15 @@
 			{/if}
 		</div>
 	</div>
-{:else}
+{:else if asked}
 	<CodexViewer {ctx} />
+{:else}
+	<!--
+		Nothing yet. Until `codex_status` answers it is not known whether this page has tabs, and mounting a viewer
+		meanwhile mounts one that is about to be destroyed: it reads a chapter nobody sees, fetches the published
+		source of a layer nobody asked for, and rewrites the query string its replacement was going to read.
+	-->
+	<div class="page-loading">{t('loading')}</div>
 {/if}
 
 <style>
@@ -88,13 +99,19 @@
 	}
 
 	.tabs button.active {
-		color: #4338ca;
-		border-bottom-color: #6366f1;
+		color: var(--color-primary-700, #4338ca);
+		border-bottom-color: var(--color-primary-500, #6366f1);
 		font-weight: 600;
 	}
 
 	.body {
 		flex: 1;
 		min-height: 0;
+	}
+
+	.page-loading {
+		padding: 24px 16px;
+		color: #6b7280;
+		font-size: 0.875rem;
 	}
 </style>

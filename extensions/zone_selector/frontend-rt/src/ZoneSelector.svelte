@@ -559,7 +559,7 @@
 	<div class="zone-overlay zone-overlay-top">
 		<div class="zone-header">
 			<div class="zone-header-copy">
-				<h2>Zones</h2>
+				<h1>Zones</h1>
 				<p class="zone-header-desc">{extensionDescription}</p>
 			</div>
 			<div class="zone-header-actions">
@@ -813,7 +813,7 @@
 		gap: 0.5rem;
 	}
 
-	.zone-header-copy h2 {
+	.zone-header-copy h1 {
 		font-size: 1.5rem;
 		font-weight: 700;
 		color: #171717;
@@ -929,7 +929,7 @@
 		padding: 0.5rem 1rem;
 		border: none;
 		border-radius: 0.5rem;
-		background: #2563eb;
+		background: var(--color-primary-600, #2563eb);
 		color: #fff;
 		font-size: 0.85rem;
 		font-weight: 500;

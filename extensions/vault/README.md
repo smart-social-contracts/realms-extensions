@@ -180,9 +180,9 @@ realms-extension-vault/
 ### Running Tests
 
 > **Note:** Vault's backend test suite (`tests/test_*.py`) still targets the
-> retired Docker harness and is pending migration to the deployed-realm scenario
-> approach documented in [`testing/README.md`](../../testing/README.md). E2E tests
-> are unaffected.
+> retired Docker harness and is pending migration. The UI test pattern to follow is
+> `.github/workflows/voting-local-e2e.yml`, which runs against a realm started locally with
+> `realms local start`.
 
 ```bash
 # Run E2E tests

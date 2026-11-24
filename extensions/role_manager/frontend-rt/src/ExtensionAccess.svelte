@@ -198,7 +198,7 @@
 									placeholder={grantType === 'department' ? 'Dept name' : 'Profile name'}
 									class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
 								/>
-								<button onclick={() => grantExtension(ext)} class="px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800">Grant</button>
+								<button onclick={() => grantExtension(ext)} class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Grant</button>
 							</div>
 						</div>
 					</div>

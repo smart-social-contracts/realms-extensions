@@ -52,8 +52,8 @@ jobs:
         if [ -f ../_shared/testing/scripts/run_tests.sh ]; then
           bash ../_shared/testing/scripts/run_tests.sh
         else
-          echo "ℹ️  Docker test harness removed; vault backend suite pending migration"
-          echo "ℹ️  See testing/README.md for the deployed-realm scenario approach"
+          echo "::warning::vault has no backend test harness (the Docker one was removed): this check ran no unit tests"
+          echo "ℹ️  UI tests run in the local-realm workflows (see voting-local-e2e.yml)"
         fi
         
     - name: Upload test logs

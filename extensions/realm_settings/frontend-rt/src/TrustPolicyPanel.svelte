@@ -221,7 +221,7 @@
 					disabled={!canChange || saving}
 					class={cn(
 						'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-						'bg-gray-900 text-white hover:bg-black',
+						'bg-blue-600 text-white hover:bg-blue-700',
 						'disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed',
 					)}
 				>
