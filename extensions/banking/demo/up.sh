@@ -105,9 +105,12 @@ build_extensions() {
   bridge="$(cd "$BANKING/../../.." && pwd)/packages/extension-bridge"
   [ -f "$bridge/package.json" ] || { mkdir -p "$(dirname "$bridge")" && ln -sfn "$REALMS_GOS/packages/extension-bridge" "$bridge"; }
   local todo=() e ui
+  # built: a screen that is a page of its own (index.html at its root, as a sandboxed one is) once dist/index.html
+  # exists; an in-page bundle once dist/index.js does. (Some repositories commit a placeholder dist/index.js.)
+  built() { if [ -f "$1/index.html" ]; then [ -f "$1/dist/index.html" ]; else [ -f "$1/dist/index.js" ]; fi; }
   for e in $CORE $AGORA; do
     for ui in frontend-rt frontend; do
-      [ -f "$EXT_SRC/$e/$ui/package.json" ] && [ ! -d "$EXT_SRC/$e/$ui/dist" ] && todo+=("$EXT_SRC/$e/$ui")
+      [ -f "$EXT_SRC/$e/$ui/package.json" ] && ! built "$EXT_SRC/$e/$ui" && todo+=("$EXT_SRC/$e/$ui")
     done
   done
   todo+=("$BANKING/frontend-rt")
