@@ -7,7 +7,9 @@ import { formatById } from './formats.ts';
 import { factsOf, orderOf } from './compose.ts';
 import {
 	bankDispatches,
+	commitApproved,
 	commitOrder,
+	proposeFile,
 	confirmAtBank,
 	loadRegister,
 	Refused,
@@ -18,6 +20,7 @@ import {
 	type Register,
 } from './realm.ts';
 import { SWISS_ORDER } from './samples.ts';
+import { checkFile, factsOfFile } from './upload.ts';
 import type { Vault } from './vault.ts';
 
 const TREASURER = 'treasurer-principal';
@@ -67,6 +70,7 @@ function vaultOf(me: string): Vault {
 let calls: { op: string; args: any }[];
 let documents: Map<string, any>;
 let dispatches: any[];
+let proposals: Map<string, { status: string; args: any }>;
 
 function realmAs(me: string, permissions: string[]): Realm {
 	const staff = [TREASURER, SIGNATORY];
@@ -100,6 +104,12 @@ function realmAs(me: string, permissions: string[]): Realm {
 			return { dispatch: dispatches.at(-1).id };
 		},
 		dispatch_list: (a) => ({ dispatches: dispatches.filter((d) => d.to === a.to), next: null }),
+		proposal_create: (a) => {
+			const id = `P-${proposals.size + 1}`;
+			proposals.set(id, { status: 'voting', args: a });
+			return { proposal: id };
+		},
+		proposal_get: (a) => ({ proposal: { id: a.proposal, status: proposals.get(a.proposal)!.status }, tally: { yes: 0, no: 0 }, eligible: 2 }),
 		dispatch_confirm: (a) => {
 			Object.assign(dispatches.find((d) => d.id === a.dispatch), { status: 'confirmed', receipt: a.outcome.Confirmed.receipt });
 			return { dispatch: a.dispatch };
@@ -122,6 +132,23 @@ function realmAs(me: string, permissions: string[]): Realm {
 			return { document, dispatch: sent.dispatch };
 		},
 		register_bank: (a) => call('external_add', { external: 'bank', name: a.name, kind: 'bank', channel: 'manual' }),
+		propose_file: async (a) => {
+			const { proposal } = await call('proposal_create', { ...a.motion, department: a.document.department });
+			const { document } = await call('document_store', { ...a.document, facts: { ...a.document.facts, proposal } });
+			return { document, proposal };
+		},
+		commit_approved: async (a) => {
+			const { document: d } = await call('document_get', { document: a.document });
+			const { proposal } = await call('proposal_get', { proposal: d.facts.proposal });
+			if (!['accepted', 'executed', 'execution_scheduled'].includes(proposal.status)) {
+				throw new Refused(`${d.facts.proposal} has not approved the file (${proposal.status})`);
+			}
+			const what = d.facts.kind === 'collection' ? 'Direct debit file' : 'Payment file';
+			return call('notification_send', {
+				recipient: 'External:bank', topic: 'banking.order', body: a.document,
+				title: `${what} ${d.facts.message_id} approved by ${d.facts.proposal} sha256:${d.facts.file_sha256}`,
+			});
+		},
 	};
 	const run = async (name: string, args: any = {}) => (backend[name] ? backend[name](args) : call(name, args));
 	return { read: run, run };
@@ -136,6 +163,7 @@ beforeEach(() => {
 	calls = [];
 	documents = new Map();
 	dispatches = [];
+	proposals = new Map();
 });
 
 describe('encryption round trip', () => {
@@ -212,5 +240,28 @@ describe('committing an order', () => {
 		await confirmAtBank(treasurer, dispatch!, 'EB-778812');
 		const outbox = await bankDispatches(treasurer);
 		assert.deepEqual(outbox.get(document), { id: dispatch, status: 'confirmed', receipt: 'EB-778812', document });
+	});
+});
+
+describe('a file from the ERP', () => {
+	it('goes to the vote with its facts, and is committed for the bank only once approved', async () => {
+		const treasurer = realmAs(TREASURER, ['treasury.manage']);
+		const [treasury] = await treasuriesOf(treasurer, TREASURER);
+		const file = formatById('sps-2025').write(SWISS_ORDER);
+		const sha = await sha256Hex(file);
+		const facts = factsOfFile(checkFile(file, null, [], sha), sha);
+
+		const { document, proposal } = await proposeFile(treasurer, vaultOf(TREASURER), treasury, TREASURER, facts, file, 'en');
+		assert.equal(proposals.get(proposal)!.args.department, 'Treasury');
+		assert.ok(!JSON.stringify(proposals.get(proposal)!.args).includes('Ada'), 'no name in the motion');
+		const stored = calls.find((c) => c.op === 'document_store')!.args;
+		assert.deepEqual([stored.facts.proposal, stored.facts.source, stored.facts.file_sha256], [proposal, 'erp', sha]);
+
+		await assert.rejects(commitApproved(treasurer, document, stored.facts), /has not approved/);
+		assert.equal(dispatches.length, 0);
+		proposals.get(proposal)!.status = 'accepted';
+		await commitApproved(treasurer, document, stored.facts);
+		assert.equal(dispatches[0].body.text, document);
+		assert.equal(dispatches[0].topic, 'banking.order');
 	});
 });

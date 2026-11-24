@@ -32,6 +32,14 @@ collections, returned payments and paid invoices; anything else goes on a review
 
 ![Importing a statement](docs/statement-import.png)
 
+**From the ERP.** A public body that keeps its books in an ERP (Abacus, SAP, Odoo, ERPNext…) uploads the ERP's own
+payment file instead. The realm checks it (totals, IBANs, the paying account, known payees paid to their registered
+accounts), the treasury votes on exactly this file, and once approved its fingerprint is committed for the bank.
+*Verify a file* then tells anyone whether a file is the one the realm approved.
+
+![A file from the ERP, put to the treasury's vote](docs/erp-file.png)
+![Verifying a file before it goes to the bank](docs/verify-file.png)
+
 **5. Follow every order** from the file to the bank's acceptance to the booking.
 
 ![Orders](docs/orders.png)
@@ -55,7 +63,7 @@ runs as the member and refuses to anyone outside the treasury's staff.
 | | Not: EBICS, SIX bLink. | Each needs a bank or SIX contract and a program outside the realm; a later step. |
 | | Never: the realm calling the bank itself. | A blockchain call is repeated by every node, and the realm cannot keep a bank key secret. |
 | **Bills** | Swiss QR-bills to residents and companies, marked paid by their reference: in review (#124). | |
-| **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext connector: in review (#122). Odoo connector: in progress. | The ERP keeps the books; the realm approves what it pays. |
+| **ERPs** | Approve a payment file made by the public body's ERP: works with any ERP that exports pain.001 (in review, #123). ERPNext connector: in review (#122). Odoo connector: in progress. | The ERP keeps the books; the realm approves what it pays. The realm vouches that it approved this exact file, not that the file comes from its own records: see [DESIGN.md](DESIGN.md). |
 | **Not yet** | Members entering their own bank details. Billing the realm's own invoices in francs. Paying a realm transfer through the bank. | Each needs a change to the realm itself, written up in [GGG-PROPOSAL.md](GGG-PROPOSAL.md). |
 
 ## Limits

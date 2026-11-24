@@ -10,7 +10,9 @@ holds together whatever the screen does:
   sha256 from the order's own facts: an order is never stored without its commitment, nor committed without its record;
 - ``download_allowed`` is what the host asks before a file leaves the frame (capability ``download``): a payment file
   is handed out only once a dispatch to the bank names its sha256;
-- ``save_register`` and ``import_statement`` store the register and the bank's files, each of its own kind only.
+- ``save_register`` and ``import_statement`` store the register and the bank's files, each of its own kind only;
+- ``propose_file`` puts a file the ERP made to the treasury's vote, and ``commit_approved`` commits it for the bank
+  only once the realm says the vote approved it.
 
 A function that fails after it changed the realm traps, and the realm undoes the whole call.
 """
@@ -46,6 +48,10 @@ def dispatch_list(**args):
 
 def external_list(**args):
     return rpc("external_list", **args)
+
+
+def proposal_get(**args):
+    return rpc("proposal_get", **args)
 
 
 # --- the writes ----------------------------------------------------------------------------------------------------
@@ -112,6 +118,46 @@ def dispatch_confirm(dispatch, outcome):
 def register_bank(name):
     """Register the bank as an outside body with a manual channel (a realm-wide change: it may become a proposal)."""
     return rpc("external_add", external=BANK, name=name, kind="bank", channel="manual")
+
+
+# --- files from the public body's ERP, approved by the treasury's vote ----------------------------------------------
+
+APPROVED = ("accepted", "executed", "execution_scheduled")
+
+
+def propose_file(document, motion):
+    """File the treasury's motion on a file the ERP made, then store the sealed file naming the motion, in one call.
+    The motion must name the file's sha256: only that exact file is approved."""
+    fields = _document(document, KINDS["order"])
+    facts = dict(fields.get("facts") or {})
+    sha = str(facts.get("file_sha256", ""))
+    if len(sha) != 64 or sha not in str(motion.get("description", "")):
+        raise ValueError("the motion names the file's sha256")
+    proposal = _done(rpc("proposal_create", title=motion["title"], description=motion["description"],
+                         department=fields["department"], kind=motion.get("kind", "payment file"),
+                         tags=motion.get("tags", ["banking"])), "proposal_create")["proposal"]
+    facts["proposal"] = proposal
+    fields["facts"] = facts
+    stored = _done(rpc("document_store", **fields), "document_store")["document"]
+    return {"ok": True, "document": stored, "proposal": proposal}
+
+
+def commit_approved(document):
+    """Commit an approved file from the ERP for the bank: the dispatch names the motion and the file's sha256, from
+    the document's own facts, once the realm says the treasury approved it."""
+    got = _done(rpc("document_get", document=document), "document_get")
+    facts = got["document"].get("facts") or {}
+    if got["document"].get("kind") != KINDS["order"] or not facts.get("proposal"):
+        raise ValueError(document + " is not a file put to the treasury's vote")
+    vote = _done(rpc("proposal_get", proposal=facts["proposal"]), "proposal_get")
+    status = str(vote["proposal"].get("status"))
+    if status not in APPROVED:
+        raise ValueError(facts["proposal"] + " has not approved the file (" + status + ")")
+    what = "Direct debit file" if facts.get("kind") == "collection" else "Payment file"
+    sent = _done(rpc("notification_send", recipient="External:" + BANK, topic=KINDS["order"], body=document,
+                     title=what + " " + str(facts["message_id"]) + " approved by " + facts["proposal"]
+                     + " sha256:" + str(facts["file_sha256"])), "notification_send")
+    return {"ok": True, "dispatch": sent.get("dispatch")}
 
 
 # --- what the host asks before a file leaves -----------------------------------------------------------------------

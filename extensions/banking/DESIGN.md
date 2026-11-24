@@ -35,6 +35,27 @@ flowchart LR
    `camt.052` has them) go on the review list. The file is kept encrypted with its matches, each statement is reported
    to the realm, and whatever did not match is listed for review.
 
+**Files from the public body's ERP.** A realm that keeps its books in an ERP (Abacus, SAP, Odoo, ERPNext…) uses the
+ERP's own payment file instead of writing one. The treasurer uploads the pain.001 or pain.008 under *From the ERP*; the
+screen reads it, shows it line by line and checks that its count and control sum hold, that every IBAN checks, which
+account it pays from, and that the bank has not seen its message id or the file. *Put it to the treasury's vote* files
+a motion in the treasury department (ids, amounts and the file's sha256, never a name or an account) and keeps the file
+encrypted. Once the department's seats approve it, *Commit for the bank* records its hash in the bank's outbox, naming
+the motion. *Verify a file* then tells anyone whether a file, from the ERP or from the e-banking's upload screen, is the
+one the realm approved. No ERP needs a connector for this: any ERP that exports pain.001 works. Where a payee of the
+file is also in the realm's register, the file must pay that payee's registered IBAN, or it cannot go to the vote.
+
+What each route attests is not the same. A file the realm writes comes from the realm's own register and records. A
+file from the ERP is a byte sequence the realm was shown and approved: the realm vouches that this exact file was
+approved, and that its known payees are paid to their registered accounts, not that the rest derives from its records.
+
+The known-payee check matches payees by name, so it raises the cost of tampering without closing it: a file that
+changes a known payee's name and IBAN together lands among the payees "only in the ERP" and raises nothing. No check
+inside the file can close that, since whoever wrote the file controls every field in it. Two controls do: the second
+signatory comparing the per-person list with what they expect before voting, and a strict mode (not built yet) in which
+every payee must match the register or the file is refused. Strict mode fits payroll, whose payees are a closed set,
+and would be wrong for supplier runs, so it belongs as an option per file, not as the default.
+
 **Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
 identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments
 to payees, and the statements bring each collection back as collected, booked as a group, or returned.
@@ -128,6 +149,8 @@ state. The same `vault` capability is what members entering their own bank detai
   compile the SPS schema, whose character-set pattern subtracts a class (`[...-[\p{C}]]`).
 - `tests/e2e/walk.py`: the whole flow on a local test-mode realm with the real vetKD, as the treasurer, the second
   signatory and a non-member, and a non-staff call the realm refuses.
+- `tests/e2e/erp_file.py`: a file from an ERP put to the vote, approved by the treasury's seats, committed for the bank,
+  verified, and a changed copy refused.
 
 Every IBAN in the samples and fixtures is a published documentation example, except the PostFinance ones of the CH-DD
 sample, which carry a postal account with a wrong check digit on purpose so that they can be no real account; every

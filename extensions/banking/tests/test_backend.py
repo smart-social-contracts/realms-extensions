@@ -20,6 +20,8 @@ class Realm:
         self.calls = []
         self.fail = set(fail)
         self.dispatches = []
+        self.vote = "voting"
+        self.stored = {}
 
     def rpc(self, action, **args):  # as the realm's sandbox gives it: rpc(action, **kw)
         if action not in MANIFEST["operations"]:
@@ -34,6 +36,12 @@ class Realm:
             return {"ok": True, "dispatch": "DSP-1"}
         if action == "dispatch_list":
             return {"ok": True, "dispatches": self.dispatches, "next": None}
+        if action == "proposal_create":
+            return {"ok": True, "proposal": "P-1"}
+        if action == "proposal_get":
+            return {"ok": True, "proposal": {"id": args.get("proposal"), "status": self.vote}}
+        if action == "document_get":
+            return {"ok": True, "document": self.stored}
         return {"ok": True}
 
 
@@ -97,6 +105,33 @@ class DownloadAllowed(unittest.TestCase):
         self.assertFalse(backend(realm)["download_allowed"]("M1.xml", SHA, 10)["allowed"])
 
 
+class FileFromTheErp(unittest.TestCase):
+    MOTION = {"title": "Approve payment file M1", "description": "Its sha256 is " + SHA + ".", "kind": "payment file"}
+
+    def test_files_the_motion_then_stores_the_file_naming_it(self):
+        realm = Realm()
+        out = backend(realm)["propose_file"](order(), self.MOTION)
+        self.assertEqual(out, {"ok": True, "document": "DOC-1", "proposal": "P-1"})
+        self.assertEqual([c[0] for c in realm.calls], ["proposal_create", "document_store"])
+        self.assertEqual(realm.calls[1][1]["facts"]["proposal"], "P-1")
+
+    def test_a_motion_must_name_the_files_hash(self):
+        with self.assertRaises(ValueError):
+            backend(Realm())["propose_file"](order(), {**self.MOTION, "description": "approve it"})
+
+    def test_commits_only_once_the_realm_says_the_vote_approved(self):
+        realm = Realm()
+        realm.stored = {"kind": "banking.order", "facts": {"proposal": "P-1", "message_id": "M1", "file_sha256": SHA}}
+        fns = backend(realm)
+        with self.assertRaises(ValueError):
+            fns["commit_approved"]("DOC-1")
+        self.assertNotIn("notification_send", [c[0] for c in realm.calls])
+        realm.vote = "accepted"
+        self.assertEqual(fns["commit_approved"]("DOC-1"), {"ok": True, "dispatch": "DSP-1"})
+        self.assertEqual(realm.calls[-1][1]["title"], "Payment file M1 approved by P-1 sha256:" + SHA)
+        self.assertTrue(fns["download_allowed"]("M1.xml", SHA, 10)["allowed"])
+
+
 class OtherWrites(unittest.TestCase):
     def test_each_store_takes_its_own_kind_only(self):
         fns = backend(Realm())
@@ -116,7 +151,8 @@ class OtherWrites(unittest.TestCase):
     def test_calls_only_declared_operations(self):
         realm = Realm()
         fns = backend(realm)
-        for name in ("me", "department_chart", "document_list", "document_get", "dispatch_list", "external_list"):
+        for name in ("me", "department_chart", "document_list", "document_get", "dispatch_list", "external_list",
+                     "proposal_get"):
             fns[name]()
         fns["register_bank"]("Example Bank")
         fns["dispatch_confirm"]("DSP-1", {"Confirmed": {"receipt": "R"}})
