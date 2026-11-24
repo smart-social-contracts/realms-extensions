@@ -1,14 +1,19 @@
 {
   "name": "vault-frontend-rt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build && node ../../_shared/frontend-rt/postbuild-stub.mjs"
+  },
+  "dependencies": {
+    "@realmsgos/extension-bridge": "file:../../../../packages/extension-bridge"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tailwindcss/vite": "^4.0.0",
     "svelte": "^5.19.0",
+    "tailwindcss": "^4.0.0",
     "typescript": "^5.4.0",
     "vite": "^6.0.0"
   }
