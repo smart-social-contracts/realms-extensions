@@ -39,8 +39,9 @@ an API key, which `npm run setup-erpnext` creates on an empty site, with demo da
 
 ```
 npm install
-npm run setup-erpnext -- http://127.0.0.1:8080 Administrator <password>   # writes the ERPNext key to .env
-# then add to .env: REALM_HOST, REALM_CANISTER, REALM_IDENTITY (a path outside the repository), REALM_TREASURY
+# .env: ERPNEXT_URL, and an API key and secret (ERPNext: User → API Access → Generate Keys) as ERPNEXT_KEY, ERPNEXT_SECRET;
+#       REALM_HOST, REALM_CANISTER, REALM_IDENTITY (a path outside the repository), REALM_TREASURY, POLL_SECONDS
+npm run setup-erpnext   # on an empty site: the setup wizard, the two doctypes, demo suppliers and a draft run
 npm start
 ```
 
