@@ -6,7 +6,8 @@
 	import { version } from '../../manifest.json';
 	import type { Env } from './env';
 	import { errorText } from './env';
-	import { bankDispatches, bankRegistered, KIND, listDocs, loadRegister, realmOf, Refused, registerBank, treasuriesOf,
+	import ErpFileTab from './ErpFileTab.svelte';
+	import { approvalOf, bankDispatches, bankRegistered, KIND, listDocs, loadRegister, realmOf, Refused, registerBank, treasuriesOf,
 		type Dispatch, type Doc, type Register, type Treasury } from './lib/realm';
 	import { hostVault } from './lib/vault';
 	import NewOrderTab from './NewOrderTab.svelte';
@@ -29,7 +30,7 @@
 	let error = $state('');
 	let treasuries = $state<Treasury[]>([]);
 	let treasury = $state<Treasury | null>(null);
-	let tab = $state<'register' | 'order' | 'orders' | 'statements'>('orders');
+	let tab = $state<'register' | 'order' | 'erp' | 'orders' | 'statements'>('orders');
 
 	let register = $state<Register | null>(null);
 	let registerDoc = $state<string | null>(null);
@@ -37,6 +38,8 @@
 	let orders = $state<Doc[]>([]);
 	let statements = $state<Doc[]>([]);
 	let outbox = $state<Map<string, Dispatch>>(new Map());
+	/** The treasury's vote on each file from the ERP that is not committed yet. */
+	let approvals = $state<Map<string, Awaited<ReturnType<typeof approvalOf>>>>(new Map());
 
 	/** Payment id → the statement record that booked it, from the reports in clear. A group booked as one entry books
 	 * every payment the order put in that group. */
@@ -67,6 +70,8 @@
 				bankDispatches(realm),
 				bankRegistered(realm),
 			]);
+			const voting = os.filter((d) => d.facts.proposal && !out.has(d.id));
+			approvals = new Map(await Promise.all(voting.map(async (d) => [d.id, await approvalOf(realm, d.facts.proposal)] as const)));
 			register = reg.register;
 			registerDoc = reg.doc;
 			orders = os.sort((a, b) => b.at - a.at);
@@ -151,13 +156,16 @@
 		<nav class="bk-tabs">
 			<button type="button" class:bk-on={tab === 'orders'} onclick={() => (tab = 'orders')}>Orders</button>
 			<button type="button" class:bk-on={tab === 'order'} onclick={() => (tab = 'order')}>New order</button>
+			<button type="button" class:bk-on={tab === 'erp'} onclick={() => (tab = 'erp')}>From the ERP</button>
 			<button type="button" class:bk-on={tab === 'statements'} onclick={() => (tab = 'statements')}>Statements</button>
 			<button type="button" class:bk-on={tab === 'register'} onclick={() => (tab = 'register')}>Accounts and payees</button>
 		</nav>
 		{#if tab === 'orders'}
-			<OrdersTab {env} {orders} {outbox} {booked} onchanged={load} />
+			<OrdersTab {env} {orders} {outbox} {booked} {approvals} onchanged={load} />
 		{:else if tab === 'order'}
 			<NewOrderTab {env} {register} {orders} oncommitted={() => load().then(() => (tab = 'orders'))} />
+		{:else if tab === 'erp'}
+			<ErpFileTab {env} {register} {orders} {outbox} onproposed={() => load().then(() => (tab = 'orders'))} />
 		{:else if tab === 'statements'}
 			<StatementsTab {env} {orders} {statements} {outbox} onimported={load} />
 		{:else}
@@ -197,6 +205,7 @@
 	.bk :global(.bk-tabs button) { border: none; border-bottom: 2px solid transparent; border-radius: 0; }
 	.bk :global(.bk-tabs .bk-on) { border-bottom-color: currentColor; font-weight: 600; }
 	.bk :global(.bk-problems) { color: #b42318; margin: 0; padding-left: 1.2rem; }
+	.bk :global(.bk-warnings) { color: #8a6100; margin: 0; padding-left: 1.2rem; }
 	.bk :global(.bk-file) { max-width: 30rem; }
 	@media print {
 		.bk :global(button), .bk :global(.bk-tabs) { display: none; }

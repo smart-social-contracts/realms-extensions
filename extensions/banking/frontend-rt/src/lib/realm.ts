@@ -10,7 +10,7 @@
 //                      report, in clear
 
 import type { Mandate } from './collection.ts';
-import type { Account } from './order.ts';
+import { decimalsOf, type Account } from './order.ts';
 import type { Match } from './match.ts';
 import type { Vault } from './vault.ts';
 
@@ -169,6 +169,10 @@ export function saveRegister(realm: Realm, vault: Vault, treasury: Treasury, me:
 export interface OrderFacts {
 	/** A payment order pays out; a collection (direct debit) brings money in. Absent on the first orders: payment. */
 	kind?: 'payment' | 'collection';
+	/** Who wrote the file: the realm, or the public body's ERP (uploaded and put to the vote). Absent: the realm. */
+	source?: 'realm' | 'erp';
+	/** The treasury's motion that approves a file from the ERP. */
+	proposal?: string;
 	format: string;
 	message_id: string;
 	file_sha256: string;
@@ -206,6 +210,77 @@ export async function commitOrder(
 		body: document,
 	});
 	return { document, dispatch: sent.dispatch ?? null };
+}
+
+// --- files from the public body's ERP, approved by the treasury's vote ------------------------------------------
+
+/** What a proposal's status means for the file it approves. */
+export function outcomeOf(status: string): 'pending' | 'approved' | 'rejected' {
+	if (status === 'accepted' || status === 'executed' || status === 'execution_scheduled') return 'approved';
+	if (status === 'draft' || status === 'voting') return 'pending';
+	return 'rejected';
+}
+
+function moneyText(minor: number, currency: string): string {
+	const decimals = decimalsOf(currency);
+	return `${currency} ${(minor / 10 ** decimals).toLocaleString('en', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+}
+
+/** The motion the treasury votes on: the file's payments by id and amount, and its sha256; never a name or an IBAN. */
+export function motionOfFile(facts: OrderFacts): { title: string; description: string } {
+	const what = facts.kind === 'collection' ? 'direct debit file' : 'payment file';
+	const totals = new Map<string, number>();
+	for (const [, amount, currency] of facts.lines) totals.set(currency, (totals.get(currency) ?? 0) + amount);
+	const total = [...totals].map(([c, a]) => moneyText(a, c)).join(' + ');
+	return {
+		title: `Approve ${what} ${facts.message_id}: ${facts.lines.length} ${facts.kind === 'collection' ? 'collections' : 'payments'}, ${total}`,
+		description: [
+			`The ${what} ${facts.message_id} (${facts.format}) was made by the ERP and uploaded to the Banking screen, for ${facts.execution_date}.`,
+			`Its sha256 is ${facts.file_sha256}. Only this exact file is approved: anyone can check a file against it in Banking.`,
+			'The names and accounts are in the file and in the ERP: the treasury staff see them in Banking before voting.',
+			'',
+			...facts.lines.map(([id, amount, currency]) => `${id} · ${moneyText(amount, currency)}`),
+		].join('\n'),
+	};
+}
+
+/** Put a file the ERP made to the treasury's vote: the motion first, then the encrypted file with its facts. */
+export async function proposeFile(
+	realm: Realm,
+	vault: Vault,
+	treasury: Treasury,
+	me: string,
+	facts: OrderFacts,
+	file: string,
+	language: string,
+): Promise<{ document: string; proposal: string }> {
+	if (facts.file_sha256 !== (await sha256Hex(file))) throw new Error('the file is not the one whose hash is proposed');
+	const { proposal } = await realm.run('proposal_create', {
+		...motionOfFile(facts), department: treasury.department, kind: 'payment file', tags: ['banking'],
+	});
+	const document = await storeSealed(realm, vault, treasury, me, {
+		kind: KIND.order, title: `ERP file ${facts.message_id}`, language, data: { format: facts.format, file }, facts: { ...facts, proposal },
+	});
+	return { document, proposal };
+}
+
+/** The vote on a file from the ERP: its status, what it means, and the tally. */
+export async function approvalOf(realm: Realm, proposal: string) {
+	const reply = await realm.read('proposal_get', { proposal });
+	const status = String(reply.proposal.status);
+	return { status, outcome: outcomeOf(status), yes: reply.tally?.yes ?? 0, no: reply.tally?.no ?? 0, eligible: reply.eligible ?? 0 };
+}
+
+/** Once the treasury approved the file, commit its hash to the bank's outbox, naming the motion. */
+export async function commitApproved(realm: Realm, document: string, facts: OrderFacts): Promise<string> {
+	const { outcome } = await approvalOf(realm, facts.proposal!);
+	if (outcome !== 'approved') throw new Error(`${facts.proposal} has not approved the file`);
+	const what = facts.kind === 'collection' ? 'Direct debit file' : 'Payment file';
+	const sent = await realm.run('notification_send', {
+		recipient: `External:${BANK}`, topic: KIND.order, body: document,
+		title: `${what} ${facts.message_id} approved by ${facts.proposal} sha256:${facts.file_sha256}`,
+	});
+	return String(sent.dispatch);
 }
 
 export interface Dispatch {

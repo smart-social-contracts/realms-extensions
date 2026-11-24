@@ -4,13 +4,17 @@
 	// committed file, for the second signatory to compare with the e-banking screen before signing.
 	import type { Env } from './env';
 	import { errorText, money, saveFile } from './env';
+	import FileLines from './FileLines.svelte';
 	import { printIban } from './lib/iban';
-	import { confirmAtBank, openSealed, sha256Hex, type Dispatch, type Doc, type OrderFacts } from './lib/realm';
+	import { commitApproved, confirmAtBank, openSealed, sha256Hex, type Dispatch, type Doc, type OrderFacts } from './lib/realm';
 	import { readOrderFile, type FileSummary } from './lib/review';
 
-	let { env, orders, outbox, booked, onchanged }: {
-		env: Env; orders: Doc[]; outbox: Map<string, Dispatch>; booked: Map<string, string>; onchanged: () => void;
+	type Approval = { status: string; outcome: 'pending' | 'approved' | 'rejected'; yes: number; eligible: number };
+	let { env, orders, outbox, booked, approvals, onchanged }: {
+		env: Env; orders: Doc[]; outbox: Map<string, Dispatch>; booked: Map<string, string>; approvals: Map<string, Approval>;
+		onchanged: () => void;
 	} = $props();
+	let committing = $state('');
 
 	let open = $state<{ doc: Doc; file: string; summary: FileSummary; hashOk: boolean } | null>(null);
 	let opening = $state('');
@@ -24,7 +28,32 @@
 		return [...sums].map(([c, a]) => money(a, c)).join(' + ');
 	}
 
+	/** A file from the ERP waits for the treasury's vote before it may go to the bank. */
+	function vote(d: Doc): string | null {
+		const facts = factsOf(d);
+		const approval = approvals.get(d.id);
+		if (!facts.proposal || outbox.has(d.id) || !approval) return null;
+		if (approval.outcome === 'pending') return `voting on ${facts.proposal}: ${approval.yes} of ${approval.eligible} yes`;
+		if (approval.outcome === 'rejected') return `${facts.proposal} ${approval.status}: not to be paid`;
+		return `approved by ${facts.proposal}: commit it for the bank`;
+	}
+
+	async function commit(d: Doc) {
+		committing = d.id;
+		try {
+			const dispatch = await commitApproved(env.realm, d.id, factsOf(d));
+			env.notify('success', `${factsOf(d).message_id} is committed for the bank (${dispatch}): upload the same file in the e-banking`);
+			onchanged();
+		} catch (e) {
+			env.notify('error', errorText(e));
+		} finally {
+			committing = '';
+		}
+	}
+
 	function status(d: Doc): string {
+		const waiting = vote(d);
+		if (waiting) return waiting;
 		const sent = outbox.get(d.id);
 		const lines = factsOf(d).lines;
 		const bookedCount = lines.filter(([id]) => booked.has(id)).length;
@@ -82,27 +111,11 @@
 		Compare every line with the e-banking screen before you sign. A bank that books a salary group as one entry never
 		shows these lines again: this list is the only per-person check.
 	</p>
-	<table>
-		<thead>
-			<tr>
-				<th>{open.summary.kind === 'payment' ? 'Payment id' : 'Collection id'}</th><th>{open.summary.kind === 'payment' ? 'Payee' : 'Payer'}</th>
-				<th>IBAN</th><th class="bk-num">Amount</th><th>Reference / note</th><th>Group</th>
-			</tr>
-		</thead>
-		<tbody>
-			{#each open.summary.lines as l (l.id)}
-				<tr>
-					<td class="bk-mono">{l.id}</td>
-					<td>{l.name}</td>
-					<td class="bk-mono">{printIban(l.iban)}{l.bic ? ` · ${l.bic}` : ''}</td>
-					<td class="bk-num">{l.amount} {l.currency}</td>
-					<td>{l.reference || l.note}</td>
-					<td>{l.group}{l.salary ? ' · salary' : ''}{l.sepa ? ' · SEPA' : ''}{l.sequence ? ` · ${l.sequence}` : ''}{l.mandate ? ` · mandate ${l.mandate}` : ''}</td>
-				</tr>
-			{/each}
-		</tbody>
-	</table>
+	<FileLines summary={open.summary} />
 
+	{#if vote(open.doc)}
+		<p><strong>{vote(open.doc)}</strong></p>
+	{/if}
 	{#if sent?.status === 'queued'}
 		<div class="bk-card">
 			<h4>Accepted by the bank?</h4>
@@ -123,12 +136,17 @@
 				{@const facts = factsOf(d)}
 				<tr>
 					<td class="bk-mono">{facts.message_id}</td>
-					<td>{facts.kind === 'collection' ? 'collection' : 'payment'}</td>
+					<td>{facts.kind === 'collection' ? 'collection' : 'payment'}{facts.source === 'erp' ? ' · from the ERP' : ''}</td>
 					<td>{facts.execution_date}</td>
 					<td class="bk-num">{facts.lines.length}</td>
 					<td class="bk-num">{totals(facts)}</td>
 					<td>{status(d)}</td>
-					<td><button type="button" disabled={opening === d.id} onclick={() => show(d)}>{opening === d.id ? 'Opening…' : 'Check'}</button></td>
+					<td class="bk-actions">
+						<button type="button" disabled={opening === d.id} onclick={() => show(d)}>{opening === d.id ? 'Opening…' : 'Check'}</button>
+						{#if approvals.get(d.id)?.outcome === 'approved' && !outbox.has(d.id)}
+							<button type="button" class="bk-primary" disabled={committing === d.id} onclick={() => commit(d)}>Commit for the bank</button>
+						{/if}
+					</td>
 				</tr>
 			{/each}
 		</tbody>

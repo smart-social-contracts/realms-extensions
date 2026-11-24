@@ -32,6 +32,15 @@ flowchart LR
    `camt.052` has them) go on the review list. The file is kept encrypted with its matches, each statement is reported
    to the realm, and whatever did not match is listed for review.
 
+**Files from the public body's ERP.** A realm that keeps its books in an ERP (Abacus, SAP, Odoo, ERPNext…) uses the
+ERP's own payment file instead of writing one. The treasurer uploads the pain.001 or pain.008 under *From the ERP*; the
+screen reads it, shows it line by line and checks that its count and control sum hold, that every IBAN checks, which
+account it pays from, and that the bank has not seen its message id or the file. *Put it to the treasury's vote* files
+a motion in the treasury department (ids, amounts and the file's sha256, never a name or an account) and keeps the file
+encrypted. Once the department's seats approve it, *Commit for the bank* records its hash in the bank's outbox, naming
+the motion. *Verify a file* then tells anyone whether a file, from the ERP or from the e-banking's upload screen, is the
+one the realm approved. No ERP needs a connector for this: any ERP that exports pain.001 works.
+
 **Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
 identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments
 to payees, and the statements bring each collection back as collected, booked as a group, or returned.
@@ -112,6 +121,8 @@ is sandboxed already.
   compile the SPS schema, whose character-set pattern subtracts a class (`[...-[\p{C}]]`).
 - `tests/e2e/walk.py`: the whole flow on a local test-mode realm with the real vetKD, as the treasurer, the second
   signatory and a non-member, and a non-staff call the realm refuses.
+- `tests/e2e/erp_file.py`: a file from an ERP put to the vote, approved by the treasury's seats, committed for the bank,
+  verified, and a changed copy refused.
 
 Every IBAN in the samples and fixtures is a published documentation example, except the PostFinance ones of the CH-DD
 sample, which carry a postal account with a wrong check digit on purpose so that they can be no real account; every
