@@ -46,7 +46,7 @@ npm install
 # .env: ERPNEXT_URL, and an API key and secret (ERPNext: User → API Access → Generate Keys) as ERPNEXT_KEY, ERPNEXT_SECRET;
 #       REALM_HOST, REALM_CANISTER, REALM_IDENTITY (a path outside the repository), REALM_TREASURY, POLL_SECONDS
 npm run setup-erpnext   # on an empty site: the setup wizard, the two doctypes, demo suppliers and a draft run
-npm start
+npm start -- erpnext
 ```
 
 `npm test` runs the steps on an in-memory ERPNext and realm.

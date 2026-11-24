@@ -54,7 +54,7 @@ Anyone else is refused, by the realm as well as the screen.
 | | Not: EBICS, SIX bLink. | Each needs a bank or SIX contract and a program outside the realm; a later step. |
 | | Never: the realm calling the bank itself. | A blockchain call is repeated by every node, and the realm cannot keep a bank key secret. |
 | **Bills** | Swiss QR-bills to residents and companies, marked paid by their reference: in review (#124). | |
-| **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext connector: in review (#122). Odoo connector: in progress. | The ERP keeps the books; the realm approves what it pays. |
+| **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext and Odoo connectors (in review, #122 and #125): see [connectors/](connectors/README.md). | The ERP keeps the books; the realm approves what it pays. |
 | **Not yet** | Members entering their own bank details. Billing the realm's own invoices in francs. Paying a realm transfer through the bank. | Each needs a change to the realm itself, written up in [GGG-PROPOSAL.md](GGG-PROPOSAL.md). |
 
 ## Limits

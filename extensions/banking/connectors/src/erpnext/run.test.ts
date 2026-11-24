@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { beforeEach, describe, it } from 'node:test';
-import { readOrderFile } from '../../frontend-rt/src/lib/review.ts';
-import type { ErpNext } from './erpnext.ts';
+import { readOrderFile } from '../../../frontend-rt/src/lib/review.ts';
+import type { ErpNext } from './client.ts';
 import { motionOf, outcomeOf, RUN, STATUS, step, type Env } from './run.ts';
 
 type Doc = Record<string, any>;

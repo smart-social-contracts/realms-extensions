@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 
 const env = Object.fromEntries(
-	readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n').filter((l) => /^[A-Z_]+=/.test(l)).map((l) => l.split(/=(.*)/s)),
+	readFileSync(new URL('../../.env', import.meta.url), 'utf8').split('\n').filter((l) => /^[A-Z_]+=/.test(l)).map((l) => l.split(/=(.*)/s)),
 );
 const BASE = env.ERPNEXT_URL.replace(/\/$/, '');
 const AUTH = { Authorization: `token ${env.ERPNEXT_KEY}:${env.ERPNEXT_SECRET}` };
