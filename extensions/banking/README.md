@@ -43,6 +43,14 @@ them; billing those in francs is part of the GGG proposal. Realm invoices and bi
 reference spells the id ("RF..INV12", "RF..BILL7"), a QR reference holds a two-digit kind (00 invoice, 01 bill) and the
 ten-digit number, so an invoice's QR reference is the one it always had.
 
+The library only draws: `bill.ts` imports nothing but its types, and the IBAN, reference, amount and message come from
+the register and the form. But it also encodes them into the QR code, which the payer scans instead of reading, so a
+faulty or tampered `swissqrbill` (or one of its dependencies: the repository keeps no lockfiles, so only the library
+itself is pinned) could send payments to another account without anything here noticing. Not done yet: decode the
+drawn QR code in the browser with an independent decoder, compare it with the Swiss QR Code text built from the bill,
+and refuse to issue the bill on any difference. The payment files are not affected: `pain001.ts` and `sdd.ts` use no
+third-party code.
+
 **Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
 identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments
 to payees, and the statements bring each collection back as collected, booked as a group, or returned.
