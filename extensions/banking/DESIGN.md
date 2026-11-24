@@ -91,6 +91,24 @@ one (generic ISO 20022 CGI-MP, a national fixed-width format) is one more entry.
 - **Addresses**: every account in the register needs a structured address with at least a town and a country, which
   SPS and the EPC require since November 2026.
 
+## Countries
+
+`lib/countries.ts` holds what changes from one country to the next: its currency, how its accounts are numbered and
+the file its banks take. The register keeps the realm's banking profile (the country of its bank and its currency;
+in a register saved before, the realm account's country). A new order defaults to the profile's currency and to its
+country's file (`defaultPaymentFormat`): Swiss Payment Standards in Switzerland and Liechtenstein, SEPA for euros from
+a SEPA country, otherwise the generic ISO 20022 file. The treasurer can choose another.
+
+An account is an IBAN, or a local account: its number at the bank and, where the country has a clearing system here,
+the bank's code in it (ABA routing number, checked by its weighted sum; Canadian transit, taken in the cheque form or
+the electronic one; BSB; IFSC). Each account is checked by the rules of its own country, so a realm in one country
+can pay payees in several. A pain.001 writes a local account as an `Othr` id and its bank as `ClrSysMmbId` (with the
+BIC when there is one); without a clearing system, the BIC names the bank.
+
+The generic file (`lib/cgi.ts`) is pain.001.001.09 as CGI-MP describes it: one group per currency and kind (salaries
+apart, `SALA`), service level `NURG`, charges `SHAR`, and the debtor's bank by BIC or clearing code. Each bank
+publishes its own guide on top of CGI-MP; its test portal comes before the first payment.
+
 ## Behind its own backend, in a sandboxed frame
 
 The screen runs in a sandboxed iframe (`runtime: sandboxed`) and reaches the realm only through Banking's backend,

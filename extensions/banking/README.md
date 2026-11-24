@@ -45,8 +45,9 @@ runs as the member and refuses to anyone outside the treasury's staff.
 
 | | Supported | Why, or why not |
 |---|---|---|
-| **Payments** | Swiss Payment Standards 2025 (pain.001.001.09.ch.03): domestic, QR-bill, SEPA, foreign currency, salaries. SEPA credit transfer (pain.001.001.09). | What Swiss and euro-area banks take today. |
-| | Not: CGI-MP, NACHA, Bacs, other national formats. | Not needed for Swiss or EU public bodies; each would be one more writer. |
+| **Payments** | Swiss Payment Standards 2025 (pain.001.001.09.ch.03): domestic, QR-bill, SEPA, foreign currency, salaries. SEPA credit transfer (pain.001.001.09). ISO 20022 for banks worldwide (CGI-MP, pain.001.001.09): any currency. | Swiss and euro-area banks take their own standards; banks elsewhere take the CGI-MP profile of the same message. |
+| **Countries** | A banking profile: the country of the realm's bank and its currency, which choose the file. Accounts by IBAN, or by account number and the bank's code where a country has none: ABA routing number (US), transit (Canada), BSB (Australia), IFSC (India); elsewhere the bank's BIC. | Most countries number accounts by IBAN; these four are the large ones that do not. |
+| | Not: NACHA (US ACH), Bacs (UK), other national fixed-width formats. | Where a bank takes only its domestic format, one more writer each. |
 | **Direct debits** | SEPA Direct Debit Core (pain.008.001.08). PostFinance CH-DD. | The two open to a new creditor. |
 | | Not: LSV+ / BDD, eBill Direct Debit. | LSV+ / BDD take no new creditors since 1 January 2026 and end in September 2028. eBill runs through its own network, not a file. |
 | **Bank reports** | Status reports (pain.002). Statements and notifications (camt.052, camt.053, camt.054). | What Swiss and EU banks deliver. |
