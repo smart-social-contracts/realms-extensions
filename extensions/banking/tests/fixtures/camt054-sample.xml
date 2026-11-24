@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A sample debit and credit notification for the tests, on the same example account: the SEPA payment of order
+     BK-20261124-0001 booked in CHF (the ordered EUR amount in AmtDtls), the USD payment returned, and an invoice paid
+     with its creditor reference. Every name is made up. -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.08">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr>
+      <MsgId>NTF-20261130-0001</MsgId>
+      <CreDtTm>2026-11-30T09:00:00+01:00</CreDtTm>
+    </GrpHdr>
+    <Ntfctn>
+      <Id>NTF-20261130-0001-1</Id>
+      <CreDtTm>2026-11-30T09:00:00+01:00</CreDtTm>
+      <Acct>
+        <Id>
+          <IBAN>CH9300762011623852957</IBAN>
+        </Id>
+        <Ccy>CHF</Ccy>
+      </Acct>
+      <Ntry>
+        <Amt Ccy="CHF">2341.25</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-11-28</Dt></BookgDt>
+        <ValDt><Dt>2026-11-28</Dt></ValDt>
+        <AcctSvcrRef>EXB-20261128-0007</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <PmtInfId>BK-20261124-0001-4</PmtInfId>
+              <EndToEndId>BK-20261124-0001-05</EndToEndId>
+            </Refs>
+            <Amt Ccy="CHF">2341.25</Amt>
+            <CdtDbtInd>DBIT</CdtDbtInd>
+            <AmtDtls>
+              <InstdAmt>
+                <Amt Ccy="EUR">2500.00</Amt>
+                <CcyXchg>
+                  <SrcCcy>CHF</SrcCcy>
+                  <TrgtCcy>EUR</TrgtCcy>
+                  <XchgRate>1.0678</XchgRate>
+                </CcyXchg>
+              </InstdAmt>
+            </AmtDtls>
+            <RltdPties>
+              <Cdtr><Pty><Nm>Beispiel Verlag GmbH</Nm></Pty></Cdtr>
+              <CdtrAcct><Id><IBAN>DE89370400440532013000</IBAN></Id></CdtrAcct>
+            </RltdPties>
+            <RmtInf><Ustrd>Invoice 2026-118</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="CHF">668.40</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-11-30</Dt></BookgDt>
+        <ValDt><Dt>2026-11-30</Dt></ValDt>
+        <AcctSvcrRef>EXB-20261130-0002</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>RRTN</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <PmtInfId>BK-20261124-0001-5</PmtInfId>
+              <EndToEndId>BK-20261124-0001-06</EndToEndId>
+            </Refs>
+            <Amt Ccy="CHF">668.40</Amt>
+            <CdtDbtInd>CRDT</CdtDbtInd>
+            <AmtDtls>
+              <InstdAmt><Amt Ccy="USD">750.00</Amt></InstdAmt>
+            </AmtDtls>
+            <RltdPties>
+              <Cdtr><Pty><Nm>Example Consulting Ltd</Nm></Pty></Cdtr>
+              <CdtrAcct><Id><IBAN>GB29NWBK60161331926819</IBAN></Id></CdtrAcct>
+            </RltdPties>
+            <RtrInf>
+              <Rsn><Cd>AC04</Cd></Rsn>
+            </RtrInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="CHF">80.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-11-30</Dt></BookgDt>
+        <ValDt><Dt>2026-11-30</Dt></ValDt>
+        <AcctSvcrRef>EXB-20261130-0003</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Amt Ccy="CHF">80.00</Amt>
+            <CdtDbtInd>CRDT</CdtDbtInd>
+            <RltdPties>
+              <Dbtr><Pty><Nm>Elena Example</Nm></Pty></Dbtr>
+            </RltdPties>
+            <RmtInf>
+              <Strd>
+                <CdtrRefInf>
+                  <Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp>
+                  <Ref>RF79INV7</Ref>
+                </CdtrRefInf>
+              </Strd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>
