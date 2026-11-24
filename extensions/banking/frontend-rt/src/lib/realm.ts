@@ -12,7 +12,7 @@
 import type { Mandate } from './collection.ts';
 import type { Account } from './order.ts';
 import type { Match } from './match.ts';
-import type { Vault } from './vault.ts';
+import { plain, type Vault } from './vault.ts';
 
 export const KIND = { register: 'banking.register', order: 'banking.order', statement: 'banking.statement' } as const;
 /** The outside body the realm's payment orders go to. */
@@ -33,7 +33,7 @@ export class Refused extends Error {}
  * (``save_register``, ``commit_order``, ``import_statement``, ``dispatch_confirm``, ``register_bank``). */
 export function realmOf(ctx: any): Realm {
 	async function call(kind: 'read' | 'run', name: string, args: Record<string, unknown>) {
-		const reply = await ctx[kind](name, args);
+		const reply = await ctx[kind](name, plain(args));
 		if (!reply?.ok) throw new Refused(String(reply?.error ?? `${name} was refused`));
 		return reply;
 	}

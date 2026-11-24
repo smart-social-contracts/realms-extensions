@@ -17,13 +17,19 @@ export interface Vault {
 	open<T>(wrappedKey: string, ciphertext: string): Promise<T | null>;
 }
 
+/** ``data`` as plain JSON: what crosses to the host is copied by ``postMessage``, which cannot copy the screen's reactive
+ * state (Svelte's proxies), and what the realm stores is JSON anyway. */
+export function plain<T>(data: T): T {
+	return data === undefined ? data : JSON.parse(JSON.stringify(data));
+}
+
 /** The host's vault, through the bridge client of the sandboxed frame. */
 export function bridgeVault(client: {
 	vault: { seal(recipients: string[], data: unknown): Promise<Sealed>; open(wrappedKey: string, ciphertext: string): Promise<unknown> };
 }): Vault {
 	return {
 		async seal(recipients, data) {
-			const sealed = await client.vault.seal([...new Set(recipients)], data);
+			const sealed = await client.vault.seal([...new Set(recipients)], plain(data));
 			return { ciphertext: sealed.ciphertext, keys: sealed.keys };
 		},
 		async open<T>(wrappedKey: string, ciphertext: string) {
