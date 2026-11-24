@@ -41,6 +41,61 @@ runs as the member and refuses to anyone outside the treasury's staff.
 
 ![Refused](docs/refused.png)
 
+## With the public body's ERP
+
+A public body that keeps its books in an ERP keeps them there. The realm's treasury votes on each payment run, and the
+realm records the exact file that goes to the bank. Connectors for ERPNext and Odoo run the whole loop; any other ERP
+can upload its pain.001 in the Banking screen instead.
+
+**1. The ERP asks.** A payment run in ERPNext, or a payment order in Odoo, becomes a motion in the treasury
+department: ids and amounts only, never a name or an account.
+
+![The two motions in the realm](docs/realm-motions.png)
+
+**2. The treasury votes** in the realm, under its own policy (here 2 of 2).
+
+**3. The ERP carries on.** Approved, the ERPNext connector writes the file and attaches it, after recording its sha256
+in the realm. In Odoo the realm's vote is the review the order waits for. Odoo writes the file, and the connector
+checks that it pays exactly what was approved before recording its hash.
+
+![An ERPNext payment run approved by the realm](docs/erpnext-run.png)
+![An Odoo payment order approved by the realm](docs/odoo-order.png)
+
+How each connector works: [connectors/](connectors/README.md).
+
+## Try it on your machine
+
+One command starts a local realm with Banking and a treasury with two seats, plus ERPNext and Odoo, each with example
+suppliers and a payment run to approve, and the two connectors between them.
+
+```bash
+git clone --recurse-submodules --branch cto/sandbox-vault-download https://github.com/smart-social-contracts/realms-gos.git
+pip install -e realms-gos/cli        # and the realm build environment: realms-gos/AGENTS.md
+git clone https://github.com/smart-social-contracts/realms-extensions.git
+
+REALMS_GOS=$PWD/realms-gos realms-extensions/extensions/banking/demo/up.sh
+```
+
+It needs Docker, Node 22+, Python 3 and about 15 GB of disk. The first run takes 30–60 minutes, mostly downloads and
+building the realm. When it finishes it prints the addresses:
+
+| | Address | Sign in |
+|---|---|---|
+| Realm | `http://<realm>.localhost:8000/join?ti=0&test_mode=1&skip_ii=1` | *Continue as Identity 1*; Identity 2 with `ti=1`, in a private window |
+| ERPNext | http://127.0.0.1:8080/app/realm-payment-run/RPR-00001 | `Administrator` / `admin` |
+| Odoo | http://127.0.0.1:8069/odoo/account.payment.order/1 | `admin` / `admin` |
+
+To try it:
+1. In ERPNext, set the run's *Status* to *Ready for approval* and save. In Odoo, press *Request Validation*.
+2. In the realm, under *Voting*, vote yes on both motions as Identity 1, then as Identity 2.
+3. ERPNext shows *Approved: file ready*, with the file attached. In Odoo, press *Confirm Payments*, then *Generate
+   Payment File*; its *Realm* tab then shows the file's hash committed in the realm.
+
+`demo/up.sh realm|erpnext|odoo|connectors` starts one part; `demo/down.sh` stops everything (`--wipe` also deletes the
+ERPs' data). Ports and the state folder are set by `REALM_PORT`, `ERPNEXT_PORT`, `ODOO_PORT` and `DEMO_HOME`;
+`BUILD_PYTHON` names the Python that builds the realm, if it is not `python3`.
+Everything is local and made up: example IBANs, invented suppliers, demo passwords.
+
 ## What is supported, and why
 
 | | Supported | Why, or why not |
@@ -55,7 +110,7 @@ runs as the member and refuses to anyone outside the treasury's staff.
 | | Not: EBICS, SIX bLink. | Each needs a bank or SIX contract and a program outside the realm; a later step. |
 | | Never: the realm calling the bank itself. | A blockchain call is repeated by every node, and the realm cannot keep a bank key secret. |
 | **Bills** | Swiss QR-bills to residents and companies, marked paid by their reference: in review (#124). | |
-| **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext connector: in review (#122). Odoo connector: in progress. | The ERP keeps the books; the realm approves what it pays. |
+| **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext and Odoo connectors (in review, #122 and #125): see [connectors/](connectors/README.md). | The ERP keeps the books; the realm approves what it pays. |
 | **Not yet** | Members entering their own bank details. Billing the realm's own invoices in francs. Paying a realm transfer through the bank. | Each needs a change to the realm itself, written up in [GGG-PROPOSAL.md](GGG-PROPOSAL.md). |
 
 ## Limits

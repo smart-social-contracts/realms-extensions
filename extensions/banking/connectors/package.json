@@ -1,0 +1,18 @@
+{
+  "name": "banking-connectors",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Connect a public body's ERP (ERPNext, Odoo) to a realm: the treasury votes on each payment run, and the payment file's hash is recorded before it goes to the bank.",
+  "scripts": {
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/main.ts",
+    "setup-erpnext": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/erpnext/setup.ts",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/*/*.test.ts"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^3.4.3",
+    "@dfinity/candid": "^3.4.3",
+    "@dfinity/identity": "^3.4.3",
+    "@dfinity/principal": "^3.4.3"
+  }
+}

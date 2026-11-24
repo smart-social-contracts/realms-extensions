@@ -10,11 +10,11 @@
 //
 // The realm sees ids and amounts only: the names and IBANs stay in ERPNext, which writes them into the file.
 
-import { decimalsOf, type Account, type PaymentLine, type PaymentOrder } from '../../frontend-rt/src/lib/order.ts';
-import { formatById } from '../../frontend-rt/src/lib/formats.ts';
-import { ibanCountry } from '../../frontend-rt/src/lib/iban.ts';
-import { sha256Hex, type Realm } from '../../frontend-rt/src/lib/realm.ts';
-import type { ErpNext } from './erpnext.ts';
+import { decimalsOf, type Account, type PaymentLine, type PaymentOrder } from '../../../frontend-rt/src/lib/order.ts';
+import { formatById } from '../../../frontend-rt/src/lib/formats.ts';
+import { ibanCountry } from '../../../frontend-rt/src/lib/iban.ts';
+import { sha256Hex, type Realm } from '../../../frontend-rt/src/lib/realm.ts';
+import type { ErpNext } from './client.ts';
 
 export const RUN = 'Realm Payment Run';
 
