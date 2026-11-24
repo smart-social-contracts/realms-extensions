@@ -1,4 +1,5 @@
-// Bank statements: camt.053 (the account statement) and camt.054 (debit and credit notifications), ISO 20022.
+// Bank statements: camt.052 (the intraday account report), camt.053 (the account statement) and camt.054 (debit and
+// credit notifications), ISO 20022.
 // Read by element name, whatever the version (001.04 to 001.08 name the parts the realm needs the same way), so a
 // bank on an older version still works. Only what matching needs is kept.
 
@@ -35,7 +36,7 @@ export interface StatementEntry {
 }
 
 export interface Statement {
-	kind: 'camt.053' | 'camt.054';
+	kind: 'camt.052' | 'camt.053' | 'camt.054';
 	messageId: string;
 	/** The statement's or notification's own id. */
 	id: string;
@@ -99,13 +100,25 @@ function entryOf(ntry: XmlNode, index: number): StatementEntry {
 	};
 }
 
-/** Every statement (camt.053) or notification (camt.054) in a bank file. Throws when the file is neither. */
+/** The message element of each camt kind, and the element of each account report in it. */
+const KINDS = {
+	BkToCstmrAcctRpt: ['camt.052', 'Rpt'],
+	BkToCstmrStmt: ['camt.053', 'Stmt'],
+	BkToCstmrDbtCdtNtfctn: ['camt.054', 'Ntfctn'],
+} as const;
+
+/** Every report (camt.052), statement (camt.053) or notification (camt.054) in a bank file. Throws when the file is
+ * none of them. */
 export function parseStatements(source: string): Statement[] {
-	const root = parse(source);
+	return statementsOf(parse(source));
+}
+
+export function statementsOf(root: XmlNode): Statement[] {
 	const message = root.children[0];
-	const kind = message?.name === 'BkToCstmrStmt' ? 'camt.053' : message?.name === 'BkToCstmrDbtCdtNtfctn' ? 'camt.054' : null;
-	if (root.name !== 'Document' || !kind) throw new Error('this is not a camt.053 statement or a camt.054 notification');
-	const reports = message.children.filter((c) => c.name === (kind === 'camt.053' ? 'Stmt' : 'Ntfctn'));
+	const known = message && KINDS[message.name as keyof typeof KINDS];
+	if (root.name !== 'Document' || !known) throw new Error('this is not a camt.052, camt.053 or camt.054 file');
+	const [kind, report] = known;
+	const reports = message.children.filter((c) => c.name === report);
 	return reports.map((r) => ({
 		kind,
 		messageId: textAt(message, 'GrpHdr/MsgId'),

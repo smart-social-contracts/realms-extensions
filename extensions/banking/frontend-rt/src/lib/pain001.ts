@@ -25,7 +25,8 @@ export interface Pain001Style {
 	debtorAgent: (debtor: Account) => ReturnType<typeof el>;
 }
 
-function address(a: Address | undefined, text: (s: string) => string) {
+/** A structured postal address, as pain.001 and pain.008 both write it. */
+export function address(a: Address | undefined, text: (s: string) => string) {
 	if (!a) return null;
 	return el(
 		'PstlAdr',
@@ -87,9 +88,9 @@ function group(order: PaymentOrder, g: PaymentGroup, index: number, style: Pain0
 }
 
 /** The PmtInfId of each line: the group it was written in. A statement that books a group as one entry names it. */
-export function groupIds(order: PaymentOrder, groups: PaymentGroup[]): Record<string, string> {
+export function groupIds(messageId: string, groups: { lines: { id: string }[] }[]): Record<string, string> {
 	const out: Record<string, string> = {};
-	groups.forEach((g, i) => g.lines.forEach((l) => (out[l.id] = `${order.messageId}-${i + 1}`)));
+	groups.forEach((g, i) => g.lines.forEach((l) => (out[l.id] = `${messageId}-${i + 1}`)));
 	return out;
 }
 
@@ -113,8 +114,8 @@ export function writePain001(order: PaymentOrder, groups: PaymentGroup[], style:
 }
 
 /** ``lines`` split by ``key``, the groups in the order their first line comes. */
-export function groupBy(lines: PaymentLine[], key: (l: PaymentLine) => string): PaymentLine[][] {
-	const groups = new Map<string, PaymentLine[]>();
+export function groupBy<T>(lines: T[], key: (l: T) => string): T[][] {
+	const groups = new Map<string, T[]>();
 	for (const line of lines) {
 		const k = key(line);
 		groups.set(k, [...(groups.get(k) ?? []), line]);

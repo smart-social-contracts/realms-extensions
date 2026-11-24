@@ -4,10 +4,12 @@
 // report of what the bank said (GGG's External, Dispatch and external_report).
 //
 //   banking.register   the realm's own account(s) and the payees' bank details: one encrypted record
-//   banking.order      one committed payment file, encrypted; its facts in clear: the file's sha256 and each line's
-//                      id, amount, currency and payment group, never a name or an IBAN
-//   banking.statement  one imported camt file, encrypted, with what matched; its facts: the report, in clear
+//   banking.order      one committed payment or direct debit file, encrypted; its facts in clear: the file's sha256
+//                      and each line's id, amount, currency and payment group, never a name or an IBAN
+//   banking.statement  one imported camt file or pain.002 status report, encrypted, with what matched; its facts: the
+//                      report, in clear
 
+import type { Mandate } from './collection.ts';
 import type { Account } from './order.ts';
 import type { Match } from './match.ts';
 import type { Vault } from './vault.ts';
@@ -130,11 +132,20 @@ export async function openSealed<T>(realm: Realm, vault: Vault, document: string
 export interface Payee extends Account {
 	/** The register's own id of the payee, which an order's facts name instead of the person. */
 	id: string;
+	/** The SEPA direct debit mandate the payee signed, when the realm collects from them. */
+	mandate?: Mandate;
+}
+
+export interface RealmAccount extends Account {
+	/** The SEPA creditor identifier the realm collects under. */
+	creditorId?: string;
+	/** PostFinance's id of the realm for CH-DD collections. */
+	rsPid?: string;
 }
 
 export interface Register {
-	/** The realm's own account the orders pay from. */
-	account: Account | null;
+	/** The realm's own account the orders pay from and the collections are credited to. */
+	account: RealmAccount | null;
 	payees: Payee[];
 }
 
@@ -156,6 +167,8 @@ export function saveRegister(realm: Realm, vault: Vault, treasury: Treasury, me:
 // --- orders and the bank --------------------------------------------------------------------------------------------
 
 export interface OrderFacts {
+	/** A payment order pays out; a collection (direct debit) brings money in. Absent on the first orders: payment. */
+	kind?: 'payment' | 'collection';
 	format: string;
 	message_id: string;
 	file_sha256: string;
@@ -182,13 +195,14 @@ export async function commitOrder(
 	language: string,
 ): Promise<CommittedOrder> {
 	if (facts.file_sha256 !== (await sha256Hex(file))) throw new Error('the file is not the one whose hash is committed');
+	const what = facts.kind === 'collection' ? 'Direct debit collection' : 'Payment order';
 	const document = await storeSealed(realm, vault, treasury, me, {
-		kind: KIND.order, title: `Payment order ${facts.message_id}`, language, data: { format: facts.format, file }, facts,
+		kind: KIND.order, title: `${what} ${facts.message_id}`, language, data: { format: facts.format, file }, facts,
 	});
 	// The dispatch names the hash too: the audit log keeps a call's arguments only up to a size, which the encrypted
 	// file passes, so this small call is where anyone who reads the log sees the commitment.
 	const sent = await realm.run('notification_send', {
-		recipient: `External:${BANK}`, topic: KIND.order, title: `Payment order ${facts.message_id} sha256:${facts.file_sha256}`,
+		recipient: `External:${BANK}`, topic: KIND.order, title: `${what} ${facts.message_id} sha256:${facts.file_sha256}`,
 		body: document,
 	});
 	return { document, dispatch: sent.dispatch ?? null };
@@ -214,9 +228,15 @@ export async function bankDispatches(realm: Realm): Promise<Map<string, Dispatch
 	return out;
 }
 
-/** The operator's word that the bank accepted the order (it was uploaded and signed in the e-banking). */
+/** The operator's word that the bank accepted the order (it was uploaded and signed in the e-banking), or the bank's
+ * own status report saying so. */
 export function confirmAtBank(realm: Realm, dispatch: string, receipt: string) {
 	return realm.run('dispatch_confirm', { dispatch, outcome: { Confirmed: { receipt } } });
+}
+
+/** The bank rejected the whole order (a pain.002 with status RJCT). */
+export function failAtBank(realm: Realm, dispatch: string, reason: string) {
+	return realm.run('dispatch_confirm', { dispatch, outcome: { Failed: reason } });
 }
 
 export async function bankRegistered(realm: Realm): Promise<boolean> {
@@ -230,24 +250,25 @@ export function registerBank(realm: Realm, name: string) {
 
 // --- statements ----------------------------------------------------------------------------------------------------
 
-/** Store an imported camt file (encrypted, with its matches) and report each statement in it to the realm. */
+/** Store an imported bank file, a camt statement or a pain.002 status report (encrypted, with its matches), and report
+ * each statement in it to the realm. */
 export async function recordImport(
 	realm: Realm,
 	vault: Vault,
 	treasury: Treasury,
 	me: string,
-	imported: { name: string; file: string; matches: Match[]; reports: Record<string, unknown>[] },
+	imported: { name: string; file: string; matches: Match[]; reports: Record<string, unknown>[]; topic?: string },
 	language: string,
 ): Promise<string> {
 	const document = await storeSealed(realm, vault, treasury, me, {
 		kind: KIND.statement,
-		title: `Bank statement ${imported.reports.map((r) => r.statement).join(', ')}`,
+		title: `Bank file ${imported.reports.map((r) => r.statement).join(', ')}`,
 		language,
 		data: { name: imported.name, file: imported.file, matches: imported.matches },
 		facts: { reports: imported.reports },
 	});
 	for (const report of imported.reports) {
-		await realm.run('external_report', { external: BANK, topic: KIND.statement, body: report, evidence_ref: document });
+		await realm.run('external_report', { external: BANK, topic: imported.topic ?? KIND.statement, body: report, evidence_ref: document });
 	}
 	return document;
 }

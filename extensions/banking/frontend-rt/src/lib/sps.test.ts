@@ -67,6 +67,7 @@ describe('SPS problems', () => {
 			[withLine({ amount: 0 }), /more than zero/],
 			[withLine({ id: SWISS_ORDER.lines[1].id }), /used twice/],
 			[withLine({ payee: { ...SWISS_ORDER.lines[0].payee, iban: 'CH9300762011623852958' } }), /check digits/],
+			[withLine({ payee: { ...SWISS_ORDER.lines[0].payee, address: undefined } }), /needs at least a town and a two-letter country/],
 		];
 		for (const [order, message] of cases) {
 			const problems = sps.problems(order);

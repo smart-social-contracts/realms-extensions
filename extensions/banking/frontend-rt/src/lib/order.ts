@@ -75,7 +75,7 @@ export function formatAmount(minor: number, currency: string): string {
 }
 
 /** The sum of ``lines`` as a decimal: the CtrlSum, which adds amounts of any currency. Exact (thousandths). */
-export function controlSum(lines: PaymentLine[]): string {
+export function controlSum(lines: { amount: number; currency: string }[]): string {
 	const thousandths = lines.reduce((sum, l) => sum + l.amount * 10 ** (3 - decimalsOf(l.currency)), 0);
 	return formatAmount(thousandths, 'BHD').replace(/\.?0+$/, '') || '0';
 }
@@ -99,7 +99,7 @@ export function referenceProblem(what: string, id: string): string | null {
 	return null;
 }
 
-function accountProblems(who: string, account: Account, line?: string): Problem[] {
+export function accountProblems(who: string, account: Account, line?: string): Problem[] {
 	const out: Problem[] = [];
 	if (!account.name.trim()) out.push({ line, message: `${who} has no name` });
 	else if (account.name.length > 70) out.push({ line, message: `${who}'s name is longer than 70 characters` });
@@ -108,8 +108,10 @@ function accountProblems(who: string, account: Account, line?: string): Problem[
 	if (account.bic && !/^[A-Z]{6}[A-Z2-9][A-NP-Z0-9]([A-Z0-9]{3})?$/.test(account.bic)) {
 		out.push({ line, message: `${who}'s BIC is not 8 or 11 letters and digits` });
 	}
-	if (account.address && !(account.address.town.trim() && /^[A-Z]{2}$/.test(account.address.country))) {
-		out.push({ line, message: `${who}'s address needs a town and a two-letter country` });
+	// Since November 2026 SPS and the EPC accept structured (or hybrid) addresses only, and a payment involving a
+	// SEPA country outside the EEA (Switzerland among them) must carry one: the register requires it of everyone.
+	if (!account.address?.town.trim() || !/^[A-Z]{2}$/.test(account.address.country)) {
+		out.push({ line, message: `${who}'s address needs at least a town and a two-letter country` });
 	}
 	return out;
 }
@@ -141,7 +143,7 @@ export function orderProblems(order: PaymentOrder): Problem[] {
 	return out;
 }
 
-function referenceProblems(line: PaymentLine): Problem[] {
+export function referenceProblems(line: Pick<PaymentLine, 'id' | 'payee' | 'reference'>): Problem[] {
 	const qrIban = isQrIban(line.payee.iban);
 	const ref = line.reference;
 	if (qrIban && ref?.kind !== 'QRR') {

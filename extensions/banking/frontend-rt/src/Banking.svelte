@@ -46,8 +46,8 @@
 		const out = new Map<string, string>();
 		for (const d of statements) {
 			for (const r of d.facts.reports ?? []) {
-				for (const [line] of r.paid) out.set(line, d.id);
-				for (const [group] of r.group_booked) for (const line of inGroup.get(group) ?? []) out.set(line, d.id);
+				for (const [line] of [...(r.paid ?? []), ...(r.collected ?? [])]) out.set(line, d.id);
+				for (const [group] of r.group_booked ?? []) for (const line of inGroup.get(group) ?? []) out.set(line, d.id);
 			}
 		}
 		return out;
@@ -159,7 +159,7 @@
 		{:else if tab === 'order'}
 			<NewOrderTab {env} {register} {orders} oncommitted={() => load().then(() => (tab = 'orders'))} />
 		{:else if tab === 'statements'}
-			<StatementsTab {env} {orders} {statements} onimported={load} />
+			<StatementsTab {env} {orders} {statements} {outbox} onimported={load} />
 		{:else}
 			<RegisterTab {env} {register} doc={registerDoc} onsaved={load} />
 		{/if}

@@ -8,9 +8,9 @@ joins it as an ordinary member if it is not one.
 
 1. Identity 1 fills the bank register (example IBANs only) and commits an order: two salaries and a QR-bill.
    The downloaded file must be the bytes whose sha256 the realm recorded before the download.
-2. Identity 2, the second signatory, opens the order: the per-person list decrypts for them, and they record the
-   bank's acceptance.
-3. Identity 1 imports the sample camt.053: the salary group matches as one entry, the QR-bill by its id.
+2. Identity 2, the second signatory, opens the order: the per-person list decrypts for them.
+3. Identity 1 imports the sample pain.002, which marks the order accepted, and the sample camt.053: the salary group
+   matches as one entry, the QR-bill by its id. Then a SEPA direct debit is committed from a payee's mandate.
 4. Identity 3 is refused: the screen says so, and the realm refuses a document_list of the treasury as a non-staff
    caller (the CLI's identity) even though it holds every permission.
 """
@@ -134,22 +134,27 @@ with sync_playwright() as p:
     assert sent["args"]["title"].endswith(f"sha256:{sha}"), "the downloaded file is not the committed one"
     page.close()
 
-    # 2. The second signatory: the per-person list decrypts for them; they record the bank's acceptance.
+    # 2. The second signatory: the per-person list decrypts for them.
     page = signed_in(browser, 2)
     page.get_by_role("row").filter(has_text=file.stem).get_by_role("button", name="Check").click()
     expect(page.get_by_text("The file is the one committed")).to_be_visible(timeout=120000)
     expect(page.get_by_role("cell", name="Ada Example")).to_be_visible()
     expect(page.get_by_role("cell", name="CH44 3199 9123 0008 8901 2")).to_be_visible()
     page.screenshot(path=str(OUT / "4-check-before-signing.png"), full_page=True)
-    page.get_by_placeholder("e-banking order reference").fill("EB-LOCAL-0001")
-    page.get_by_role("button", name="Record as accepted").click()
-    done(page)
     page.close()
 
-    # 3. The treasurer imports the sample statement.
+    # 3. The treasurer imports the bank's status report (accepted, one payment of another order rejected), which
+    #    settles the order's dispatch, then the sample statement. Both samples name order BK-20261124-0001: name the
+    #    order this walk committed instead.
     page = signed_in(browser, 1)
     tab(page, "Statements")
-    # The sample statement books order BK-20261124-0001; name the order this walk committed instead.
+    status = OUT / "pain002.xml"
+    status.write_text((FIXTURES / "pain002-sample.xml").read_text().replace("BK-20261124-0001", file.stem))
+    page.locator("input[type=file]").set_input_files(str(status))
+    expect(page.get_by_text(re.compile(r"On order .*PART"))).to_be_visible(timeout=30000)
+    page.get_by_role("button", name="Record this report").click()
+    expect(page.get_by_text(re.compile("is marked accepted"))).to_be_visible(timeout=120000)
+    done(page)
     statement = OUT / "camt053.xml"
     statement.write_text((FIXTURES / "camt053-sample.xml").read_text().replace("BK-20261124-0001", file.stem))
     page.locator("input[type=file]").set_input_files(str(statement))
@@ -161,8 +166,40 @@ with sync_playwright() as p:
     done(page)
     tab(page, "Orders")
     row = page.get_by_role("row").filter(has_text=file.stem)
-    expect(row).to_contain_text("accepted by the bank (EB-LOCAL-0001); 3 of 3 booked", timeout=30000)
+    expect(row).to_contain_text("accepted by the bank (pain.002 STS-20261125-0001 PART); 3 of 3 booked", timeout=30000)
     page.screenshot(path=str(OUT / "6-orders-booked.png"), full_page=True)
+
+    # 3b. A SEPA direct debit: the realm's creditor identifier (the Bundesbank's published test one) and a payee's
+    #     mandate go in the register, then one collection is committed and downloaded.
+    tab(page, "Accounts and payees")
+    page.get_by_label("SEPA creditor identifier (direct debits)").fill("DE98ZZZ09999999999")
+    page.get_by_role("row").filter(has_text="Ada Example").first.get_by_role("button", name="Edit").click()
+    page.get_by_label("Direct debit mandate (SEPA)").fill("REALM-MANDATE-0001")
+    page.get_by_label("Signed on").fill("2026-01-15")
+    page.get_by_role("button", name="Keep").click()
+    page.get_by_role("button", name="Save the register").click()
+    expect(page.get_by_text(re.compile("Bank register saved"))).to_be_visible(timeout=120000)
+    done(page)
+    tab(page, "New order")
+    page.get_by_label("What").select_option("collect")
+    page.get_by_label("File format").select_option("sepa-dd-2025")
+    row = page.locator("tbody tr").first
+    row.locator("select").first.select_option("P1")
+    row.locator("input.bk-amount").fill("120")
+    row.locator("input.bk-ccy").fill("EUR")
+    row.get_by_label("Sequence").select_option("RCUR")
+    page.screenshot(path=str(OUT / "6b-new-collection.png"), full_page=True)
+    with page.expect_download(timeout=120000) as download:
+        page.get_by_role("button", name="Commit and download the file").click()
+    collection = OUT / download.value.suggested_filename
+    download.value.save_as(collection)
+    done(page)
+    assert "CstmrDrctDbtInitn" in collection.read_text() and "REALM-MANDATE-0001" in collection.read_text()
+    events = realm("events", {"count": 30})["events"]
+    sent = next(e for e in events if e["op"] == "notification_send" and collection.stem in e["args"].get("title", ""))
+    assert sent["args"]["title"].startswith("Direct debit collection")
+    assert sent["args"]["title"].endswith("sha256:" + hashlib.sha256(collection.read_bytes()).hexdigest())
+    print("collection", collection.name, "committed and downloaded")
     page.close()
 
     # 4. Refusals.

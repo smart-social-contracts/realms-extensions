@@ -19,3 +19,4 @@
 	<label>Country <input bind:value={form.country} maxlength="2" /></label>
 </div>
 {#if ibanError}<p class="bk-error">{ibanError}</p>{/if}
+<p class="bk-muted">A town and a two-letter country are required: banks take structured addresses only since November 2026.</p>

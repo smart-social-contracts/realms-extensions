@@ -6,7 +6,7 @@
 	import { errorText, money, saveFile } from './env';
 	import { printIban } from './lib/iban';
 	import { confirmAtBank, openSealed, sha256Hex, type Dispatch, type Doc, type OrderFacts } from './lib/realm';
-	import { readPain001, type FileSummary } from './lib/review';
+	import { readOrderFile, type FileSummary } from './lib/review';
 
 	let { env, orders, outbox, booked, onchanged }: {
 		env: Env; orders: Doc[]; outbox: Map<string, Dispatch>; booked: Map<string, string>; onchanged: () => void;
@@ -28,7 +28,7 @@
 		const sent = outbox.get(d.id);
 		const lines = factsOf(d).lines;
 		const bookedCount = lines.filter(([id]) => booked.has(id)).length;
-		const bank = !sent ? 'not in the outbox' : sent.status === 'confirmed' ? `accepted by the bank (${sent.receipt})` : sent.status === 'failed' ? 'refused by the bank' : 'waiting for the e-banking';
+		const bank = !sent ? 'not in the outbox' : sent.status === 'confirmed' ? `accepted by the bank (${sent.receipt})` : sent.status === 'failed' ? 'rejected by the bank' : 'waiting for the e-banking';
 		return bookedCount ? `${bank}; ${bookedCount} of ${lines.length} booked` : bank;
 	}
 
@@ -37,7 +37,7 @@
 		try {
 			const { data } = await openSealed<{ file: string }>(env.realm, env.vault, d.id);
 			if (!data) throw new Error('this order was not sealed for you: ask a colleague to share the register again');
-			open = { doc: d, file: data.file, summary: readPain001(data.file), hashOk: (await sha256Hex(data.file)) === factsOf(d).file_sha256 };
+			open = { doc: d, file: data.file, summary: readOrderFile(data.file), hashOk: (await sha256Hex(data.file)) === factsOf(d).file_sha256 };
 			receipt = '';
 		} catch (e) {
 			env.notify('error', `Cannot open ${d.id}: ${errorText(e)}`);
@@ -74,8 +74,9 @@
 			: 'The file does not match the sha256 the realm committed: do not sign it.'}
 	</p>
 	<p>
-		Paid from <strong>{open.summary.debtor.name}</strong>, <span class="bk-mono">{printIban(open.summary.debtor.iban)}</span>,
-		on {facts.execution_date}. {open.summary.count} payments, control sum {open.summary.controlSum}.
+		{open.summary.kind === 'payment' ? 'Paid from' : 'Collected into'} <strong>{open.summary.account.name}</strong>,
+		<span class="bk-mono">{printIban(open.summary.account.iban)}</span>, on {facts.execution_date}.
+		{open.summary.count} {open.summary.kind === 'payment' ? 'payments' : 'collections'}, control sum {open.summary.controlSum}.
 	</p>
 	<p class="bk-muted">
 		Compare every line with the e-banking screen before you sign. A bank that books a salary group as one entry never
@@ -83,7 +84,10 @@
 	</p>
 	<table>
 		<thead>
-			<tr><th>Payment id</th><th>Payee</th><th>IBAN</th><th class="bk-num">Amount</th><th>Reference / note</th><th>Group</th></tr>
+			<tr>
+				<th>{open.summary.kind === 'payment' ? 'Payment id' : 'Collection id'}</th><th>{open.summary.kind === 'payment' ? 'Payee' : 'Payer'}</th>
+				<th>IBAN</th><th class="bk-num">Amount</th><th>Reference / note</th><th>Group</th>
+			</tr>
 		</thead>
 		<tbody>
 			{#each open.summary.lines as l (l.id)}
@@ -93,7 +97,7 @@
 					<td class="bk-mono">{printIban(l.iban)}{l.bic ? ` · ${l.bic}` : ''}</td>
 					<td class="bk-num">{l.amount} {l.currency}</td>
 					<td>{l.reference || l.note}</td>
-					<td>{l.group}{l.salary ? ' · salary' : ''}{l.sepa ? ' · SEPA' : ''}</td>
+					<td>{l.group}{l.salary ? ' · salary' : ''}{l.sepa ? ' · SEPA' : ''}{l.sequence ? ` · ${l.sequence}` : ''}{l.mandate ? ` · mandate ${l.mandate}` : ''}</td>
 				</tr>
 			{/each}
 		</tbody>
@@ -113,12 +117,13 @@
 	{/if}
 {:else if orders.length}
 	<table>
-		<thead><tr><th>Order</th><th>Execution</th><th class="bk-num">Payments</th><th class="bk-num">Total</th><th>Status</th><th></th></tr></thead>
+		<thead><tr><th>Order</th><th>Kind</th><th>Execution</th><th class="bk-num">Payments</th><th class="bk-num">Total</th><th>Status</th><th></th></tr></thead>
 		<tbody>
 			{#each orders as d (d.id)}
 				{@const facts = factsOf(d)}
 				<tr>
 					<td class="bk-mono">{facts.message_id}</td>
+					<td>{facts.kind === 'collection' ? 'collection' : 'payment'}</td>
 					<td>{facts.execution_date}</td>
 					<td class="bk-num">{facts.lines.length}</td>
 					<td class="bk-num">{totals(facts)}</td>
