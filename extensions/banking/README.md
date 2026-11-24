@@ -1,125 +1,69 @@
-# Banking extension
+# Banking
 
-Pay, collect and be paid through the realm's ordinary bank account, with no bank connector. The realm writes the
-payment or direct debit file, the treasurer uploads and approves it in the realm's own e-banking, and brings the bank's
-status reports and statements back. No bLink, no EBICS, no operator service: nothing here talks to a bank.
+Pay, collect and be paid through the realm's ordinary bank account. The realm writes the bank file, the treasurer
+uploads and signs it in the realm's own e-banking, and the bank's reports come back to be matched. Nothing here talks
+to a bank, and the bank details stay encrypted: only the treasury's staff can read them.
 
-```mermaid
-flowchart LR
-    R[Register: realm account and payees] --> O[New order]
-    O -->|sha256 and lines committed first| D[pain.001 downloaded]
-    D --> E[E-banking: upload, two signatures]
-    E -->|bank's order reference| A[Accepted by the bank]
-    S[camt.053 / camt.054] --> M[Matched in the browser]
-    M -->|report to the realm| B[Booked lines, review list]
-```
+> **Status: prototype.** Draft pull requests #121 (this extension) to #124. Every file it writes and reads is tested
+> against the official SIX and ISO schemas, on a local realm. It has never been tried with a real bank.
 
-1. **Register.** The realm's own account and each payee's bank details (IBAN, name at the bank, postal address),
-   kept as one encrypted record of the treasury department.
-2. **Order.** The treasurer picks payees and amounts. The file is generated in the browser, deterministically, and
-   its sha256 and every line (id, amount, currency, payment group, payee id) are recorded in the realm **before** the
-   file is handed out. Each payment's `EndToEndId` is its realm id (`BK-20261124-0001-03`).
-3. **Check before signing.** The second signatory opens the order and compares the per-person list, read from the
-   committed file itself, with the e-banking screen. At a bank that books a salary group as one entry this list is
-   the only per-person check: PostFinance's EPO manual (Sep 2024, §4.2.9) says salary orders ignore `BtchBookg` and
-   are always batch-booked, so the per-person lines never reach `camt.053`.
-4. **Accepted.** The bank's `pain.002` status report, imported, marks the order accepted or rejected (with the
-   bank's reasons, and the payments it rejected on the review list). Without one, the bank's order reference can be
-   entered by hand once the order is signed in the e-banking.
-5. **Statements.** A `camt.052`, `camt.053` or `camt.054` is read and matched in the browser: payments and collections
-   by `EndToEndId` (or by their payment group when the bank books the group as one entry), returns by `EndToEndId` in
-   the other direction, incoming payments by the invoice's QR or RF reference. Entries not booked yet (an intraday
-   `camt.052` has them) go on the review list. The file is kept encrypted with its matches, each statement is reported
-   to the realm, and whatever did not match is listed for review.
+## What a treasurer does
 
-**Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
-identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments
-to payees, and the statements bring each collection back as collected, booked as a group, or returned.
+**1. Keep the bank register.** The realm's own account and each payee's IBAN, name and address, saved encrypted for the
+treasury's staff.
 
-## What the realm keeps, and who sees it
+![The bank register](docs/register.png)
 
-Nothing in the realm changes for this extension: it uses GGG's Document, External and Dispatch as they are.
+**2. Pay, or collect by direct debit.** Choose payees and amounts. *Commit and download* records the file's fingerprint
+(sha256) and every amount in the realm before the treasurer gets the file, so the realm always knows exactly what was
+sent to the bank.
 
-| Record | How | In clear | Encrypted |
-|---|---|---|---|
-| Bank register | Document `banking.register` of the treasury department | title only | accounts, payees |
-| Payment order | Document `banking.order`; a dispatch to the outside body `bank` (channel `manual`) | sha256, per line: id, amount, currency, group, payee id | the file |
-| Statement import | Document `banking.statement`; `external_report` per statement | ids, amounts, dates, counts | the file, the matches with names |
+![A payment order](docs/new-order.png)
+![A direct debit collection](docs/collection.png)
 
-**Per-person amounts stay in clear**, as transfers are today; bank details and the statement files do not. The keys
-are the realm's live scheme (vetKD, a per-record key wrapped per principal: realms-gos `lib/crypto/sharing.ts`), wrapped
-for the department's head and seat holders at the time of saving. Someone seated later reads a record once a colleague
-saves it again.
+**3. Check before signing.** The second signatory opens the order and compares each line, read from the file itself,
+with the e-banking screen before signing there. Some banks book a salary run as one line on the statement, so this
+list is the only place the individual payments can be checked.
 
-**Permission.** The treasury department is the one where the user holds a seat and the treasury permission. The realm
-enforces the rest: `document_store`, `document_list` and the document's key are for that department's staff only
-(realms-gos `api/crypto.py`, `staff()`), whatever other permission a caller holds. Sending the order to the bank's
-outbox, confirming it and reporting a statement also need `notification.send`, `dispatch.confirm` and `external.report`,
-which the realm's codex must give the treasury's seats.
+![Check before signing](docs/check-before-signing.png)
 
-## Formats
+**4. Bring the bank's files back.** A status report marks the order accepted or rejected. A statement matches payments,
+collections, returned payments and paid invoices; anything else goes on a review list.
 
-The format layer is `frontend-rt/src/lib/formats.ts`: each format is its checks, its grouping and its writer, so a new
-one (generic ISO 20022 CGI-MP, a national fixed-width format) is one more entry.
+![Importing a statement](docs/statement-import.png)
 
-- **Swiss Payment Standards 2025**: `pain.001.001.09`, SIX's XSD `pain.001.001.09.ch.03.xsd`, IG v2.2. Payment types
-  D (domestic CHF/EUR, QR-bill with a QR-IBAN and QR reference), S (SEPA) and X (foreign currency, abroad: needs the
-  payee bank's BIC); one payment group per type, currency and salary flag; salaries carry `CtgyPurp/Cd SALA` at the
-  group level; `BtchBookg` true; the debtor bank by its IID when no BIC is given; the software in `InitgPty/CtctDtls`
-  (IG 3.9); the SPS character set (IG 3.1) checked, not converted.
-- **SEPA Credit Transfer** (EPC132-08, 2025 v1.0): `pain.001.001.09`. The EPC's own XSD could not be downloaded by a
-  script (the EPC site sits behind a bot check), so the file is validated against ISO's `pain.001.001.09.xsd` and the
-  EPC rules are enforced in code (`lib/sepa.ts`). That is a weaker guarantee: a reviewer cannot re-run a schema to
-  check them. The rules implemented: EUR only; debtor and payee IBANs in SEPA countries; amount at most 999,999,999.99;
-  service level `SEPA` and charges `SLEV` on every group; a creditor reference or a note, not both; no QR reference;
-  names, towns and notes converted to the EPC's basic Latin set (accents dropped, `&` as `+`), and shown converted on
-  the review screen; `NOTPROVIDED` as the debtor bank when no BIC is given.
-- **SEPA Direct Debit Core** (EPC130-08, 2025): `pain.008.001.08`, validated against ISO's schema; the EPC rules in
-  `lib/sdd.ts`: EUR only, SEPA IBANs, a valid creditor identifier (EPC262-08 check digits), each collection's mandate id
-  and date of signature (on or before the collection), service level `SEPA`, local instrument `CORE`, one group per
-  sequence type, charges `SLEV`, an RF reference or a note.
-- **PostFinance CH-DD**: `pain.008.001.02.ch.03`, SIX's Swiss direct debit schema (SPS 2018, IG v1.2), validated against
-  it: both accounts at PostFinance, the creditor's RS-PID (ISO 7064 MOD 97-10), codes `CHDD` / `DDCOR1`, unstructured
-  remittance only. The mandates are PostFinance's. The other Swiss procedures are left out on purpose: SIX's LSV+ and
-  BDD take no new creditors since 1 January 2026 and end on 30 September 2028, and eBill Direct Debit runs through
-  eBill rather than a file.
-- **Statements**: `camt.052`, `camt.053` and `camt.054`, read by element name, so versions 001.04 to 001.08 work.
-- **Status reports**: `pain.002` (SPS: `pain.002.001.10`), read the same way.
-- **Addresses**: every account in the register needs a structured address with at least a town and a country, which
-  SPS and the EPC require since November 2026.
+**5. Follow every order** from the file to the bank's acceptance to the booking.
 
-## Running in the page, and what a sandbox would need
+![Orders](docs/orders.png)
 
-The screen runs in the realm's page, like vault and department_docs. A sandboxed frame has no `ctx.crypto`, and
-bundling vetKeys into the frame would hand it the user's whole vetKey, which opens everything ever wrapped for them;
-the frame also may not start a download (`allow-downloads` is not in the iframe's sandbox). All decryption therefore goes
-through one interface, `lib/vault.ts`, and the download through `saveFile` in `env.ts`. Sandboxing the extension means
-the host offers these as capabilities and the extension swaps those two:
+Anyone else is refused, by the realm as well as the screen.
 
-- `vault.seal(recipients, data)` → host: seal for these principals;
-- `vault.open(wrappedKey, ciphertext)` → host: open this document for me (the key never enters the frame);
-- `saveFile(name, text)` → host: commit-then-save these bytes. The host would then enforce "the hash is recorded
-  before the file leaves" itself.
+![Refused](docs/refused.png)
 
-The same host capability is a prerequisite for members entering their own bank details from member_dashboard, which
-is sandboxed already.
+## What is supported, and why
 
-## Tests
+| | Supported | Why, or why not |
+|---|---|---|
+| **Payments** | Swiss Payment Standards 2025 (pain.001.001.09.ch.03): domestic, QR-bill, SEPA, foreign currency, salaries. SEPA credit transfer (pain.001.001.09). | What Swiss and euro-area banks take today. |
+| | Not: CGI-MP, NACHA, Bacs, other national formats. | Not needed for Swiss or EU public bodies; each would be one more writer. |
+| **Direct debits** | SEPA Direct Debit Core (pain.008.001.08). PostFinance CH-DD. | The two open to a new creditor. |
+| | Not: LSV+ / BDD, eBill Direct Debit. | LSV+ / BDD take no new creditors since 1 January 2026 and end in September 2028. eBill runs through its own network, not a file. |
+| **Bank reports** | Status reports (pain.002). Statements and notifications (camt.052, camt.053, camt.054). | What Swiss and EU banks deliver. |
+| | Not: MT940. | Swiss banks deliver camt. |
+| **Bank connection** | File upload and download in the realm's e-banking. | Works with any bank, no contract, and the bank keys stay with the people who sign. |
+| | Not: EBICS, SIX bLink. | Each needs a bank or SIX contract and a program outside the realm; a later step. |
+| | Never: the realm calling the bank itself. | A blockchain call is repeated by every node, and the realm cannot keep a bank key secret. |
+| **Bills** | Swiss QR-bills to residents and companies, marked paid by their reference: in review (#124). | |
+| **ERPs** | Approve a payment file made by the public body's ERP: in review (#123). ERPNext connector: in review (#122). Odoo connector: in progress. | The ERP keeps the books; the realm approves what it pays. |
+| **Not yet** | Members entering their own bank details. Billing the realm's own invoices in francs. Paying a realm transfer through the bank. | Each needs a change to the realm itself, written up in [GGG-PROPOSAL.md](GGG-PROPOSAL.md). |
 
-- `run_tests.sh`: the unit tests (`frontend-rt/src/lib/*.test.ts`: formats, references, camt matching, the encryption
-  round trip and permission refusal on an in-memory realm), the build, and `tests/xsd/check.sh`, which validates the
-  sample files against the pinned SIX and ISO schemas. The check uses the JDK's validator: libxml2 (`xmllint`) cannot
-  compile the SPS schema, whose character-set pattern subtracts a class (`[...-[\p{C}]]`).
-- `tests/e2e/walk.py`: the whole flow on a local test-mode realm with the real vetKD, as the treasurer, the second
-  signatory and a non-member, and a non-staff call the realm refuses.
+## Limits
 
-Every IBAN in the samples and fixtures is a published documentation example, except the PostFinance ones of the CH-DD
-sample, which carry a postal account with a wrong check digit on purpose so that they can be no real account; every
-name is made up.
+- **Never tried with a real bank.** The files pass the official schemas; each bank still has its own rules, so a bank's
+  test portal comes before the first real payment.
+- **Runs in the realm's page.** A sandboxed screen would be safer, but today a sandbox can neither decrypt bank details
+  nor hand over a file. The way to sandbox it is in [DESIGN.md](DESIGN.md).
+- **English only.**
 
-## Not done in this version
-
-- Payees are entered by the treasury, not by the members themselves: the realm has no encrypted payout account a
-  member can share with the treasury yet (see the GGG proposal in the pull request).
-- One register record: two treasurers saving at once keep the last save.
-- English only.
+How it works, what the realm stores in clear and what it keeps encrypted, the matching rules, and the tests:
+[DESIGN.md](DESIGN.md).
