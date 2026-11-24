@@ -1,6 +1,7 @@
 // A payment order as the realm sees it, before any file format: who pays, from which account, and one line per payee.
 // The formats (sps.ts, sepa.ts) turn it into a pain.001; what they share is checked here.
 
+import { localScheme, type ClearingSystem } from './countries.ts';
 import { compactIban, ibanProblem, isQrIban } from './iban.ts';
 import { isCreditorReference, isQrr } from './references.ts';
 
@@ -13,12 +14,28 @@ export interface Address {
 	country: string;
 }
 
-/** A bank account and the name and address the bank knows its holder by. */
+/** An account where accounts are not numbered by IBAN: its number at the bank, and the bank's clearing code (an ABA
+ * routing number, a BSB…) in the clearing system of the account's country. Without one, the bank is named by its BIC. */
+export interface LocalAccount {
+	number: string;
+	system?: ClearingSystem;
+	code?: string;
+}
+
+/** A bank account and the name and address the bank knows its holder by: an IBAN, or a local account. */
 export interface Account {
 	name: string;
+	/** Empty for a local account. */
 	iban: string;
+	local?: LocalAccount;
 	bic?: string;
 	address?: Address;
+}
+
+/** The account's number as a person reads it: the IBAN, or the bank's code and the account number. */
+export function accountText(a: Account): string {
+	if (!a.local) return a.iban;
+	return [a.local.code, a.local.number].filter(Boolean).join(' ');
 }
 
 export interface Reference {
@@ -103,8 +120,11 @@ export function accountProblems(who: string, account: Account, line?: string): P
 	const out: Problem[] = [];
 	if (!account.name.trim()) out.push({ line, message: `${who} has no name` });
 	else if (account.name.length > 70) out.push({ line, message: `${who}'s name is longer than 70 characters` });
-	const iban = ibanProblem(account.iban);
-	if (iban) out.push({ line, message: `${who}'s IBAN: ${iban}` });
+	if (account.local) out.push(...localProblems(who, account, line));
+	else {
+		const iban = ibanProblem(account.iban);
+		if (iban) out.push({ line, message: `${who}'s IBAN: ${iban}` });
+	}
 	if (account.bic && !/^[A-Z]{6}[A-Z2-9][A-NP-Z0-9]([A-Z0-9]{3})?$/.test(account.bic)) {
 		out.push({ line, message: `${who}'s BIC is not 8 or 11 letters and digits` });
 	}
@@ -112,6 +132,27 @@ export function accountProblems(who: string, account: Account, line?: string): P
 	// SEPA country outside the EEA (Switzerland among them) must carry one: the register requires it of everyone.
 	if (!account.address?.town.trim() || !/^[A-Z]{2}$/.test(account.address.country)) {
 		out.push({ line, message: `${who}'s address needs at least a town and a two-letter country` });
+	}
+	return out;
+}
+
+/** A local account, by the rules of its country: the clearing system and code of the country's scheme, or a BIC. */
+function localProblems(who: string, account: Account, line?: string): Problem[] {
+	const local = account.local!;
+	const scheme = localScheme(account.address?.country ?? '');
+	const out: Problem[] = [];
+	if (!local.number.trim()) out.push({ line, message: `${who} has no account number` });
+	else if (local.number.length > 34) out.push({ line, message: `${who}'s account number is longer than 34 characters` });
+	if (scheme) {
+		if (local.system !== scheme.system) {
+			out.push({ line, message: `${who}'s account is in ${account.address?.country}: it needs the ${scheme.codeLabel}` });
+		} else if (!scheme.code(local.code ?? '')) {
+			out.push({ line, message: `${who}'s ${scheme.codeLabel} is not valid (like ${scheme.codeExample})` });
+		}
+		const number = scheme.numberProblem(local.number);
+		if (local.number.trim() && number) out.push({ line, message: `${who}: ${number}` });
+	} else if (!account.bic) {
+		out.push({ line, message: `${who}'s account has no IBAN: its bank's BIC is needed` });
 	}
 	return out;
 }
@@ -162,7 +203,19 @@ export function referenceProblems(line: Pick<PaymentLine, 'id' | 'payee' | 'refe
 
 /** ``order`` with every IBAN and reference in the compact form a file carries. */
 export function normalized(order: PaymentOrder): PaymentOrder {
-	const account = (a: Account): Account => ({ ...a, iban: compactIban(a.iban), bic: a.bic?.toUpperCase() || undefined });
+	const account = (a: Account): Account => ({
+		...a,
+		iban: a.local ? '' : compactIban(a.iban),
+		bic: a.bic?.toUpperCase() || undefined,
+		local: a.local
+			? {
+					number: a.local.number.replace(/[\s.-]/g, ''),
+					...(a.local.system
+						? { system: a.local.system, code: localScheme(a.address?.country ?? '')?.code(a.local.code ?? '') ?? a.local.code }
+						: {}),
+				}
+			: undefined,
+	});
 	return {
 		...order,
 		debtor: account(order.debtor),

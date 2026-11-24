@@ -4,7 +4,7 @@
 	// committed file, for the second signatory to compare with the e-banking screen before signing.
 	import type { Env } from './env';
 	import { errorText, money } from './env';
-	import { printIban } from './lib/iban';
+	import { printAccount } from './lib/iban';
 	import { confirmAtBank, openSealed, sha256Hex, type Dispatch, type Doc, type OrderFacts } from './lib/realm';
 	import { readOrderFile, type FileSummary } from './lib/review';
 
@@ -75,7 +75,7 @@
 	</p>
 	<p>
 		{open.summary.kind === 'payment' ? 'Paid from' : 'Collected into'} <strong>{open.summary.account.name}</strong>,
-		<span class="bk-mono">{printIban(open.summary.account.iban)}</span>, on {facts.execution_date}.
+		<span class="bk-mono">{printAccount(open.summary.account.iban)}</span>, on {facts.execution_date}.
 		{open.summary.count} {open.summary.kind === 'payment' ? 'payments' : 'collections'}, control sum {open.summary.controlSum}.
 	</p>
 	<p class="bk-muted">
@@ -94,7 +94,7 @@
 				<tr>
 					<td class="bk-mono">{l.id}</td>
 					<td>{l.name}</td>
-					<td class="bk-mono">{printIban(l.iban)}{l.bic ? ` · ${l.bic}` : ''}</td>
+					<td class="bk-mono">{printAccount(l.iban)}{l.bic ? ` · ${l.bic}` : ''}</td>
 					<td class="bk-num">{l.amount} {l.currency}</td>
 					<td>{l.reference || l.note}</td>
 					<td>{l.group}{l.salary ? ' · salary' : ''}{l.sepa ? ' · SEPA' : ''}{l.sequence ? ` · ${l.sequence}` : ''}{l.mandate ? ` · mandate ${l.mandate}` : ''}</td>

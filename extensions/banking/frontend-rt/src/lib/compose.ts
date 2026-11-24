@@ -4,9 +4,9 @@ import type { CollectionLine, CollectionOrder, Sequence } from './collection.ts'
 import { ibanCountry } from './iban.ts';
 import { parseAmount, type PaymentLine, type PaymentOrder, type Problem } from './order.ts';
 import type { FileFormat } from './formats.ts';
-import { sentBatch } from './formats.ts';
+import { defaultPaymentFormat, sentBatch } from './formats.ts';
 import type { SentBatch } from './match.ts';
-import type { Doc, OrderFacts, Register } from './realm.ts';
+import { profileOf, type Doc, type OrderFacts, type Register } from './realm.ts';
 
 export interface DraftLine {
 	payee: string;
@@ -25,10 +25,11 @@ export interface Draft {
 	lines: DraftLine[];
 }
 
-/** The format a realm account is paid from by default: SPS from Switzerland and Liechtenstein, SEPA elsewhere. */
+/** The file the realm pays by default: its country's own standard in its currency (Swiss Payment Standards, SEPA),
+ * otherwise the generic ISO 20022 file (lib/formats.ts). */
 export function defaultFormat(register: Register): string {
-	const country = register.account ? ibanCountry(register.account.iban) : 'CH';
-	return country === 'CH' || country === 'LI' ? 'sps-2025' : 'sepa-2025';
+	const { country, currency } = profileOf(register);
+	return defaultPaymentFormat(country, currency);
 }
 
 /** "BK-20261124-0003": the day, then one more than the orders already committed (banks refuse a MsgId seen twice). */

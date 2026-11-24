@@ -1,7 +1,10 @@
 // The payment file formats the extension writes. A new one (generic ISO 20022 CGI-MP, a national fixed-width format)
 // is one more entry: its checks, its grouping and its writer.
 
+import { cgiGroups, cgiProblems, writeCgi } from './cgi.ts';
 import { chddGroups, chddProblems, writeChdd } from './chdd.ts';
+import { countryOf, type PaymentFormatId } from './countries.ts';
+import { SEPA_COUNTRIES } from './iban.ts';
 import { normalizedCollection, type CollectionOrder } from './collection.ts';
 import type { SentBatch } from './match.ts';
 import { normalized, type PaymentOrder, type Problem } from './order.ts';
@@ -39,7 +42,23 @@ export const FORMATS: PaymentFormat[] = [
 		groups: (o) => sepaGroups(normalized(o)),
 		write: writeSepa,
 	},
+	{
+		id: 'iso-cgi',
+		label: 'ISO 20022 for banks worldwide (CGI-MP, pain.001.001.09)',
+		problems: cgiProblems,
+		groups: (o) => cgiGroups(normalized(o)),
+		write: writeCgi,
+	},
 ];
+
+/** The file a realm whose bank is in ``country`` writes for payments in ``currency``: its country's own (Swiss
+ * Payment Standards, SEPA) in its currency, SEPA for euros from a SEPA country, otherwise the generic ISO file. */
+export function defaultPaymentFormat(country: string, currency: string): PaymentFormatId {
+	const c = countryOf(country);
+	if (c.paymentFormat === 'sps-2025') return 'sps-2025';
+	if (currency === 'EUR' && SEPA_COUNTRIES.has(c.code)) return 'sepa-2025';
+	return 'iso-cgi';
+}
 
 /** Direct debits (pain.008): SEPA Core in EUR, and PostFinance's CH-DD in Switzerland. */
 export const COLLECTION_FORMATS: CollectionFormat[] = [

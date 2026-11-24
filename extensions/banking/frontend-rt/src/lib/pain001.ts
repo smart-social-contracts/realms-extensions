@@ -10,7 +10,7 @@ export const PAIN_001_NAMESPACE = 'urn:iso:std:iso:20022:tech:xsd:pain.001.001.0
 /** One B-level payment group: lines paid from the debtor account on one date, in one currency and one kind. */
 export interface PaymentGroup {
 	lines: PaymentLine[];
-	serviceLevel?: 'SEPA';
+	serviceLevel?: 'SEPA' | 'NURG';
 	categoryPurpose?: 'SALA';
 	chargeBearer?: 'SLEV' | 'SHAR';
 }
@@ -38,6 +38,21 @@ export function address(a: Address | undefined, text: (s: string) => string) {
 	);
 }
 
+/** The account's id: its IBAN, or its number at the bank (an "other" id) where accounts have no IBAN. */
+export function accountId(a: Account) {
+	return a.local ? el('Id', el('Othr', leaf('Id', a.local.number))) : el('Id', leaf('IBAN', a.iban));
+}
+
+/** The account's bank: by BIC, by its clearing code in its country's clearing system, or both. Null when neither is
+ * known (an IBAN tells the bank itself). */
+export function agentOf(a: Account) {
+	const clearing = a.local?.system && a.local.code
+		? el('ClrSysMmbId', el('ClrSysId', leaf('Cd', a.local.system)), leaf('MmbId', a.local.code))
+		: null;
+	if (!a.bic && !clearing) return null;
+	return el('FinInstnId', leaf('BICFI', a.bic), clearing);
+}
+
 function remittance(line: PaymentLine, text: (s: string) => string) {
 	const ref = line.reference;
 	if (!ref) return el('RmtInf', leaf('Ustrd', line.note && text(line.note)));
@@ -57,9 +72,9 @@ function transaction(line: PaymentLine, style: Pain001Style) {
 		'CdtTrfTxInf',
 		el('PmtId', leaf('InstrId', line.id), leaf('EndToEndId', line.id)),
 		el('Amt', leaf('InstdAmt', formatAmount(line.amount, line.currency), { Ccy: line.currency })),
-		line.payee.bic ? el('CdtrAgt', el('FinInstnId', leaf('BICFI', line.payee.bic))) : null,
+		agentOf(line.payee) ? el('CdtrAgt', agentOf(line.payee)) : null,
 		el('Cdtr', leaf('Nm', style.text(line.payee.name)), address(line.payee.address, style.text)),
-		el('CdtrAcct', el('Id', leaf('IBAN', line.payee.iban))),
+		el('CdtrAcct', accountId(line.payee)),
 		remittance(line, style.text),
 	);
 }
@@ -80,8 +95,8 @@ function group(order: PaymentOrder, g: PaymentGroup, index: number, style: Pain0
 		),
 		el('ReqdExctnDt', leaf('Dt', order.executionDate)),
 		el('Dbtr', leaf('Nm', style.text(debtor.name)), address(debtor.address, style.text)),
-		el('DbtrAcct', el('Id', leaf('IBAN', debtor.iban))),
-		el('DbtrAgt', debtor.bic ? el('FinInstnId', leaf('BICFI', debtor.bic)) : style.debtorAgent(debtor)),
+		el('DbtrAcct', accountId(debtor)),
+		el('DbtrAgt', agentOf(debtor) ?? style.debtorAgent(debtor)),
 		leaf('ChrgBr', g.chargeBearer),
 		...g.lines.map((line) => transaction(line, style)),
 	);

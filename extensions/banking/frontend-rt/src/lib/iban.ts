@@ -13,6 +13,9 @@ const LENGTHS: Record<string, number> = {
 	UA: 29, VA: 22, VG: 24, XK: 20, YE: 30,
 };
 
+/** The countries whose accounts the IBAN registry numbers. */
+export const IBAN_COUNTRIES: ReadonlySet<string> = new Set(Object.keys(LENGTHS));
+
 /** The countries of the SEPA schemes (EPC409-09): an IBAN of one of them can be paid with a SEPA credit transfer. */
 export const SEPA_COUNTRIES = new Set([
 	'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT',
@@ -23,6 +26,11 @@ export const SEPA_COUNTRIES = new Set([
 /** The IBAN without spaces, in capitals: the form a payment file carries. */
 export function compactIban(text: string): string {
 	return text.replace(/\s+/g, '').toUpperCase();
+}
+
+/** An account id as a person reads it: an IBAN in groups of four, any other account number as it is. */
+export function printAccount(id: string): string {
+	return /^[A-Z]{2}\d{2}[A-Z0-9]{8,}$/.test(compactIban(id)) ? printIban(id) : id;
 }
 
 /** The IBAN in groups of four, the way a bank prints it. */

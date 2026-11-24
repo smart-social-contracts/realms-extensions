@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Validates the sample payment files and the sample statements against the published schemas:
 #   - the SPS file against SIX's pain.001.001.09.ch.03.xsd (SPS 2025, IG v2.2) and ISO's pain.001.001.09.xsd;
+#   - the generic ISO file (CGI-MP) against ISO's pain.001.001.09.xsd;
 #   - the SEPA file against ISO's pain.001.001.09.xsd (the EPC's own XSD is not downloadable by a script, so the EPC
 #     rules are checked in sepa.ts instead);
 #   - the SEPA direct debit against ISO's pain.008.001.08.xsd (EPC rules in sdd.ts), the PostFinance CH-DD file against
@@ -51,7 +52,7 @@ trap 'rm -rf "$OUT"' EXIT
 (cd ../../frontend-rt && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/write-samples.ts "$OUT")
 
 java Validate.java "$CACHE/pain.001.001.09.ch.03.xsd" "$OUT/sps.xml"
-java Validate.java "$CACHE/pain.001.001.09.xsd" "$OUT/sps.xml" "$OUT/sepa.xml"
+java Validate.java "$CACHE/pain.001.001.09.xsd" "$OUT/sps.xml" "$OUT/sepa.xml" "$OUT/cgi.xml"
 java Validate.java "$CACHE/pain.008.001.08.xsd" "$OUT/sepa-dd.xml"
 java Validate.java "$CACHE/pain.008.001.02.ch.03.xsd" "$OUT/ch-dd.xml"
 java Validate.java "$CACHE/camt.052.001.08.xsd" ../fixtures/camt052-sample.xml
