@@ -32,6 +32,17 @@ flowchart LR
    `camt.052` has them) go on the review list. The file is kept encrypted with its matches, each statement is reported
    to the realm, and whatever did not match is listed for review.
 
+**QR-bills.** Under *QR-bills* the treasurer bills a resident or a company in CHF or EUR: a payee of the register (or
+"Payable by" left blank), an amount (or left open, for a donation), a due date, what it is for, and optionally the realm
+invoice it settles. The bill is a standard Swiss QR-bill (receipt and payment part, drawn by the `swissqrbill` library),
+to download and send. Its reference names it: an RF creditor reference on an ordinary IBAN, a QR reference on a QR-IBAN.
+When a statement brings a payment with that reference, the bill shows as paid (or paid in part, or overpaid). The bill
+is kept encrypted (who is billed); its id, amount, currency, reference and due date are in clear. A bill is the
+extension's own record because the realm's invoices (GGG) are kept in the realm's token and only their payer can list
+them; billing those in francs is part of the GGG proposal. Realm invoices and bills share the reference scheme: an RF
+reference spells the id ("RF..INV12", "RF..BILL7"), a QR reference holds a two-digit kind (00 invoice, 01 bill) and the
+ten-digit number, so an invoice's QR reference is the one it always had.
+
 **Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
 identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments
 to payees, and the statements bring each collection back as collected, booked as a group, or returned.
@@ -112,6 +123,7 @@ is sandboxed already.
   compile the SPS schema, whose character-set pattern subtracts a class (`[...-[\p{C}]]`).
 - `tests/e2e/walk.py`: the whole flow on a local test-mode realm with the real vetKD, as the treasurer, the second
   signatory and a non-member, and a non-staff call the realm refuses.
+- `tests/e2e/qr_bill.py`: a QR-bill issued to a payee of the register, paid by its reference in a statement, shown paid.
 
 Every IBAN in the samples and fixtures is a published documentation example, except the PostFinance ones of the CH-DD
 sample, which carry a postal account with a wrong check digit on purpose so that they can be no real account; every
