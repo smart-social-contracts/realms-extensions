@@ -1,0 +1,55 @@
+# ERPNext connector (demo)
+
+Realms as the governance layer over an ERP: ERPNext keeps the books, the suppliers and their bank accounts; the realm
+decides whether a payment run may be paid, and records the exact file that leaves.
+
+```mermaid
+sequenceDiagram
+    participant E as ERPNext
+    participant C as Connector
+    participant R as Realm
+    participant T as Treasurers
+    E->>C: run RPR-00001 "Ready for approval"
+    C->>R: proposal_create (motion in Treasury: ids and amounts only)
+    T->>R: vote (the department's policy, e.g. 2 of 2)
+    C->>R: proposal_get … approved
+    C->>C: write pain.001 from ERPNext's suppliers and IBANs
+    C->>R: notification_send to the bank: "approved by P-…, sha256:…"
+    C->>E: attach RPR-00001.xml, "Approved: file ready"
+```
+
+1. In ERPNext a treasurer makes a **Realm Payment Run** (company, execution date, one line per supplier invoice) and
+   sets its status to *Ready for approval*.
+2. The connector files a **motion** in the realm's treasury department. It names the run's payments by ERPNext id and
+   amount only; the names and IBANs stay in ERPNext. The run shows *Awaiting the realm*, the proposal and the votes.
+3. The department's seats **vote** in the realm, under its own policy (m of n).
+4. Approved: the connector writes the payment file (Swiss Payment Standards, or SEPA outside Switzerland: the Banking
+   extension's tested writers), **records its sha256 in the realm** as a dispatch to the bank naming the motion, and only
+   then attaches the file to the run: *Approved: file ready*. Rejected, withdrawn or expired: *Rejected by the realm*,
+   and no file is ever written.
+
+The realm needs no change: the approval is an ordinary department motion, and the commitment an ordinary dispatch to
+the outside body `bank` (Realms GOS reaches outside bodies only through such dispatches, `api/external.py`, I-EXT-6).
+
+## Running it
+
+Needs a realm with a treasury department whose seats vote on payment runs, an outside body `bank`, and the connector
+as a member holding `notification.send` (its key is made on first use); and an ERPNext site with the two doctypes and
+an API key, which `npm run setup-erpnext` creates on an empty site, with demo data (example IBANs only).
+
+```
+npm install
+npm run setup-erpnext -- http://127.0.0.1:8080 Administrator <password>   # writes the ERPNext key to .env
+# then add to .env: REALM_HOST, REALM_CANISTER, REALM_IDENTITY (a path outside the repository), REALM_TREASURY
+npm start
+```
+
+`npm test` runs the steps on an in-memory ERPNext and realm.
+
+## What it is not (yet)
+
+- A demo: one polling process with an API key, not a Frappe app. A real deployment would run as a Frappe app or a
+  service the institution's IT operates, with the connector's key kept as a secret there.
+- The ERPNext side has no lock of its own: a user who can write files there could still upload another one. What the
+  realm adds is that the file the bank receives can be checked against the hash it approved.
+- Statements are not brought back to ERPNext; the Banking extension matches them in the realm.
