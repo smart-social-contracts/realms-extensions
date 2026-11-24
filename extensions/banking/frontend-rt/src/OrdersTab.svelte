@@ -3,7 +3,7 @@
 	// reference as the receipt), and what the statements booked. Opening one shows the per-person list read from the
 	// committed file, for the second signatory to compare with the e-banking screen before signing.
 	import type { Env } from './env';
-	import { errorText, money, saveFile } from './env';
+	import { errorText, money } from './env';
 	import { printIban } from './lib/iban';
 	import { confirmAtBank, openSealed, sha256Hex, type Dispatch, type Doc, type OrderFacts } from './lib/realm';
 	import { readOrderFile, type FileSummary } from './lib/review';
@@ -65,7 +65,7 @@
 	<div class="bk-actions">
 		<button type="button" onclick={() => (open = null)}>← All orders</button>
 		<button type="button" onclick={() => window.print()}>Print</button>
-		<button type="button" disabled={!open.hashOk} onclick={() => saveFile(`${facts.message_id}.xml`, open!.file)}>Download again</button>
+		<button type="button" disabled={!open.hashOk} onclick={() => env.save(`${facts.message_id}.xml`, open!.file).catch((e) => env.notify('error', errorText(e)))}>Download again</button>
 	</div>
 	<h3>Check before signing: {facts.message_id}</h3>
 	<p class:bk-ok={open.hashOk} class:bk-error={!open.hashOk}>

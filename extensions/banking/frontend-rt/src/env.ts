@@ -16,19 +16,10 @@ export interface Env {
 	language: string;
 	notify: (level: 'success' | 'info' | 'warning' | 'error', message: string) => void;
 	version: string;
-}
-
-/** Hand ``text`` to the browser as a file to save. In the realm's page a download needs nothing more; a sandboxed
- * frame would ask the host to save it (the frame may not start a download). */
-export function saveFile(name: string, text: string, type = 'application/xml') {
-	const url = URL.createObjectURL(new Blob([text], { type }));
-	const a = document.createElement('a');
-	a.href = url;
-	a.download = name;
-	document.body.appendChild(a);
-	a.click();
-	a.remove();
-	setTimeout(() => URL.revokeObjectURL(url), 1000);
+	/** Hand ``text`` to the member as a file to save. The frame may not start a download: the realm's page saves it,
+	 * once Banking's backend confirms the file may leave (``download_allowed``: an order committed for the bank names
+	 * its sha256). Rejects otherwise. */
+	save: (name: string, text: string, type?: string) => Promise<void>;
 }
 
 export function errorText(e: unknown): string {

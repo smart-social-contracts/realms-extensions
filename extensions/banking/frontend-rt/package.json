@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node ../../_shared/frontend-rt/postbuild-stub.mjs",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/lib/*.test.ts"
+  },
+  "dependencies": {
+    "@realmsgos/extension-bridge": "file:../../../../packages/extension-bridge"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

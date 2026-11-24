@@ -1,10 +1,8 @@
-// The one place the Banking screen touches keys and the plaintext of an encrypted record. Bank details (IBAN, name at
-// the bank, postal address) and the files that carry them are sealed for the treasury's staff and opened only here.
+// The one place the Banking screen touches the plaintext of an encrypted record. Bank details (IBAN, name at the bank,
+// postal address) and the files that carry them are sealed for the treasury's staff and opened only here.
 //
-// Today the screen runs in the realm's page and this is the host's ``ctx.crypto``, which derives the caller's vetKey
-// in the page. If the extension is sandboxed, these two calls become host capabilities instead ("seal for these
-// principals", "open this document for me"), so that the user's vetKey never enters the frame: swap ``hostVault`` for
-// a bridge client and nothing else in the extension changes.
+// The screen runs in a sandboxed frame and holds no key: the realm's page seals and opens records for it (the bridge's
+// capability ``vault``), with the member's vetKey, which never enters the frame.
 
 export interface Sealed {
 	ciphertext: string;
@@ -19,20 +17,24 @@ export interface Vault {
 	open<T>(wrappedKey: string, ciphertext: string): Promise<T | null>;
 }
 
-export class VaultUnavailable extends Error {}
+/** ``data`` as plain JSON: what crosses to the host is copied by ``postMessage``, which cannot copy the screen's reactive
+ * state (Svelte's proxies), and what the realm stores is JSON anyway. */
+export function plain<T>(data: T): T {
+	return data === undefined ? data : JSON.parse(JSON.stringify(data));
+}
 
-export function hostVault(ctx: any): Vault {
-	const crypto = ctx?.crypto;
+/** The host's vault, through the bridge client of the sandboxed frame. */
+export function bridgeVault(client: {
+	vault: { seal(recipients: string[], data: unknown): Promise<Sealed>; open(wrappedKey: string, ciphertext: string): Promise<unknown> };
+}): Vault {
 	return {
 		async seal(recipients, data) {
-			if (typeof crypto?.encryptForRecipients !== 'function') throw new VaultUnavailable('this realm offers no encryption');
-			const plan = await crypto.encryptForRecipients([...new Set(recipients)], data);
-			return { ciphertext: plan.ciphertext, keys: plan.wrappedDeks };
+			const sealed = await client.vault.seal([...new Set(recipients)], plain(data));
+			return { ciphertext: sealed.ciphertext, keys: sealed.keys };
 		},
 		async open<T>(wrappedKey: string, ciphertext: string) {
 			if (!wrappedKey) return null;
-			if (typeof crypto?.decryptWithEnvelope !== 'function') throw new VaultUnavailable('this realm offers no encryption');
-			return (await crypto.decryptWithEnvelope(wrappedKey, ciphertext)) as T | null;
+			return ((await client.vault.open(wrappedKey, ciphertext)) ?? null) as T | null;
 		},
 	};
 }
