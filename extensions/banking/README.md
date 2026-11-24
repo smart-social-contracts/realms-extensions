@@ -46,6 +46,13 @@ What each route attests is not the same. A file the realm writes comes from the 
 file from the ERP is a byte sequence the realm was shown and approved: the realm vouches that this exact file was
 approved, and that its known payees are paid to their registered accounts, not that the rest derives from its records.
 
+The known-payee check matches payees by name, so it raises the cost of tampering without closing it: a file that
+changes a known payee's name and IBAN together lands among the payees "only in the ERP" and raises nothing. No check
+inside the file can close that, since whoever wrote the file controls every field in it. Two controls do: the second
+signatory comparing the per-person list with what they expect before voting, and a strict mode (not built yet) in which
+every payee must match the register or the file is refused. Strict mode fits payroll, whose payees are a closed set,
+and would be wrong for supplier runs, so it belongs as an option per file, not as the default.
+
 **Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
 identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments
 to payees, and the statements bring each collection back as collected, booked as a group, or returned.
