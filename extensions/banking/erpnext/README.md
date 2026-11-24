@@ -28,6 +28,10 @@ sequenceDiagram
    then attaches the file to the run: *Approved: file ready*. Rejected, withdrawn or expired: *Rejected by the realm*,
    and no file is ever written.
 
+A run in ERPNext after the realm approved it: the votes, the dispatch to the bank, the committed sha256 and the file.
+
+![A payment run in ERPNext, approved by the realm](../docs/erpnext-run.png)
+
 The realm needs no change: the approval is an ordinary department motion, and the commitment an ordinary dispatch to
 the outside body `bank` (Realms GOS reaches outside bodies only through such dispatches, `api/external.py`, I-EXT-6).
 
