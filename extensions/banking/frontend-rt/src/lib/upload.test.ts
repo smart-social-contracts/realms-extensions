@@ -48,6 +48,16 @@ describe('a file from the ERP', () => {
 		}
 	});
 
+	it("refuses a known payee paid to another IBAN, and only counts payees the register doesn't know", () => {
+		const known: Register = { account: SWISS_ORDER.debtor, payees: [{ id: 'P1', name: 'Ada Example', iban: 'CH58 0079 1123 0008 8901 2' }] };
+		const check = checkFile(file, known, [], sha(file));
+		assert.ok(check.problems.some((p) => /Ada Example is in the realm's register with IBAN CH5800791123000889012, but the file pays CH5604835012345678009/.test(p.message)));
+		const same: Register = { account: SWISS_ORDER.debtor, payees: [{ id: 'P1', name: 'ada  example', iban: 'CH5604835012345678009' }] };
+		const ok = checkFile(file, same, [], sha(file));
+		assert.deepEqual([ok.problems, ok.known], [[], 1]);
+		assert.equal(checkFile(file, register, [], sha(file)).known, 0, 'payees only in the ERP are no problem');
+	});
+
 	it("warns when the file pays from another account than the realm's", () => {
 		const other: Register = { account: { ...SWISS_ORDER.debtor, iban: 'CH5800791123000889012' }, payees: [] };
 		assert.match(checkFile(file, other, [], sha(file)).warnings[0], /not the realm's account in the register/);

@@ -39,7 +39,12 @@ account it pays from, and that the bank has not seen its message id or the file.
 a motion in the treasury department (ids, amounts and the file's sha256, never a name or an account) and keeps the file
 encrypted. Once the department's seats approve it, *Commit for the bank* records its hash in the bank's outbox, naming
 the motion. *Verify a file* then tells anyone whether a file, from the ERP or from the e-banking's upload screen, is the
-one the realm approved. No ERP needs a connector for this: any ERP that exports pain.001 works.
+one the realm approved. No ERP needs a connector for this: any ERP that exports pain.001 works. Where a payee of the
+file is also in the realm's register, the file must pay that payee's registered IBAN, or it cannot go to the vote.
+
+What each route attests is not the same. A file the realm writes comes from the realm's own register and records. A
+file from the ERP is a byte sequence the realm was shown and approved: the realm vouches that this exact file was
+approved, and that its known payees are paid to their registered accounts, not that the rest derives from its records.
 
 **Collections.** The same flow collects by direct debit (`pain.008`): the register keeps the realm's SEPA creditor
 identifier (or PostFinance RS-PID) and each payer's mandate, an order is a collection from payers instead of payments

@@ -87,6 +87,10 @@
 					control sum {s.controlSum}. Message {s.messageId} ({picked.check.message}).
 				</p>
 				<p class="bk-muted bk-mono">sha256 {picked.sha}</p>
+				<p class="bk-muted">
+					{picked.check.known} of {s.lines.length} {s.kind === 'payment' ? 'payees' : 'payers'} are in the realm's register and
+					match it; the others are only in the ERP.
+				</p>
 				<FileLines summary={s} />
 			{/if}
 			{#if picked.check.problems.length}
