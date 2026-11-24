@@ -6,5 +6,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 python3 -m unittest discover -s tests -p 'test_backend.py'
+# The screen builds against realms-gos' bridge (packages/extension-bridge), where frontend-rt/package.json looks for it:
+# one level above this repository, as when it is realms-gos' extensions submodule. Elsewhere, REALMS_GOS names a
+# realms-gos checkout with the sandbox capabilities (branch cto/sandbox-vault-download or later), linked there.
+BRIDGE="$(cd ../../.. && pwd)/packages/extension-bridge"
+if [ ! -f "$BRIDGE/package.json" ]; then
+  [ -n "${REALMS_GOS:-}" ] || { echo "run_tests.sh: set REALMS_GOS to a realms-gos checkout (for packages/extension-bridge)" >&2; exit 1; }
+  mkdir -p "$(dirname "$BRIDGE")" && ln -sfn "$REALMS_GOS/packages/extension-bridge" "$BRIDGE"
+fi
+[ -f "$BRIDGE/dist/index.js" ] || (cd "$BRIDGE" && npm install --no-audit --no-fund --silent && npm run build)
 (cd frontend-rt && npm install --no-audit --no-fund --silent && npm test && npm run build)
 bash tests/xsd/check.sh

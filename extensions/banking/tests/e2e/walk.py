@@ -14,8 +14,9 @@ joins it as an ordinary member if it is not one.
 2. Identity 2, the second signatory, opens the order: the per-person list decrypts for them.
 3. Identity 1 imports the sample pain.002, which marks the order accepted, and the sample camt.053: the salary group
    matches as one entry, the QR-bill by its id. Then a SEPA direct debit is committed from a payee's mandate.
-4. Identity 3 is refused: the screen says so, and the realm refuses a document_list of the treasury as a non-staff
-   caller (the CLI's identity) even though it holds every permission.
+4. Identity 3 is refused: the realm refuses its call of Banking's backend and the realm's page says so, and the realm
+   refuses a document_list of the treasury as a non-staff caller (the CLI's identity) even though it holds every
+   permission.
 """
 import hashlib
 import json
@@ -132,9 +133,14 @@ with sync_playwright() as p:
     # What anyone with realm.monitor reads in the audit log: the register stored as ciphertext without its wrapped
     # keys, and the order's dispatch to the bank naming the file's sha256 (the order's own document_store is too large
     # for the log to keep its arguments; its facts are on the document, which only the staff read).
+    # The screen called Banking's backend (extension_call, as the member); the operations are the backend's, marked
+    # origin "extension". A call too large to keep is logged by its field names only.
     events = realm("events", {"count": 60})["events"]
-    register = next(e for e in events if e["op"] == "document_store" and e["args"].get("kind") == "banking.register")
-    assert "keys" not in register["args"], "the wrapped keys reached the audit log"
+    stores = [e for e in events if e["op"] == "document_store"]
+    assert stores and all(e.get("origin") == "extension" for e in stores), "a document was stored other than by the backend"
+    for e in stores:
+        fields = e["args"]["keys"] if set(e["args"]) == {"keys"} and isinstance(e["args"]["keys"], list) else list(e["args"])
+        assert "keys" not in fields, "the wrapped keys reached the audit log"
     logged = json.dumps([e["args"] for e in events])
     for clear in ("CH5604835012345678009", "Ada Example", "Zürich", "Z\\u00fcrich"):
         assert clear not in logged, f"{clear} is in the audit log"
@@ -143,6 +149,17 @@ with sync_playwright() as p:
     sha = hashlib.sha256(file.read_bytes()).hexdigest()
     print("downloaded", file.name, "sha256", sha[:16], "| dispatch:", sent["args"]["title"][:60])
     assert sent["args"]["title"].endswith(f"sha256:{sha}"), "the downloaded file is not the committed one"
+
+    # The frame cannot hand out a file the realm has not recorded: asked to save one, the host asks Banking's backend
+    # (download_allowed) and refuses.
+    frame = next(f for f in page.frames if "/ext/banking/" in f.url)
+    reply = frame.evaluate("""() => new Promise((resolve) => {
+        addEventListener('message', (e) => { if (e.data && e.data.id === 990001) resolve(e.data); });
+        parent.postMessage({ source: 'realm-bridge', kind: 'save_file', id: 990001, name: 'forged.xml',
+                             mimeType: 'application/xml', content: '<Document>not committed</Document>' }, '*');
+    })""")
+    assert reply["kind"] == "error" and reply["error"]["code"] == "denied", reply
+    print("an uncommitted file is refused:", reply["error"]["message"][:100])
     page.close()
 
     # 2. The second signatory: the per-person list decrypts for them.
@@ -214,8 +231,15 @@ with sync_playwright() as p:
     page.close()
 
     # 4. Refusals.
-    page = signed_in(browser, 3)
-    expect(ui(page).get_by_text("Banking is for the treasury's staff")).to_be_visible(timeout=60000)
+    # The realm refuses the backend's first call (extension.call) to a member who is not the treasury's staff, and the
+    # realm's page says so in place of the screen.
+    page = browser.new_context(viewport={"width": 1400, "height": 1000}).new_page()
+    pin = "?ti=2&test_mode=1&skip_ii=1"
+    page.goto(f"{BASE}/join{pin}", wait_until="networkidle", timeout=120000)
+    page.get_by_role("button", name=re.compile(r"^Continue as Identity")).click()
+    page.wait_for_timeout(5000)
+    page.goto(f"{BASE}/extensions/banking{pin}", wait_until="networkidle", timeout=120000)
+    expect(page.get_by_text("You don't have permission to view this")).to_be_visible(timeout=60000)
     page.screenshot(path=str(OUT / "7-refused.png"), full_page=True)
     refused = realm("document_list", {"department": "Treasury", "kind": "banking.register"})
     print("non-staff document_list:", refused)
