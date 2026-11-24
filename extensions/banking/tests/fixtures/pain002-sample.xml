@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A sample status report for the tests: the bank accepted payment order BK-20261124-0001 of samples.ts except its
+     payment abroad, which it rejected for an account number it could not use. -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.002.001.10">
+  <CstmrPmtStsRpt>
+    <GrpHdr>
+      <MsgId>STS-20261125-0001</MsgId>
+      <CreDtTm>2026-11-25T07:30:00+01:00</CreDtTm>
+    </GrpHdr>
+    <OrgnlGrpInfAndSts>
+      <OrgnlMsgId>BK-20261124-0001</OrgnlMsgId>
+      <OrgnlMsgNmId>pain.001.001.09</OrgnlMsgNmId>
+      <OrgnlNbOfTxs>6</OrgnlNbOfTxs>
+      <GrpSts>PART</GrpSts>
+    </OrgnlGrpInfAndSts>
+    <OrgnlPmtInfAndSts>
+      <OrgnlPmtInfId>BK-20261124-0001-5</OrgnlPmtInfId>
+      <PmtInfSts>RJCT</PmtInfSts>
+      <TxInfAndSts>
+        <OrgnlInstrId>BK-20261124-0001-06</OrgnlInstrId>
+        <OrgnlEndToEndId>BK-20261124-0001-06</OrgnlEndToEndId>
+        <TxSts>RJCT</TxSts>
+        <StsRsnInf>
+          <Rsn><Cd>AC01</Cd></Rsn>
+          <AddtlInf>Account identifier invalid or incorrect</AddtlInf>
+        </StsRsnInf>
+      </TxInfAndSts>
+    </OrgnlPmtInfAndSts>
+  </CstmrPmtStsRpt>
+</Document>

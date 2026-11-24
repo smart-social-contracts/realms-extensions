@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A sample intraday account report for the tests: the euro-area realm's account (a published example IBAN) after
+     the SEPA direct debit BK-20261124-0003 of samples.ts. One collection is credited with its details, the one-off
+     group as one entry, a payer has the first one returned, and a credit is still pending. Every name is made up. -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.052.001.08">
+  <BkToCstmrAcctRpt>
+    <GrpHdr>
+      <MsgId>RPT-20261204-0001</MsgId>
+      <CreDtTm>2026-12-04T14:00:00+01:00</CreDtTm>
+    </GrpHdr>
+    <Rpt>
+      <Id>RPT-20261204-0001-1</Id>
+      <CreDtTm>2026-12-04T14:00:00+01:00</CreDtTm>
+      <Acct>
+        <Id><IBAN>DE89370400440532013000</IBAN></Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
+      <Ntry>
+        <Amt Ccy="EUR">120.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-12-04</Dt></BookgDt>
+        <AcctSvcrRef>EXB-20261204-0001</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RDDT</Cd><SubFmlyCd>ESDD</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <PmtInfId>BK-20261124-0003-1</PmtInfId>
+              <EndToEndId>BK-20261124-0003-01</EndToEndId>
+              <MndtId>REALM-MANDATE-0001</MndtId>
+            </Refs>
+            <Amt Ccy="EUR">120.00</Amt>
+            <CdtDbtInd>CRDT</CdtDbtInd>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">45.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-12-04</Dt></BookgDt>
+        <AcctSvcrRef>EXB-20261204-0002</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RDDT</Cd><SubFmlyCd>ESDD</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <Btch>
+            <PmtInfId>BK-20261124-0003-2</PmtInfId>
+            <NbOfTxs>1</NbOfTxs>
+          </Btch>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">120.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts><Cd>BOOK</Cd></Sts>
+        <BookgDt><Dt>2026-12-04</Dt></BookgDt>
+        <AcctSvcrRef>EXB-20261204-0003</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RDDT</Cd><SubFmlyCd>UPDD</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><EndToEndId>BK-20261124-0003-01</EndToEndId></Refs>
+            <Amt Ccy="EUR">120.00</Amt>
+            <CdtDbtInd>DBIT</CdtDbtInd>
+            <RtrInf><Rsn><Cd>MD06</Cd></Rsn></RtrInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">300.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts><Cd>PDNG</Cd></Sts>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+      </Ntry>
+    </Rpt>
+  </BkToCstmrAcctRpt>
+</Document>
