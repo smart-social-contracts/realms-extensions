@@ -1,0 +1,39 @@
+{
+  "name": "banking",
+  "version": "0.1.0",
+  "description": "Pay and be paid through the realm's ordinary bank account: generate the payment file (Swiss Payment Standards or SEPA pain.001) for the e-banking, then import the bank's camt statements to match payments and invoices. For the treasury's staff; bank details stay encrypted.",
+  "author": "Smart Social Contracts",
+  "ggg_api_version": 1,
+  "categories": [
+    "finances"
+  ],
+  "permissions": [],
+  "profiles": [
+    "member",
+    "admin"
+  ],
+  "show_in_sidebar": true,
+  "icon": "receipt",
+  "sidebar_label": {
+    "en": "Banking",
+    "es": "Banca",
+    "de": "Banking",
+    "fr": "Banque",
+    "it": "Banca",
+    "zh-CN": "银行",
+    "ca-valencia": "Banca"
+  },
+  "operations": [
+    "me",
+    "department_chart",
+    "document_list",
+    "document_get",
+    "document_store",
+    "notification_send",
+    "dispatch_list",
+    "dispatch_confirm",
+    "external_list",
+    "external_add",
+    "external_report"
+  ]
+}

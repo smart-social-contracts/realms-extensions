@@ -1,0 +1,41 @@
+name: Banking Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/banking/**'
+      - '.github/workflows/banking-test.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/banking/**'
+      - '.github/workflows/banking-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Set up Java (validates against the SPS schema, which libxml2 cannot compile)
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
+
+    - name: Cache the pinned schemas
+      uses: actions/cache@v4
+      with:
+        path: extensions/banking/tests/xsd/.cache
+        key: banking-xsd-${{ hashFiles('extensions/banking/tests/xsd/check.sh') }}
+
+    - name: Run tests
+      run: bash extensions/banking/run_tests.sh
