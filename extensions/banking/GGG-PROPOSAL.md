@@ -65,7 +65,7 @@ The prototype shows that a realm can pay through an ordinary bank account. It do
 
 - Per-person amounts stay in clear, as transfers are today. Only bank details and statement files are encrypted.
 - No connector, no operator service: the bank is an outside body (GGG domain 10), reached through Dispatches that an
-  operator delivers (`manual`), never by a call from the realm.
+  operator delivers (`manual`). Realms GOS holds that the realm calls no outside body (`api/external.py`, I-EXT-6).
 - Existing transfers, tokens and accounts are untouched; every field above is new and optional.
 
 ## Open questions
