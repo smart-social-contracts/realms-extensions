@@ -1,15 +1,19 @@
 {
   "name": "tax_manager-frontend-rt",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "test": "node --experimental-strip-types --test src/*.test.ts"
+    "build": "vite build && node ../../_shared/frontend-rt/postbuild-stub.mjs"
+  },
+  "dependencies": {
+    "@realmsgos/extension-bridge": "file:../../../../packages/extension-bridge"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tailwindcss/vite": "^4.0.0",
     "svelte": "^5.19.0",
+    "tailwindcss": "^4.0.0",
     "typescript": "^5.4.0",
     "vite": "^6.0.0"
   }

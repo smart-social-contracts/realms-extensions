@@ -110,25 +110,38 @@ one (generic ISO 20022 CGI-MP, a national fixed-width format) is one more entry.
 - **Addresses**: every account in the register needs a structured address with at least a town and a country, which
   SPS and the EPC require since November 2026.
 
-## Running in the page, and what a sandbox would need
+## Behind its own backend, in a sandboxed frame
 
-The screen runs in the realm's page, like vault and department_docs. A sandboxed frame has no `ctx.crypto`, and
-bundling vetKeys into the frame would hand it the user's whole vetKey, which opens everything ever wrapped for them;
-the frame also may not start a download (`allow-downloads` is not in the iframe's sandbox). All decryption therefore goes
-through one interface, `lib/vault.ts`, and the download through `saveFile` in `env.ts`. Sandboxing the extension means
-the host offers these as capabilities and the extension swaps those two:
+The screen runs in a sandboxed iframe (`runtime: sandboxed`) and reaches the realm only through Banking's backend,
+`backend/entry.py`, which the realm runs as the member, in its own sandbox, with only the operations the manifest
+declares. The reads are those operations by their names. The writes are Banking's own functions, so that what the realm
+records holds together whatever the screen does:
 
-- `vault.seal(recipients, data)` → host: seal for these principals;
-- `vault.open(wrappedKey, ciphertext)` → host: open this document for me (the key never enters the frame);
-- `saveFile(name, text)` → host: commit-then-save these bytes. The host would then enforce "the hash is recorded
-  before the file leaves" itself.
+| Function | What it does in one call |
+|---|---|
+| `commit_order` | stores the sealed order with its facts, then sends the dispatch to the bank naming the document and the file's sha256, taken from the order's own facts |
+| `download_allowed` | answers the realm's page before a file leaves the frame: yes only once a dispatch to the bank names the file's sha256 |
+| `save_register` | stores the register, of that kind only, sealed |
+| `import_statement` | stores a bank file, of that kind only, then reports each statement in it |
+| `dispatch_confirm`, `register_bank` | the bank's answer to an order; the bank as an outside body |
 
-The same host capability is a prerequisite for members entering their own bank details from member_dashboard, which
-is sandboxed already.
+A function that fails after it changed the realm traps, and the realm undoes the whole call: an order is never stored
+without its commitment, nor committed without its record.
+
+The frame holds no key and may not start a download. The realm's page does both for it, through the bridge's
+capabilities (realms-gos `cto/sandbox-vault-download`):
+
+- `vault`: the page seals a record for the treasury's staff, or opens one with the key wrapped for the member, with the
+  member's vetKey, which never enters the frame (`lib/vault.ts`);
+- `download`: the page hashes the file, asks the backend `download_allowed`, and saves it only on yes. So a file whose
+  hash the realm has not recorded cannot leave, whatever the frame does (the walk checks a forged one is refused).
+
+What crosses the bridge is a JSON copy (`plain` in `lib/vault.ts`): `postMessage` cannot copy the screen's reactive
+state. The same `vault` capability is what members entering their own bank details from member_dashboard would need.
 
 ## Tests
 
-- `run_tests.sh`: the unit tests (`frontend-rt/src/lib/*.test.ts`: formats, references, camt matching, the encryption
+- `run_tests.sh`: the backend's tests (`tests/test_backend.py`, on a stand-in for the realm's `rpc`), the unit tests (`frontend-rt/src/lib/*.test.ts`: formats, references, camt matching, the encryption
   round trip and permission refusal on an in-memory realm), the build, and `tests/xsd/check.sh`, which validates the
   sample files against the pinned SIX and ISO schemas. The check uses the JDK's validator: libxml2 (`xmllint`) cannot
   compile the SPS schema, whose character-set pattern subtracts a class (`[...-[\p{C}]]`).

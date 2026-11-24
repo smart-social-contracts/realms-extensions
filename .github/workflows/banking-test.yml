@@ -2,12 +2,12 @@ name: Banking Test
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/extensions-behind-backends ]
     paths:
       - 'extensions/banking/**'
       - '.github/workflows/banking-test.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, feat/extensions-behind-backends ]
     paths:
       - 'extensions/banking/**'
       - '.github/workflows/banking-test.yml'
@@ -37,5 +37,10 @@ jobs:
         path: extensions/banking/tests/xsd/.cache
         key: banking-xsd-${{ hashFiles('extensions/banking/tests/xsd/check.sh') }}
 
+    - name: realms-gos, for the sandbox bridge the screen builds against
+      run: git clone --depth 1 --branch cto/sandbox-vault-download https://github.com/smart-social-contracts/realms-gos.git "$RUNNER_TEMP/realms-gos"
+
     - name: Run tests
+      env:
+        REALMS_GOS: ${{ runner.temp }}/realms-gos
       run: bash extensions/banking/run_tests.sh

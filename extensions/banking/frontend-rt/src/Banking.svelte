@@ -9,7 +9,7 @@
 	import BillsTab from './BillsTab.svelte';
 	import { bankDispatches, bankRegistered, KIND, listDocs, loadRegister, realmOf, Refused, registerBank, treasuriesOf,
 		type Dispatch, type Doc, type Register, type Treasury } from './lib/realm';
-	import { hostVault } from './lib/vault';
+	import { bridgeVault } from './lib/vault';
 	import NewOrderTab from './NewOrderTab.svelte';
 	import OrdersTab from './OrdersTab.svelte';
 	import RegisterTab from './RegisterTab.svelte';
@@ -21,9 +21,12 @@
 	// svelte-ignore state_referenced_locally
 	const realm = realmOf(ctx);
 	// svelte-ignore state_referenced_locally
-	const vault = hostVault(ctx);
+	const vault = bridgeVault(ctx.client);
 	const notify = (level: 'success' | 'info' | 'warning' | 'error', message: string) =>
-		typeof ctx.notify === 'function' ? ctx.notify(level, message) : console.info(message);
+		ctx.notify(level === 'warning' ? 'info' : level, message);
+	const save = async (name: string, text: string, type = 'application/xml') => {
+		await ctx.client.saveFile(name, text, { mimeType: type });
+	};
 
 	let me = $state('');
 	let state = $state<'loading' | 'refused' | 'error' | 'ready'>('loading');
@@ -56,7 +59,7 @@
 	});
 
 	const env = $derived<Env | null>(
-		treasury ? { realm, vault, treasury, me, notify, version, language: (ctx.locale ? get(ctx.locale) : null) || 'en' } : null,
+		treasury ? { realm, vault, treasury, me, notify, save, version, language: (ctx.locale ? get(ctx.locale) : null) || 'en' } : null,
 	);
 
 	async function load() {
