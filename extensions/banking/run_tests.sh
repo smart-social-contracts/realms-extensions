@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The Banking extension's checks: the backend's and the screen's unit tests, the screen's build, and the sample files
+# The Banking extension's checks: the backend's and the screen's unit tests, the screen's build, the ERPNext
+# connector's tests, and the sample files
 # against the published schemas
 # (needs Java and network access the first time, to download the pinned XSDs). The walk on a local realm,
 # tests/e2e/walk.py, is run by hand: it needs a running test-mode realm.
@@ -16,4 +17,5 @@ if [ ! -f "$BRIDGE/package.json" ]; then
 fi
 [ -f "$BRIDGE/dist/index.js" ] || (cd "$BRIDGE" && npm install --no-audit --no-fund --silent && npm run build)
 (cd frontend-rt && npm install --no-audit --no-fund --silent && npm test && npm run build)
+(cd erpnext && npm install --no-audit --no-fund --silent && npm test)
 bash tests/xsd/check.sh
