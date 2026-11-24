@@ -46,6 +46,13 @@ npm start
 
 `npm test` runs the steps on an in-memory ERPNext and realm.
 
+## A policy with no spare approver
+
+The demo realm's Treasury approves 2 of 2, with both seats filled. That has no margin: in Realms GOS a department's own
+policy governs its seating (`appoint`) and its policy (`department_set_policy`), so once fewer seat holders remain than
+the policy needs, the department can no longer seat anyone or lower its threshold. agora's Economy department on the
+same local realm is already stuck that way (2 of 3, no seat filled). A real treasury wants m below its seats, e.g. 2 of 3.
+
 ## What it is not (yet)
 
 - A demo: one polling process with an API key, not a Frappe app. A real deployment would run as a Frappe app or a
