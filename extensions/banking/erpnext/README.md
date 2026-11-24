@@ -49,10 +49,17 @@ npm start
 
 ## A policy with no spare approver
 
-The demo realm's Treasury approves 2 of 2, with both seats filled. That has no margin: in Realms GOS a department's own
-policy governs its seating (`appoint`) and its policy (`department_set_policy`), so once fewer seat holders remain than
-the policy needs, the department can no longer seat anyone or lower its threshold. agora's Economy department on the
-same local realm is already stuck that way (2 of 3, no seat filled). A real treasury wants m below its seats, e.g. 2 of 3.
+The demo realm's Treasury approves 2 of 2, with both seats filled. That has no margin. In realms-gos `api/orgs.py`
+every route out of a stuck department is governed by that same department: seating and unseating (`appoint`,
+`appoint_acting`, `appointment_end`), positions (`position_create`, `position_edit`, `position_close`), its policy
+(`department_set_policy`) and its details (`department_edit`). The one exception, `department_delete`, is decided by the
+parent, but only once every position is closed, and closing one is the department's own decision again. So a
+department that falls below its threshold cannot be staffed, re-ruled or deleted. (This is every path in `api/orgs.py`;
+the rest of the backend was not audited for an override.)
+
+The rule that follows: **a department whose own policy governs its seating must keep a margin above its threshold.**
+2 of 2 has none; 2 of 3 with no seat filled has none either, which is why agora's Economy department on the same local
+realm was stuck from the moment it was installed. A real treasury wants something like 2 of 3 with all three seated.
 
 ## What it is not (yet)
 
