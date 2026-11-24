@@ -3,9 +3,11 @@ import { decimalsOf } from './lib/order.ts';
 import type { Realm, Treasury } from './lib/realm.ts';
 import type { Vault } from './lib/vault.ts';
 
-/** A bank account as its form holds it, every field text. */
+/** A bank account as its form holds it, every field text. ``iban`` where the account's country numbers accounts by
+ * IBAN; otherwise ``number`` and the bank's clearing ``code`` (lib/countries.ts). */
 export type AccountForm = {
-	name: string; iban: string; bic: string; street: string; building: string; postCode: string; town: string; country: string;
+	name: string; iban: string; number: string; code: string; bic: string;
+	street: string; building: string; postCode: string; town: string; country: string;
 };
 
 export interface Env {

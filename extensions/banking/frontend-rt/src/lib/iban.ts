@@ -28,6 +28,11 @@ export function compactIban(text: string): string {
 	return text.replace(/\s+/g, '').toUpperCase();
 }
 
+/** An account id as a person reads it: an IBAN in groups of four, any other account number as it is. */
+export function printAccount(id: string): string {
+	return /^[A-Z]{2}\d{2}[A-Z0-9]{8,}$/.test(compactIban(id)) ? printIban(id) : id;
+}
+
 /** The IBAN in groups of four, the way a bank prints it. */
 export function printIban(iban: string): string {
 	return compactIban(iban).replace(/(.{4})(?=.)/g, '$1 ');

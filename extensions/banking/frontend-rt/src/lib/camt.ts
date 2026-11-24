@@ -76,7 +76,10 @@ function transactionOf(tx: XmlNode, entry: { amount: number; currency: string; d
 		currency: own.currency,
 		reference: strd.map((s) => textAt(s, 'CdtrRefInf/Ref')).find(Boolean) ?? '',
 		note: findAll(tx, 'RmtInf/Ustrd').map((u) => u.text.trim()).join(' '),
-		counterparty: { name: partyName(find(parties, side)), iban: textAt(parties, `${side}Acct/Id/IBAN`) },
+		counterparty: {
+			name: partyName(find(parties, side)),
+			iban: textAt(parties, `${side}Acct/Id/IBAN`) || textAt(parties, `${side}Acct/Id/Othr/Id`),
+		},
 	};
 }
 
@@ -124,7 +127,7 @@ export function statementsOf(root: XmlNode): Statement[] {
 		messageId: textAt(message, 'GrpHdr/MsgId'),
 		id: textAt(r, 'Id'),
 		createdAt: textAt(r, 'CreDtTm') || textAt(message, 'GrpHdr/CreDtTm'),
-		account: { iban: textAt(r, 'Acct/Id/IBAN'), currency: textAt(r, 'Acct/Ccy') },
+		account: { iban: textAt(r, 'Acct/Id/IBAN') || textAt(r, 'Acct/Id/Othr/Id'), currency: textAt(r, 'Acct/Ccy') },
 		entries: findAll(r, 'Ntry').map(entryOf),
 	}));
 }

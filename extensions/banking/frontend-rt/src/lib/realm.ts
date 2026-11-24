@@ -13,6 +13,8 @@ import type { Mandate } from './collection.ts';
 import type { Account } from './order.ts';
 import type { Match } from './match.ts';
 import { plain, type Vault } from './vault.ts';
+import { countryOf } from './countries.ts';
+import { ibanCountry } from './iban.ts';
 
 export const KIND = { register: 'banking.register', order: 'banking.order', statement: 'banking.statement' } as const;
 /** The outside body the realm's payment orders go to. */
@@ -143,10 +145,27 @@ export interface RealmAccount extends Account {
 	rsPid?: string;
 }
 
+/** The realm's banking profile: the country of its bank and the currency it pays in by default. */
+export interface BankingProfile {
+	country: string;
+	currency: string;
+}
+
 export interface Register {
 	/** The realm's own account the orders pay from and the collections are credited to. */
 	account: RealmAccount | null;
 	payees: Payee[];
+	/** Absent in a register saved before profiles: taken from the realm's account then. */
+	profile?: BankingProfile;
+}
+
+/** The register's profile, or the one its account implies (its country, that country's currency); Switzerland when
+ * there is no account yet. */
+export function profileOf(register: Register | null): BankingProfile {
+	if (register?.profile?.country) return register.profile;
+	const a = register?.account;
+	const country = (a?.local ? a.address?.country : a?.iban ? ibanCountry(a.iban) : a?.address?.country) || 'CH';
+	return { country, currency: countryOf(country).currency || 'EUR' };
 }
 
 export const EMPTY_REGISTER: Register = { account: null, payees: [] };

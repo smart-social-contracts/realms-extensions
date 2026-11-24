@@ -7,14 +7,14 @@
 	import { collectionOf, createdAt, defaultFormat, factsOf, nextMessageId, orderOf, type Draft, type DraftLine } from './lib/compose';
 	import { COLLECTION_FORMATS, collectionFormatById, FORMATS, formatById } from './lib/formats';
 	import type { Problem } from './lib/order';
-	import { commitOrder, sha256Hex, type Doc, type OrderFacts, type Register } from './lib/realm';
+	import { commitOrder, profileOf, sha256Hex, type Doc, type OrderFacts, type Register } from './lib/realm';
 
 	let { env, register, orders, oncommitted }: { env: Env; register: Register; orders: Doc[]; oncommitted: (doc: string) => void } =
 		$props();
 
 	const software = () => ({ name: 'Realms Banking', version: env.version });
 	const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
-	const currency = () => (register.account?.iban.startsWith('CH') || register.account?.iban.startsWith('LI') ? 'CHF' : 'EUR');
+	const currency = () => profileOf(register).currency;
 	const blankLine = (): DraftLine => ({
 		payee: '', amount: '', currency: currency(), salary: false, sequence: 'OOFF', referenceKind: '', reference: '', note: '',
 	});
@@ -25,7 +25,7 @@
 	// svelte-ignore state_referenced_locally
 	let payFormat = $state(defaultFormat(register));
 	// svelte-ignore state_referenced_locally
-	let collectFormat = $state(currency() === 'CHF' ? 'ch-dd' : 'sepa-dd-2025');
+	let collectFormat = $state(['CH', 'LI'].includes(profileOf(register).country) ? 'ch-dd' : 'sepa-dd-2025');
 	let committing = $state(false);
 
 	/** The order as it would be committed now: its id, every problem with it, and, when it can be written, its file and
