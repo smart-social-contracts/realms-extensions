@@ -4,7 +4,7 @@
 	// paid.
 	import { SwissQRBill } from 'swissqrbill/svg';
 	import type { Env } from './env';
-	import { errorText, money, saveFile } from './env';
+	import { errorText, money } from './env';
 	import { billProblems, nextBillId, qrDataOf, referenceOfBill, type Bill } from './lib/bill';
 	import { parseAmount } from './lib/order';
 	import { openSealed, storeBill, type BillFacts, type Doc, type Register } from './lib/realm';
@@ -135,7 +135,7 @@
 			<!-- As an image, not inline markup: the SVG holds names typed by people, and an image runs no code. -->
 			<div class="bk-bill"><img alt="QR-bill {shown.bill.id}" src={'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(shown.svg)} /></div>
 			<div class="bk-actions">
-				<button type="button" onclick={() => saveFile(`${shown!.bill.id}.svg`, shown!.svg, 'image/svg+xml')}>Download</button>
+				<button type="button" onclick={() => env.save(`${shown!.bill.id}.svg`, shown!.svg, 'image/svg+xml').catch((e) => env.notify('error', errorText(e)))}>Download</button>
 				<button type="button" onclick={() => printable(shown!.svg)}>Open to print</button>
 				<button type="button" onclick={() => (shown = null)}>Close</button>
 			</div>

@@ -20,6 +20,7 @@ class Realm:
         self.calls = []
         self.fail = set(fail)
         self.dispatches = []
+        self.bills = []
 
     def rpc(self, action, **args):  # as the realm's sandbox gives it: rpc(action, **kw)
         if action not in MANIFEST["operations"]:
@@ -34,6 +35,12 @@ class Realm:
             return {"ok": True, "dispatch": "DSP-1"}
         if action == "dispatch_list":
             return {"ok": True, "dispatches": self.dispatches, "next": None}
+        if action == "department_chart":
+            return {"ok": True, "chart": {"department": "Administration", "children": [{"department": "Treasury", "children": []}]}}
+        if action == "document_list":
+            if args.get("department") != "Treasury":
+                return {"ok": False, "error": "only " + str(args.get("department")) + "'s staff manage its documents"}
+            return {"ok": True, "documents": self.bills, "next": None}
         return {"ok": True}
 
 
@@ -95,6 +102,25 @@ class DownloadAllowed(unittest.TestCase):
         realm = Realm()
         realm.dispatches.append({"id": "DSP-9", "topic": "banking.status", "title": "x sha256:" + SHA})
         self.assertFalse(backend(realm)["download_allowed"]("M1.xml", SHA, 10)["allowed"])
+
+
+class Bills(unittest.TestCase):
+    def bill(self, **facts):
+        return {**order(), "kind": "banking.bill", "facts": {"bill": "BILL-1", "reference": "RF18539007547034", **facts}}
+
+    def test_keeps_a_bill_of_its_own_kind_with_its_id(self):
+        realm = Realm()
+        self.assertEqual(backend(realm)["save_bill"](**self.bill()), {"ok": True, "document": "DOC-1"})
+        with self.assertRaises(ValueError):
+            backend(realm)["save_bill"](**self.bill(bill="something"))
+
+    def test_a_qr_bill_leaves_once_the_bill_is_kept_in_a_department_of_the_members(self):
+        realm = Realm()
+        fns = backend(realm)
+        self.assertFalse(fns["download_allowed"]("BILL-1.svg", SHA, 10)["allowed"])
+        realm.bills.append({"id": "DOC-1", "facts": {"bill": "BILL-1"}})
+        self.assertTrue(fns["download_allowed"]("BILL-1.svg", SHA, 10)["allowed"])
+        self.assertFalse(fns["download_allowed"]("BILL-2.svg", SHA, 10)["allowed"])
 
 
 class OtherWrites(unittest.TestCase):

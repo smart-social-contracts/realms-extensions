@@ -282,12 +282,14 @@ export interface BillFacts {
 	invoice: string;
 }
 
-/** Keep an issued bill: who is billed, encrypted for the treasury's staff; its id, amount and reference in clear. */
-export function storeBill(realm: Realm, vault: Vault, treasury: Treasury, me: string, bill: Bill, reference: string, language: string) {
+/** Keep an issued bill (``save_bill``): who is billed, encrypted for the treasury's staff; its id, amount and reference
+ * in clear. Once it is kept, the member may save its QR-bill. */
+export async function storeBill(realm: Realm, vault: Vault, treasury: Treasury, me: string, bill: Bill, reference: string, language: string) {
 	const facts: BillFacts = {
 		bill: bill.id, amount: bill.amount ?? null, currency: bill.currency, reference, due: bill.dueDate ?? '', invoice: bill.invoice ?? '',
 	};
-	return storeSealed(realm, vault, treasury, me, {
+	const document = await sealedDocument(vault, treasury, me, {
 		kind: KIND.bill, title: `Bill ${bill.id}`, language, data: bill, facts: facts as unknown as Record<string, unknown>,
 	});
+	return String((await realm.run('save_bill', document)).document);
 }
