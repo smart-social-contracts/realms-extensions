@@ -183,3 +183,47 @@ export const CHDD_ORDER: CollectionOrder = {
 		},
 	],
 };
+
+/** A realm whose bank is in the United States, paying by the generic ISO file (CGI-MP) to accounts with and without
+ * IBANs: by ABA routing number in the US, Canadian transit, BSB and IFSC, and an IBAN in the UK. Every routing number,
+ * BSB, IFSC and account number here is made up so that no bank has it (ABA numbers starting 98, which no Federal Reserve
+ * district uses; BSB 000; the IFSC bank code EXMP; the institution 999), and the IBAN is the SWIFT registry's example. */
+export const WORLD_ORDER: PaymentOrder = {
+	messageId: 'BK-20261124-0101',
+	createdAt: '2026-11-24T13:05:00+00:00',
+	executionDate: '2026-11-27',
+	software: SOFTWARE,
+	debtor: {
+		name: 'Example Realm Association',
+		iban: '',
+		local: { system: 'USABA', code: '981234568', number: '000123456789' },
+		address: { street: 'Example Street', building: '1', postCode: '10001', town: 'New York', country: 'US' },
+	},
+	lines: [
+		{
+			id: 'BK-20261124-0101-01', payee: { name: 'Ada Example', iban: '', local: { system: 'USABA', code: '987654320', number: '4400123456' },
+				address: { town: 'Boston', country: 'US' } },
+			amount: 250_000, currency: 'USD', salary: true, note: 'Salary November 2026',
+		},
+		{
+			id: 'BK-20261124-0101-02', payee: { name: 'Bruno Sample', iban: '', local: { system: 'CACPA', code: '12345-999', number: '1234567' },
+				bic: 'EXMPCAT1XXX', address: { town: 'Toronto', country: 'CA' } },
+			amount: 120_000, currency: 'CAD', note: 'Translation services',
+		},
+		{
+			id: 'BK-20261124-0101-03', payee: { name: 'Example Printing Pty', iban: '', local: { system: 'AUBSB', code: '000-123', number: '12345678' },
+				bic: 'EXMPAU2SXXX', address: { town: 'Sydney', country: 'AU' } },
+			amount: 89_900, currency: 'AUD',
+		},
+		{
+			id: 'BK-20261124-0101-04', payee: { name: 'Example Software Pvt', iban: '', local: { system: 'INFSC', code: 'EXMP0001234', number: '123456789012' },
+				bic: 'EXMPINBBXXX', address: { town: 'Pune', country: 'IN' } },
+			amount: 5_000_000, currency: 'INR', note: 'Invoice 2026-118',
+		},
+		{
+			id: 'BK-20261124-0101-05', payee: { name: 'Example Studio Ltd', iban: 'GB29 NWBK 6016 1331 9268 19', bic: 'NWBKGB2L',
+				address: { town: 'London', country: 'GB' } },
+			amount: 45_000, currency: 'GBP', reference: { kind: 'SCOR', value: 'RF18539007547034' },
+		},
+	],
+};

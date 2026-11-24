@@ -12,7 +12,9 @@ export interface FileLine {
 	executionDate: string;
 	id: string;
 	name: string;
+	/** The account's IBAN, or its number at the bank where it has none (an "other" id). */
 	iban: string;
+	/** The bank's BIC, or its clearing code ("USABA 981234568") where the file names it so. */
 	bic: string;
 	/** As the file writes it: "4200.00". */
 	amount: string;
@@ -53,8 +55,9 @@ export function readOrderFile(xml: string): FileSummary {
 				executionDate: textAt(g, 'ReqdExctnDt/Dt') || textAt(g, 'ReqdColltnDt'),
 				id: textAt(t, 'PmtId/EndToEndId'),
 				name: textAt(t, `${party}/Nm`),
-				iban: textAt(t, `${party}Acct/Id/IBAN`),
-				bic: textAt(t, `${party}Agt/FinInstnId/BICFI`),
+				iban: textAt(t, `${party}Acct/Id/IBAN`) || textAt(t, `${party}Acct/Id/Othr/Id`),
+				bic: textAt(t, `${party}Agt/FinInstnId/BICFI`) || [textAt(t, `${party}Agt/FinInstnId/ClrSysMmbId/ClrSysId/Cd`),
+					textAt(t, `${party}Agt/FinInstnId/ClrSysMmbId/MmbId`)].filter(Boolean).join(' '),
 				amount: amount?.text.trim() ?? '',
 				currency: amount?.attrs.Ccy ?? '',
 				reference: textAt(t, 'RmtInf/Strd/CdtrRefInf/Ref'),
@@ -68,7 +71,10 @@ export function readOrderFile(xml: string): FileSummary {
 		kind: payments ? 'payment' : 'collection',
 		messageId: textAt(root, 'GrpHdr/MsgId'),
 		createdAt: textAt(root, 'GrpHdr/CreDtTm'),
-		account: { name: textAt(groups[0], `${own}/Nm`), iban: textAt(groups[0], `${own}Acct/Id/IBAN`) },
+		account: {
+			name: textAt(groups[0], `${own}/Nm`),
+			iban: textAt(groups[0], `${own}Acct/Id/IBAN`) || textAt(groups[0], `${own}Acct/Id/Othr/Id`),
+		},
 		lines,
 		count: Number(textAt(root, 'GrpHdr/NbOfTxs')),
 		controlSum: textAt(root, 'GrpHdr/CtrlSum'),
