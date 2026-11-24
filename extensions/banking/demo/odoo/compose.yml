@@ -1,0 +1,30 @@
+# Odoo 18 Community and the OCA modules for the Banking demo (up.sh sets OCA_DIR and ODOO_PORT). Database "realms".
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+  odoo:
+    build: .
+    depends_on: [db]
+    ports:
+      - "127.0.0.1:${ODOO_PORT:-8069}:8069"
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: odoo
+    volumes:
+      - odoo-data:/var/lib/odoo
+      - ${OCA_DIR:?}/bank-payment:/mnt/oca/bank-payment:ro
+      - ${OCA_DIR:?}/l10n-switzerland:/mnt/oca/l10n-switzerland:ro
+      - ${OCA_DIR:?}/server-ux:/mnt/oca/server-ux:ro
+    command: >
+      odoo --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/oca/bank-payment,/mnt/oca/l10n-switzerland,/mnt/oca/server-ux
+      --db-filter=^realms$$ --without-demo=all
+volumes:
+  db-data:
+  odoo-data:

@@ -16,5 +16,8 @@ npm start -- erpnext     # or: npm start -- odoo      (settings in .env; --once 
 npm test                 # both connectors on an in-memory ERP and realm
 ```
 
+[`../demo/up.sh`](../demo/up.sh) starts both ERPs, a local realm and both connectors, set up and ready to try: see
+*Try it on your machine* in the [Banking README](../README.md#try-it-on-your-machine).
+
 The connector is a member of the realm with `notification.send`, under its own key (`REALM_IDENTITY`, a path outside the
 repository); the realm's treasury department decides under its own policy. See the README of each ERP for its setup.

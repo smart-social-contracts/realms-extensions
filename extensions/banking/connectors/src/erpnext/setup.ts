@@ -3,13 +3,15 @@
 // invoices, and one payment run in Draft. Every IBAN is a published documentation example; every name is made up.
 // Safe to run again: what exists is left as it is.
 //
-//   npm run setup-erpnext        (reads ERPNEXT_URL, ERPNEXT_KEY, ERPNEXT_SECRET from .env)
+//   npm run setup-erpnext        (ERPNEXT_URL, ERPNEXT_KEY, ERPNEXT_SECRET from .env or the environment, which wins)
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
-const env = Object.fromEntries(
-	readFileSync(new URL('../../.env', import.meta.url), 'utf8').split('\n').filter((l) => /^[A-Z_]+=/.test(l)).map((l) => l.split(/=(.*)/s)),
-);
+const file = new URL('../../.env', import.meta.url);
+const env: Record<string, string> = {
+	...Object.fromEntries((existsSync(file) ? readFileSync(file, 'utf8') : '').split('\n').filter((l) => /^[A-Z_]+=/.test(l)).map((l) => l.split(/=(.*)/s))),
+	...(process.env as Record<string, string>),
+};
 const BASE = env.ERPNEXT_URL.replace(/\/$/, '');
 const AUTH = { Authorization: `token ${env.ERPNEXT_KEY}:${env.ERPNEXT_SECRET}` };
 
