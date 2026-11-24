@@ -36,7 +36,8 @@ collections, returned payments and paid invoices; anything else goes on a review
 
 ![Orders](docs/orders.png)
 
-Anyone else is refused, by the realm as well as the screen.
+Anyone else is refused by the realm itself: the screen reaches the realm only through Banking's backend, which the realm
+runs as the member and refuses to anyone outside the treasury's staff.
 
 ![Refused](docs/refused.png)
 
@@ -68,7 +69,7 @@ One command starts a local realm with Banking and a treasury with two seats, plu
 suppliers and a payment run to approve, and the two connectors between them.
 
 ```bash
-git clone --recurse-submodules https://github.com/smart-social-contracts/realms-gos.git
+git clone --recurse-submodules --branch cto/sandbox-vault-download https://github.com/smart-social-contracts/realms-gos.git
 pip install -e realms-gos/cli        # and the realm build environment: realms-gos/AGENTS.md
 git clone https://github.com/smart-social-contracts/realms-extensions.git
 
@@ -116,8 +117,9 @@ Everything is local and made up: example IBANs, invented suppliers, demo passwor
 
 - **Never tried with a real bank.** The files pass the official schemas; each bank still has its own rules, so a bank's
   test portal comes before the first real payment.
-- **Runs in the realm's page.** A sandboxed screen would be safer, but today a sandbox can neither decrypt bank details
-  nor hand over a file. The way to sandbox it is in [DESIGN.md](DESIGN.md).
+- **Needs the realm's sandbox capabilities.** The screen runs in a sandboxed frame behind its own backend
+  (`backend/entry.py`), and the realm's page seals, opens and saves files for it: capabilities that come with the
+  extensions-behind-backends work in realms-gos, not yet in a release.
 - **English only.**
 
 How it works, what the realm stores in clear and what it keeps encrypted, the matching rules, and the tests:

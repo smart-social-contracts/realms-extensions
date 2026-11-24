@@ -3,7 +3,7 @@
 	// debit mandate (pain.008). Each line is checked as it is typed by the chosen format. Committing records the file's
 	// sha256 and lines in the realm first; only then is the file handed to the treasurer.
 	import type { Env } from './env';
-	import { errorText, saveFile } from './env';
+	import { errorText } from './env';
 	import { collectionOf, createdAt, defaultFormat, factsOf, nextMessageId, orderOf, type Draft, type DraftLine } from './lib/compose';
 	import { COLLECTION_FORMATS, collectionFormatById, FORMATS, formatById } from './lib/formats';
 	import type { Problem } from './lib/order';
@@ -59,7 +59,7 @@
 			const file = order.write();
 			const facts = order.facts(await sha256Hex(file));
 			const { document } = await commitOrder(env.realm, env.vault, env.treasury, env.me, facts, file, env.language);
-			saveFile(`${order.messageId}.xml`, file);
+			await env.save(`${order.messageId}.xml`, file);
 			env.notify('success', `${order.messageId} is committed (${document}) and downloaded: upload it in the e-banking`);
 			draft = { executionDate: draft.executionDate, lines: [blankLine()] };
 			oncommitted(document);

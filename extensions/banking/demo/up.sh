@@ -7,9 +7,11 @@
 #   extensions/banking/demo/down.sh [--wipe]                       stop it all
 #
 # Needs: docker with compose v2, node 22+ and npm, python3, git, curl; ~15 GB of disk for the images.
-# The realm is built from a realms-gos checkout (REALMS_GOS, at main), since no realms-gos release has the operations
-# Banking uses yet: that checkout's build environment (its AGENTS.md: BUILD_PYTHON is a Python with basilisk) and the
-# realms CLI's Python packages (pip install -e "$REALMS_GOS/cli"; CLI_PYTHON if not python3).
+# The realm is built from a realms-gos checkout (REALMS_GOS) on branch cto/sandbox-vault-download, with its submodules:
+# no release has yet what Banking needs (its operations, extension backends, and the sandbox's vault and download), and
+# Banking's sandboxed screen builds against that checkout's bridge (packages/extension-bridge). It needs the checkout's
+# build environment (its AGENTS.md: BUILD_PYTHON is a Python with basilisk) and the realms CLI's Python packages
+# (pip install -e "$REALMS_GOS/cli"; CLI_PYTHON if not python3).
 #
 # Everything is local and made up: example IBANs, invented suppliers, demo passwords (admin / admin). The state is in
 # DEMO_HOME (~/.realms-banking-demo); nothing is written in this repository but the extensions' build output.
@@ -98,6 +100,10 @@ build_extensions() {
   (cd "$REALMS_GOS" && npm run build --workspace packages/extension-ui) > "$DEMO_HOME/logs/build-extension-ui.log" 2>&1 \
     || die "realms-gos packages/extension-ui did not build: $DEMO_HOME/logs/build-extension-ui.log"
   rm -rf "$BANKING/frontend-rt/dist"
+  # Banking's screen finds the bridge one level above this repository, as when it is realms-gos' extensions submodule
+  local bridge
+  bridge="$(cd "$BANKING/../../.." && pwd)/packages/extension-bridge"
+  [ -f "$bridge/package.json" ] || { mkdir -p "$(dirname "$bridge")" && ln -sfn "$REALMS_GOS/packages/extension-bridge" "$bridge"; }
   local todo=() e ui
   for e in $CORE $AGORA; do
     for ui in frontend-rt frontend; do
@@ -140,6 +146,8 @@ up_realm() {
   # are published below instead.
   realms local start --version main --port "$REALM_PORT" --yes --fresh --no-core-ui > "$DEMO_HOME/logs/realm-start.log" 2>&1 || true
   [ "$(state 's.get("deployed")')" = True ] || die "the realm was not deployed: $DEMO_HOME/logs/realm-start.log"
+  # Every opening of a sealed record derives a vetKey, for a fee in cycles: a local realm gets plenty
+  (cd "$REALMS_LOCAL_HOME" && icp canister top-up realm_backend --amount 20t -e local --identity realms-local) > /dev/null
 
   say "realm: publish the extensions and the agora codex"
   local paths=() codex

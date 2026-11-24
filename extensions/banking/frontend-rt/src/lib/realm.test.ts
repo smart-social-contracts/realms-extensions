@@ -109,7 +109,22 @@ function realmAs(me: string, permissions: string[]): Realm {
 		calls.push({ op, args });
 		return ops[op](args);
 	};
-	return { read: call, run: call };
+	// Banking's backend (backend/entry.py), whose functions the screen runs: each calls the realm's operations, which
+	// is what ``calls`` records, as the audit log would.
+	const backend: Record<string, (a: any) => Promise<any>> = {
+		save_register: async (a) => ({ document: (await call('document_store', a)).document }),
+		commit_order: async (a) => {
+			const { document } = await call('document_store', a);
+			const what = a.facts.kind === 'collection' ? 'Direct debit collection' : 'Payment order';
+			const sent = await call('notification_send', {
+				recipient: 'External:bank', topic: 'banking.order', title: `${what} ${a.facts.message_id} sha256:${a.facts.file_sha256}`, body: document,
+			});
+			return { document, dispatch: sent.dispatch };
+		},
+		register_bank: (a) => call('external_add', { external: 'bank', name: a.name, kind: 'bank', channel: 'manual' }),
+	};
+	const run = async (name: string, args: any = {}) => (backend[name] ? backend[name](args) : call(name, args));
+	return { read: run, run };
 }
 
 const REGISTER: Register = {
