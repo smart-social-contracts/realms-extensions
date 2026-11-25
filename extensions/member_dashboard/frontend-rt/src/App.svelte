@@ -467,39 +467,6 @@
 						</div>
 					</div>
 					<ol class="divide-y divide-slate-100 dark:divide-slate-700">
-						{#if steps.showPassport}
-						<li class="flex items-start gap-3 px-4 py-3">
-							<div
-								class={cn(
-									'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-									steps.passport
-										? 'bg-emerald-500 text-white'
-										: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300',
-								)}
-							>
-								{#if steps.passport}
-									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-								{:else}
-									1
-								{/if}
-							</div>
-							<div class="min-w-0 flex-1">
-								<div class="flex items-center justify-between gap-3">
-									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_passport')}</p>
-									{#if !steps.passport}
-										<Button tone="primary" size="sm" onclick={() => handleCitizenshipAction('verify_passport')}>
-											{t('citizenship_verify_passport')}
-										</Button>
-									{/if}
-								</div>
-								<p class="mt-0.5 text-xs leading-snug text-slate-500 dark:text-slate-400">
-									{steps.passport
-										? t('citizenship_passport_done')
-										: `${t('citizenship_passport_todo')} · ${t('citizenship_passport_hint')}`}
-								</p>
-							</div>
-						</li>
-						{/if}
 						{#if steps.showInvoice}
 						<li class="flex items-start gap-3 px-4 py-3">
 							<div
@@ -513,18 +480,14 @@
 								{#if steps.invoice}
 									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
 								{:else}
-									{steps.showPassport ? 2 : 1}
+									1
 								{/if}
 							</div>
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center justify-between gap-3">
 									<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_invoice_step')}</p>
 									{#if !steps.invoice}
-										<Button
-											tone={steps.showPassport && !steps.passport ? 'secondary' : 'primary'}
-											size="sm"
-											onclick={() => handleCitizenshipAction('invoices')}
-										>
+										<Button tone="primary" size="sm" onclick={() => handleCitizenshipAction('invoices')}>
 											{t(Number(citizenship.total_invoices || 0) > 0 ? 'citizenship_pay_invoice' : 'citizenship_view_invoices')}
 										</Button>
 									{/if}
@@ -536,6 +499,19 @@
 						</li>
 						{/if}
 					</ol>
+					{/if}
+					{#if steps.showPassport}
+					<div class="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+						<div class="min-w-0">
+							<p class="font-medium text-slate-900 dark:text-white">{t('citizenship_passport')}</p>
+							<p class="mt-0.5 text-xs leading-snug text-slate-500 dark:text-slate-400">
+								{`${t('citizenship_passport_optional')} · ${t('citizenship_passport_hint')}`}
+							</p>
+						</div>
+						<Button tone="secondary" size="sm" onclick={() => handleCitizenshipAction('verify_passport')}>
+							{t('citizenship_verify_passport')}
+						</Button>
+					</div>
 					{/if}
 					{#if Number(citizenship.total_invoices || 0) > 0}
 					<div class="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100 dark:divide-slate-700 dark:border-slate-700">

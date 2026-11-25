@@ -74,14 +74,14 @@ export function notificationFromRealm(n: RealmNotification) {
 const OWED = ['pending', 'overdue'];
 
 /**
- * The pill of the membership card. Activation is the realm's own record of the member, plus passport verification
- * where the realm asks for it. What the member owes is a separate matter and never changes it.
+ * The pill of the membership card: the realm's own record of the member. What the member owes never changes it, and
+ * neither does a passport: the realm does not hold membership back for one, and no realm read reports a member's
+ * verified identities, so waiting on it kept every member of a realm with passport_verification pending for good.
  */
-export function membershipStatus(memberStatus: string, passportPending: boolean): string {
+export function membershipStatus(memberStatus: string): string {
 	if (memberStatus === 'suspended' || memberStatus === 'banned') return memberStatus;
 	if (memberStatus === 'inactive') return 'pending';
-	if (memberStatus !== 'active') return ''; // no membership on record: no pill
-	return passportPending ? 'pending' : 'active';
+	return memberStatus === 'active' ? 'active' : ''; // no membership on record: no pill
 }
 
 /** The membership card from ``me``'s card, ``my_invoices`` and the installed extension ids. */
@@ -92,16 +92,12 @@ export function citizenshipFromRealm(
 ): Record<string, unknown> {
 	const paid = invoices.filter((i) => i.status === 'paid').length;
 	const owed = invoices.filter((i) => OWED.includes(i.status)).length;
-	const passportRequired = installed.includes(PASSPORT_VERIFICATION_ID);
-	// No realm read reports a member's own verified identities yet.
-	const passportVerified = false;
 	const memberStatus = typeof user.status === 'string' ? user.status : '';
 	return {
-		status: membershipStatus(memberStatus, passportRequired && !passportVerified),
+		status: membershipStatus(memberStatus),
 		member_status: memberStatus,
 		invoice_paid: owed === 0,
-		passport_verified: passportVerified,
-		passport_verification_installed: passportRequired,
+		passport_verification_installed: installed.includes(PASSPORT_VERIFICATION_ID),
 		installed_extensions: installed,
 		total_invoices: invoices.length,
 		paid_invoices: paid,
@@ -168,7 +164,8 @@ export function isPassportVerificationAvailable(
 
 /**
  * What the member still has to do. The invoice step is there while something is owed, and stays, done, once an
- * invoice was paid; a member who was never billed has no invoice step.
+ * invoice was paid; a member who was never billed has no invoice step. ``showPassport`` offers the passport where the
+ * realm has the extension, as an option and not a step: nothing the dashboard reads says whether it was done.
  */
 export function citizenshipSteps(
 	citizenship: Record<string, unknown> | null,
@@ -176,18 +173,15 @@ export function citizenshipSteps(
 ): {
 	showPassport: boolean;
 	showInvoice: boolean;
-	passport: boolean;
 	invoice: boolean;
 	done: number;
 	total: number;
 } {
 	const showPassport = isPassportVerificationAvailable(ctx, citizenship);
-	const passport = showPassport && Boolean(citizenship?.passport_verified);
 	const settled = Boolean(citizenship?.invoice_paid);
 	const showInvoice = citizenship != null && (!settled || Number(citizenship.paid_invoices || 0) > 0);
 	const invoice = showInvoice && settled;
-	const total = Number(showPassport) + Number(showInvoice);
-	return { showPassport, showInvoice, passport, invoice, done: Number(passport) + Number(invoice), total };
+	return { showPassport, showInvoice, invoice, done: Number(invoice), total: Number(showInvoice) };
 }
 
 export function citizenshipActionTarget(id: 'verify_passport' | 'invoices'): {

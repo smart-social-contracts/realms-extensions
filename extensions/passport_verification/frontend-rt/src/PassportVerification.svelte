@@ -1,6 +1,8 @@
 <script lang="ts">
 	import {
+		APP_URL,
 		CHECKING_COPY,
+		VerifierUnreachable,
 		canGoBack,
 		canRestartFlow,
 		interpretVerificationLinkResult,
@@ -110,7 +112,8 @@
 			await showNotYetVerifiedModal(ctx);
 		} catch (e: any) {
 			console.error('Error checking verification status:', e);
-			await showNotYetVerifiedModal(ctx);
+			if (e instanceof VerifierUnreachable) ctx.notify?.('error', e.message);
+			else await showNotYetVerifiedModal(ctx);
 		} finally {
 			checkingStatus = false;
 		}
@@ -213,7 +216,7 @@
 				</button>
 				{#if showGetApp}
 					<a
-						href="https://app.rarime.com/"
+						href={APP_URL}
 						target="_blank"
 						rel="noopener noreferrer"
 						class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-medium text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600"
@@ -250,7 +253,7 @@
 				<p class="text-sm font-medium text-gray-800 dark:text-gray-200">Scan this code with the RariMe app on your phone</p>
 				<p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
 					If you have not installed RariMe yet,
-					<a href="https://app.rarime.com/" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 text-gray-800 dark:text-gray-200">get the app first</a>, then come back and scan.
+					<a href={APP_URL} target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 text-gray-800 dark:text-gray-200">get the app first</a>, then come back and scan.
 				</p>
 			</div>
 

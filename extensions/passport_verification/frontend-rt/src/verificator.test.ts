@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+	APP_URL,
 	CHECKING_COPY,
 	GO_HOME_ACTION,
 	NOT_YET_VERIFIED_MODAL,
@@ -16,7 +17,12 @@ import {
 	rarimeAppUrl,
 	realmEventId,
 	requestGoHome,
+	requestVerificationLink,
+	requestVerificationStatus,
 	testModeVerification,
+	VERIFIER_URL,
+	VerifierUnreachable,
+	verificationStatusUrl,
 	showNotYetVerifiedModal,
 	verifiedHeading,
 } from './verificator.ts';
@@ -200,5 +206,57 @@ describe('mobile-width check-status waiting copy', () => {
 		assert.equal(waitingBlock.includes('sm:hidden'), false);
 		assert.match(CHECKING_COPY.title, /Checking verification status/);
 		assert.match(CHECKING_COPY.subtitle, /Please wait/);
+	});
+});
+
+describe('the verifier is configured, not written into the code', () => {
+	const dir = dirname(fileURLToPath(import.meta.url));
+	const manifest = JSON.parse(readFileSync(join(dir, '..', '..', 'manifest.json'), 'utf8'));
+
+	it('takes both hosts from the manifest', () => {
+		assert.equal(VERIFIER_URL, manifest.identity_provider.verifier_url);
+		assert.equal(APP_URL, manifest.identity_provider.provider_url);
+		assert.ok(verificationStatusUrl('alice').startsWith(`${VERIFIER_URL}/`));
+		assert.ok(rarimeAppUrl('https://p.example/x').startsWith(`${new URL('external', APP_URL)}?`));
+	});
+
+	it('names no host in the sources', () => {
+		for (const file of ['PassportVerification.svelte', 'verificator.ts', 'index.ts']) {
+			assert.equal(readFileSync(join(dir, file), 'utf8').includes('rarime.com'), false, file);
+		}
+	});
+});
+
+describe('an unreachable verifier', () => {
+	const realFetch = globalThis.fetch;
+
+	it('says so, and that the membership is not affected, instead of "Failed to fetch"', async () => {
+		globalThis.fetch = async () => {
+			throw new TypeError('Failed to fetch');
+		};
+		try {
+			for (const request of [
+				() => requestVerificationLink({ userId: 'alice', eventId: '1' }),
+				() => requestVerificationStatus('alice'),
+			]) {
+				await assert.rejects(request, (e: unknown) => {
+					assert.ok(e instanceof VerifierUnreachable);
+					assert.match((e as Error).message, new RegExp(new URL(VERIFIER_URL).host.replaceAll('.', '\\.')));
+					assert.match((e as Error).message, /membership is not affected/);
+					return true;
+				});
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
+
+	it('still reports a verifier that answers with an error as that error', async () => {
+		globalThis.fetch = async () => new Response(JSON.stringify({ errors: [{ title: 'bad event' }] }), { status: 400 });
+		try {
+			await assert.rejects(() => requestVerificationStatus('alice'), /bad event/);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
 	});
 });
