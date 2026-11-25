@@ -1,0 +1,25 @@
+name: public_dashboard Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'extensions/public_dashboard/**'
+      - '.github/workflows/public_dashboard-test.yml'
+  pull_request:
+    branches: [ main, develop, feat/layered-codex ]
+    paths:
+      - 'extensions/public_dashboard/**'
+      - '.github/workflows/public_dashboard-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: What the page shows of the realm's status
+        run: npm test
+        working-directory: extensions/public_dashboard/frontend-rt

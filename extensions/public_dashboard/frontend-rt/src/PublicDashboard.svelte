@@ -7,6 +7,7 @@
 		resolvePublicAssetUrl,
 	} from '../../../_shared/frontend/branding';
 	import { loadExtensionI18n, t } from './lib/i18n';
+	import { realmStatus } from './status';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -85,12 +86,13 @@
 	async function loadData() {
 		loading = true;
 		try {
-			// realm_info, quarter_directory and scale_status are public; user_list and land_map need
+			// realm_info, quarter_directory, scale_status and realm_numbers are public; user_list and land_map need
 			// the viewer's data rights, so visitors just don't see members and zones.
-			const [info, directory, scale, users, map] = await Promise.all([
+			const [info, directory, scale, numbers, users, map] = await Promise.all([
 				read('realm_info'),
 				read('quarter_directory'),
 				read('scale_status'),
+				read('realm_numbers'),
 				read('user_list', { from: 1, count: 50 }),
 				read('land_map', { from: 1, count: 200 }),
 			]);
@@ -113,12 +115,7 @@
 				status: q.status,
 				is_capital: Boolean(q.capital),
 			}));
-			statusData = {
-				realm_stage: realmData?.status,
-				open_registration: realmData?.open_registration,
-				users_count: quarters.reduce((sum, q) => sum + Number(q.population || 0), 0),
-				quarters,
-			};
+			statusData = realmStatus(realmData, quarters, numbers);
 			if (scale) {
 				scaleStatus = { auto_scale_enabled: scale.enabled, threshold: scale.scale_at, n: scale.capacity };
 			}
