@@ -20,8 +20,10 @@ test.beforeAll(() => {
   const now = Math.floor(Date.now() / 1000);
   realmCall('token_register', { symbol: 'E2E', ledger: 'aaaaa-aa', decimals: 2, fee: 10 });
   realmCall('realm_configure_tokens', { accounting_currency: 'E2E' });
-  // The treasury's payments land in ROOT, which a codex seeds: this realm has none.
-  realmCall('fund_create', { fund: 'ROOT', name: 'Root' });
+  // The treasury's payments land in ROOT: a realm has it from setup since realms-gos#754, an older one has none.
+  if (!realmCall('budget_view').funds.some((f: { id: string }) => f.id === 'ROOT')) {
+    realmCall('fund_create', { fund: 'ROOT', name: 'Root' });
+  }
   realmCall('fund_create', { fund: FUND, name: 'Welfare' });
   realmCall('period_open', { period: PERIOD, starts_at: now - 86_400, ends_at: now + 365 * 86_400 });
   realmCall('budget_draft', { fund: FUND, period: PERIOD, category: CATEGORY, kind: 'expense', planned: 500_000 });
