@@ -1,0 +1,55 @@
+name: Realm release
+description: >
+  Resolve the realms-gos release a local-realm job would start, and say whether it can run this checkout's
+  extensions. They call the realm through `run` and `read`, which only a release cut from realms-gos e6d87a42
+  (26 Oct 2026) or later has. Against an older release a job can only fail, so it is skipped with the reason.
+
+inputs:
+  version:
+    description: Realms release ("latest", "newest" for the newest including pre-releases, or a tag such as v0.8.0-rc3)
+    default: latest
+
+outputs:
+  tag:
+    description: The release tag
+    value: ${{ steps.resolve.outputs.tag }}
+  supported:
+    description: '"true" when the release can run this checkout''s extensions'
+    value: ${{ steps.resolve.outputs.supported }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the release and check it has run and read
+      id: resolve
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+        REPO: smart-social-contracts/realms-gos
+        # "Frontend and CLI call the realm through read and run": the commit a release must contain.
+        RUN_READ_COMMIT: e6d87a42a29b4b00dd541173ce129d87a1d8f062
+      run: |
+        tag="$VERSION"
+        if [ "$tag" = "newest" ]; then
+          # `latest` skips pre-releases
+          tag=$(gh release list --repo "$REPO" --limit 1 --json tagName --jq '.[0].tagName')
+        elif [ "$tag" = "latest" ]; then
+          tag=$(gh release view --repo "$REPO" --json tagName --jq .tagName)
+        fi
+
+        # `ahead` or `identical`: the release's history contains the commit.
+        status=$(gh api "repos/$REPO/compare/$RUN_READ_COMMIT...$tag" --jq .status)
+        case "$status" in
+          ahead|identical) supported=true ;;
+          *) supported=false ;;
+        esac
+
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "supported=$supported" >> "$GITHUB_OUTPUT"
+
+        if [ "$supported" = false ]; then
+          reason="Skipped: realms-gos $tag cannot run this checkout's extensions. They call the realm through run and read, which only a release cut from realms-gos ${RUN_READ_COMMIT:0:8} (26 Oct 2026) or later has, and $tag does not contain it, so the test could only fail. Nothing is wrong with the extension. It runs again by itself once the release tested contains that commit."
+          echo "::notice title=Skipped::$reason"
+          echo "$reason" >> "$GITHUB_STEP_SUMMARY"
+        fi

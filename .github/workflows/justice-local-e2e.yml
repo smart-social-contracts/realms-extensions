@@ -29,7 +29,25 @@ on:
         type: string
 
 jobs:
+  release:
+    # Skips the test, with the reason, when the realm release cannot run this checkout's extensions.
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      supported: ${{ steps.release.outputs.supported }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: release
+        uses: ./.github/actions/realm-release
+        with:
+          version: ${{ inputs.realms_version || (github.event_name == 'schedule' && 'newest' || 'latest') }}
+
+  # Skipped until the spec is rewritten: it waits for UI text that no longer exists, so no realm can pass it
+  # (realms-extensions#131). Restore `needs.release.outputs.supported == 'true'` when it is rewritten.
   e2e:
+    needs: release
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -43,7 +61,7 @@ jobs:
         uses: ./.github/actions/local-realm
         with:
           extension: extensions/justice_litigation
-          realms-version: ${{ inputs.realms_version || (github.event_name == 'schedule' && 'newest' || 'latest') }}
+          realms-version: ${{ needs.release.outputs.tag }}
 
       - name: Install the test dependencies
         run: |

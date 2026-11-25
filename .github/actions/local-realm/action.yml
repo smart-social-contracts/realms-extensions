@@ -43,6 +43,9 @@ runs:
       env:
         REALMS_VERSION: ${{ inputs.realms-version }}
         GH_TOKEN: ${{ github.token }}
+        # `icp network start` looks the network launcher up through api.github.com. Unauthenticated that
+        # is 60 requests an hour per runner IP, and it fails with a 403 before any test runs.
+        ICP_CLI_GITHUB_TOKEN: ${{ github.token }}
 
     - uses: actions/setup-node@v4
       with:
