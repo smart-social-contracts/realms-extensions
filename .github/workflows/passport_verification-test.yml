@@ -28,6 +28,11 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
         
     - name: Install base dependencies
       run: |
@@ -62,11 +67,6 @@ jobs:
           echo "::warning::extensions/passport_verification has no run_tests.sh: this check ran no backend tests"
           echo "ℹ️  UI tests run in the local-realm workflows, where an extension has one"
         fi
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
 
     - name: Install E2E dependencies
       run: |

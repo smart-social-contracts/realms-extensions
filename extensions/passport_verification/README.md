@@ -29,7 +29,7 @@ This extension integrates **Rarimo's zero-knowledge proof technology** to verify
 
 **Frontend**: Svelte component with QR code display and status management; it calls the Rarimo API from the browser
 **Backend**: none
-**External Service**: Rarimo API (`api.app.rarime.com`)
+**External Service**: Rarimo API, at `identity_provider.verifier_url` in `manifest.json`
 **Proof System**: Zero-knowledge cryptography with NFC passport reading
 
 ### Realm operations
@@ -61,6 +61,16 @@ The Rarimo `event_id` is derived from the realm's canister id, so it is stable p
 - ✅ No passport images or personal data stored on blockchain
 - ✅ Session IDs derived from caller principals (unique per user)
 - ✅ The realm records only a pending identity; a reviewer confirms it
+
+## Configuration
+
+The hosts live in `manifest.json`, not in the code: `identity_provider.verifier_url` is the verification API and
+`identity_provider.provider_url` the RariMe app's web home (its download page and the base of the deep link in the
+QR code). Pointing the extension at another verifier, or at Rarimo on another domain, is a manifest change and a
+republish.
+
+When the verifier cannot be reached (its name does not resolve, the network is down), the screen says so and that
+the member's membership is not affected; nothing is submitted to the realm.
 
 ## External Dependencies
 

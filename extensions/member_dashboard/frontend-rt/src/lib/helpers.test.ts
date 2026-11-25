@@ -19,7 +19,6 @@ const syntropiaInstalled = [...agoraInstalled, 'passport_verification'];
 const pendingMembership = {
 	status: 'pending',
 	invoice_paid: false,
-	passport_verified: false,
 	total_invoices: 1,
 };
 
@@ -60,28 +59,35 @@ describe('citizenshipSteps', () => {
 	it('agora-like: no verify_passport step; invoice is the only step', () => {
 		const steps = citizenshipSteps(pendingMembership, { installed: agoraInstalled });
 		assert.equal(steps.showPassport, false);
-		assert.equal(steps.passport, false);
 		assert.equal(steps.invoice, false);
 		assert.equal(steps.done, 0);
 		assert.equal(steps.total, 1);
 	});
 
-	it('Syntropia-like: passport step is shown and counted', () => {
+	it('with passport_verification: the passport is offered, not counted as a step', () => {
 		const steps = citizenshipSteps(pendingMembership, { installed: syntropiaInstalled });
 		assert.equal(steps.showPassport, true);
-		assert.equal(steps.passport, false);
 		assert.equal(steps.invoice, false);
 		assert.equal(steps.done, 0);
-		assert.equal(steps.total, 2);
+		assert.equal(steps.total, 1);
 	});
 
-	it('does not count an unverified passport when the extension is absent', () => {
+	it('a paid invoice completes the steps, with or without passport_verification', () => {
+		for (const installed of [agoraInstalled, syntropiaInstalled]) {
+			const steps = citizenshipSteps({ ...pendingMembership, invoice_paid: true, paid_invoices: 1 }, { installed });
+			assert.equal(steps.showPassport, installed === syntropiaInstalled);
+			assert.equal(steps.invoice, true);
+			assert.equal(steps.done, 1);
+			assert.equal(steps.total, 1);
+		}
+	});
+
+	it('does not offer the passport when the extension is absent', () => {
 		const steps = citizenshipSteps(
-			{ ...pendingMembership, passport_verified: true, invoice_paid: true, paid_invoices: 1 },
+			{ ...pendingMembership, invoice_paid: true, paid_invoices: 1 },
 			{ installed: agoraInstalled },
 		);
 		assert.equal(steps.showPassport, false);
-		assert.equal(steps.passport, false);
 		assert.equal(steps.invoice, true);
 		assert.equal(steps.done, 1);
 		assert.equal(steps.total, 1);
@@ -100,16 +106,11 @@ const invoice = (status: string) => ({ id: `INV-${status}`, amount: 5, symbol: '
 
 describe('membershipStatus', () => {
 	it('is the realm\'s record of the member', () => {
-		assert.equal(membershipStatus('active', false), 'active');
-		assert.equal(membershipStatus('inactive', false), 'pending');
-		assert.equal(membershipStatus('suspended', false), 'suspended');
-		assert.equal(membershipStatus('banned', false), 'banned');
-		assert.equal(membershipStatus('', false), '');
-	});
-
-	it('waits for the passport where the realm asks for one', () => {
-		assert.equal(membershipStatus('active', true), 'pending');
-		assert.equal(membershipStatus('suspended', true), 'suspended');
+		assert.equal(membershipStatus('active'), 'active');
+		assert.equal(membershipStatus('inactive'), 'pending');
+		assert.equal(membershipStatus('suspended'), 'suspended');
+		assert.equal(membershipStatus('banned'), 'banned');
+		assert.equal(membershipStatus(''), '');
 	});
 });
 
@@ -143,8 +144,9 @@ describe('citizenshipFromRealm', () => {
 		assert.equal(card.invoice_paid, true);
 	});
 
-	it('a realm that asks for a passport keeps the member pending until it is verified', () => {
-		assert.equal(citizenshipFromRealm({ status: 'active' }, [], syntropiaInstalled).status, 'pending');
+	it('passport_verification never holds an active member back: nothing read says a passport was verified', () => {
+		assert.equal(citizenshipFromRealm({ status: 'active' }, [], syntropiaInstalled).status, 'active');
+		assert.equal(citizenshipFromRealm({ status: 'inactive' }, [], syntropiaInstalled).status, 'pending');
 	});
 });
 

@@ -1,6 +1,14 @@
 /** Browser client + parsers for RariMe verificator-svc. */
 
-export const RARIMO_API_BASE = 'https://api.app.rarime.com';
+import manifest from '../../manifest.json' with { type: 'json' };
+
+/**
+ * The verifier and the app come from the manifest's ``identity_provider``: moving to another host is a manifest
+ * change and a republish, not a code change.
+ */
+export const VERIFIER_URL: string = manifest.identity_provider.verifier_url;
+/** The RariMe app's web home: where to get the app, and the base of the deep link the QR code carries. */
+export const APP_URL: string = manifest.identity_provider.provider_url;
 export const VERIFICATION_LINK_PATH =
 	'/integrations/verificator-svc/private/verification-link';
 export const VERIFICATION_STATUS_PATH =
@@ -54,7 +62,25 @@ export async function realmEventId(canisterId: string): Promise<string> {
 }
 
 export function verificationStatusUrl(userId: string): string {
-	return `${RARIMO_API_BASE}${VERIFICATION_STATUS_PATH}/${encodeURIComponent(userId)}`;
+	return `${VERIFIER_URL}${VERIFICATION_STATUS_PATH}/${encodeURIComponent(userId)}`;
+}
+
+/** The verifier could not be reached at all (its name does not resolve, the network is down, it refuses): no reply. */
+export class VerifierUnreachable extends Error {
+	constructor() {
+		super(
+			`The passport verifier (${new URL(VERIFIER_URL).host}) cannot be reached right now. ` +
+				'Your membership is not affected: try again later.',
+		);
+	}
+}
+
+async function verifierFetch(url: string, init?: RequestInit): Promise<Response> {
+	try {
+		return await fetch(url, init);
+	} catch {
+		throw new VerifierUnreachable();
+	}
 }
 
 export function testModeVerification(userId: string) {
@@ -62,7 +88,7 @@ export function testModeVerification(userId: string) {
 }
 
 export function rarimeAppUrl(proofParamsUrl: string): string {
-	return `https://app.rarime.com/external?type=proof-request&proof_params_url=${encodeURIComponent(proofParamsUrl)}`;
+	return `${new URL('external', APP_URL)}?type=proof-request&proof_params_url=${encodeURIComponent(proofParamsUrl)}`;
 }
 
 export function formatJsonApiErrors(errors: unknown): string {
@@ -166,7 +192,7 @@ export async function requestVerificationLink(opts: {
 			},
 		},
 	};
-	const response = await fetch(`${RARIMO_API_BASE}${VERIFICATION_LINK_PATH}`, {
+	const response = await verifierFetch(`${VERIFIER_URL}${VERIFICATION_LINK_PATH}`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -271,7 +297,7 @@ export async function requestVerificationStatus(userId: string): Promise<unknown
 	if (!userId) {
 		throw new Error('Sign in to check verification status');
 	}
-	const response = await fetch(verificationStatusUrl(userId), {
+	const response = await verifierFetch(verificationStatusUrl(userId), {
 		headers: { Accept: 'application/vnd.api+json, application/json' },
 	});
 	const raw = await response.text();

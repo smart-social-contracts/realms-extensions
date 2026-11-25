@@ -1,6 +1,6 @@
 {
   "name": "passport_verification",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Prove your identity with your passport using the RariMe app on your phone. Your passport details stay on your device.",
   "author": "Realms Team",
   "permissions": [],
@@ -26,6 +26,7 @@
   "identity_provider": {
     "name": "RariMe Passport",
     "provider_url": "https://app.rarime.com/",
+    "verifier_url": "https://api.app.rarime.com",
     "logo": "rarime.png",
     "description": "Verified passport identity using the RariMe phone app"
   },
