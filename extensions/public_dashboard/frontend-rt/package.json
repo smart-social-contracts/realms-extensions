@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node ../../dev-server/bin/dev.js",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --experimental-strip-types --test src/status.test.ts"
   },
   "dependencies": {
     "h3-js": "^4.1.0",
