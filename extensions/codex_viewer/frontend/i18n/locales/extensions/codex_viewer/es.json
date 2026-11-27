@@ -98,5 +98,6 @@
   "no_views": "El códice en uso no tiene capítulos.",
   "mark_fixed": "fijo",
   "mark_extension": "extensión",
-  "mark_overridable": "reemplazable"
+  "mark_overridable": "reemplazable",
+  "ai_answers_can_be_wrong": "Las respuestas las escribe una IA y pueden ser erróneas"
 }

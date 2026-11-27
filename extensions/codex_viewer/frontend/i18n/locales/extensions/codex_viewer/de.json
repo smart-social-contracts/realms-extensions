@@ -98,5 +98,6 @@
   "no_views": "Der laufende Codex hat keine Kapitel.",
   "mark_fixed": "fest",
   "mark_extension": "Erweiterung",
-  "mark_overridable": "überschreibbar"
+  "mark_overridable": "überschreibbar",
+  "ai_answers_can_be_wrong": "Answers are written by an AI and can be wrong"
 }

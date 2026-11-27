@@ -1,8 +1,18 @@
 <script lang="ts">
 	import { description as extensionDescription } from '../../manifest.json';
 	import { onMount, tick } from 'svelte';
+	import { loadExtensionI18n, t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
+
+	$effect(() => {
+		const localeStore = ctx?.locale;
+		if (!localeStore?.subscribe) {
+			void loadExtensionI18n('en');
+			return;
+		}
+		return localeStore.subscribe((locale: string | null | undefined) => void loadExtensionI18n(locale || 'en'));
+	});
 
 	// The realm declares its own network (host config / canister_ids.js); no
 	// id→network table here to go stale when an environment is rebuilt.
@@ -1110,6 +1120,8 @@
 				{/if}
 			</button>
 		</div>
+		<!-- Always on screen while chatting: the answers come from an AI. -->
+		<p class="ai-notice">{t('ai_answers_can_be_wrong')}</p>
 	</div>
 </div>
 {/if}
@@ -1661,6 +1673,14 @@
 		display: flex;
 		gap: 8px;
 		align-items: flex-end;
+	}
+
+	.ai-notice {
+		margin: 6px 0 0;
+		font-size: 0.75rem;
+		line-height: 1.3;
+		color: #6b7280;
+		text-align: center;
 	}
 
 	.chat-input {
