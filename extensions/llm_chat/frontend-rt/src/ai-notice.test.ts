@@ -11,8 +11,29 @@ test('the AI line is the approved wording in English and Spanish', () => {
 	assert.equal(locale('es').ai_answers_can_be_wrong, 'Las respuestas las escribe una IA y pueden ser erróneas');
 });
 
+// The other languages' approved wording (CLFO via the CTO, 27 Nov 2026), word for word.
+const APPROVED = {
+	de: 'Die Antworten werden von einer KI geschrieben und können falsch sein.',
+	fr: 'Les réponses sont rédigées par une IA et peuvent être erronées.',
+	it: "Le risposte sono scritte da un'IA e possono essere errate.",
+	'zh-CN': '回答由人工智能撰写，可能有误。',
+	'ca-valencia': 'Les respostes les escriu una IA i poden ser errònies.',
+};
+
+test('the AI line is the approved wording in every other language', () => {
+	for (const [name, text] of Object.entries(APPROVED)) assert.equal(locale(name).ai_answers_can_be_wrong, text, name);
+});
+
 test('the chat panel shows the AI line under the input, outside any condition', () => {
 	const chat = read('./LlmChat.svelte');
 	const input = chat.slice(chat.indexOf('<div class="input-section">'));
 	assert.match(input, /<\/div>\s*<!--[^>]*-->\s*<p class="ai-notice">\{t\('ai_answers_can_be_wrong'\)\}<\/p>\s*<\/div>/);
+});
+
+// A publish without `realms files build` ships the committed bundle as it is (realms-gos#831): staging's 1.0.22
+// was a September copy. npm test runs before the build, so in CI this reads the committed file.
+test('the committed bundle carries the AI line', () => {
+	const bundle = read('../dist/index.js');
+	assert.match(bundle, /ai_answers_can_be_wrong/);
+	assert.match(bundle, /ai-notice/);
 });

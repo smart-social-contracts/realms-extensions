@@ -11,6 +11,19 @@ test('the AI line is the approved wording in English and Spanish', () => {
 	assert.equal(locale('es').ai_answers_can_be_wrong, 'Las respuestas las escribe una IA y pueden ser erróneas');
 });
 
+// The other languages' approved wording (CLFO via the CTO, 27 Nov 2026), word for word.
+const APPROVED = {
+	de: 'Die Antworten werden von einer KI geschrieben und können falsch sein.',
+	fr: 'Les réponses sont rédigées par une IA et peuvent être erronées.',
+	it: "Le risposte sono scritte da un'IA e possono essere errate.",
+	'zh-CN': '回答由人工智能撰写，可能有误。',
+	'ca-valencia': 'Les respostes les escriu una IA i poden ser errònies.',
+};
+
+test('the AI line is the approved wording in every other language', () => {
+	for (const [name, text] of Object.entries(APPROVED)) assert.equal(locale(name).ai_answers_can_be_wrong, text, name);
+});
+
 test('the viewer shows the AI line wherever it offers Explain', () => {
 	const viewer = read('./CodexViewer.svelte');
 	assert.match(viewer, /\{#if aiAssistantEnabled\}\s*<!--[^>]*-->\s*<p class="ai-notice">\{t\('ai_answers_can_be_wrong'\)\}<\/p>/);
