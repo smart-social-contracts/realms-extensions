@@ -20,7 +20,8 @@ the same ones.
 TASK = "demo_simulator"
 EXTENSION = "demo_simulator"
 DEFAULTS = {"batch_size": 200, "interval_seconds": 5, "target": 0, "seed": 1}
-BATCH_MAX = 1000  # members per run, one user_import; what one message can add (measured: see README)
+BATCH_MAX = 1000  # members per run, one user_import. Measured on a local network (28 Nov 2026): one message adds
+# 2,000 members, 3,000 go over the 40 billion instructions a message may use; 1,000 take 5.4 s from 4,000 to 10,000.
 INTERVAL_MIN = 1
 
 FIRST_NAMES = (
