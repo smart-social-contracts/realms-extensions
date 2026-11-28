@@ -30,7 +30,11 @@
 	interface Status {
 		running: boolean;
 		interval_seconds: number;
+		interval_min?: number;
 		batch_size: number;
+		batch_size_max?: number;
+		capacity?: number;
+		population?: number;
 		max_entities: number | null;
 		batch_number: number;
 		seed: number;
@@ -52,12 +56,12 @@
 
 	const CONFIG_HELP: Record<string, string> = {
 		interval:
-			'Seconds between automatic batches while the simulator is running. Minimum 10 seconds.',
+			'Seconds between automatic batches while the simulator is running. Minimum 1 second.',
 		batch_size:
-			'Base count used to derive how many entities of each type are created per batch. Some types use smaller fractions of this value by default.',
+			'Members added per batch, at most 1,000. A larger batch fills a quarter faster; each batch is one call to the realm.',
 		max_entities:
-			'Stop automatically once this many entities have been created in total across all types. Leave empty for no limit.',
-		seed: 'Fixed random seed so demo data is reproducible. The same seed yields the same names, amounts, and choices. Leave empty for a random seed.',
+			'Stop once this quarter holds this many members. Leave empty to fill it to a quarter’s capacity. Each quarter runs its own simulator.',
+		seed: 'The same seed gives the same simulated members in the same quarter. The members hold no keys: nobody can act as them.',
 		rotation_mode:
 			'How enabled types are picked each batch. Round robin cycles one type at a time; Random picks one enabled type; All runs every enabled type in the same batch.',
 		entity_types:
@@ -466,7 +470,7 @@
 					<input
 						id="ds-interval"
 						type="number"
-						min="10"
+						min={status?.interval_min ?? 1}
 						max="3600"
 						bind:value={editInterval}
 						class="ds-input"
@@ -478,17 +482,17 @@
 						id="ds-batch"
 						type="number"
 						min="1"
-						max="20"
+						max={status?.batch_size_max ?? 1000}
 						bind:value={editBatchSize}
 						class="ds-input"
 					/>
 				</div>
 				<div>
-					{@render FieldLabel('ds-max', 'Max entities', CONFIG_HELP.max_entities)}
+					{@render FieldLabel('ds-max', 'Target members', CONFIG_HELP.max_entities)}
 					<input
 						id="ds-max"
 						type="text"
-						placeholder="unlimited"
+						placeholder={status?.capacity ? `a quarter's capacity (${status.capacity})` : 'a quarter\'s capacity'}
 						bind:value={editMaxEntities}
 						class="ds-input"
 					/>
