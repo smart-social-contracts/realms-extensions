@@ -98,5 +98,6 @@
   "no_views": "The running codex has no chapters.",
   "mark_fixed": "fixed",
   "mark_extension": "extension",
-  "mark_overridable": "overridable"
+  "mark_overridable": "overridable",
+  "ai_answers_can_be_wrong": "Answers are written by an AI and can be wrong"
 }

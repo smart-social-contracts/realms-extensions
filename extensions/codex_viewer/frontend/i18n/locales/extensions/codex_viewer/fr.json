@@ -98,5 +98,6 @@
   "no_views": "Le codex en cours n'a aucun chapitre.",
   "mark_fixed": "figé",
   "mark_extension": "extension",
-  "mark_overridable": "remplaçable"
+  "mark_overridable": "remplaçable",
+  "ai_answers_can_be_wrong": "Les réponses sont rédigées par une IA et peuvent être erronées."
 }

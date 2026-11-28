@@ -1,6 +1,6 @@
 {
   "name": "llm_chat",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "ggg_api_version": 1,
   "capabilities": [
     "caller.get",

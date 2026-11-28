@@ -32,6 +32,7 @@
 	} from './published';
 	import { chapterFile, chapterLanguage } from './source';
 	import { citedLegislation, explainQuestion, type Standing } from './explain';
+	import { t } from './lib/i18n';
 
 	let { ctx }: { ctx: any } = $props();
 
@@ -1189,6 +1190,10 @@
 							<span class="btn-label">Minimap</span>
 						</button>
 					</div>
+					{#if aiAssistantEnabled}
+						<!-- Explain asks the AI assistant: say so where the button is. -->
+						<p class="ai-notice">{t('ai_answers_can_be_wrong')}</p>
+					{/if}
 				</div>
 
 				{#if selectedCodex.description}
@@ -1680,6 +1685,12 @@
 
 	:global(html.codex-viewer-hide-assistant-fab .assistant-fab) {
 		display: none !important;
+	}
+
+	.ai-notice {
+		margin: 0;
+		font-size: 0.75rem;
+		color: #6b7280;
 	}
 
 	.editor-description {

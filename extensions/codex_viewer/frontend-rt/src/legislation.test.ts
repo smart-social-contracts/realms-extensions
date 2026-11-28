@@ -243,7 +243,7 @@ describe('the strings of the page', () => {
 
 	it('include every text the components ask for', () => {
 		const sources = readdirSync(new URL('.', import.meta.url))
-			.filter((file) => file.endsWith('.svelte') && file !== 'CodexViewer.svelte')
+			.filter((file) => file.endsWith('.svelte'))
 			.map((file) => readFileSync(new URL(file, import.meta.url), 'utf8'))
 			.concat(readFileSync(new URL('legislation.ts', import.meta.url), 'utf8'));
 		const asked = new Set<string>();
